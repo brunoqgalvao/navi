@@ -106,7 +106,10 @@
   function handleMouseMove(e: MouseEvent) {
     if (!isResizingRight) return;
     const newWidth = window.innerWidth - e.clientX;
-    if (newWidth >= 400 && newWidth <= window.innerWidth - 400) {
+    const sidebarWidth = sidebarCollapsed ? 56 : 288;
+    const minChatWidth = 400;
+    const maxPanelWidth = window.innerWidth - sidebarWidth - minChatWidth;
+    if (newWidth >= 300 && newWidth <= maxPanelWidth) {
       rightPanelWidth = newWidth;
     }
   }
