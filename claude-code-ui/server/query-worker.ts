@@ -1,4 +1,5 @@
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import * as readline from "readline";
 
 interface WorkerInput {
   prompt: string;
@@ -7,7 +8,13 @@ interface WorkerInput {
   model?: string;
   allowedTools?: string[];
   sessionId?: string;
+  permissionSettings?: {
+    autoAcceptAll: boolean;
+    requireConfirmation: string[];
+  };
 }
+
+const pendingPermissions = new Map<string, (result: { approved: boolean; approveAll?: boolean }) => void>();
 
 function send(msg: any) {
   console.log(JSON.stringify(msg));
@@ -71,8 +78,59 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
   }
 }
 
+let sessionApprovedAll = false;
+
 async function runQuery(input: WorkerInput) {
-  const { prompt, cwd, resume, model, allowedTools, sessionId } = input;
+  const { prompt, cwd, resume, model, allowedTools, sessionId, permissionSettings } = input;
+
+  const canUseTool = async (
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    options: { signal: AbortSignal; toolUseID: string }
+  ): Promise<{ behavior: 'allow'; updatedInput: Record<string, unknown> } | { behavior: 'deny'; message: string; interrupt?: boolean }> => {
+    if (permissionSettings?.autoAcceptAll) {
+      return { behavior: 'allow', updatedInput: toolInput };
+    }
+
+    if (sessionApprovedAll) {
+      return { behavior: 'allow', updatedInput: toolInput };
+    }
+
+    if (!permissionSettings?.requireConfirmation?.includes(toolName)) {
+      return { behavior: 'allow', updatedInput: toolInput };
+    }
+
+    const requestId = crypto.randomUUID();
+
+    let inputPreview = "";
+    if (toolName === "Write" || toolName === "Edit") {
+      inputPreview = `File: ${(toolInput as any).file_path || "unknown"}`;
+    } else if (toolName === "Bash") {
+      inputPreview = `Command: ${((toolInput as any).command || "").slice(0, 100)}`;
+    }
+
+    send({
+      type: "permission_request",
+      requestId,
+      toolName,
+      toolInput,
+      message: `Claude wants to use ${toolName}. ${inputPreview}`,
+    });
+
+    const result = await new Promise<{ approved: boolean; approveAll?: boolean }>((resolve) => {
+      pendingPermissions.set(requestId, resolve);
+    });
+
+    if (result.approveAll) {
+      sessionApprovedAll = true;
+    }
+
+    if (!result.approved) {
+      return { behavior: 'deny', message: 'User denied permission', interrupt: false };
+    }
+
+    return { behavior: 'allow', updatedInput: toolInput };
+  };
 
   try {
     const q = query({
@@ -92,7 +150,9 @@ async function runQuery(input: WorkerInput) {
           "WebSearch",
           "TodoWrite",
         ],
-        permissionMode: "acceptEdits",
+        permissionMode: "default",
+        canUseTool,
+        settingSources: ['project'],
       },
     });
 
@@ -133,10 +193,29 @@ async function runQuery(input: WorkerInput) {
   }
 }
 
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  terminal: false,
+});
+
+rl.on("line", (line) => {
+  try {
+    const msg = JSON.parse(line);
+    if (msg.type === "permission_response" && msg.requestId) {
+      const resolve = pendingPermissions.get(msg.requestId);
+      if (resolve) {
+        resolve({ approved: msg.approved, approveAll: msg.approveAll });
+        pendingPermissions.delete(msg.requestId);
+      }
+    }
+  } catch {}
+});
+
 const input: WorkerInput = JSON.parse(process.argv[2] || "{}");
 
 if (input.prompt) {
-  runQuery(input).then(() => process.exit(0));
+  runQuery(input);
 } else {
   console.error("No input provided");
   process.exit(1);

@@ -1,5 +1,5 @@
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { initDb, projects, sessions, messages, type Project, type Session, type Message } from "./db";
+import { initDb, projects, sessions, messages, globalSettings, DEFAULT_TOOLS, DANGEROUS_TOOLS, type Project, type Session, type Message } from "./db";
 import { spawn, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -25,13 +25,16 @@ function json(data: any, status = 200) {
 }
 
 interface ClientMessage {
-  type: "query" | "cancel" | "abort";
+  type: "query" | "cancel" | "abort" | "permission_response";
   prompt?: string;
   projectId?: string;
   sessionId?: string;
   claudeSessionId?: string;
   allowedTools?: string[];
   model?: string;
+  permissionRequestId?: string;
+  approved?: boolean;
+  approveAll?: boolean;
 }
 
 interface ActiveProcess {
@@ -41,6 +44,7 @@ interface ActiveProcess {
 }
 
 const activeProcesses = new Map<string, ActiveProcess>();
+const pendingPermissions = new Map<string, { sessionId: string }>();
 
 const server = Bun.serve({
   port: PORT,
@@ -122,6 +126,23 @@ const server = Bun.serve({
         projects.delete(id);
         return json({ success: true });
       }
+    }
+
+    const projectPinMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/pin$/);
+    if (projectPinMatch && method === "POST") {
+      const id = projectPinMatch[1];
+      const body = await req.json();
+      projects.togglePin(id, body.pinned);
+      return json(projects.get(id));
+    }
+
+    const projectsReorderMatch = url.pathname === "/api/projects/reorder";
+    if (projectsReorderMatch && method === "POST") {
+      const body = await req.json();
+      for (let i = 0; i < body.order.length; i++) {
+        projects.updateOrder(body.order[i], i);
+      }
+      return json({ success: true });
     }
 
     if (url.pathname === "/api/sessions/recent" && method === "GET") {
@@ -358,6 +379,20 @@ const server = Bun.serve({
       return json({ defaultProjectsDir, hasOpenAIKey, openAIKeyPreview, autoTitleEnabled });
     }
 
+    if (url.pathname === "/api/permissions") {
+      if (method === "GET") {
+        return json({
+          global: globalSettings.getPermissions(),
+          defaults: { tools: DEFAULT_TOOLS, dangerous: DANGEROUS_TOOLS },
+        });
+      }
+      if (method === "POST") {
+        const body = await req.json();
+        globalSettings.setPermissions(body);
+        return json({ success: true });
+      }
+    }
+
     if (url.pathname === "/api/config/auto-title" && method === "POST") {
       const body = await req.json();
       const enabled = body.enabled;
@@ -413,6 +448,95 @@ const server = Bun.serve({
       await fs.writeFile(envPath, `OPENAI_API_KEY=${apiKey}\n`);
       
       return json({ success: true });
+    }
+
+    if (url.pathname === "/api/claude-md/default") {
+      const { homedir } = await import("os");
+      const { join } = await import("path");
+      const fs = await import("fs/promises");
+      const defaultPath = join(homedir(), ".claude-code-ui", "default-claude.md");
+
+      if (method === "GET") {
+        try {
+          const content = await fs.readFile(defaultPath, "utf-8");
+          return json({ content, exists: true });
+        } catch {
+          return json({ content: getDefaultClaudeMdContent(), exists: false });
+        }
+      }
+
+      if (method === "POST") {
+        const body = await req.json();
+        const configDir = join(homedir(), ".claude-code-ui");
+        await fs.mkdir(configDir, { recursive: true });
+        await fs.writeFile(defaultPath, body.content);
+        return json({ success: true });
+      }
+    }
+
+    if (url.pathname === "/api/claude-md/project") {
+      const projectPath = url.searchParams.get("path");
+      if (!projectPath) {
+        return json({ error: "Project path required" }, 400);
+      }
+
+      const { join } = await import("path");
+      const fs = await import("fs/promises");
+      const claudeMdPath = join(projectPath, "CLAUDE.md");
+
+      if (method === "GET") {
+        try {
+          const content = await fs.readFile(claudeMdPath, "utf-8");
+          return json({ content, exists: true, path: claudeMdPath });
+        } catch {
+          return json({ content: null, exists: false, path: claudeMdPath });
+        }
+      }
+
+      if (method === "POST") {
+        const body = await req.json();
+        await fs.writeFile(claudeMdPath, body.content);
+        return json({ success: true, path: claudeMdPath });
+      }
+
+      if (method === "DELETE") {
+        try {
+          await fs.unlink(claudeMdPath);
+          return json({ success: true });
+        } catch {
+          return json({ error: "File not found" }, 404);
+        }
+      }
+    }
+
+    if (url.pathname === "/api/claude-md/init" && method === "POST") {
+      const body = await req.json();
+      const projectPath = body.path;
+      if (!projectPath) {
+        return json({ error: "Project path required" }, 400);
+      }
+
+      const { homedir } = await import("os");
+      const { join } = await import("path");
+      const fs = await import("fs/promises");
+
+      const claudeMdPath = join(projectPath, "CLAUDE.md");
+      
+      try {
+        await fs.access(claudeMdPath);
+        return json({ created: false, exists: true, path: claudeMdPath });
+      } catch {}
+
+      const defaultPath = join(homedir(), ".claude-code-ui", "default-claude.md");
+      let content: string;
+      try {
+        content = await fs.readFile(defaultPath, "utf-8");
+      } catch {
+        content = getDefaultClaudeMdContent();
+      }
+
+      await fs.writeFile(claudeMdPath, content);
+      return json({ created: true, exists: true, path: claudeMdPath });
     }
 
     if (url.pathname === "/api/models") {
@@ -801,6 +925,7 @@ const server = Bun.serve({
               cwd: project.path,
               allowedTools: ["Read", "Glob", "Grep"],
               maxTurns: 3,
+              settingSources: ['project'],
             },
           });
 
@@ -850,6 +975,21 @@ const server = Bun.serve({
             activeProcesses.delete(data.sessionId);
             ws.send(JSON.stringify({ type: "aborted", uiSessionId: data.sessionId }));
           }
+        } else if (data.type === "permission_response" && data.permissionRequestId) {
+          const pending = pendingPermissions.get(data.permissionRequestId);
+          if (pending) {
+            const active = activeProcesses.get(pending.sessionId);
+            if (active && active.process.stdin) {
+              const response = JSON.stringify({
+                type: "permission_response",
+                requestId: data.permissionRequestId,
+                approved: data.approved,
+                approveAll: data.approveAll,
+              });
+              active.process.stdin.write(response + "\n");
+            }
+            pendingPermissions.delete(data.permissionRequestId);
+          }
         }
       } catch (error) {
         ws.send(
@@ -876,6 +1016,8 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
   console.log(`[${sessionId}] Spawning worker process in ${workingDirectory}`);
 
+  const permissionSettings = globalSettings.getPermissions();
+
   const needsAutoTitle = session?.title === "New Chat" || session?.title === "New conversation";
   
   if (sessionId && prompt) {
@@ -889,8 +1031,12 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
     cwd: workingDirectory,
     resume: claudeSessionId || session?.claude_session_id,
     model,
-    allowedTools,
+    allowedTools: allowedTools || permissionSettings.allowedTools,
     sessionId,
+    permissionSettings: {
+      autoAcceptAll: permissionSettings.autoAcceptAll,
+      requireConfirmation: permissionSettings.requireConfirmation,
+    },
   });
 
   const child = spawn("bun", ["run", workerPath, inputJson], {
@@ -917,6 +1063,17 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
         
         if (msg.type === "message") {
           ws.send(JSON.stringify(msg.data));
+        } else if (msg.type === "permission_request") {
+          if (sessionId) {
+            pendingPermissions.set(msg.requestId, { sessionId });
+          }
+          ws.send(JSON.stringify({
+            type: "permission_request",
+            requestId: msg.requestId,
+            tools: [msg.toolName],
+            toolInput: msg.toolInput,
+            message: msg.message,
+          }));
         } else if (msg.type === "complete") {
           if (sessionId && msg.lastAssistantContent?.length > 0) {
             const msgId = crypto.randomUUID();
@@ -1021,6 +1178,7 @@ async function handleQuery(ws: any, data: ClientMessage) {
           "TodoWrite",
         ],
         permissionMode: "acceptEdits",
+        settingSources: ['project'],
       },
     });
 
@@ -1222,6 +1380,27 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
     default:
       return { type: "unknown", uiSessionId, raw: msg };
   }
+}
+
+function getDefaultClaudeMdContent(): string {
+  return `# Project Instructions
+
+## Code Style
+- Follow existing patterns and conventions in this codebase
+- No comments unless absolutely necessary
+- Prefer editing existing files over creating new ones
+- Keep code concise and readable
+
+## Development
+- Run tests before committing changes
+- Verify lint/typecheck passes
+- Follow security best practices
+
+## Communication
+- Be concise and direct
+- Focus on what changed, not explanations
+- One word answers when appropriate
+`;
 }
 
 console.log(`Claude Code UI Server running on http://localhost:${PORT}`);

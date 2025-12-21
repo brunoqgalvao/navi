@@ -141,6 +141,14 @@
     }
   }
 
+  export function toggleRecording() {
+    handleClick();
+  }
+
+  export function isRecording() {
+    return state === "recording";
+  }
+
   function handleClick() {
     if (disabled) return;
     

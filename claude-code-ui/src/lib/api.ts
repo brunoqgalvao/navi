@@ -154,11 +154,18 @@ export const api = {
         authenticated: boolean;
         authMethod: "oauth" | "api_key" | null;
         hasApiKey: boolean;
+        hasOAuth: boolean;
+        preferredAuth: "oauth" | "api_key" | null;
       }>("/auth/status"),
     setApiKey: (apiKey: string) =>
       request<{ success: boolean }>("/auth/api-key", {
         method: "POST",
         body: JSON.stringify({ apiKey }),
+      }),
+    setPreferred: (preferred: "oauth" | "api_key" | null) =>
+      request<{ success: boolean; preferred: "oauth" | "api_key" | null }>("/auth/preferred", {
+        method: "POST",
+        body: JSON.stringify({ preferred }),
       }),
     login: () =>
       request<{ success: boolean; error?: string; requiresTerminal?: boolean }>("/auth/login", {
@@ -220,4 +227,51 @@ export const api = {
         body: JSON.stringify(options),
       }),
   },
+
+  permissions: {
+    get: () =>
+      request<{
+        global: PermissionSettings;
+        defaults: { tools: string[]; dangerous: string[] };
+      }>("/permissions"),
+    set: (settings: PermissionSettings) =>
+      request<{ success: boolean }>("/permissions", {
+        method: "POST",
+        body: JSON.stringify(settings),
+      }),
+  },
+
+  claudeMd: {
+    getDefault: () =>
+      request<{ content: string; exists: boolean }>("/claude-md/default"),
+    setDefault: (content: string) =>
+      request<{ success: boolean }>("/claude-md/default", {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      }),
+    getProject: (projectPath: string) =>
+      request<{ content: string | null; exists: boolean; path: string }>(
+        `/claude-md/project?path=${encodeURIComponent(projectPath)}`
+      ),
+    setProject: (projectPath: string, content: string) =>
+      request<{ success: boolean; path: string }>("/claude-md/project?path=" + encodeURIComponent(projectPath), {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      }),
+    deleteProject: (projectPath: string) =>
+      request<{ success: boolean }>("/claude-md/project?path=" + encodeURIComponent(projectPath), {
+        method: "DELETE",
+      }),
+    initProject: (projectPath: string) =>
+      request<{ created: boolean; exists: boolean; path: string }>("/claude-md/init", {
+        method: "POST",
+        body: JSON.stringify({ path: projectPath }),
+      }),
+  },
 };
+
+export interface PermissionSettings {
+  autoAcceptAll: boolean;
+  allowedTools: string[];
+  requireConfirmation: string[];
+}

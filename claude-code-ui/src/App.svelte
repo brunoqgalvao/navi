@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, type ChatMessage } from "./lib/stores";
+  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, type ChatMessage } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, type Project, type Session } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -13,6 +13,16 @@
     let url = href;
     if (url.startsWith("//")) {
       url = "https:" + url;
+    }
+    const isExternal = url.startsWith("http://") || url.startsWith("https://");
+    if (isExternal) {
+      try {
+        const domain = new URL(url).hostname;
+        const favicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+        return `<a href="${url}"${titleAttr} target="_blank" rel="noopener noreferrer" class="source-link"><img src="${favicon}" alt="" class="source-favicon" onerror="this.style.display='none'">${text}<span class="external-arrow">↗</span></a>`;
+      } catch {
+        return `<a href="${url}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}<span class="external-arrow">↗</span></a>`;
+      }
     }
     return `<a href="${url}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
   };
@@ -39,6 +49,8 @@
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import ToolRenderer from "./lib/components/ToolRenderer.svelte";
+  import ToolConfirmDialog from "./lib/components/ToolConfirmDialog.svelte";
+  import type { PermissionRequestMessage } from "./lib/claude";
 
   function relativeTime(timestamp: number | null | undefined): string {
     if (!timestamp) return "Never";
@@ -97,7 +109,93 @@
   let isResizingRight = $state(false);
   
   let projectContext = $state<{ summary: string; suggestions: string[] } | null>(null);
+  let claudeMdContent = $state<string | null>(null);
+  let showClaudeMdModal = $state(false);
   let projectContextError = $state<string | null>(null);
+
+  let audioRecorderRef: { toggleRecording: () => void; isRecording: () => boolean } | null = $state(null);
+  let showHotkeysHelp = $state(false);
+  let inputRef: HTMLTextAreaElement | null = $state(null);
+
+  const HOTKEYS = [
+    { key: "Cmd/Ctrl + K", action: "Toggle preview panel" },
+    { key: "Cmd/Ctrl + B", action: "Toggle file browser" },
+    { key: "M", action: "Toggle mic recording" },
+    { key: "Cmd/Ctrl + /", action: "Focus input" },
+    { key: "Cmd/Ctrl + ,", action: "Open settings" },
+    { key: "Escape", action: "Close panels" },
+    { key: "?", action: "Show hotkeys help" },
+  ];
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    const isMod = e.metaKey || e.ctrlKey;
+    const target = e.target as HTMLElement;
+    const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+    if (!isInput) {
+      if (e.key === '?') {
+        e.preventDefault();
+        showHotkeysHelp = !showHotkeysHelp;
+        return;
+      }
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        audioRecorderRef?.toggleRecording();
+        return;
+      }
+    }
+
+    if (e.key === 'Escape') {
+      if (showHotkeysHelp) {
+        showHotkeysHelp = false;
+      } else if (showSettings) {
+        showSettings = false;
+      } else {
+        closeRightPanel();
+      }
+      return;
+    }
+
+    if (!isMod) return;
+
+    if (e.key === 'k') {
+      e.preventDefault();
+      showPreview = !showPreview;
+      if (showPreview) rightPanelMode = 'preview';
+    } else if (e.key === 'b') {
+      e.preventDefault();
+      toggleFileBrowser();
+    } else if (e.key === '/') {
+      e.preventDefault();
+      inputRef?.focus();
+    } else if (e.key === ',') {
+      e.preventDefault();
+      showSettings = true;
+    }
+  }
+
+  let pendingPermissionRequest = $state<{ requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string } | null>(null);
+
+  function handlePermissionApprove() {
+    if (pendingPermissionRequest && client) {
+      client.respondToPermission(pendingPermissionRequest.requestId, true, false);
+      pendingPermissionRequest = null;
+    }
+  }
+
+  function handlePermissionDeny() {
+    if (pendingPermissionRequest && client) {
+      client.respondToPermission(pendingPermissionRequest.requestId, false, false);
+      pendingPermissionRequest = null;
+    }
+  }
+
+  function handlePermissionApproveAll() {
+    if (pendingPermissionRequest && client) {
+      client.respondToPermission(pendingPermissionRequest.requestId, true, true);
+      pendingPermissionRequest = null;
+    }
+  }
 
   function startResizingRight() {
     isResizingRight = true;
@@ -207,6 +305,7 @@
     projectFileIndex = new Map();
     projectContext = null;
     projectContextError = null;
+    claudeMdContent = null;
     
     try {
       const sessionsList = await api.sessions.list(project.id);
@@ -217,6 +316,21 @@
     
     indexProjectFiles(project.path);
     loadProjectContext(project);
+    loadClaudeMd(project.path);
+  }
+
+  async function loadClaudeMd(projectPath: string) {
+    try {
+      const res = await fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(projectPath + "/CLAUDE.md")}`);
+      const data = await res.json();
+      if (!data.error && data.content) {
+        claudeMdContent = data.content;
+      } else {
+        claudeMdContent = null;
+      }
+    } catch (e) {
+      claudeMdContent = null;
+    }
   }
 
   async function goToChat(chat: Session) {
@@ -227,6 +341,7 @@
     projectFileIndex = new Map();
     projectContext = null;
     projectContextError = null;
+    claudeMdContent = null;
     
     try {
       const sessionsList = await api.sessions.list(chat.project_id);
@@ -238,6 +353,7 @@
     selectSession({ ...chat, claude_session_id: chat.claude_session_id } as Session);
     indexProjectFiles(project.path);
     loadProjectContext(project);
+    loadClaudeMd(project.path);
   }
   
   async function loadProjectContext(project: Project) {
@@ -535,6 +651,16 @@ Respond in this exact JSON format only, no other text:
     const uiSessionId = (msg as any).uiSessionId;
     const claudeSessionId = (msg as any).claudeSessionId;
     
+    if (msg.type === "result") {
+      console.log("RESULT MESSAGE:", { 
+        uiSessionId, 
+        currentSessionId: $session.sessionId,
+        match: uiSessionId === $session.sessionId,
+        usage: (msg as any).usage,
+        costUsd: (msg as any).costUsd 
+      });
+    }
+    
     switch (msg.type) {
       case "system":
         if (msg.subtype === "init" && uiSessionId && uiSessionId === $session.sessionId) {
@@ -634,6 +760,16 @@ Respond in this exact JSON format only, no other text:
         if (abortedSessionId === $session.sessionId) {
           activeSubagents = new Map();
         }
+        break;
+
+      case "permission_request":
+        const permMsg = msg as PermissionRequestMessage;
+        pendingPermissionRequest = {
+          requestId: permMsg.requestId,
+          tools: permMsg.tools,
+          toolInput: permMsg.toolInput,
+          message: permMsg.message,
+        };
         break;
     }
   }
@@ -791,6 +927,7 @@ Respond in this exact JSON format only, no other text:
   }
 
   let expandedHistories = $state<Set<string>>(new Set());
+  let expandedToolCalls = $state<Set<string>>(new Set());
 
   function openPreview(source: string) {
     const isUrl = source.startsWith("http://") || source.startsWith("https://") || source.startsWith("localhost") || source.match(/^:\d+/);
@@ -939,7 +1076,7 @@ Respond in this exact JSON format only, no other text:
   }
 </script>
 
-<svelte:window onmousemove={handleMouseMove} onmouseup={stopResizingRight} />
+<svelte:window onmousemove={handleMouseMove} onmouseup={stopResizingRight} onkeydown={handleGlobalKeydown} />
 
 {#if showOnboarding}
   <Onboarding onComplete={handleOnboardingComplete} />
@@ -1396,6 +1533,20 @@ Respond in this exact JSON format only, no other text:
 
         <div class="flex-1 overflow-y-auto p-4 md:p-0 space-y-6 scroll-smooth" bind:this={messagesContainer}>
 
+        <!-- Advanced Mode Info Bar -->
+        {#if $advancedMode && claudeMdContent}
+          <div class="max-w-3xl mx-auto w-full md:pt-4 md:px-0 px-4">
+            <button
+              onclick={() => showClaudeMdModal = true}
+              class="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+              <span>CLAUDE.md loaded</span>
+              <span class="text-gray-400">({claudeMdContent.split('\n').length} lines)</span>
+            </button>
+          </div>
+        {/if}
+
         <div class="max-w-3xl mx-auto w-full md:pt-10 space-y-8 pb-64">
 
             {#if currentMessages.length === 0 && !$session.sessionId}
@@ -1409,6 +1560,7 @@ Respond in this exact JSON format only, no other text:
                   <div class="w-full max-w-xl mb-6">
                     <div class="relative group bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-200 transition-shadow focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] focus-within:border-gray-300">
                       <textarea
+                        bind:this={inputRef}
                         bind:value={inputText}
                         onkeydown={handleKeydown}
                         placeholder="Type a message to Claude..."
@@ -1530,8 +1682,8 @@ Respond in this exact JSON format only, no other text:
 
                                  
 
-                                 <!-- Tool History (Collapsible) -->
-                                 {#if msg.contentHistory && getHistoryToolCalls(msg.contentHistory).length > 0}
+                                 <!-- Tool History (Collapsible) - only in advanced mode -->
+                                 {#if $advancedMode && msg.contentHistory && getHistoryToolCalls(msg.contentHistory).length > 0}
                                     <div class="mt-3">
                                       <button
                                         onclick={() => {
@@ -1559,24 +1711,66 @@ Respond in this exact JSON format only, no other text:
                                  {/if}
 
                                  <!-- Tool Calls -->
-
-                                 {#each getToolCalls(msg.content) as tool}
-                                    {#if isTaskTool(tool)}
-                                      <SubagentBlock
-                                        toolUseId={tool.id}
-                                        description={tool.input.description || tool.input.prompt?.slice(0, 100) || "Subagent task"}
-                                        subagentType={tool.input.subagent_type || "general-purpose"}
-                                        messages={getSubagentMessages(tool.id)}
-                                        isActive={activeSubagents.has(tool.id)}
-                                        elapsedTime={activeSubagents.get(tool.id)?.elapsed}
-                                        {renderMarkdown}
-                                        onMessageClick={handleMessageClick}
-                                      />
+                                 {#if getToolCalls(msg.content).length > 0}
+                                    {#if $advancedMode}
+                                      <!-- Advanced mode: collapsible tool calls -->
+                                      <div class="mt-3">
+                                        <button
+                                          onclick={() => {
+                                            const newSet = new Set(expandedToolCalls);
+                                            if (newSet.has(msg.id)) {
+                                              newSet.delete(msg.id);
+                                            } else {
+                                              newSet.add(msg.id);
+                                            }
+                                            expandedToolCalls = newSet;
+                                          }}
+                                          class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                                        >
+                                          <svg class={`w-3 h-3 transition-transform ${expandedToolCalls.has(msg.id) ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                                          <span>{getToolCalls(msg.content).length} tool {getToolCalls(msg.content).length === 1 ? 'call' : 'calls'}</span>
+                                        </button>
+                                        {#if expandedToolCalls.has(msg.id)}
+                                          <div class="mt-2 space-y-1">
+                                            {#each getToolCalls(msg.content) as tool}
+                                              {#if isTaskTool(tool)}
+                                                <SubagentBlock
+                                                  toolUseId={tool.id}
+                                                  description={tool.input.description || tool.input.prompt?.slice(0, 100) || "Subagent task"}
+                                                  subagentType={tool.input.subagent_type || "general-purpose"}
+                                                  messages={getSubagentMessages(tool.id)}
+                                                  isActive={activeSubagents.has(tool.id)}
+                                                  elapsedTime={activeSubagents.get(tool.id)?.elapsed}
+                                                  {renderMarkdown}
+                                                  onMessageClick={handleMessageClick}
+                                                />
+                                              {:else}
+                                                <ToolRenderer {tool} onPreview={openPreview} />
+                                              {/if}
+                                            {/each}
+                                          </div>
+                                        {/if}
+                                      </div>
                                     {:else}
-                                      <ToolRenderer {tool} onPreview={openPreview} />
+                                      <!-- Normal mode: show all tool calls -->
+                                      {#each getToolCalls(msg.content) as tool}
+                                        {#if isTaskTool(tool)}
+                                          <SubagentBlock
+                                            toolUseId={tool.id}
+                                            description={tool.input.description || tool.input.prompt?.slice(0, 100) || "Subagent task"}
+                                            subagentType={tool.input.subagent_type || "general-purpose"}
+                                            messages={getSubagentMessages(tool.id)}
+                                            isActive={activeSubagents.has(tool.id)}
+                                            elapsedTime={activeSubagents.get(tool.id)?.elapsed}
+                                            {renderMarkdown}
+                                            onMessageClick={handleMessageClick}
+                                          />
+                                        {:else}
+                                          <ToolRenderer {tool} onPreview={openPreview} />
+                                        {/if}
+                                      {/each}
                                     {/if}
-
-                                 {/each}
+                                 {/if}
 
                              </div>
 
@@ -1628,6 +1822,7 @@ Respond in this exact JSON format only, no other text:
                 <div class="relative group bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-200 transition-shadow focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] focus-within:border-gray-300">
 
                     <textarea
+                        bind:this={inputRef}
                         bind:value={inputText}
                         onkeydown={handleKeydown}
                         placeholder={currentSessionLoading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : "Type a message to Claude..."}
@@ -1638,6 +1833,7 @@ Respond in this exact JSON format only, no other text:
                     
                     <div class="absolute right-2 bottom-2 flex items-center gap-1">
                       <AudioRecorder 
+                        bind:this={audioRecorderRef}
                         onTranscript={(text) => { inputText = inputText ? inputText + " " + text : text; }}
                         disabled={!$isConnected}
                       />
@@ -1911,6 +2107,55 @@ Respond in this exact JSON format only, no other text:
 
   <Settings open={showSettings} onClose={() => showSettings = false} />
 
+  {#if pendingPermissionRequest}
+    <ToolConfirmDialog
+      tools={pendingPermissionRequest.tools}
+      toolInput={pendingPermissionRequest.toolInput}
+      message={pendingPermissionRequest.message}
+      onApprove={handlePermissionApprove}
+      onDeny={handlePermissionDeny}
+      onApproveAll={handlePermissionApproveAll}
+    />
+  {/if}
+
+  <!-- CLAUDE.md Modal -->
+  {#if showClaudeMdModal}
+    <div 
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/20 backdrop-blur-sm"
+      onclick={() => showClaudeMdModal = false}
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+    >
+      <div 
+        class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden animate-in zoom-in-95 duration-200"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white">
+          <div class="flex items-center gap-3">
+            <div class="p-2 bg-gray-100 rounded-lg">
+              <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <div>
+              <h3 class="font-semibold text-sm text-gray-900">CLAUDE.md</h3>
+              <p class="text-xs text-gray-500">Project instructions for Claude</p>
+            </div>
+          </div>
+          <button onclick={() => showClaudeMdModal = false} class="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6 overflow-y-auto max-h-[calc(80vh-80px)]">
+          <pre class="text-sm text-gray-700 font-mono whitespace-pre-wrap bg-gray-50 rounded-lg p-4 border border-gray-200">{claudeMdContent}</pre>
+        </div>
+      </div>
+    </div>
+  {/if}
+
 </div>
 
 
@@ -1989,10 +2234,24 @@ Respond in this exact JSON format only, no other text:
     color: #1d4ed8;
   }
 
-  :global(.markdown-body a::after) {
-    content: " ↗";
+  :global(.markdown-body a .external-arrow) {
     font-size: 0.75em;
     opacity: 0.6;
+    margin-left: 0.15em;
+  }
+
+  :global(.markdown-body .source-link) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+  }
+
+  :global(.markdown-body .source-favicon) {
+    width: 16px;
+    height: 16px;
+    vertical-align: middle;
+    flex-shrink: 0;
+    border-radius: 2px;
   }
 
   :global(.markdown-body h1, .markdown-body h2, .markdown-body h3) {

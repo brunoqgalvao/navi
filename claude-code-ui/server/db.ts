@@ -70,6 +70,24 @@ export async function initDb() {
   try {
     db.run("ALTER TABLE projects ADD COLUMN summary_updated_at INTEGER");
   } catch {}
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS global_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )`);
+  } catch {}
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN pinned INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN sort_order INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN pinned INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN sort_order INTEGER DEFAULT 0");
+  } catch {}
   
   saveDb();
   return db;
@@ -90,6 +108,8 @@ export interface Project {
   description: string | null;
   summary: string | null;
   summary_updated_at: number | null;
+  pinned: number;
+  sort_order: number;
   created_at: number;
   updated_at: number;
 }
@@ -104,6 +124,8 @@ export interface Session {
   total_turns: number;
   input_tokens: number;
   output_tokens: number;
+  pinned: number;
+  sort_order: number;
   created_at: number;
   updated_at: number;
 }
@@ -142,6 +164,8 @@ export interface ProjectWithStats extends Project {
   last_activity: number | null;
   summary: string | null;
   summary_updated_at: number | null;
+  pinned: number;
+  sort_order: number;
 }
 
 export const projects = {
@@ -150,7 +174,7 @@ export const projects = {
       (SELECT COUNT(*) FROM sessions WHERE project_id = p.id) as session_count,
       (SELECT MAX(updated_at) FROM sessions WHERE project_id = p.id) as last_activity
     FROM projects p 
-    ORDER BY COALESCE((SELECT MAX(updated_at) FROM sessions WHERE project_id = p.id), p.updated_at) DESC
+    ORDER BY p.pinned DESC, p.sort_order ASC, COALESCE((SELECT MAX(updated_at) FROM sessions WHERE project_id = p.id), p.updated_at) DESC
   `),
   get: (id: string) => queryOne<Project>("SELECT * FROM projects WHERE id = ?", [id]),
   create: (id: string, name: string, path: string, description: string | null, created_at: number, updated_at: number) =>
@@ -162,6 +186,10 @@ export const projects = {
   delete: (id: string) => run("DELETE FROM projects WHERE id = ?", [id]),
   updateSummary: (id: string, summary: string, updated_at: number) =>
     run("UPDATE projects SET summary = ?, summary_updated_at = ? WHERE id = ?", [summary, updated_at, id]),
+  togglePin: (id: string, pinned: boolean) =>
+    run("UPDATE projects SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
+  updateOrder: (id: string, sortOrder: number) =>
+    run("UPDATE projects SET sort_order = ? WHERE id = ?", [sortOrder, id]),
 };
 
 export interface SessionWithProject extends Session {
@@ -170,7 +198,7 @@ export interface SessionWithProject extends Session {
 
 export const sessions = {
   listByProject: (projectId: string) => 
-    queryAll<Session>("SELECT * FROM sessions WHERE project_id = ? ORDER BY updated_at DESC", [projectId]),
+    queryAll<Session>("SELECT * FROM sessions WHERE project_id = ? ORDER BY pinned DESC, sort_order ASC, updated_at DESC", [projectId]),
   listRecent: (limit: number = 10) =>
     queryAll<SessionWithProject>(`
       SELECT s.*, p.name as project_name 
@@ -189,6 +217,10 @@ export const sessions = {
     run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ?, updated_at = ? WHERE id = ?",
         [claude_session_id, model, cost, turns, inputTokens, outputTokens, updated_at, id]),
   delete: (id: string) => run("DELETE FROM sessions WHERE id = ?", [id]),
+  togglePin: (id: string, pinned: boolean) =>
+    run("UPDATE sessions SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
+  updateOrder: (id: string, sortOrder: number) =>
+    run("UPDATE sessions SET sort_order = ? WHERE id = ?", [sortOrder, id]),
   search: (projectId: string, query: string) =>
     queryAll<Session>(`
       SELECT DISTINCT s.* FROM sessions s 
@@ -218,3 +250,41 @@ export const messages = {
 export function getDb() {
   return db;
 }
+
+export interface PermissionSettings {
+  autoAcceptAll: boolean;
+  allowedTools: string[];
+  requireConfirmation: string[];
+}
+
+export const DEFAULT_TOOLS = [
+  "Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite"
+];
+
+export const DANGEROUS_TOOLS = ["Bash", "Write", "Edit"];
+
+export const globalSettings = {
+  get: (key: string): string | null => {
+    const result = queryOne<{ value: string }>("SELECT value FROM global_settings WHERE key = ?", [key]);
+    return result?.value ?? null;
+  },
+  set: (key: string, value: string) => {
+    run("INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)", [key, value]);
+  },
+  getPermissions: (): PermissionSettings => {
+    const raw = globalSettings.get("permissions");
+    if (raw) {
+      try {
+        return JSON.parse(raw);
+      } catch {}
+    }
+    return {
+      autoAcceptAll: false,
+      allowedTools: DEFAULT_TOOLS,
+      requireConfirmation: DANGEROUS_TOOLS,
+    };
+  },
+  setPermissions: (settings: PermissionSettings) => {
+    globalSettings.set("permissions", JSON.stringify(settings));
+  },
+};

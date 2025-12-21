@@ -180,3 +180,31 @@ export const onboardingComplete = createOnboardingStore();
 export const messageQueue = writable<string[]>([]);
 
 export const loadingSessions = writable<Set<string>>(new Set());
+
+const ADVANCED_MODE_KEY = "claude-code-ui-advanced-mode";
+
+function createAdvancedModeStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(ADVANCED_MODE_KEY) : null;
+  const { subscribe, set } = writable(stored === "true");
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current = false;
+      subscribe(v => current = v)();
+      const newValue = !current;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(ADVANCED_MODE_KEY, String(newValue));
+      }
+      set(newValue);
+    },
+    set: (value: boolean) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(ADVANCED_MODE_KEY, String(value));
+      }
+      set(value);
+    },
+  };
+}
+
+export const advancedMode = createAdvancedModeStore();

@@ -70,6 +70,14 @@ export interface ToolProgressMessage {
   elapsedTimeSeconds: number;
 }
 
+export interface PermissionRequestMessage {
+  type: "permission_request";
+  requestId: string;
+  tools: string[];
+  toolInput?: Record<string, unknown>;
+  message: string;
+}
+
 export type ClaudeMessage =
   | SystemMessage
   | AssistantMessage
@@ -78,6 +86,7 @@ export type ClaudeMessage =
   | ErrorMessage
   | DoneMessage
   | ToolProgressMessage
+  | PermissionRequestMessage
   | { type: "connected" }
   | { type: "aborted"; sessionId?: string };
 
@@ -165,6 +174,21 @@ export class ClaudeClient {
       JSON.stringify({
         type: "abort",
         sessionId,
+      })
+    );
+  }
+
+  respondToPermission(requestId: string, approved: boolean, approveAll?: boolean) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error("Not connected to server");
+    }
+
+    this.ws.send(
+      JSON.stringify({
+        type: "permission_response",
+        permissionRequestId: requestId,
+        approved,
+        approveAll,
       })
     );
   }

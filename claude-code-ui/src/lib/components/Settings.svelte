@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { api } from "../api";
+  import { api, type PermissionSettings } from "../api";
   import { onMount } from "svelte";
+  import { advancedMode } from "../stores";
 
   interface Props {
     open: boolean;
@@ -27,6 +28,11 @@
   let anthropicError: string | null = $state(null);
   let savingAnthropic = $state(false);
 
+  let permissionSettings = $state<PermissionSettings | null>(null);
+  let defaultTools = $state<string[]>([]);
+  let dangerousTools = $state<string[]>([]);
+  let savingPermissions = $state(false);
+
   onMount(() => {
     if (open) loadStatus();
   });
@@ -38,9 +44,10 @@
   async function loadStatus() {
     loading = true;
     try {
-      const [config, auth] = await Promise.all([
+      const [config, auth, perms] = await Promise.all([
         api.config.get(),
         api.auth.status(),
+        api.permissions.get(),
       ]);
       hasOpenAIKey = config.hasOpenAIKey;
       openAIKeyPreview = config.openAIKeyPreview;
@@ -48,11 +55,43 @@
       hasAnthropicKey = auth.hasApiKey;
       authMethod = auth.authMethod;
       claudeInstalled = auth.claudeInstalled;
+      permissionSettings = perms.global;
+      defaultTools = perms.defaults.tools;
+      dangerousTools = perms.defaults.dangerous;
     } catch (e) {
       console.error("Failed to load settings:", e);
     } finally {
       loading = false;
     }
+  }
+
+  async function savePermissions() {
+    if (!permissionSettings) return;
+    savingPermissions = true;
+    try {
+      await api.permissions.set(permissionSettings);
+    } catch (e) {
+      console.error("Failed to save permissions:", e);
+    } finally {
+      savingPermissions = false;
+    }
+  }
+
+  function toggleAutoAccept() {
+    if (!permissionSettings) return;
+    permissionSettings = { ...permissionSettings, autoAcceptAll: !permissionSettings.autoAcceptAll };
+    savePermissions();
+  }
+
+  function toggleRequireConfirmation(tool: string) {
+    if (!permissionSettings) return;
+    const current = permissionSettings.requireConfirmation;
+    if (current.includes(tool)) {
+      permissionSettings = { ...permissionSettings, requireConfirmation: current.filter(t => t !== tool) };
+    } else {
+      permissionSettings = { ...permissionSettings, requireConfirmation: [...current, tool] };
+    }
+    savePermissions();
   }
 
   async function saveOpenAIKey() {
@@ -333,7 +372,89 @@
                   Uses {hasOpenAIKey ? "GPT-4o-mini" : hasAnthropicKey ? "Claude Haiku" : "your API"} for title generation (~$0.0001 per title)
                 </p>
               {/if}
+
+              <div class="border-t border-gray-200 my-3"></div>
+
+              <div class="flex items-center justify-between">
+                <div class="space-y-0.5">
+                  <span class="text-sm text-gray-900 font-medium">Advanced Mode</span>
+                  <p class="text-xs text-gray-500">Show reasoning history and system prompt info</p>
+                </div>
+                <button
+                  onclick={() => advancedMode.toggle()}
+                  class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${$advancedMode ? 'bg-gray-900' : 'bg-gray-300'}`}
+                >
+                  <span
+                    class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${$advancedMode ? 'translate-x-6' : 'translate-x-1'}`}
+                  ></span>
+                </button>
+              </div>
+              
+              {#if $advancedMode}
+                <p class="text-xs text-gray-500 bg-gray-100 rounded px-2 py-1.5">
+                  Tool calls will be collapsible. You can view loaded CLAUDE.md and system context.
+                </p>
+              {/if}
             </div>
+          </div>
+
+          <!-- Permissions Section -->
+          <div class="space-y-3">
+            <h4 class="text-sm font-semibold text-gray-900 flex items-center gap-2">
+              <span class="w-6 h-6 bg-amber-100 rounded flex items-center justify-center">
+                <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </span>
+              Tool Permissions
+            </h4>
+            
+            {#if permissionSettings}
+              <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-4">
+                <div class="flex items-center justify-between">
+                  <div class="space-y-0.5">
+                    <span class="text-sm text-gray-900 font-medium">Auto-accept all tools</span>
+                    <p class="text-xs text-gray-500">Skip confirmation for all tool uses</p>
+                  </div>
+                  <button
+                    onclick={toggleAutoAccept}
+                    class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${permissionSettings.autoAcceptAll ? 'bg-amber-500' : 'bg-gray-300'}`}
+                  >
+                    <span
+                      class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${permissionSettings.autoAcceptAll ? 'translate-x-6' : 'translate-x-1'}`}
+                    ></span>
+                  </button>
+                </div>
+
+                {#if !permissionSettings.autoAcceptAll}
+                  <div class="border-t border-gray-200 pt-4">
+                    <p class="text-xs font-medium text-gray-500 mb-3">Require confirmation for:</p>
+                    <div class="space-y-2">
+                      {#each dangerousTools as tool}
+                        <label class="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={permissionSettings.requireConfirmation.includes(tool)}
+                            onchange={() => toggleRequireConfirmation(tool)}
+                            class="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                          />
+                          <span class="text-sm text-gray-700">{tool}</span>
+                          <span class="text-xs text-gray-400">
+                            {#if tool === "Bash"}(shell commands){/if}
+                            {#if tool === "Write"}(create files){/if}
+                            {#if tool === "Edit"}(modify files){/if}
+                          </span>
+                        </label>
+                      {/each}
+                    </div>
+                  </div>
+                  
+                  <p class="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    When a tool requires confirmation, you'll see a dialog before it executes.
+                  </p>
+                {/if}
+              </div>
+            {/if}
           </div>
 
           <!-- Storage Info -->
