@@ -1250,68 +1250,90 @@ Respond in this exact JSON format only, no other text:
 
     {#if !currentProject}
 
-        <div class="flex-1 flex flex-col items-center justify-center text-center p-8 bg-gray-50/30">
+        <div class="flex-1 flex flex-col items-center justify-center p-8 bg-gray-50/50 min-h-full">
 
-            <div class="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-gray-200 mb-5">
-                <div class="w-7 h-7 bg-gray-900 rounded-md flex items-center justify-center text-white font-bold text-base">C</div>
-            </div>
-
-            <h1 class="text-xl font-semibold text-gray-900 mb-1">Claude Code</h1>
-            <p class="text-sm text-gray-500 mb-6">Select a project or continue a recent chat</p>
-
-            <button onclick={() => showNewProjectModal = true} class="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium shadow-sm transition-all hover:shadow-md mb-10">
-                Create New Project
-            </button>
-
-            <div class="w-full max-w-2xl grid grid-cols-1 md:grid-cols-2 gap-6">
-              {#if sidebarProjects.length > 0}
-                <div>
-                  <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Projects</h3>
-                  <div class="space-y-2">
-                    {#each sidebarProjects.slice(0, 5) as proj}
-                      <button 
-                        onclick={() => selectProject(proj)}
-                        class="w-full text-left px-4 py-3 rounded-lg bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all group"
-                      >
-                        <div class="flex items-center gap-3">
-                          <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                          <div class="flex-1 min-w-0">
-                            <div class="text-sm font-medium text-gray-900 truncate">{proj.name}</div>
-                            <div class="text-[11px] text-gray-400">{proj.session_count || 0} chats · {relativeTime(proj.last_activity || proj.updated_at)}</div>
-                          </div>
-                          <svg class="w-4 h-4 text-gray-300 group-hover:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
-                        </div>
-                      </button>
-                    {/each}
-                  </div>
+            <div class="w-full max-w-4xl mx-auto flex flex-col items-center">
+                <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-lg shadow-gray-200/50 border border-gray-100 mb-6 rotate-3 hover:rotate-0 transition-transform duration-300">
+                    <div class="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">C</div>
                 </div>
-              {/if}
 
-              {#if recentChats.length > 0}
-                <div>
-                  <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Recent Chats</h3>
-                  <div class="space-y-2">
-                    {#each recentChats.slice(0, 5) as chat}
-                      <button 
-                        onclick={() => {
-                          session.setProject(chat.project_id);
-                          session.setSession(chat.id);
-                        }}
-                        class="w-full text-left px-4 py-3 rounded-lg bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all group"
-                      >
-                        <div class="flex items-center gap-3">
-                          <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-                          <div class="flex-1 min-w-0">
-                            <div class="text-sm font-medium text-gray-900 truncate">{chat.title}</div>
-                            <div class="text-[11px] text-gray-400">{chat.project_name} · {relativeTime(chat.updated_at)}</div>
-                          </div>
-                          <svg class="w-4 h-4 text-gray-300 group-hover:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
-                        </div>
-                      </button>
-                    {/each}
-                  </div>
+                <h1 class="text-3xl font-bold text-gray-900 mb-2 tracking-tight">Claude Code</h1>
+                <p class="text-base text-gray-500 mb-8 max-w-md text-center">Select a project to start coding or continue where you left off</p>
+
+                <button 
+                    onclick={() => showNewProjectModal = true} 
+                    class="group relative inline-flex items-center justify-center gap-2 px-8 py-3.5 text-sm font-semibold text-white transition-all duration-200 bg-gray-900 rounded-full hover:bg-gray-800 hover:shadow-xl hover:shadow-gray-900/20 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 mb-16"
+                >
+                    <svg class="w-5 h-5 transition-transform duration-300 group-hover:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Create New Project
+                </button>
+
+                <div class="w-full grid grid-cols-1 md:grid-cols-2 gap-8 px-4">
+                  {#if sidebarProjects.length > 0}
+                    <div class="flex flex-col gap-4">
+                      <div class="flex items-center gap-2 px-1">
+                          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest">Projects</h3>
+                          <div class="h-px bg-gray-200 flex-1"></div>
+                      </div>
+                      <div class="space-y-3">
+                        {#each sidebarProjects.slice(0, 5) as proj}
+                          <button 
+                            onclick={() => selectProject(proj)}
+                            class="group flex items-center w-full p-4 text-left bg-white border border-gray-100 rounded-xl transition-all duration-200 hover:border-gray-300 hover:shadow-md hover:-translate-y-0.5"
+                          >
+                            <div class="flex items-center justify-center w-10 h-10 mr-4 transition-colors bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-100 group-hover:text-blue-700 shadow-sm">
+                              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                              <h4 class="font-medium text-gray-900 truncate group-hover:text-blue-700 transition-colors">{proj.name}</h4>
+                              <p class="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
+                                <span>{proj.session_count || 0} chats</span>
+                                <span class="w-0.5 h-0.5 bg-gray-300 rounded-full"></span>
+                                <span>{relativeTime(proj.last_activity || proj.updated_at)}</span>
+                              </p>
+                            </div>
+                            <svg class="w-5 h-5 text-gray-300 transition-transform transform group-hover:translate-x-1 group-hover:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
+                          </button>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+
+                  {#if recentChats.length > 0}
+                    <div class="flex flex-col gap-4">
+                      <div class="flex items-center gap-2 px-1">
+                          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest">Recent Chats</h3>
+                          <div class="h-px bg-gray-200 flex-1"></div>
+                      </div>
+                      <div class="space-y-3">
+                        {#each recentChats.slice(0, 5) as chat}
+                          <button 
+                            onclick={() => {
+                              session.setProject(chat.project_id);
+                              session.setSession(chat.id);
+                            }}
+                            class="group flex items-center w-full p-4 text-left bg-white border border-gray-100 rounded-xl transition-all duration-200 hover:border-gray-300 hover:shadow-md hover:-translate-y-0.5"
+                          >
+                            <div class="flex items-center justify-center w-10 h-10 mr-4 transition-colors bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-emerald-100 group-hover:text-emerald-700 shadow-sm">
+                              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                              <h4 class="font-medium text-gray-900 truncate group-hover:text-emerald-700 transition-colors">{chat.title}</h4>
+                              <p class="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
+                                <span class="truncate max-w-[120px]">{chat.project_name}</span>
+                                <span class="w-0.5 h-0.5 bg-gray-300 rounded-full"></span>
+                                <span>{relativeTime(chat.updated_at)}</span>
+                              </p>
+                            </div>
+                            <svg class="w-5 h-5 text-gray-300 transition-transform transform group-hover:translate-x-1 group-hover:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
+                          </button>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
                 </div>
-              {/if}
             </div>
 
         </div>
@@ -1346,7 +1368,7 @@ Respond in this exact JSON format only, no other text:
 
                 <div class="flex flex-col items-center justify-center text-center min-h-[70vh] animate-in fade-in duration-500">
 
-                  <h2 class="text-xl font-semibold text-gray-900 mb-1">Start a conversation</h2>
+                  <h2 class="text-2xl font-bold text-gray-900 mb-1">Start a conversation</h2>
                   <p class="text-sm text-gray-500 mb-8">in <span class="font-medium text-gray-700">{currentProject.name}</span></p>
 
                   <!-- Centered Input Box -->
@@ -1681,7 +1703,7 @@ Respond in this exact JSON format only, no other text:
 
             <div class="px-6 py-5 border-b border-gray-100">
 
-                <h3 class="font-semibold text-base text-gray-900">Create New Project</h3>
+                <h3 class="font-bold text-xl text-gray-900">Create New Project</h3>
 
             </div>
 
