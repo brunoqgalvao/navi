@@ -133,6 +133,9 @@ async function runQuery(input: WorkerInput) {
   };
 
   try {
+    console.error(`[Worker] Starting query with cwd: ${cwd}`);
+    console.error(`[Worker] settingSources: ['project']`);
+    
     const q = query({
       prompt,
       options: {
@@ -152,7 +155,7 @@ async function runQuery(input: WorkerInput) {
         ],
         permissionMode: "default",
         canUseTool,
-        settingSources: ['project'],
+        settingSources: ['project'] as const,
       },
     });
 

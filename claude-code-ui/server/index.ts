@@ -119,7 +119,7 @@ const server = Bun.serve({
         } catch {
           return json({ error: "Directory does not exist" }, 400);
         }
-        projects.update(body.name, body.path, body.description || null, Date.now(), id);
+        projects.update(body.name, body.path, body.description || null, body.context_window || 200000, Date.now(), id);
         return json(projects.get(id));
       }
       if (method === "DELETE") {
@@ -185,6 +185,23 @@ const server = Bun.serve({
       }
     }
 
+    const sessionPinMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/pin$/);
+    if (sessionPinMatch && method === "POST") {
+      const id = sessionPinMatch[1];
+      const body = await req.json();
+      sessions.togglePin(id, body.pinned);
+      return json(sessions.get(id));
+    }
+
+    const sessionsReorderMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions\/reorder$/);
+    if (sessionsReorderMatch && method === "POST") {
+      const body = await req.json();
+      for (let i = 0; i < body.order.length; i++) {
+        sessions.updateOrder(body.order[i], i);
+      }
+      return json({ success: true });
+    }
+
     const forkMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/fork$/);
     if (forkMatch && method === "POST") {
       const sourceSessionId = forkMatch[1];
@@ -228,6 +245,60 @@ const server = Bun.serve({
         const msgs = messages.listBySession(sessionId);
         return json(msgs.map(m => ({ ...m, content: JSON.parse(m.content) })));
       }
+    }
+
+    const messageMatch = url.pathname.match(/^\/api\/messages\/([^/]+)$/);
+    if (messageMatch) {
+      const messageId = messageMatch[1];
+      if (method === "GET") {
+        const msg = messages.get(messageId);
+        if (!msg) return json({ error: "Message not found" }, 404);
+        return json({ ...msg, content: JSON.parse(msg.content) });
+      }
+      if (method === "PUT") {
+        const body = await req.json();
+        const msg = messages.get(messageId);
+        if (!msg) return json({ error: "Message not found" }, 404);
+        messages.update(messageId, JSON.stringify(body.content));
+        return json({ success: true });
+      }
+      if (method === "DELETE") {
+        messages.delete(messageId);
+        return json({ success: true });
+      }
+    }
+
+    const rollbackMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/rollback$/);
+    if (rollbackMatch && method === "POST") {
+      const sessionId = rollbackMatch[1];
+      const body = await req.json();
+      const messageId = body.messageId;
+      
+      const session = sessions.get(sessionId);
+      if (!session) return json({ error: "Session not found" }, 404);
+      
+      const msg = messages.get(messageId);
+      if (!msg) return json({ error: "Message not found" }, 404);
+      
+      messages.deleteAfter(sessionId, msg.timestamp);
+      
+      sessions.updateClaudeSession(
+        null,
+        session.model,
+        0,
+        0,
+        0,
+        0,
+        Date.now(),
+        sessionId
+      );
+      
+      const remainingMsgs = messages.listBySession(sessionId);
+      return json({ 
+        success: true, 
+        messages: remainingMsgs.map(m => ({ ...m, content: JSON.parse(m.content) })),
+        sessionReset: true 
+      });
     }
 
     const exportMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/export$/);
@@ -612,13 +683,40 @@ const server = Bun.serve({
         }
       }
 
+      const preferredAuth = globalSettings.get("preferredAuth") as "oauth" | "api_key" | null;
+      const hasOAuth = authenticated && !process.env.ANTHROPIC_API_KEY;
+      const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+      
+      if (hasOAuth && hasApiKey && preferredAuth) {
+        authMethod = preferredAuth;
+      }
+
       return json({
         claudeInstalled,
         claudePath,
         authenticated,
         authMethod,
-        hasApiKey: !!process.env.ANTHROPIC_API_KEY,
+        hasApiKey,
+        hasOAuth: authenticated,
+        preferredAuth,
       });
+    }
+
+    if (url.pathname === "/api/auth/preferred" && method === "POST") {
+      const body = await req.json();
+      const preferred = body.preferred as "oauth" | "api_key" | null;
+      
+      if (preferred !== null && preferred !== "oauth" && preferred !== "api_key") {
+        return json({ error: "Invalid preferred auth method" }, 400);
+      }
+      
+      if (preferred === null) {
+        globalSettings.set("preferredAuth", "");
+      } else {
+        globalSettings.set("preferredAuth", preferred);
+      }
+      
+      return json({ success: true, preferred });
     }
 
     if (url.pathname === "/api/auth/api-key" && method === "POST") {

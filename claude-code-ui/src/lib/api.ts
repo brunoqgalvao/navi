@@ -7,6 +7,9 @@ export interface Project {
   description: string | null;
   summary?: string | null;
   summary_updated_at?: number | null;
+  pinned?: number;
+  sort_order?: number;
+  context_window?: number;
   created_at: number;
   updated_at: number;
   session_count?: number;
@@ -23,6 +26,8 @@ export interface Session {
   total_turns: number;
   input_tokens: number;
   output_tokens: number;
+  pinned?: number;
+  sort_order?: number;
   created_at: number;
   updated_at: number;
   project_name?: string;
@@ -60,7 +65,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: { name: string; path: string; description?: string }) =>
+    update: (id: string, data: { name: string; path: string; description?: string; context_window?: number }) =>
       request<Project>(`/projects/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
@@ -71,6 +76,16 @@ export const api = {
       request<{ summary: string | null; summaryUpdatedAt: number | null }>(`/projects/${id}/summary`),
     generateSummary: (id: string) =>
       request<{ summary: string; summaryUpdatedAt: number }>(`/projects/${id}/summary`, { method: "POST" }),
+    togglePin: (id: string, pinned: boolean) =>
+      request<Project>(`/projects/${id}/pin`, {
+        method: "POST",
+        body: JSON.stringify({ pinned }),
+      }),
+    reorder: (order: string[]) =>
+      request<{ success: boolean }>("/projects/reorder", {
+        method: "POST",
+        body: JSON.stringify({ order }),
+      }),
   },
 
   sessions: {
@@ -94,6 +109,16 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    togglePin: (id: string, pinned: boolean) =>
+      request<Session>(`/sessions/${id}/pin`, {
+        method: "POST",
+        body: JSON.stringify({ pinned }),
+      }),
+    reorder: (projectId: string, order: string[]) =>
+      request<{ success: boolean }>(`/projects/${projectId}/sessions/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ order }),
+      }),
     search: (query: string, projectId?: string) => {
       const params = new URLSearchParams({ q: query });
       if (projectId) params.set("projectId", projectId);
@@ -103,6 +128,22 @@ export const api = {
 
   messages: {
     list: (sessionId: string) => request<Message[]>(`/sessions/${sessionId}/messages`),
+    get: (id: string) => request<Message>(`/messages/${id}`),
+    update: (id: string, content: any) =>
+      request<{ success: boolean }>(`/messages/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ content }),
+      }),
+    delete: (id: string) =>
+      request<{ success: boolean }>(`/messages/${id}`, { method: "DELETE" }),
+    rollback: (sessionId: string, messageId: string) =>
+      request<{ success: boolean; messages: Message[]; sessionReset: boolean }>(
+        `/sessions/${sessionId}/rollback`,
+        {
+          method: "POST",
+          body: JSON.stringify({ messageId }),
+        }
+      ),
   },
 
   export: {

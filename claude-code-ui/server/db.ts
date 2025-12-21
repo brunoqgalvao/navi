@@ -88,8 +88,11 @@ export async function initDb() {
   try {
     db.run("ALTER TABLE sessions ADD COLUMN sort_order INTEGER DEFAULT 0");
   } catch {}
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN context_window INTEGER DEFAULT 200000");
+  } catch {}
   
-  saveDb();
+  saveDb()
   return db;
 }
 
@@ -110,6 +113,7 @@ export interface Project {
   summary_updated_at: number | null;
   pinned: number;
   sort_order: number;
+  context_window: number;
   created_at: number;
   updated_at: number;
 }
@@ -180,9 +184,9 @@ export const projects = {
   create: (id: string, name: string, path: string, description: string | null, created_at: number, updated_at: number) =>
     run("INSERT INTO projects (id, name, path, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", 
         [id, name, path, description, created_at, updated_at]),
-  update: (name: string, path: string, description: string | null, updated_at: number, id: string) =>
-    run("UPDATE projects SET name = ?, path = ?, description = ?, updated_at = ? WHERE id = ?",
-        [name, path, description, updated_at, id]),
+  update: (name: string, path: string, description: string | null, contextWindow: number, updated_at: number, id: string) =>
+    run("UPDATE projects SET name = ?, path = ?, description = ?, context_window = ?, updated_at = ? WHERE id = ?",
+        [name, path, description, contextWindow, updated_at, id]),
   delete: (id: string) => run("DELETE FROM projects WHERE id = ?", [id]),
   updateSummary: (id: string, summary: string, updated_at: number) =>
     run("UPDATE projects SET summary = ?, summary_updated_at = ? WHERE id = ?", [summary, updated_at, id]),
@@ -241,10 +245,16 @@ export const sessions = {
 export const messages = {
   listBySession: (sessionId: string) =>
     queryAll<Message>("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC", [sessionId]),
+  get: (id: string) => queryOne<Message>("SELECT * FROM messages WHERE id = ?", [id]),
   create: (id: string, session_id: string, role: string, content: string, timestamp: number) =>
     run("INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)",
         [id, session_id, role, content, timestamp]),
+  update: (id: string, content: string) =>
+    run("UPDATE messages SET content = ? WHERE id = ?", [content, id]),
+  delete: (id: string) => run("DELETE FROM messages WHERE id = ?", [id]),
   deleteBySession: (sessionId: string) => run("DELETE FROM messages WHERE session_id = ?", [sessionId]),
+  deleteAfter: (sessionId: string, timestamp: number) =>
+    run("DELETE FROM messages WHERE session_id = ? AND timestamp > ?", [sessionId, timestamp]),
 };
 
 export function getDb() {

@@ -208,3 +208,21 @@ function createAdvancedModeStore() {
 }
 
 export const advancedMode = createAdvancedModeStore();
+
+export interface TodoItem {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  activeForm?: string;
+}
+
+function createTodosStore() {
+  const { subscribe, set } = writable<TodoItem[]>([]);
+
+  return {
+    subscribe,
+    set,
+    clear: () => set([]),
+  };
+}
+
+export const todos = createTodosStore();

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, type ChatMessage } from "./lib/stores";
+  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, type ChatMessage } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, type Project, type Session } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -48,6 +48,7 @@
   import AudioRecorder from "./lib/components/AudioRecorder.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Settings from "./lib/components/Settings.svelte";
+  import TodoPanel from "./lib/components/TodoPanel.svelte";
   import ToolRenderer from "./lib/components/ToolRenderer.svelte";
   import ToolConfirmDialog from "./lib/components/ToolConfirmDialog.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
@@ -84,6 +85,7 @@
   let editingProject = $state<Project | null>(null);
   let editProjectName = $state("");
   let editProjectPath = $state("");
+  let editProjectContextWindow = $state(200000);
   let showDeleteConfirm = $state(false);
   let projectToDelete = $state<Project | null>(null);
   let editingSession = $state<Session | null>(null);
@@ -95,6 +97,11 @@
   let sidebarCollapsed = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
+
+  let draggedProjectId = $state<string | null>(null);
+  let dragOverProjectId = $state<string | null>(null);
+  let draggedSessionId = $state<string | null>(null);
+  let dragOverSessionId = $state<string | null>(null);
 
   let showPreview = $state(false);
   let previewSource = $state("");
@@ -301,6 +308,7 @@
   async function selectProject(project: Project) {
     session.setProject(project.id);
     session.setSession(null);
+    todos.clear();
     sidebarSessions = [];
     projectFileIndex = new Map();
     projectContext = null;
@@ -313,6 +321,10 @@
     } catch (e) {
       console.error("Failed to load sessions:", e);
     }
+    
+    api.claudeMd.initProject(project.path).catch(e => {
+      console.error("Failed to init CLAUDE.md:", e);
+    });
     
     indexProjectFiles(project.path);
     loadProjectContext(project);
@@ -500,6 +512,7 @@ Respond in this exact JSON format only, no other text:
     editingProject = proj;
     editProjectName = proj.name;
     editProjectPath = proj.path;
+    editProjectContextWindow = proj.context_window || 200000;
   }
 
   async function updateProject() {
@@ -508,7 +521,8 @@ Respond in this exact JSON format only, no other text:
     try {
       await api.projects.update(editingProject.id, {
         name: editProjectName,
-        path: editProjectPath
+        path: editProjectPath,
+        context_window: editProjectContextWindow
       });
       await loadProjects();
       editingProject = null;
@@ -584,6 +598,7 @@ Respond in this exact JSON format only, no other text:
     session.setSession(s.id, s.claude_session_id);
     session.setCost(s.total_cost_usd || 0);
     session.setUsage(s.input_tokens || 0, s.output_tokens || 0);
+    todos.clear();
     
     if (!$sessionMessages.has(s.id)) {
       try {
@@ -624,6 +639,153 @@ Respond in this exact JSON format only, no other text:
     } catch (e) {
       console.error("Failed to delete session:", e);
     }
+  }
+
+  async function toggleProjectPin(proj: Project, e: Event) {
+    e.stopPropagation();
+    const newPinned = !proj.pinned;
+    try {
+      await api.projects.togglePin(proj.id, newPinned);
+      sidebarProjects = sidebarProjects.map(p => 
+        p.id === proj.id ? { ...p, pinned: newPinned ? 1 : 0 } : p
+      ).sort((a, b) => {
+        if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+        return (a.sort_order || 0) - (b.sort_order || 0);
+      });
+    } catch (e) {
+      console.error("Failed to toggle project pin:", e);
+    }
+  }
+
+  async function toggleSessionPin(sess: Session, e: Event) {
+    e.stopPropagation();
+    const newPinned = !sess.pinned;
+    try {
+      await api.sessions.togglePin(sess.id, newPinned);
+      sidebarSessions = sidebarSessions.map(s => 
+        s.id === sess.id ? { ...s, pinned: newPinned ? 1 : 0 } : s
+      ).sort((a, b) => {
+        if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+        if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
+        return b.updated_at - a.updated_at;
+      });
+    } catch (e) {
+      console.error("Failed to toggle session pin:", e);
+    }
+  }
+
+  function handleProjectDragStart(e: DragEvent, proj: Project) {
+    draggedProjectId = proj.id;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", proj.id);
+    }
+  }
+
+  function handleProjectDragOver(e: DragEvent, projId: string) {
+    e.preventDefault();
+    if (draggedProjectId && draggedProjectId !== projId) {
+      dragOverProjectId = projId;
+    }
+  }
+
+  function handleProjectDragLeave() {
+    dragOverProjectId = null;
+  }
+
+  async function handleProjectDrop(e: DragEvent, targetProj: Project) {
+    e.preventDefault();
+    if (!draggedProjectId || draggedProjectId === targetProj.id) {
+      draggedProjectId = null;
+      dragOverProjectId = null;
+      return;
+    }
+    
+    const draggedIndex = sidebarProjects.findIndex(p => p.id === draggedProjectId);
+    const targetIndex = sidebarProjects.findIndex(p => p.id === targetProj.id);
+    
+    if (draggedIndex === -1 || targetIndex === -1) {
+      draggedProjectId = null;
+      dragOverProjectId = null;
+      return;
+    }
+
+    const newProjects = [...sidebarProjects];
+    const [removed] = newProjects.splice(draggedIndex, 1);
+    newProjects.splice(targetIndex, 0, removed);
+    sidebarProjects = newProjects;
+
+    const order = newProjects.map(p => p.id);
+    try {
+      await api.projects.reorder(order);
+    } catch (e) {
+      console.error("Failed to reorder projects:", e);
+    }
+
+    draggedProjectId = null;
+    dragOverProjectId = null;
+  }
+
+  function handleProjectDragEnd() {
+    draggedProjectId = null;
+    dragOverProjectId = null;
+  }
+
+  function handleSessionDragStart(e: DragEvent, sess: Session) {
+    draggedSessionId = sess.id;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", sess.id);
+    }
+  }
+
+  function handleSessionDragOver(e: DragEvent, sessId: string) {
+    e.preventDefault();
+    if (draggedSessionId && draggedSessionId !== sessId) {
+      dragOverSessionId = sessId;
+    }
+  }
+
+  function handleSessionDragLeave() {
+    dragOverSessionId = null;
+  }
+
+  async function handleSessionDrop(e: DragEvent, targetSess: Session) {
+    e.preventDefault();
+    if (!draggedSessionId || draggedSessionId === targetSess.id || !currentProject) {
+      draggedSessionId = null;
+      dragOverSessionId = null;
+      return;
+    }
+    
+    const draggedIndex = sidebarSessions.findIndex(s => s.id === draggedSessionId);
+    const targetIndex = sidebarSessions.findIndex(s => s.id === targetSess.id);
+    
+    if (draggedIndex === -1 || targetIndex === -1) {
+      draggedSessionId = null;
+      dragOverSessionId = null;
+      return;
+    }
+
+    const newSessions = [...sidebarSessions];
+    const [removed] = newSessions.splice(draggedIndex, 1);
+    newSessions.splice(targetIndex, 0, removed);
+    sidebarSessions = newSessions;
+
+    const order = newSessions.map(s => s.id);
+    try {
+      await api.sessions.reorder(currentProject.id, order);
+    } catch (e) {
+      console.error("Failed to reorder sessions:", e);
+    }
+
+    draggedSessionId = null;
+    dragOverSessionId = null;
+  }
+
+  function handleSessionDragEnd() {
+    draggedSessionId = null;
+    dragOverSessionId = null;
   }
 
   function openEditSession(sess: Session, e: Event) {
@@ -697,6 +859,15 @@ Respond in this exact JSON format only, no other text:
             parentToolUseId: parentId,
           });
         }
+        const msgContent = (msg as any).content;
+        if (Array.isArray(msgContent)) {
+          const todoTool = msgContent.find(
+            (b: any): b is ToolUseBlock => b.type === "tool_use" && b.name === "TodoWrite"
+          );
+          if (todoTool?.input?.todos) {
+            todos.set(todoTool.input.todos);
+          }
+        }
         if (uiSessionId === $session.sessionId) {
           scrollToBottom();
         }
@@ -706,9 +877,13 @@ Respond in this exact JSON format only, no other text:
         if (uiSessionId && uiSessionId === $session.sessionId) {
           session.setCost($session.costUsd + ((msg as any).costUsd || 0));
           if ((msg as any).usage) {
+            const usage = (msg as any).usage;
+            const totalInputTokens = (usage.input_tokens || 0) + 
+              (usage.cache_creation_input_tokens || 0) + 
+              (usage.cache_read_input_tokens || 0);
             session.setUsage(
-              $session.inputTokens + ((msg as any).usage.input_tokens || 0),
-              $session.outputTokens + ((msg as any).usage.output_tokens || 0)
+              $session.inputTokens + totalInputTokens,
+              $session.outputTokens + (usage.output_tokens || 0)
             );
           }
         }
@@ -1062,6 +1237,86 @@ Respond in this exact JSON format only, no other text:
     closeMessageMenu();
   }
 
+  let editingMessageId = $state<string | null>(null);
+  let editingMessageContent = $state("");
+
+  function startEditMessage(msgId: string) {
+    const msg = currentMessages.find(m => m.id === msgId);
+    if (msg && msg.role === "user") {
+      editingMessageId = msgId;
+      editingMessageContent = formatContent(msg.content);
+    }
+    closeMessageMenu();
+  }
+
+  async function saveEditedMessage() {
+    if (!editingMessageId || !$session.sessionId) return;
+    
+    try {
+      await api.messages.update(editingMessageId, editingMessageContent);
+      
+      sessionMessages.setMessages($session.sessionId, 
+        currentMessages.map(m => 
+          m.id === editingMessageId 
+            ? { ...m, content: editingMessageContent }
+            : m
+        )
+      );
+      
+      editingMessageId = null;
+      editingMessageContent = "";
+    } catch (e) {
+      console.error("Failed to update message:", e);
+      alert("Failed to update message");
+    }
+  }
+
+  function cancelEditMessage() {
+    editingMessageId = null;
+    editingMessageContent = "";
+  }
+
+  async function rollbackToMessage(msgId: string) {
+    if (!$session.sessionId) return;
+    
+    const msg = currentMessages.find(m => m.id === msgId);
+    if (!msg) return;
+    
+    const msgIndex = currentMessages.findIndex(m => m.id === msgId);
+    const messagesAfter = currentMessages.slice(msgIndex + 1);
+    
+    if (messagesAfter.length === 0) {
+      alert("No messages to rollback");
+      return;
+    }
+    
+    if (!confirm(`This will delete ${messagesAfter.length} message${messagesAfter.length > 1 ? 's' : ''} after this point and reset Claude's context. Continue?`)) {
+      return;
+    }
+    
+    try {
+      const result = await api.messages.rollback($session.sessionId, msgId);
+      
+      if (result.success) {
+        const loadedMsgs: ChatMessage[] = result.messages.map(m => ({
+          id: m.id,
+          role: m.role as any,
+          content: m.content,
+          timestamp: new Date(m.timestamp),
+        }));
+        sessionMessages.setMessages($session.sessionId!, loadedMsgs);
+        
+        if (result.sessionReset) {
+          session.setSession($session.sessionId, null);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to rollback:", e);
+      alert("Failed to rollback conversation");
+    }
+    closeMessageMenu();
+  }
+
   async function forkFromMessage(msgId: string) {
     if (!$session.sessionId) return;
     
@@ -1082,6 +1337,8 @@ Respond in this exact JSON format only, no other text:
   <Onboarding onComplete={handleOnboardingComplete} />
 {/if}
 
+<TodoPanel />
+
 <div class="flex h-screen bg-white text-gray-900 font-sans overflow-hidden selection:bg-gray-100 selection:text-gray-900">
 
   <!-- Sidebar -->
@@ -1098,11 +1355,8 @@ Respond in this exact JSON format only, no other text:
           </button>
         {:else}
           <div class="flex items-center gap-2.5 px-2">
-
-              <div class="w-6 h-6 rounded bg-gray-900 flex items-center justify-center font-bold text-white text-xs">C</div>
-
+              <img src="/logo.png" alt="Logo" class="w-6 h-6" />
               <span class="font-medium text-sm tracking-tight text-gray-900">Claude Code</span>
-
           </div>
 
           <div class="flex items-center gap-0.5">
@@ -1168,13 +1422,26 @@ Respond in this exact JSON format only, no other text:
 
                         {#each sidebarProjects as proj}
 
-                            <div class="group relative">
+                            <div 
+                                class="group relative {dragOverProjectId === proj.id && !proj.pinned ? 'border-t-2 border-blue-500' : ''} {draggedProjectId === proj.id ? 'opacity-50' : ''}"
+                                role="listitem"
+                                draggable={!proj.pinned}
+                                ondragstart={(e) => !proj.pinned && handleProjectDragStart(e, proj)}
+                                ondragover={(e) => !proj.pinned && handleProjectDragOver(e, proj.id)}
+                                ondragleave={handleProjectDragLeave}
+                                ondrop={(e) => !proj.pinned && handleProjectDrop(e, proj)}
+                                ondragend={handleProjectDragEnd}
+                            >
                             <button 
                                 onclick={() => selectProject(proj)}
-                                class="w-full text-left px-2.5 py-2 rounded-md text-gray-600 hover:bg-gray-200/50 hover:text-gray-900 transition-colors"
+                                class="w-full text-left px-2.5 py-2 rounded-md text-gray-600 hover:bg-gray-200/50 hover:text-gray-900 transition-colors {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
                             >
                                 <div class="flex items-center gap-2">
-                                    <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                                    {#if proj.pinned}
+                                        <svg class="w-3.5 h-3.5 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
+                                    {:else}
+                                        <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                                    {/if}
                                     <span class="text-[13px] font-medium truncate">{proj.name}</span>
                                 </div>
                                 <div class="flex items-center gap-2 mt-0.5 pl-5.5 text-[10px] text-gray-400">
@@ -1184,6 +1451,13 @@ Respond in this exact JSON format only, no other text:
                                 </div>
                             </button>
                             <div class="absolute right-1 top-2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                    onclick={(e) => toggleProjectPin(proj, e)}
+                                    class="p-1 {proj.pinned ? 'text-amber-500 hover:text-amber-600' : 'text-gray-400 hover:text-amber-500'} transition-colors"
+                                    title={proj.pinned ? "Unpin project" : "Pin project"}
+                                >
+                                    <svg class="w-3 h-3" fill={proj.pinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
+                                </button>
                                 <button 
                                     onclick={(e) => openEditProject(proj, e)}
                                     class="p-1 text-gray-400 hover:text-gray-600 transition-colors"
@@ -1286,17 +1560,31 @@ Respond in this exact JSON format only, no other text:
 
                         {#each sidebarSessions as sess}
 
-                            <div class="group relative">
+                            <div 
+                                class="group relative {dragOverSessionId === sess.id && !sess.pinned ? 'border-t-2 border-blue-500' : ''} {draggedSessionId === sess.id ? 'opacity-50' : ''}"
+                                role="listitem"
+                                draggable={!sess.pinned}
+                                ondragstart={(e) => !sess.pinned && handleSessionDragStart(e, sess)}
+                                ondragover={(e) => !sess.pinned && handleSessionDragOver(e, sess.id)}
+                                ondragleave={handleSessionDragLeave}
+                                ondrop={(e) => !sess.pinned && handleSessionDrop(e, sess)}
+                                ondragend={handleSessionDragEnd}
+                            >
 
                                 <button 
 
                                     onclick={() => selectSession(sess)}
 
-                                    class={`w-full text-left px-2.5 py-2 rounded-md text-[13px] transition-all border ${$session.sessionId === sess.id ? 'bg-white border-gray-200 shadow-sm text-gray-900 z-10 relative' : 'border-transparent text-gray-500 hover:bg-gray-200/50 hover:text-gray-800'}`}
+                                    class={`w-full text-left px-2.5 py-2 rounded-md text-[13px] transition-all border ${sess.pinned ? '' : 'cursor-grab active:cursor-grabbing'} ${$session.sessionId === sess.id ? 'bg-white border-gray-200 shadow-sm text-gray-900 z-10 relative' : 'border-transparent text-gray-500 hover:bg-gray-200/50 hover:text-gray-800'}`}
 
                                 >
 
-                                    <div class="truncate pr-4 font-medium">{sess.title}</div>
+                                    <div class="truncate pr-12 font-medium flex items-center gap-1.5">
+                                        {#if sess.pinned}
+                                            <svg class="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
+                                        {/if}
+                                        <span class="truncate">{sess.title}</span>
+                                    </div>
 
                                     <div class="text-[10px] opacity-60 mt-0.5 flex justify-between">
 
@@ -1307,6 +1595,13 @@ Respond in this exact JSON format only, no other text:
                                 </button>
 
                                 <div class="absolute right-1 top-2.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                                    <button 
+                                        onclick={(e) => toggleSessionPin(sess, e)}
+                                        class="p-0.5 {sess.pinned ? 'text-amber-500 hover:text-amber-600' : 'text-gray-400 hover:text-amber-500'} transition-colors"
+                                        title={sess.pinned ? "Unpin chat" : "Pin chat"}
+                                    >
+                                        <svg class="w-3.5 h-3.5" fill={sess.pinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
+                                    </button>
                                     <button 
                                         onclick={(e) => openEditSession(sess, e)}
                                         class="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
@@ -1354,7 +1649,7 @@ Respond in this exact JSON format only, no other text:
 
       <!-- Context Usage -->
       {#if $session.inputTokens > 0 && !sidebarCollapsed}
-        {@const contextWindow = 200000}
+        {@const contextWindow = $currentProject?.context_window || 200000}
         {@const usagePercent = Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100))}
         <div class="space-y-1">
           <div class="flex items-center justify-between text-[10px] text-gray-500">
@@ -1373,6 +1668,9 @@ Respond in this exact JSON format only, no other text:
       {#if sidebarCollapsed}
         <div class="flex flex-col items-center gap-2">
           <span class={`w-2 h-2 rounded-full ${$isConnected ? "bg-emerald-500" : "bg-red-400"}`} title={$isConnected ? "Online" : "Offline"}></span>
+          <button onclick={() => showHotkeysHelp = true} class="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Keyboard shortcuts (?)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          </button>
           <button onclick={() => showSettings = true} class="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Settings">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
           </button>
@@ -1392,6 +1690,9 @@ Respond in this exact JSON format only, no other text:
           {#if $session.costUsd > 0}
               <span class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200">${$session.costUsd.toFixed(4)}</span>
           {/if}
+          <button onclick={() => showHotkeysHelp = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Keyboard shortcuts (?)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          </button>
           <button onclick={() => showSettings = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Settings">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
           </button>
@@ -1438,7 +1739,7 @@ Respond in this exact JSON format only, no other text:
 
             <div class="w-full max-w-4xl mx-auto flex flex-col items-center">
                 <div class="w-16 h-16 bg-white rounded-xl flex items-center justify-center shadow-sm border border-gray-200 mb-6">
-                    <div class="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center text-white font-serif font-bold text-xl">C</div>
+                    <img src="/logo.png" alt="Logo" class="w-10 h-10" />
                 </div>
 
                 <h1 class="text-3xl font-serif text-gray-900 mb-3 tracking-tight">Claude Code</h1>
@@ -1619,20 +1920,37 @@ Respond in this exact JSON format only, no other text:
                    {#if msg.role === 'user'}
 
                         <div class="relative max-w-[85%]">
-                          <div class="bg-gray-100 text-gray-900 px-5 py-3 rounded-2xl rounded-tr-sm text-[15px] leading-relaxed">
-                            <div class="whitespace-pre-wrap break-words">{formatContent(msg.content)}</div>
-                          </div>
-                          <div class="absolute -top-8 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5">
-                            <button onclick={() => copyMessageContent(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Copy">
-                              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                            </button>
-                            <button onclick={() => editAsNewMessage(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Edit as new message">
-                              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                            </button>
-                            <button onclick={() => forkFromMessage(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Fork from here">
-                              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
-                            </button>
-                          </div>
+                          {#if editingMessageId === msg.id}
+                            <div class="bg-gray-50 border border-gray-300 rounded-2xl rounded-tr-sm p-3">
+                              <textarea
+                                bind:value={editingMessageContent}
+                                class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-[15px] text-gray-900 focus:border-gray-400 focus:outline-none resize-none min-h-[60px]"
+                                rows="3"
+                              ></textarea>
+                              <div class="flex justify-end gap-2 mt-2">
+                                <button onclick={cancelEditMessage} class="px-3 py-1 text-xs text-gray-600 hover:text-gray-800 transition-colors">Cancel</button>
+                                <button onclick={saveEditedMessage} class="px-3 py-1 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">Save</button>
+                              </div>
+                            </div>
+                          {:else}
+                            <div class="bg-gray-100 text-gray-900 px-5 py-3 rounded-2xl rounded-tr-sm text-[15px] leading-relaxed">
+                              <div class="whitespace-pre-wrap break-words">{formatContent(msg.content)}</div>
+                            </div>
+                            <div class="absolute -top-8 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5">
+                              <button onclick={() => copyMessageContent(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Copy">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                              </button>
+                              <button onclick={() => startEditMessage(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Edit message">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                              </button>
+                              <button onclick={() => rollbackToMessage(msg.id)} class="p-1 text-gray-400 hover:text-amber-600 rounded transition-colors" title="Rollback to here (delete messages after)">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
+                              </button>
+                              <button onclick={() => forkFromMessage(msg.id)} class="p-1 text-gray-400 hover:text-blue-600 rounded transition-colors" title="Fork from here">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                              </button>
+                            </div>
+                          {/if}
                         </div>
 
                         <span class="text-[10px] text-gray-400 mt-1.5 mr-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1669,7 +1987,10 @@ Respond in this exact JSON format only, no other text:
                                    <button onclick={() => copyMessageContent(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Copy">
                                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
                                    </button>
-                                   <button onclick={() => forkFromMessage(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Fork from here">
+                                   <button onclick={() => rollbackToMessage(msg.id)} class="p-1 text-gray-400 hover:text-amber-600 rounded transition-colors" title="Rollback to here (delete messages after)">
+                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
+                                   </button>
+                                   <button onclick={() => forkFromMessage(msg.id)} class="p-1 text-gray-400 hover:text-blue-600 rounded transition-colors" title="Fork from here">
                                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
                                    </button>
                                  </div>
@@ -2067,6 +2388,19 @@ Respond in this exact JSON format only, no other text:
             </button>
           </div>
         </div>
+        <div class="space-y-1.5">
+          <label class="text-xs font-medium text-gray-700">Context Window</label>
+          <select 
+            bind:value={editProjectContextWindow}
+            class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none focus:ring-0 transition-colors"
+          >
+            <option value={8192}>8k (Haiku 3)</option>
+            <option value={32000}>32k</option>
+            <option value={128000}>128k</option>
+            <option value={200000}>200k (Claude 3.5/4)</option>
+          </select>
+          <p class="text-[10px] text-gray-500">Maximum context size for this project's model</p>
+        </div>
       </div>
     {/snippet}
     {#snippet footer()}
@@ -2106,6 +2440,39 @@ Respond in this exact JSON format only, no other text:
   </Modal>
 
   <Settings open={showSettings} onClose={() => showSettings = false} />
+
+  {#if showHotkeysHelp}
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/20 backdrop-blur-sm" onclick={() => showHotkeysHelp = false} role="dialog" aria-modal="true" tabindex="-1">
+      <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200" onclick={(e) => e.stopPropagation()}>
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="p-2 bg-gray-100 rounded-lg">
+              <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707" />
+              </svg>
+            </div>
+            <h3 class="font-semibold text-base text-gray-900">Keyboard Shortcuts</h3>
+          </div>
+          <button onclick={() => showHotkeysHelp = false} class="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
+          {#each HOTKEYS as hotkey}
+            <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors">
+              <span class="text-sm text-gray-600">{hotkey.action}</span>
+              <kbd class="px-2 py-1 text-xs font-mono bg-gray-100 border border-gray-200 rounded text-gray-700">{hotkey.key}</kbd>
+            </div>
+          {/each}
+        </div>
+        <div class="px-6 py-3 bg-gray-50 border-t border-gray-100">
+          <p class="text-xs text-gray-500 text-center">Press <kbd class="px-1.5 py-0.5 font-mono bg-gray-200 rounded text-gray-600">?</kbd> anytime to toggle this help</p>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   {#if pendingPermissionRequest}
     <ToolConfirmDialog
