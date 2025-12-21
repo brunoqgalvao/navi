@@ -427,16 +427,19 @@ Respond in this exact JSON format only, no other text:
     }
   }
 
-  async function createNewChat() {
-    if (!$session.projectId) return;
+  async function createNewChat(): Promise<string | null> {
+    if (!$session.projectId) return null;
     
     try {
       const newSession = await api.sessions.create($session.projectId, { title: "New Chat" });
       sidebarSessions = [newSession, ...sidebarSessions];
-      selectSession(newSession);
+      session.setSession(newSession.id, newSession.claude_session_id);
+      sessionMessages.setMessages(newSession.id, []);
       loadRecentChats();
+      return newSession.id;
     } catch (e) {
       console.error("Failed to create session:", e);
+      return null;
     }
   }
 
@@ -679,11 +682,13 @@ Respond in this exact JSON format only, no other text:
         return;
     }
 
-    if (!$session.sessionId) {
-        await createNewChat();
+    let currentSessionId = $session.sessionId;
+    
+    if (!currentSessionId) {
+        const newSessionId = await createNewChat();
+        if (!newSessionId) return;
+        currentSessionId = newSessionId;
     }
-
-    const currentSessionId = $session.sessionId!;
     const isCurrentSessionLoading = $loadingSessions.has(currentSessionId);
     
     if (isCurrentSessionLoading) {
