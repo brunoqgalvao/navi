@@ -91,6 +91,23 @@ export async function initDb() {
   try {
     db.run("ALTER TABLE projects ADD COLUMN context_window INTEGER DEFAULT 200000");
   } catch {}
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS search_index (
+      id TEXT PRIMARY KEY,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      project_id TEXT,
+      session_id TEXT,
+      session_title TEXT,
+      searchable_text TEXT NOT NULL,
+      preview TEXT,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_search_entity ON search_index(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_search_project ON search_index(project_id);
+    CREATE INDEX IF NOT EXISTS idx_search_session ON search_index(session_id);
+  `);
   
   saveDb()
   return db;
@@ -143,14 +160,19 @@ export interface Message {
 }
 
 function queryAll<T>(sql: string, params: any[] = []): T[] {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const results: T[] = [];
-  while (stmt.step()) {
-    results.push(stmt.getAsObject() as T);
+  try {
+    const stmt = db.prepare(sql);
+    stmt.bind(params);
+    const results: T[] = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject() as T);
+    }
+    stmt.free();
+    return results;
+  } catch (e) {
+    console.error("Query error:", sql, params, e);
+    return [];
   }
-  stmt.free();
-  return results;
 }
 
 function queryOne<T>(sql: string, params: any[] = []): T | undefined {
@@ -255,6 +277,167 @@ export const messages = {
   deleteBySession: (sessionId: string) => run("DELETE FROM messages WHERE session_id = ?", [sessionId]),
   deleteAfter: (sessionId: string, timestamp: number) =>
     run("DELETE FROM messages WHERE session_id = ? AND timestamp > ?", [sessionId, timestamp]),
+};
+
+export interface SearchIndexEntry {
+  id: string;
+  entity_type: 'project' | 'session' | 'message';
+  entity_id: string;
+  project_id: string | null;
+  session_id: string | null;
+  session_title: string | null;
+  searchable_text: string;
+  preview: string | null;
+  updated_at: number;
+}
+
+export interface SearchResult extends SearchIndexEntry {
+  project_name?: string;
+  rank?: number;
+}
+
+function extractSearchableText(content: string): { text: string; preview: string } {
+  try {
+    const parsed = JSON.parse(content);
+    if (typeof parsed === 'string') {
+      return { text: parsed, preview: parsed.slice(0, 200) };
+    }
+    if (Array.isArray(parsed)) {
+      const texts: string[] = [];
+      for (const block of parsed) {
+        if (block.type === 'text' && block.text) {
+          texts.push(block.text);
+        } else if (block.type === 'tool_use' && block.name) {
+          texts.push(`[Tool: ${block.name}]`);
+          if (block.input) {
+            if (typeof block.input === 'string') texts.push(block.input);
+            else if (block.input.command) texts.push(block.input.command);
+            else if (block.input.content) texts.push(block.input.content);
+            else if (block.input.file_path) texts.push(block.input.file_path);
+            else if (block.input.pattern) texts.push(block.input.pattern);
+          }
+        } else if (block.type === 'tool_result' && block.content) {
+          if (typeof block.content === 'string') {
+            texts.push(block.content.slice(0, 500));
+          }
+        }
+      }
+      const fullText = texts.join(' ');
+      return { text: fullText, preview: texts[0]?.slice(0, 200) || '' };
+    }
+    return { text: content, preview: content.slice(0, 200) };
+  } catch {
+    return { text: content, preview: content.slice(0, 200) };
+  }
+}
+
+export const searchIndex = {
+  indexMessage: (messageId: string, sessionId: string, content: string, timestamp: number) => {
+    const session = sessions.get(sessionId);
+    if (!session) return;
+    
+    const { text, preview } = extractSearchableText(content);
+    if (!text.trim()) return;
+    
+    run(`INSERT OR REPLACE INTO search_index 
+         (id, entity_type, entity_id, project_id, session_id, session_title, searchable_text, preview, updated_at)
+         VALUES (?, 'message', ?, ?, ?, ?, ?, ?, ?)`,
+        [`msg_${messageId}`, messageId, session.project_id, sessionId, session.title, text.toLowerCase(), preview, timestamp]);
+  },
+
+  indexSession: (sessionId: string) => {
+    const session = sessions.get(sessionId);
+    if (!session) return;
+    
+    run(`INSERT OR REPLACE INTO search_index 
+         (id, entity_type, entity_id, project_id, session_id, session_title, searchable_text, preview, updated_at)
+         VALUES (?, 'session', ?, ?, ?, ?, ?, ?, ?)`,
+        [`session_${sessionId}`, sessionId, session.project_id, sessionId, session.title, session.title.toLowerCase(), session.title, Date.now()]);
+  },
+
+  indexProject: (projectId: string) => {
+    const project = projects.get(projectId);
+    if (!project) return;
+    
+    const searchText = [project.name, project.description, project.path].filter(Boolean).join(' ');
+    run(`INSERT OR REPLACE INTO search_index 
+         (id, entity_type, entity_id, project_id, session_id, session_title, searchable_text, preview, updated_at)
+         VALUES (?, 'project', ?, ?, NULL, NULL, ?, ?, ?)`,
+        [`project_${projectId}`, projectId, projectId, searchText.toLowerCase(), project.name, Date.now()]);
+  },
+
+  removeMessage: (messageId: string) => {
+    run("DELETE FROM search_index WHERE id = ?", [`msg_${messageId}`]);
+  },
+
+  removeSession: (sessionId: string) => {
+    run("DELETE FROM search_index WHERE session_id = ?", [sessionId]);
+  },
+
+  removeProject: (projectId: string) => {
+    run("DELETE FROM search_index WHERE project_id = ?", [projectId]);
+  },
+
+  search: (query: string, options?: { projectId?: string; sessionId?: string; limit?: number }): SearchResult[] => {
+    const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+    if (terms.length === 0) return [];
+    
+    const limit = options?.limit || 50;
+    let sql = `
+      SELECT si.*, p.name as project_name
+      FROM search_index si
+      LEFT JOIN projects p ON si.project_id = p.id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    
+    if (options?.projectId) {
+      sql += " AND si.project_id = ?";
+      params.push(options.projectId);
+    }
+    if (options?.sessionId) {
+      sql += " AND si.session_id = ?";
+      params.push(options.sessionId);
+    }
+    
+    for (const term of terms) {
+      sql += " AND si.searchable_text LIKE ?";
+      params.push(`%${term}%`);
+    }
+    
+    sql += " ORDER BY si.updated_at DESC LIMIT ?";
+    params.push(limit);
+    
+    return queryAll<SearchResult>(sql, params);
+  },
+
+  reindexAll: () => {
+    run("DELETE FROM search_index");
+    
+    const allProjects = projects.list();
+    for (const project of allProjects) {
+      searchIndex.indexProject(project.id);
+    }
+    
+    for (const project of allProjects) {
+      const projectSessions = sessions.listByProject(project.id);
+      for (const session of projectSessions) {
+        searchIndex.indexSession(session.id);
+        const sessionMessages = messages.listBySession(session.id);
+        for (const msg of sessionMessages) {
+          searchIndex.indexMessage(msg.id, session.id, msg.content, msg.timestamp);
+        }
+      }
+    }
+  },
+
+  getStats: () => {
+    const total = queryOne<{ count: number }>("SELECT COUNT(*) as count FROM search_index");
+    const byType = queryAll<{ entity_type: string; count: number }>(
+      "SELECT entity_type, COUNT(*) as count FROM search_index GROUP BY entity_type"
+    );
+    return { total: total?.count || 0, byType };
+  },
 };
 
 export function getDb() {

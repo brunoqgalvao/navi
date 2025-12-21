@@ -7,16 +7,17 @@
 
   let { onComplete }: Props = $props();
 
-  type Step = "welcome" | "checking" | "setup" | "api-key" | "terminal-login" | "complete";
+  type Step = "intro-1" | "intro-2" | "intro-3" | "checking" | "setup" | "api-key" | "terminal-login" | "no-account" | "complete";
   type AuthStatus = {
     claudeInstalled: boolean;
     claudePath: string;
     authenticated: boolean;
     authMethod: "oauth" | "api_key" | null;
     hasApiKey: boolean;
+    hasOAuth: boolean;
   };
 
-  let step = $state<Step>("welcome");
+  let step = $state<Step>("intro-1");
   let authStatus = $state<AuthStatus | null>(null);
   let apiKey = $state("");
   let error = $state("");
@@ -39,6 +40,7 @@
         authenticated: false,
         authMethod: null,
         hasApiKey: false,
+        hasOAuth: false,
       };
     }
   }
@@ -72,30 +74,146 @@
       submitApiKey();
     }
   }
+
+  function nextIntro() {
+    if (step === "intro-1") step = "intro-2";
+    else if (step === "intro-2") step = "intro-3";
+    else if (step === "intro-3") checkAuthStatus();
+  }
+
+  function prevIntro() {
+    if (step === "intro-2") step = "intro-1";
+    else if (step === "intro-3") step = "intro-2";
+  }
+
+  const introSteps = ["intro-1", "intro-2", "intro-3"];
+  $effect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (introSteps.includes(step)) {
+        if (e.key === "ArrowRight" || e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          nextIntro();
+        } else if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          prevIntro();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  });
 </script>
 
 <div class="fixed inset-0 z-[100] bg-white flex items-center justify-center">
   <div class="max-w-lg w-full mx-4">
     
-    {#if step === "welcome"}
+    {#if step === "intro-1"}
       <div class="text-center space-y-8 animate-in fade-in duration-500">
         <div class="w-20 h-20 bg-gray-900 rounded-2xl flex items-center justify-center mx-auto shadow-lg">
-          <span class="text-white font-bold text-3xl">C</span>
+          <span class="text-white font-bold text-3xl">O</span>
         </div>
         
         <div class="space-y-3">
-          <h1 class="text-2xl font-semibold text-gray-900">Welcome to Claude Code</h1>
+          <h1 class="text-2xl font-semibold text-gray-900">Welcome to Orbit</h1>
           <p class="text-gray-500 text-sm leading-relaxed max-w-md mx-auto">
-            A local UI for Claude Code that helps you manage projects and conversations with Claude.
+            A beautiful local interface for Claude Code that helps you manage projects and conversations.
           </p>
         </div>
         
+        <div class="flex items-center justify-center gap-2">
+          {#each [0, 1, 2] as i}
+            <div class="w-2 h-2 rounded-full transition-colors {i === 0 ? 'bg-gray-900' : 'bg-gray-300'}"></div>
+          {/each}
+        </div>
+        
         <button
-          onclick={checkAuthStatus}
+          onclick={nextIntro}
           class="bg-gray-900 hover:bg-gray-800 text-white px-8 py-3 rounded-xl text-sm font-medium shadow-sm transition-all hover:shadow-md"
         >
-          Get Started
+          Continue
         </button>
+        
+        <p class="text-xs text-gray-400">Press Enter or arrow keys to navigate</p>
+      </div>
+    {/if}
+
+    {#if step === "intro-2"}
+      <div class="text-center space-y-8 animate-in fade-in duration-500">
+        <div class="w-20 h-20 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto border border-gray-200">
+          <svg class="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+        </div>
+        
+        <div class="space-y-3">
+          <h2 class="text-xl font-semibold text-gray-900">What is Orbit?</h2>
+          <p class="text-gray-500 text-sm leading-relaxed max-w-md mx-auto">
+            Orbit is a GUI for Claude Code - an agentic AI assistant that can write, edit, and execute code in your projects.
+          </p>
+          <div class="flex flex-wrap justify-center gap-2 pt-2">
+            <span class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-full border border-gray-200">Multi-file editing</span>
+            <span class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-full border border-gray-200">Terminal access</span>
+            <span class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-full border border-gray-200">Web search</span>
+            <span class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-full border border-gray-200">File preview</span>
+          </div>
+        </div>
+        
+        <div class="flex items-center justify-center gap-2">
+          {#each [0, 1, 2] as i}
+            <div class="w-2 h-2 rounded-full transition-colors {i === 1 ? 'bg-gray-900' : 'bg-gray-300'}"></div>
+          {/each}
+        </div>
+        
+        <div class="flex justify-center gap-3">
+          <button
+            onclick={prevIntro}
+            class="text-gray-600 hover:text-gray-900 px-6 py-3 rounded-xl text-sm font-medium transition-colors"
+          >
+            Back
+          </button>
+          <button
+            onclick={nextIntro}
+            class="bg-gray-900 hover:bg-gray-800 text-white px-8 py-3 rounded-xl text-sm font-medium shadow-sm transition-all hover:shadow-md"
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    {/if}
+
+    {#if step === "intro-3"}
+      <div class="text-center space-y-8 animate-in fade-in duration-500">
+        <div class="w-20 h-20 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto border border-orange-200">
+          <span class="text-orange-600 font-bold text-3xl">A</span>
+        </div>
+        
+        <div class="space-y-3">
+          <h2 class="text-xl font-semibold text-gray-900">Powered by Claude</h2>
+          <p class="text-gray-500 text-sm leading-relaxed max-w-md mx-auto">
+            Orbit uses Claude from Anthropic - you'll need an Anthropic account or API key to use it. Let's set that up next.
+          </p>
+        </div>
+        
+        <div class="flex items-center justify-center gap-2">
+          {#each [0, 1, 2] as i}
+            <div class="w-2 h-2 rounded-full transition-colors {i === 2 ? 'bg-gray-900' : 'bg-gray-300'}"></div>
+          {/each}
+        </div>
+        
+        <div class="flex justify-center gap-3">
+          <button
+            onclick={prevIntro}
+            class="text-gray-600 hover:text-gray-900 px-6 py-3 rounded-xl text-sm font-medium transition-colors"
+          >
+            Back
+          </button>
+          <button
+            onclick={nextIntro}
+            class="bg-gray-900 hover:bg-gray-800 text-white px-8 py-3 rounded-xl text-sm font-medium shadow-sm transition-all hover:shadow-md"
+          >
+            Get Started
+          </button>
+        </div>
       </div>
     {/if}
 
@@ -186,6 +304,26 @@
               </svg>
             </div>
           </button>
+
+          <button
+            onclick={() => step = "no-account"}
+            class="w-full bg-white border-2 border-gray-200 hover:border-gray-900 rounded-xl p-5 text-left transition-all group"
+          >
+            <div class="flex items-start gap-4">
+              <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center shrink-0">
+                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+                </svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-gray-900 group-hover:text-gray-900">I don't have an account yet</div>
+                <div class="text-sm text-gray-500 mt-1">Learn how to get started with Anthropic</div>
+              </div>
+              <svg class="w-5 h-5 text-gray-400 group-hover:text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </div>
+          </button>
         </div>
 
         <div class="text-center">
@@ -196,6 +334,127 @@
             Skip for now (I'll set this up later)
           </button>
         </div>
+      </div>
+    {/if}
+
+    {#if step === "no-account"}
+      <div class="space-y-6 animate-in fade-in duration-500">
+        <button
+          onclick={() => step = "setup"}
+          class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+          </svg>
+          Back
+        </button>
+
+        <div class="space-y-3">
+          <h2 class="text-xl font-semibold text-gray-900">Get an Anthropic Account</h2>
+          <p class="text-gray-500 text-sm">
+            To use Orbit, you'll need access to Claude. Here are your options:
+          </p>
+        </div>
+
+        <div class="space-y-4">
+          <a 
+            href="https://claude.ai" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="block bg-white border-2 border-gray-200 hover:border-gray-900 rounded-xl p-5 transition-all group"
+          >
+            <div class="flex items-start gap-4">
+              <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center shrink-0">
+                <span class="text-orange-600 font-bold text-lg">C</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-gray-900 group-hover:text-gray-900 flex items-center gap-2">
+                  Claude Pro Subscription
+                  <span class="text-xs font-normal text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">Recommended</span>
+                </div>
+                <div class="text-sm text-gray-500 mt-1">$20/month - Includes Claude Code access with generous usage limits</div>
+                <div class="text-xs text-blue-600 mt-2 flex items-center gap-1">
+                  claude.ai
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </a>
+
+          <a 
+            href="https://console.anthropic.com" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="block bg-white border-2 border-gray-200 hover:border-gray-900 rounded-xl p-5 transition-all group"
+          >
+            <div class="flex items-start gap-4">
+              <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+                </svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-gray-900 group-hover:text-gray-900">API Access (Pay as you go)</div>
+                <div class="text-sm text-gray-500 mt-1">Get an API key and pay only for what you use. Good for developers.</div>
+                <div class="text-xs text-blue-600 mt-2 flex items-center gap-1">
+                  console.anthropic.com
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </a>
+
+          <a 
+            href="https://claude.ai/team" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="block bg-white border-2 border-gray-200 hover:border-gray-900 rounded-xl p-5 transition-all group"
+          >
+            <div class="flex items-start gap-4">
+              <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center shrink-0">
+                <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                </svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-gray-900 group-hover:text-gray-900">Claude for Teams</div>
+                <div class="text-sm text-gray-500 mt-1">$30/user/month - For teams with collaboration features</div>
+                <div class="text-xs text-blue-600 mt-2 flex items-center gap-1">
+                  claude.ai/team
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </a>
+        </div>
+
+        <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+          <div class="flex gap-3">
+            <svg class="w-5 h-5 text-gray-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div class="text-sm text-gray-600">
+              <p class="font-medium text-gray-700">After signing up:</p>
+              <ol class="mt-2 space-y-1 ml-4 list-decimal text-gray-500">
+                <li>Install Claude Code CLI (for OAuth) or get an API key</li>
+                <li>Return here and complete the setup</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onclick={() => checkAuthStatus()}
+          class="w-full bg-gray-900 hover:bg-gray-800 text-white px-6 py-3 rounded-lg text-sm font-medium transition-all"
+        >
+          I've signed up - Continue setup
+        </button>
       </div>
     {/if}
 
@@ -340,7 +599,7 @@
             {:else if authStatus?.authMethod === "api_key"}
               Using your API key for authentication
             {:else}
-              Ready to start using Claude Code
+              Ready to start using Orbit
             {/if}
           </p>
         </div>
@@ -349,7 +608,7 @@
           onclick={onComplete}
           class="bg-gray-900 hover:bg-gray-800 text-white px-8 py-3 rounded-xl text-sm font-medium shadow-sm transition-all hover:shadow-md"
         >
-          Start Using Claude Code
+          Start Using Orbit
         </button>
       </div>
     {/if}

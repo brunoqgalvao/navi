@@ -226,3 +226,5 @@ function createTodosStore() {
 }
 
 export const todos = createTodosStore();
+
+export const sessionHistoryContext = writable<Map<string, string>>(new Map());

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, type ChatMessage } from "./lib/stores";
+  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionHistoryContext, type ChatMessage } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, type Project, type Session } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -51,6 +51,7 @@
   import TodoPanel from "./lib/components/TodoPanel.svelte";
   import ToolRenderer from "./lib/components/ToolRenderer.svelte";
   import ToolConfirmDialog from "./lib/components/ToolConfirmDialog.svelte";
+  import SearchModal from "./lib/components/SearchModal.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
 
   function relativeTime(timestamp: number | null | undefined): string {
@@ -75,6 +76,11 @@
   
   let sidebarProjects = $state<Project[]>([]);
   let sidebarSessions = $state<Session[]>([]);
+  let filteredSidebarSessions = $derived(
+    sidebarSearchQuery.trim()
+      ? sidebarSessions.filter(s => s.title.toLowerCase().includes(sidebarSearchQuery.toLowerCase()))
+      : sidebarSessions
+  );
   let recentChats = $state<Session[]>([]);
   let showNewProjectModal = $state(false);
   let newProjectName = $state("");
@@ -85,7 +91,6 @@
   let editingProject = $state<Project | null>(null);
   let editProjectName = $state("");
   let editProjectPath = $state("");
-  let editProjectContextWindow = $state(200000);
   let showDeleteConfirm = $state(false);
   let projectToDelete = $state<Project | null>(null);
   let editingSession = $state<Session | null>(null);
@@ -115,6 +120,9 @@
   let rightPanelWidth = $state(600);
   let isResizingRight = $state(false);
   
+  let sidebarWidth = $state(288);
+  let isResizingLeft = $state(false);
+  
   let projectContext = $state<{ summary: string; suggestions: string[] } | null>(null);
   let claudeMdContent = $state<string | null>(null);
   let showClaudeMdModal = $state(false);
@@ -123,9 +131,12 @@
   let audioRecorderRef: { toggleRecording: () => void; isRecording: () => boolean } | null = $state(null);
   let showHotkeysHelp = $state(false);
   let inputRef: HTMLTextAreaElement | null = $state(null);
+  let showSearchModal = $state(false);
+  let sidebarSearchQuery = $state("");
 
   const HOTKEYS = [
-    { key: "Cmd/Ctrl + K", action: "Toggle preview panel" },
+    { key: "Cmd/Ctrl + K", action: "Open search" },
+    { key: "Cmd/Ctrl + P", action: "Toggle preview panel" },
     { key: "Cmd/Ctrl + B", action: "Toggle file browser" },
     { key: "M", action: "Toggle mic recording" },
     { key: "Cmd/Ctrl + /", action: "Focus input" },
@@ -167,6 +178,9 @@
 
     if (e.key === 'k') {
       e.preventDefault();
+      showSearchModal = true;
+    } else if (e.key === 'p') {
+      e.preventDefault();
       showPreview = !showPreview;
       if (showPreview) rightPanelMode = 'preview';
     } else if (e.key === 'b') {
@@ -204,20 +218,45 @@
     }
   }
 
-  function startResizingRight() {
+  function startResizingRight(e: MouseEvent) {
+    e.preventDefault();
     isResizingRight = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
   }
 
   function stopResizingRight() {
     isResizingRight = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }
+
+  function startResizingLeft(e: MouseEvent) {
+    e.preventDefault();
+    isResizingLeft = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }
+
+  function stopResizingLeft() {
+    isResizingLeft = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
   }
 
   function handleMouseMove(e: MouseEvent) {
+    if (isResizingLeft) {
+      const newWidth = e.clientX;
+      if (newWidth >= 200 && newWidth <= 400) {
+        sidebarWidth = newWidth;
+      }
+      return;
+    }
     if (!isResizingRight) return;
     const newWidth = window.innerWidth - e.clientX;
-    const sidebarWidth = sidebarCollapsed ? 56 : 288;
+    const currentSidebarWidth = sidebarCollapsed ? 56 : sidebarWidth;
     const minChatWidth = 400;
-    const maxPanelWidth = window.innerWidth - sidebarWidth - minChatWidth;
+    const maxPanelWidth = window.innerWidth - currentSidebarWidth - minChatWidth;
     if (newWidth >= 300 && newWidth <= maxPanelWidth) {
       rightPanelWidth = newWidth;
     }
@@ -512,7 +551,6 @@ Respond in this exact JSON format only, no other text:
     editingProject = proj;
     editProjectName = proj.name;
     editProjectPath = proj.path;
-    editProjectContextWindow = proj.context_window || 200000;
   }
 
   async function updateProject() {
@@ -521,8 +559,7 @@ Respond in this exact JSON format only, no other text:
     try {
       await api.projects.update(editingProject.id, {
         name: editProjectName,
-        path: editProjectPath,
-        context_window: editProjectContextWindow
+        path: editProjectPath
       });
       await loadProjects();
       editingProject = null;
@@ -1041,13 +1078,23 @@ Respond in this exact JSON format only, no other text:
 
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
 
+    const historyCtx = $sessionHistoryContext.get(currentSessionId);
+    
     client.query({
       prompt: currentInput,
       projectId: $session.projectId || undefined,
       sessionId: currentSessionId,
       claudeSessionId: $session.claudeSessionId || undefined,
       model: $session.selectedModel || undefined,
+      historyContext: historyCtx,
     });
+
+    if (historyCtx) {
+      sessionHistoryContext.update(map => {
+        map.delete(currentSessionId);
+        return new Map(map);
+      });
+    }
 
     scrollToBottom();
   }
@@ -1090,7 +1137,9 @@ Respond in this exact JSON format only, no other text:
   }
 
   function getMainMessages() {
-    return currentMessages.filter(m => !m.parentToolUseId);
+    return currentMessages
+      .filter(m => !m.parentToolUseId)
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }
 
   function getHistoryToolCalls(contentHistory: (ContentBlock[] | string)[] | undefined): ToolUseBlock[] {
@@ -1155,7 +1204,7 @@ Respond in this exact JSON format only, no other text:
 
   function renderMarkdown(content: string): string {
     const html = marked.parse(content) as string;
-    return linkifyUrls(linkifyCodePaths(html, currentProject?.path));
+    return linkifyUrls(linkifyFilenames(linkifyCodePaths(html, currentProject?.path)));
   }
 
   function linkifyUrls(html: string): string {
@@ -1179,7 +1228,7 @@ Respond in this exact JSON format only, no other text:
         return `<code class="file-link" data-path="${escapeHtml(indexedPath)}">${codeContent}</code>`;
       }
       
-      const isFilePath = /^(\/[\w\-\.\/]+|\.\.?\/[\w\-\.\/]+|[\w\-\/]+\.(ts|js|tsx|jsx|svelte|vue|py|rs|go|md|json|css|scss|html|yml|yaml|toml|sql|sh|txt|env|lock|pdf))$/.test(decoded);
+      const isFilePath = /^(\/[\w\-\.\/]+|\.\.?\/[\w\-\.\/]+|[\w\-\/]+\.(ts|js|tsx|jsx|svelte|vue|py|rs|go|md|json|css|scss|html|yml|yaml|toml|sql|sh|txt|env|lock|pdf|csv|xml|log))$/.test(decoded);
       
       if (isFilePath) {
         let fullPath = decoded;
@@ -1187,6 +1236,17 @@ Respond in this exact JSON format only, no other text:
           fullPath = `${projectPath}/${decoded.replace(/^\.\//,"")}`;
         }
         return `<code class="file-link" data-path="${escapeHtml(fullPath)}">${codeContent}</code>`;
+      }
+      return match;
+    });
+  }
+
+  function linkifyFilenames(html: string): string {
+    const filenamePattern = /([\w\-\.]+\.(csv|txt|json|xml|md|pdf|log|sql|yml|yaml|toml|env|html|css|js|ts|tsx|jsx|py|rs|go|svelte|vue|sh|lock))(?![^<]*<\/code>)(?![^<]*<\/a>)/gi;
+    return html.replace(filenamePattern, (match, filename) => {
+      const indexedPath = projectFileIndex.get(filename);
+      if (indexedPath) {
+        return `<span class="file-link cursor-pointer text-blue-600 hover:text-blue-800 hover:underline" data-path="${escapeHtml(indexedPath)}">${match}</span>`;
       }
       return match;
     });
@@ -1240,11 +1300,43 @@ Respond in this exact JSON format only, no other text:
   let editingMessageId = $state<string | null>(null);
   let editingMessageContent = $state("");
 
-  function startEditMessage(msgId: string) {
+  async function reloadSessionMessages() {
+    if (!$session.sessionId) return;
+    try {
+      const msgs = await api.messages.list($session.sessionId);
+      const loadedMsgs: ChatMessage[] = msgs.map(m => {
+        let content = m.content;
+        if (typeof content === "string") {
+          try { content = JSON.parse(content); } catch {}
+        }
+        return {
+          id: m.id,
+          role: m.role as any,
+          content: content,
+          timestamp: new Date(m.timestamp),
+        };
+      });
+      sessionMessages.setMessages($session.sessionId, loadedMsgs);
+      return loadedMsgs;
+    } catch (e) {
+      console.error("Failed to reload messages:", e);
+      return null;
+    }
+  }
+
+  async function startEditMessage(msgId: string) {
     const msg = currentMessages.find(m => m.id === msgId);
     if (msg && msg.role === "user") {
-      editingMessageId = msgId;
-      editingMessageContent = formatContent(msg.content);
+      const reloaded = await reloadSessionMessages();
+      if (reloaded) {
+        const dbMsg = reloaded.find(m => formatContent(m.content) === formatContent(msg.content) && m.role === "user");
+        if (dbMsg) {
+          editingMessageId = dbMsg.id;
+          editingMessageContent = formatContent(dbMsg.content);
+        } else {
+          alert("Message not found in database. It may not have been saved yet.");
+        }
+      }
     }
     closeMessageMenu();
   }
@@ -1265,9 +1357,13 @@ Respond in this exact JSON format only, no other text:
       
       editingMessageId = null;
       editingMessageContent = "";
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to update message:", e);
-      alert("Failed to update message");
+      if (e.message?.includes("not found")) {
+        alert("Cannot edit this message - it hasn't been saved to the database yet. Try refreshing the session first.");
+      } else {
+        alert("Failed to update message: " + (e.message || "Unknown error"));
+      }
     }
   }
 
@@ -1279,11 +1375,23 @@ Respond in this exact JSON format only, no other text:
   async function rollbackToMessage(msgId: string) {
     if (!$session.sessionId) return;
     
+    const reloaded = await reloadSessionMessages();
+    if (!reloaded) {
+      alert("Failed to sync messages. Please try again.");
+      return;
+    }
+    
     const msg = currentMessages.find(m => m.id === msgId);
     if (!msg) return;
     
-    const msgIndex = currentMessages.findIndex(m => m.id === msgId);
-    const messagesAfter = currentMessages.slice(msgIndex + 1);
+    const dbMsg = reloaded.find(m => formatContent(m.content) === formatContent(msg.content) && m.role === msg.role);
+    if (!dbMsg) {
+      alert("Message not found in database. It may not have been saved yet.");
+      return;
+    }
+    
+    const msgIndex = reloaded.findIndex(m => m.id === dbMsg.id);
+    const messagesAfter = reloaded.slice(msgIndex + 1);
     
     if (messagesAfter.length === 0) {
       alert("No messages to rollback");
@@ -1295,7 +1403,7 @@ Respond in this exact JSON format only, no other text:
     }
     
     try {
-      const result = await api.messages.rollback($session.sessionId, msgId);
+      const result = await api.messages.rollback($session.sessionId, dbMsg.id);
       
       if (result.success) {
         const loadedMsgs: ChatMessage[] = result.messages.map(m => ({
@@ -1308,6 +1416,13 @@ Respond in this exact JSON format only, no other text:
         
         if (result.sessionReset) {
           session.setSession($session.sessionId, null);
+        }
+        
+        if (result.historyContext) {
+          sessionHistoryContext.update(map => {
+            map.set($session.sessionId!, result.historyContext!);
+            return new Map(map);
+          });
         }
       }
     } catch (e) {
@@ -1331,7 +1446,7 @@ Respond in this exact JSON format only, no other text:
   }
 </script>
 
-<svelte:window onmousemove={handleMouseMove} onmouseup={stopResizingRight} onkeydown={handleGlobalKeydown} />
+<svelte:window onmousemove={handleMouseMove} onmouseup={() => { stopResizingRight(); stopResizingLeft(); }} onkeydown={handleGlobalKeydown} />
 
 {#if showOnboarding}
   <Onboarding onComplete={handleOnboardingComplete} />
@@ -1343,7 +1458,13 @@ Respond in this exact JSON format only, no other text:
 
   <!-- Sidebar -->
 
-  <aside class={`${sidebarCollapsed ? 'w-14' : 'w-72'} bg-gray-50/50 border-r border-gray-200 flex flex-col hidden md:flex shrink-0 transition-all duration-200`}>
+  <aside style={sidebarCollapsed ? 'width: 56px' : `width: ${sidebarWidth}px`} class="bg-gray-50/50 border-r border-gray-200 flex flex-col hidden md:flex shrink-0 relative">
+    {#if !sidebarCollapsed}
+      <div 
+        class="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400/50 transition-colors z-10"
+        onmousedown={startResizingLeft}
+      ></div>
+    {/if}
 
     <!-- Header -->
 
@@ -1508,7 +1629,7 @@ Respond in this exact JSON format only, no other text:
 
             <!-- Selected Project View -->
 
-             <div class="px-3 flex-1 flex flex-col min-h-0">
+             <div class="px-3 flex-1 flex flex-col min-h-0 overflow-hidden">
 
                  <button onclick={() => { session.setProject(null); sidebarSessions = []; }} class="flex items-center gap-1.5 text-[11px] font-medium text-gray-500 hover:text-gray-800 mb-4 px-1 py-1 -ml-1 transition-colors">
 
@@ -1520,19 +1641,18 @@ Respond in this exact JSON format only, no other text:
 
                  
 
-                 <button onclick={() => { session.setSession(null); }} class="mb-6 px-1 text-left w-full hover:bg-gray-100 rounded-lg py-2 -my-2 transition-colors group">
-
+                 <div class="mb-6 flex items-start gap-2 min-w-0">
+                   <button onclick={() => { session.setSession(null); }} class="flex-1 min-w-0 px-1 text-left hover:bg-gray-100 rounded-lg py-2 -my-2 transition-colors group">
                      <h2 class="text-sm font-semibold text-gray-900 truncate flex items-center gap-2 group-hover:text-gray-700">
-
-                        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-
-                        {currentProject.name}
-
+                        <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                        <span class="truncate">{currentProject.name}</span>
                      </h2>
-
-                     <p class="text-[11px] text-gray-400 truncate mt-0.5 pl-6" title={currentProject.path}>{currentProject.path}</p>
-
-                 </button>
+                     <p class="text-[11px] text-gray-400 truncate mt-0.5 pl-6 max-w-full" title={currentProject.path}>{currentProject.path}</p>
+                   </button>
+                   <button onclick={() => showSettings = true} class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors mt-0.5" title="Settings">
+                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                   </button>
+                 </div>
 
 
 
@@ -1548,7 +1668,29 @@ Respond in this exact JSON format only, no other text:
 
                  </div>
 
-
+                 <div class="mb-2 px-1">
+                   <div class="relative">
+                     <svg class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                     </svg>
+                     <input 
+                       type="text" 
+                       bind:value={sidebarSearchQuery}
+                       placeholder="Filter chats..."
+                       class="w-full text-xs pl-7 pr-2 py-1.5 bg-gray-100 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 placeholder-gray-400"
+                     />
+                     {#if sidebarSearchQuery}
+                       <button 
+                         onclick={() => sidebarSearchQuery = ""}
+                         class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                       >
+                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                         </svg>
+                       </button>
+                     {/if}
+                   </div>
+                 </div>
 
                  <div class="flex-1 overflow-y-auto space-y-0.5">
 
@@ -1556,9 +1698,13 @@ Respond in this exact JSON format only, no other text:
 
                         <div class="text-xs text-gray-400 italic text-center py-8">No chats yet</div>
 
+                     {:else if filteredSidebarSessions.length === 0}
+
+                        <div class="text-xs text-gray-400 italic text-center py-4">No matching chats</div>
+
                      {:else}
 
-                        {#each sidebarSessions as sess}
+                        {#each filteredSidebarSessions as sess}
 
                             <div 
                                 class="group relative {dragOverSessionId === sess.id && !sess.pinned ? 'border-t-2 border-blue-500' : ''} {draggedSessionId === sess.id ? 'opacity-50' : ''}"
@@ -1649,7 +1795,7 @@ Respond in this exact JSON format only, no other text:
 
       <!-- Context Usage -->
       {#if $session.inputTokens > 0 && !sidebarCollapsed}
-        {@const contextWindow = $currentProject?.context_window || 200000}
+        {@const contextWindow = currentProject?.context_window || 200000}
         {@const usagePercent = Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100))}
         <div class="space-y-1">
           <div class="flex items-center justify-between text-[10px] text-gray-500">
@@ -1668,6 +1814,9 @@ Respond in this exact JSON format only, no other text:
       {#if sidebarCollapsed}
         <div class="flex flex-col items-center gap-2">
           <span class={`w-2 h-2 rounded-full ${$isConnected ? "bg-emerald-500" : "bg-red-400"}`} title={$isConnected ? "Online" : "Offline"}></span>
+          <button onclick={() => showSearchModal = true} class="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Search (Cmd+K)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </button>
           <button onclick={() => showHotkeysHelp = true} class="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Keyboard shortcuts (?)">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
           </button>
@@ -1690,6 +1839,9 @@ Respond in this exact JSON format only, no other text:
           {#if $session.costUsd > 0}
               <span class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200">${$session.costUsd.toFixed(4)}</span>
           {/if}
+          <button onclick={() => showSearchModal = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Search (Cmd+K)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </button>
           <button onclick={() => showHotkeysHelp = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Keyboard shortcuts (?)">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
           </button>
@@ -1834,7 +1986,6 @@ Respond in this exact JSON format only, no other text:
 
         <div class="flex-1 overflow-y-auto p-4 md:p-0 space-y-6 scroll-smooth" bind:this={messagesContainer}>
 
-        <!-- Advanced Mode Info Bar -->
         {#if $advancedMode && claudeMdContent}
           <div class="max-w-3xl mx-auto w-full md:pt-4 md:px-0 px-4">
             <button
@@ -2388,20 +2539,7 @@ Respond in this exact JSON format only, no other text:
             </button>
           </div>
         </div>
-        <div class="space-y-1.5">
-          <label class="text-xs font-medium text-gray-700">Context Window</label>
-          <select 
-            bind:value={editProjectContextWindow}
-            class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none focus:ring-0 transition-colors"
-          >
-            <option value={8192}>8k (Haiku 3)</option>
-            <option value={32000}>32k</option>
-            <option value={128000}>128k</option>
-            <option value={200000}>200k (Claude 3.5/4)</option>
-          </select>
-          <p class="text-[10px] text-gray-500">Maximum context size for this project's model</p>
-        </div>
-      </div>
+              </div>
     {/snippet}
     {#snippet footer()}
       <button onclick={() => editingProject = null} class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">Cancel</button>
@@ -2440,6 +2578,16 @@ Respond in this exact JSON format only, no other text:
   </Modal>
 
   <Settings open={showSettings} onClose={() => showSettings = false} />
+
+  <SearchModal 
+    bind:isOpen={showSearchModal} 
+    projectId={$session.projectId}
+    onNavigate={async (sessionId, projectId) => {
+      session.setProject(projectId);
+      await loadSessions(projectId);
+      selectSession(sessionId);
+    }}
+  />
 
   {#if showHotkeysHelp}
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/20 backdrop-blur-sm" onclick={() => showHotkeysHelp = false} role="dialog" aria-modal="true" tabindex="-1">

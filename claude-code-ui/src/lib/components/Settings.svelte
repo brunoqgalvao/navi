@@ -18,6 +18,9 @@
   let hasAnthropicKey = $state(false);
   let authMethod: "oauth" | "api_key" | null = $state(null);
   let claudeInstalled = $state(false);
+  let hasOAuth = $state(false);
+  let preferredAuth: "oauth" | "api_key" | null = $state(null);
+  let switchingAuth = $state(false);
   let loading = $state(true);
   let autoTitleEnabled = $state(true);
 
@@ -72,6 +75,8 @@
       hasAnthropicKey = auth.hasApiKey;
       authMethod = auth.authMethod;
       claudeInstalled = auth.claudeInstalled;
+      hasOAuth = auth.hasOAuth;
+      preferredAuth = auth.preferredAuth;
       permissionSettings = perms.global;
       defaultTools = perms.defaults.tools;
       dangerousTools = perms.defaults.dangerous;
@@ -356,6 +361,51 @@
                       <p class="text-xs text-gray-500">
                         Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" class="text-blue-600 hover:underline">console.anthropic.com</a>
                       </p>
+
+                      {#if hasOAuth && hasAnthropicKey}
+                        <div class="mt-4 pt-4 border-t border-gray-200">
+                          <div class="flex items-center justify-between">
+                            <div>
+                              <span class="text-sm font-medium text-gray-700">Active Method</span>
+                              <p class="text-xs text-gray-500 mt-0.5">You have both OAuth and API key configured</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <button
+                                onclick={async () => {
+                                  switchingAuth = true;
+                                  try {
+                                    await api.auth.setPreferred("oauth");
+                                    preferredAuth = "oauth";
+                                    authMethod = "oauth";
+                                  } finally {
+                                    switchingAuth = false;
+                                  }
+                                }}
+                                disabled={switchingAuth}
+                                class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors {authMethod === 'oauth' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+                              >
+                                OAuth
+                              </button>
+                              <button
+                                onclick={async () => {
+                                  switchingAuth = true;
+                                  try {
+                                    await api.auth.setPreferred("api_key");
+                                    preferredAuth = "api_key";
+                                    authMethod = "api_key";
+                                  } finally {
+                                    switchingAuth = false;
+                                  }
+                                }}
+                                disabled={switchingAuth}
+                                class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors {authMethod === 'api_key' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+                              >
+                                API Key
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      {/if}
                     </div>
                   </div>
                 </div>

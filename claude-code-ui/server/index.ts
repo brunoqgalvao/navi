@@ -1,5 +1,5 @@
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { initDb, projects, sessions, messages, globalSettings, DEFAULT_TOOLS, DANGEROUS_TOOLS, type Project, type Session, type Message } from "./db";
+import { initDb, projects, sessions, messages, globalSettings, searchIndex, DEFAULT_TOOLS, DANGEROUS_TOOLS, type Project, type Session, type Message } from "./db";
 import { spawn, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -32,6 +32,7 @@ interface ClientMessage {
   claudeSessionId?: string;
   allowedTools?: string[];
   model?: string;
+  historyContext?: string;
   permissionRequestId?: string;
   approved?: boolean;
   approveAll?: boolean;
@@ -71,12 +72,31 @@ const server = Bun.serve({
     if (url.pathname === "/api/search") {
       if (method === "GET") {
         const q = url.searchParams.get("q") || "";
-        const projectId = url.searchParams.get("projectId");
-        if (projectId) {
-          return json(sessions.search(projectId, q));
+        const projectId = url.searchParams.get("projectId") || undefined;
+        const sessionId = url.searchParams.get("sessionId") || undefined;
+        const limit = parseInt(url.searchParams.get("limit") || "50");
+        
+        if (!q.trim()) {
+          return json([]);
         }
-        return json(sessions.searchAll(q));
+        
+        const results = searchIndex.search(q, { projectId, sessionId, limit });
+        return json(results);
       }
+    }
+
+    if (url.pathname === "/api/search/reindex" && method === "POST") {
+      try {
+        searchIndex.reindexAll();
+        const stats = searchIndex.getStats();
+        return json({ success: true, stats });
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : "Reindex failed" }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/search/stats" && method === "GET") {
+      return json(searchIndex.getStats());
     }
 
     if (url.pathname === "/api/projects") {
@@ -256,11 +276,16 @@ const server = Bun.serve({
         return json({ ...msg, content: JSON.parse(msg.content) });
       }
       if (method === "PUT") {
-        const body = await req.json();
-        const msg = messages.get(messageId);
-        if (!msg) return json({ error: "Message not found" }, 404);
-        messages.update(messageId, JSON.stringify(body.content));
-        return json({ success: true });
+        try {
+          const body = await req.json();
+          const msg = messages.get(messageId);
+          if (!msg) return json({ error: "Message not found - it may not be saved yet" }, 404);
+          messages.update(messageId, JSON.stringify(body.content));
+          return json({ success: true });
+        } catch (e) {
+          console.error("Failed to update message:", e);
+          return json({ error: e instanceof Error ? e.message : "Update failed" }, 500);
+        }
       }
       if (method === "DELETE") {
         messages.delete(messageId);
@@ -294,10 +319,24 @@ const server = Bun.serve({
       );
       
       const remainingMsgs = messages.listBySession(sessionId);
+      
+      let historyContext = "";
+      if (remainingMsgs.length > 0) {
+        historyContext = "<conversation_history>\n";
+        for (const m of remainingMsgs) {
+          const content = JSON.parse(m.content);
+          const text = typeof content === "string" ? content : 
+            (Array.isArray(content) ? content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n") : "");
+          historyContext += `<${m.role}>${text}</${m.role}>\n`;
+        }
+        historyContext += "</conversation_history>\n\nContinue from this conversation context. The previous messages above are your conversation history.";
+      }
+      
       return json({ 
         success: true, 
         messages: remainingMsgs.map(m => ({ ...m, content: JSON.parse(m.content) })),
-        sessionReset: true 
+        sessionReset: true,
+        historyContext 
       });
     }
 
@@ -1106,7 +1145,7 @@ const server = Bun.serve({
 });
 
 function handleQueryWithProcess(ws: any, data: ClientMessage) {
-  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model } = data;
+  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext } = data;
 
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
@@ -1120,12 +1159,18 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
   
   if (sessionId && prompt) {
     const msgId = crypto.randomUUID();
-    messages.create(msgId, sessionId, "user", JSON.stringify(prompt), Date.now());
+    const now = Date.now();
+    messages.create(msgId, sessionId, "user", JSON.stringify(prompt), now);
+    searchIndex.indexMessage(msgId, sessionId, JSON.stringify(prompt), now);
   }
+
+  const effectivePrompt = historyContext 
+    ? `${historyContext}\n\nUser's new message:\n${prompt}`
+    : prompt;
 
   const workerPath = join(__dirname, "query-worker.ts");
   const inputJson = JSON.stringify({
-    prompt,
+    prompt: effectivePrompt,
     cwd: workingDirectory,
     resume: claudeSessionId || session?.claude_session_id,
     model,
@@ -1175,7 +1220,9 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
         } else if (msg.type === "complete") {
           if (sessionId && msg.lastAssistantContent?.length > 0) {
             const msgId = crypto.randomUUID();
-            messages.create(msgId, sessionId, "assistant", JSON.stringify(msg.lastAssistantContent), Date.now());
+            const now = Date.now();
+            messages.create(msgId, sessionId, "assistant", JSON.stringify(msg.lastAssistantContent), now);
+            searchIndex.indexMessage(msgId, sessionId, JSON.stringify(msg.lastAssistantContent), now);
             
             if (needsAutoTitle && prompt) {
               generateChatTitle(prompt, msg.lastAssistantContent, sessionId);

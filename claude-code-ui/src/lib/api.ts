@@ -137,7 +137,7 @@ export const api = {
     delete: (id: string) =>
       request<{ success: boolean }>(`/messages/${id}`, { method: "DELETE" }),
     rollback: (sessionId: string, messageId: string) =>
-      request<{ success: boolean; messages: Message[]; sessionReset: boolean }>(
+      request<{ success: boolean; messages: Message[]; sessionReset: boolean; historyContext?: string }>(
         `/sessions/${sessionId}/rollback`,
         {
           method: "POST",
@@ -309,10 +309,35 @@ export const api = {
         body: JSON.stringify({ path: projectPath }),
       }),
   },
+
+  search: {
+    query: (q: string, options?: { projectId?: string; sessionId?: string; limit?: number }) => {
+      const params = new URLSearchParams({ q });
+      if (options?.projectId) params.set("projectId", options.projectId);
+      if (options?.sessionId) params.set("sessionId", options.sessionId);
+      if (options?.limit) params.set("limit", String(options.limit));
+      return request<SearchResult[]>(`/search?${params}`);
+    },
+    reindex: () => request<{ success: boolean; stats: { total: number; byType: Array<{ entity_type: string; count: number }> } }>("/search/reindex", { method: "POST" }),
+    stats: () => request<{ total: number; byType: Array<{ entity_type: string; count: number }> }>("/search/stats"),
+  },
 };
 
 export interface PermissionSettings {
   autoAcceptAll: boolean;
   allowedTools: string[];
   requireConfirmation: string[];
+}
+
+export interface SearchResult {
+  id: string;
+  entity_type: 'project' | 'session' | 'message';
+  entity_id: string;
+  project_id: string | null;
+  session_id: string | null;
+  session_title: string | null;
+  searchable_text: string;
+  preview: string | null;
+  updated_at: number;
+  project_name?: string;
 }

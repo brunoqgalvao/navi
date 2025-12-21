@@ -134,7 +134,26 @@ async function runQuery(input: WorkerInput) {
 
   try {
     console.error(`[Worker] Starting query with cwd: ${cwd}`);
-    console.error(`[Worker] settingSources: ['project']`);
+    console.error(`[Worker] permissionSettings:`, permissionSettings);
+    
+    const allTools = allowedTools || [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "TodoWrite",
+    ];
+    
+    const requireConfirmation = permissionSettings?.requireConfirmation || [];
+    const autoAllowedTools = allTools.filter(t => !requireConfirmation.includes(t));
+    
+    console.error(`[Worker] allTools:`, allTools);
+    console.error(`[Worker] requireConfirmation:`, requireConfirmation);
+    console.error(`[Worker] autoAllowedTools:`, autoAllowedTools);
     
     const q = query({
       prompt,
@@ -142,17 +161,8 @@ async function runQuery(input: WorkerInput) {
         cwd,
         resume,
         model,
-        allowedTools: allowedTools || [
-          "Read",
-          "Write",
-          "Edit",
-          "Bash",
-          "Glob",
-          "Grep",
-          "WebFetch",
-          "WebSearch",
-          "TodoWrite",
-        ],
+        tools: allTools,
+        allowedTools: permissionSettings?.autoAcceptAll ? allTools : autoAllowedTools,
         permissionMode: "default",
         canUseTool,
         settingSources: ['project'] as const,
