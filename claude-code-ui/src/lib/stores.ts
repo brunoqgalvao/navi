@@ -6,6 +6,7 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: ContentBlock[] | string;
+  contentHistory?: (ContentBlock[] | string)[];
   timestamp: Date;
   parentToolUseId?: string | null;
 }
@@ -36,24 +37,46 @@ function createSessionsStore() {
   };
 }
 
-function createChatStore() {
-  const { subscribe, set, update } = writable<ChatMessage[]>([]);
+function createSessionMessagesStore() {
+  const { subscribe, set, update } = writable<Map<string, ChatMessage[]>>(new Map());
 
   return {
     subscribe,
     set,
-    addMessage: (msg: ChatMessage) => update((msgs) => [...msgs, msg]),
-    updateLastAssistant: (content: ContentBlock[], parentToolUseId?: string | null) =>
-      update((msgs) => {
+    addMessage: (sessionId: string, msg: ChatMessage) =>
+      update((map) => {
+        const msgs = map.get(sessionId) || [];
+        map.set(sessionId, [...msgs, msg]);
+        return new Map(map);
+      }),
+    updateLastAssistant: (sessionId: string, content: ContentBlock[], parentToolUseId?: string | null) =>
+      update((map) => {
+        const msgs = map.get(sessionId) || [];
         for (let i = msgs.length - 1; i >= 0; i--) {
           const msg = msgs[i];
           if (msg.role === "assistant" && msg.parentToolUseId === parentToolUseId) {
-            return [...msgs.slice(0, i), { ...msg, content }, ...msgs.slice(i + 1)];
+            const prevContent = msg.content;
+            const history = msg.contentHistory || [];
+            const hasToolUse = Array.isArray(prevContent) && prevContent.some(b => b.type === "tool_use");
+            const newHistory = hasToolUse ? [...history, prevContent] : history;
+            const updated = [...msgs.slice(0, i), { ...msg, content, contentHistory: newHistory }, ...msgs.slice(i + 1)];
+            map.set(sessionId, updated);
+            return new Map(map);
           }
         }
-        return msgs;
+        return map;
       }),
-    clear: () => set([]),
+    setMessages: (sessionId: string, msgs: ChatMessage[]) =>
+      update((map) => {
+        map.set(sessionId, msgs);
+        return new Map(map);
+      }),
+    clearSession: (sessionId: string) =>
+      update((map) => {
+        map.delete(sessionId);
+        return new Map(map);
+      }),
+    getMessages: (sessionId: string, map: Map<string, ChatMessage[]>) => map.get(sessionId) || [],
   };
 }
 
@@ -119,7 +142,7 @@ function createCurrentSessionStore() {
 
 export const projects = createProjectsStore();
 export const sessions = createSessionsStore();
-export const messages = createChatStore();
+export const sessionMessages = createSessionMessagesStore();
 export const currentSession = createCurrentSessionStore();
 export const isConnected = writable(false);
 

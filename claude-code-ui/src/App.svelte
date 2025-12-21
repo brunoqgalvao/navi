@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { messages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions } from "./lib/stores";
+  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, type ChatMessage } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, type Project, type Session } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -38,6 +38,7 @@
   import AudioRecorder from "./lib/components/AudioRecorder.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Settings from "./lib/components/Settings.svelte";
+  import ToolRenderer from "./lib/components/ToolRenderer.svelte";
 
   function relativeTime(timestamp: number | null | undefined): string {
     if (!timestamp) return "Never";
@@ -56,6 +57,8 @@
 
   let client: ClaudeClient;
   let inputText = $state("");
+  
+  let currentMessages = $derived($session.sessionId ? ($sessionMessages.get($session.sessionId) || []) : []);
   
   let sidebarProjects = $state<Project[]>([]);
   let sidebarSessions = $state<Session[]>([]);
@@ -200,7 +203,6 @@
   async function selectProject(project: Project) {
     session.setProject(project.id);
     session.setSession(null);
-    messages.clear();
     sidebarSessions = [];
     projectFileIndex = new Map();
     projectContext = null;
@@ -393,7 +395,6 @@ Respond in this exact JSON format only, no other text:
       await loadProjects();
       if ($session.projectId === projectToDelete.id) {
         session.setProject(null);
-        messages.clear();
         sidebarSessions = [];
       }
       showDeleteConfirm = false;
@@ -443,27 +444,29 @@ Respond in this exact JSON format only, no other text:
     session.setSession(s.id, s.claude_session_id);
     session.setCost(s.total_cost_usd || 0);
     session.setUsage(s.input_tokens || 0, s.output_tokens || 0);
-    messages.clear();
     
-    try {
-      const msgs = await api.messages.list(s.id);
-      msgs.forEach(m => {
-        let content = m.content;
-        if (typeof content === "string") {
+    if (!$sessionMessages.has(s.id)) {
+      try {
+        const msgs = await api.messages.list(s.id);
+        const loadedMsgs: ChatMessage[] = msgs.map(m => {
+          let content = m.content;
+          if (typeof content === "string") {
             try { content = JSON.parse(content); } catch {}
-        }
-
-        messages.addMessage({
-          id: m.id,
-          role: m.role as any,
-          content: content,
-          timestamp: new Date(m.timestamp),
+          }
+          return {
+            id: m.id,
+            role: m.role as any,
+            content: content,
+            timestamp: new Date(m.timestamp),
+          };
         });
-      });
-      scrollToBottom();
-    } catch (e) {
-      console.error("Failed to load messages:", e);
+        sessionMessages.setMessages(s.id, loadedMsgs);
+      } catch (e) {
+        console.error("Failed to load messages:", e);
+      }
     }
+    
+    scrollToBottom();
   }
 
   async function deleteSession(e: Event, id: string) {
@@ -474,8 +477,8 @@ Respond in this exact JSON format only, no other text:
       await api.sessions.delete(id);
       sidebarSessions = sidebarSessions.filter(s => s.id !== id);
       loadRecentChats();
+      sessionMessages.clearSession(id);
       if ($session.sessionId === id) {
-        messages.clear();
         session.setSession(null);
       }
     } catch (e) {
@@ -505,95 +508,107 @@ Respond in this exact JSON format only, no other text:
   }
 
   function handleMessage(msg: ClaudeMessage) {
-    console.log("WS message:", msg.type, msg);
+    const uiSessionId = (msg as any).uiSessionId;
+    const claudeSessionId = (msg as any).claudeSessionId;
+    
     switch (msg.type) {
       case "system":
-        if (msg.subtype === "init") {
-          session.setClaudeSession(msg.sessionId);
-          if (msg.model) session.setModel(msg.model);
+        if (msg.subtype === "init" && uiSessionId && uiSessionId === $session.sessionId) {
+          session.setClaudeSession(claudeSessionId);
+          if ((msg as any).model) session.setModel((msg as any).model);
         }
         break;
 
       case "tool_progress":
-        const progressMsg = msg as ToolProgressMessage;
-        if (progressMsg.parentToolUseId) {
-          activeSubagents = new Map(activeSubagents.set(progressMsg.parentToolUseId, { elapsed: progressMsg.elapsedTimeSeconds }));
+        if (uiSessionId && uiSessionId === $session.sessionId) {
+          const progressMsg = msg as ToolProgressMessage;
+          if (progressMsg.parentToolUseId) {
+            activeSubagents = new Map(activeSubagents.set(progressMsg.parentToolUseId, { elapsed: progressMsg.elapsedTimeSeconds }));
+          }
         }
         break;
 
       case "assistant":
-        const existingMsgs = $messages;
-        const parentId = msg.parentToolUseId;
-        
+        if (!uiSessionId) break;
+        const parentId = (msg as any).parentToolUseId;
+        const existingMsgs = $sessionMessages.get(uiSessionId) || [];
         const matchingMsg = existingMsgs.findLast(
-          m => m.role === "assistant" && m.parentToolUseId === parentId
+          (m: ChatMessage) => m.role === "assistant" && m.parentToolUseId === parentId
         );
         
         if (matchingMsg) {
-          messages.updateLastAssistant(msg.content, parentId);
+          sessionMessages.updateLastAssistant(uiSessionId, (msg as any).content, parentId);
         } else {
-          messages.addMessage({
+          sessionMessages.addMessage(uiSessionId, {
             id: crypto.randomUUID(),
             role: "assistant",
-            content: msg.content,
+            content: (msg as any).content,
             timestamp: new Date(),
             parentToolUseId: parentId,
           });
         }
-        scrollToBottom();
+        if (uiSessionId === $session.sessionId) {
+          scrollToBottom();
+        }
         break;
 
       case "result":
-        session.setCost($session.costUsd + (msg.costUsd || 0));
-        if (msg.usage) {
-          session.setUsage(
-            $session.inputTokens + (msg.usage.input_tokens || 0),
-            $session.outputTokens + (msg.usage.output_tokens || 0)
-          );
+        if (uiSessionId && uiSessionId === $session.sessionId) {
+          session.setCost($session.costUsd + ((msg as any).costUsd || 0));
+          if ((msg as any).usage) {
+            session.setUsage(
+              $session.inputTokens + ((msg as any).usage.input_tokens || 0),
+              $session.outputTokens + ((msg as any).usage.output_tokens || 0)
+            );
+          }
         }
-        session.setLoading(false);
+        if (uiSessionId) {
+          loadingSessions.update(s => { s.delete(uiSessionId); return new Set(s); });
+        }
         if ($session.projectId) {
-            api.sessions.list($session.projectId).then(list => {
-                sidebarSessions = list.sort((a, b) => b.updated_at - a.updated_at);
-            });
+          api.sessions.list($session.projectId).then(list => {
+            sidebarSessions = list.sort((a, b) => b.updated_at - a.updated_at);
+          });
         }
         break;
 
       case "error":
-        messages.addMessage({
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `Error: ${msg.error}`,
-          timestamp: new Date(),
-        });
-        session.setLoading(false);
+        if (uiSessionId) {
+          sessionMessages.addMessage(uiSessionId, {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: `Error: ${(msg as any).error}`,
+            timestamp: new Date(),
+          });
+          loadingSessions.update(s => { s.delete(uiSessionId); return new Set(s); });
+        }
         break;
 
       case "done":
-        session.setLoading(false);
-        activeSubagents = new Map();
-        const doneSessionId = (msg as any).sessionId || $session.sessionId;
+        const doneSessionId = uiSessionId || (msg as any).sessionId;
         if (doneSessionId) {
           loadingSessions.update(s => { s.delete(doneSessionId); return new Set(s); });
           processMessageQueue(doneSessionId);
         }
+        if (doneSessionId === $session.sessionId) {
+          activeSubagents = new Map();
+        }
         break;
 
       case "aborted":
-        session.setLoading(false);
-        activeSubagents = new Map();
-        const abortedSessionId = (msg as any).sessionId || $session.sessionId;
+        const abortedSessionId = uiSessionId || (msg as any).sessionId;
         if (abortedSessionId) {
           loadingSessions.update(s => { s.delete(abortedSessionId); return new Set(s); });
-        }
-        messages.addMessage({
-          id: crypto.randomUUID(),
-          role: "system",
-          content: "Request stopped",
-          timestamp: new Date(),
-        });
-        if (abortedSessionId) {
+          sessionMessages.addMessage(abortedSessionId, {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: "Request stopped",
+            timestamp: new Date(),
+          });
           processMessageQueue(abortedSessionId);
+        }
+        if (abortedSessionId === $session.sessionId) {
+          activeSubagents = new Map();
         }
         break;
     }
@@ -617,14 +632,13 @@ Respond in this exact JSON format only, no other text:
     
     const prompt = first.substring(sessionId.length + 1);
     
-    messages.addMessage({
+    sessionMessages.addMessage(sessionId, {
       id: crypto.randomUUID(),
       role: "user",
       content: prompt,
       timestamp: new Date(),
     });
 
-    session.setLoading(true);
     loadingSessions.update(s => { s.add(sessionId); return new Set(s); });
 
     client.query({
@@ -635,7 +649,9 @@ Respond in this exact JSON format only, no other text:
       model: $session.selectedModel || undefined,
     });
 
-    scrollToBottom();
+    if (sessionId === $session.sessionId) {
+      scrollToBottom();
+    }
   }
 
   function stopGeneration() {
@@ -646,9 +662,8 @@ Respond in this exact JSON format only, no other text:
       client.abort(sessionId);
     } catch (e) {
       console.error("Failed to abort:", e);
-      session.setLoading(false);
       loadingSessions.update(s => { s.delete(sessionId); return new Set(s); });
-      messages.addMessage({
+      sessionMessages.addMessage(sessionId, {
         id: crypto.randomUUID(),
         role: "system",
         content: "Request stopped",
@@ -680,14 +695,13 @@ Respond in this exact JSON format only, no other text:
     const currentInput = inputText;
     inputText = "";
 
-    messages.addMessage({
+    sessionMessages.addMessage(currentSessionId, {
       id: crypto.randomUUID(),
       role: "user",
       content: currentInput,
       timestamp: new Date(),
     });
 
-    session.setLoading(true);
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
 
     client.query({
@@ -735,12 +749,22 @@ Respond in this exact JSON format only, no other text:
   }
 
   function getSubagentMessages(toolUseId: string) {
-    return $messages.filter(m => m.parentToolUseId === toolUseId);
+    return currentMessages.filter(m => m.parentToolUseId === toolUseId);
   }
 
   function getMainMessages() {
-    return $messages.filter(m => !m.parentToolUseId);
+    return currentMessages.filter(m => !m.parentToolUseId);
   }
+
+  function getHistoryToolCalls(contentHistory: (ContentBlock[] | string)[] | undefined): ToolUseBlock[] {
+    if (!contentHistory) return [];
+    return contentHistory.flatMap(content => {
+      if (typeof content === "string") return [];
+      return content.filter((b): b is ToolUseBlock => b.type === "tool_use");
+    });
+  }
+
+  let expandedHistories = $state<Set<string>>(new Set());
 
   function openPreview(source: string) {
     const isUrl = source.startsWith("http://") || source.startsWith("https://") || source.startsWith("localhost") || source.match(/^:\d+/);
@@ -859,7 +883,7 @@ Respond in this exact JSON format only, no other text:
   }
 
   function copyMessageContent(msgId: string) {
-    const msg = $messages.find(m => m.id === msgId);
+    const msg = currentMessages.find(m => m.id === msgId);
     if (msg) {
       const text = formatContent(msg.content);
       navigator.clipboard.writeText(text);
@@ -868,7 +892,7 @@ Respond in this exact JSON format only, no other text:
   }
 
   function editAsNewMessage(msgId: string) {
-    const msg = $messages.find(m => m.id === msgId);
+    const msg = currentMessages.find(m => m.id === msgId);
     if (msg && msg.role === "user") {
       inputText = formatContent(msg.content);
     }
@@ -1062,7 +1086,7 @@ Respond in this exact JSON format only, no other text:
 
                  
 
-                 <button onclick={() => { session.setSession(null); messages.set([]); }} class="mb-6 px-1 text-left w-full hover:bg-gray-100 rounded-lg py-2 -my-2 transition-colors group">
+                 <button onclick={() => { session.setSession(null); }} class="mb-6 px-1 text-left w-full hover:bg-gray-100 rounded-lg py-2 -my-2 transition-colors group">
 
                      <h2 class="text-sm font-semibold text-gray-900 truncate flex items-center gap-2 group-hover:text-gray-700">
 
@@ -1364,7 +1388,7 @@ Respond in this exact JSON format only, no other text:
 
         <div class="max-w-3xl mx-auto w-full md:pt-10 space-y-8 pb-64">
 
-            {#if $messages.length === 0 && !$session.sessionId}
+            {#if currentMessages.length === 0 && !$session.sessionId}
 
                 <div class="flex flex-col items-center justify-center text-center min-h-[70vh] animate-in fade-in duration-500">
 
@@ -1413,7 +1437,7 @@ Respond in this exact JSON format only, no other text:
 
                 </div>
 
-            {:else if $messages.length === 0}
+            {:else if currentMessages.length === 0}
                 <div class="flex flex-col items-center justify-center text-gray-400 space-y-4 min-h-[40vh] animate-in fade-in duration-500">
                   <div class="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
                     <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
@@ -1496,6 +1520,34 @@ Respond in this exact JSON format only, no other text:
 
                                  
 
+                                 <!-- Tool History (Collapsible) -->
+                                 {#if msg.contentHistory && getHistoryToolCalls(msg.contentHistory).length > 0}
+                                    <div class="mt-3">
+                                      <button
+                                        onclick={() => {
+                                          const newSet = new Set(expandedHistories);
+                                          if (newSet.has(msg.id)) {
+                                            newSet.delete(msg.id);
+                                          } else {
+                                            newSet.add(msg.id);
+                                          }
+                                          expandedHistories = newSet;
+                                        }}
+                                        class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                                      >
+                                        <svg class={`w-3 h-3 transition-transform ${expandedHistories.has(msg.id) ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                                        <span>{getHistoryToolCalls(msg.contentHistory).length} previous tool {getHistoryToolCalls(msg.contentHistory).length === 1 ? 'call' : 'calls'}</span>
+                                      </button>
+                                      {#if expandedHistories.has(msg.id)}
+                                        <div class="mt-2 space-y-1 pl-4 border-l-2 border-gray-200 opacity-70">
+                                          {#each getHistoryToolCalls(msg.contentHistory) as histTool, idx}
+                                            <ToolRenderer tool={histTool} compact={true} index={idx} onPreview={openPreview} />
+                                          {/each}
+                                        </div>
+                                      {/if}
+                                    </div>
+                                 {/if}
+
                                  <!-- Tool Calls -->
 
                                  {#each getToolCalls(msg.content) as tool}
@@ -1511,27 +1563,7 @@ Respond in this exact JSON format only, no other text:
                                         onMessageClick={handleMessageClick}
                                       />
                                     {:else}
-                                    <div class="mt-3 rounded-lg border border-gray-200 bg-gray-50/50 overflow-hidden">
-
-                                       <div class="px-3 py-2 bg-gray-100/50 border-b border-gray-200 flex items-center gap-2">
-
-                                            <div class="p-1 bg-white border border-gray-200 rounded shadow-sm">
-
-                                                <svg class="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-
-                                            </div>
-
-                                            <span class="text-xs font-medium text-gray-600 font-mono tracking-tight">Used {tool.name}</span>
-
-                                       </div>
-
-                                       <div class="px-3 py-2 bg-gray-50 font-mono text-xs text-gray-600 overflow-x-auto">
-
-                                            {JSON.stringify(tool.input, null, 2)}
-
-                                       </div>
-
-                                    </div>
+                                      <ToolRenderer {tool} onPreview={openPreview} />
                                     {/if}
 
                                  {/each}
@@ -1548,7 +1580,7 @@ Respond in this exact JSON format only, no other text:
 
 
 
-            {#if $session.isLoading}
+            {#if $session.sessionId && $loadingSessions.has($session.sessionId)}
 
                 <div class="flex gap-4">
 
@@ -1579,7 +1611,7 @@ Respond in this exact JSON format only, no other text:
 
 
         <!-- Input Area (hidden on project home via CSS) -->
-        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center {$messages.length === 0 && !$session.sessionId ? 'hidden' : ''}">
+        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}">
 
             <div class="w-full max-w-3xl pointer-events-auto">
 

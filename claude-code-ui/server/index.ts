@@ -1,5 +1,11 @@
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { initDb, projects, sessions, messages, type Project, type Session, type Message } from "./db";
+import { spawn, type ChildProcess } from "child_process";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 await initDb();
 
@@ -28,7 +34,13 @@ interface ClientMessage {
   model?: string;
 }
 
-const activeQueries = new Map<string, { abort: () => void; ws: any }>();
+interface ActiveProcess {
+  process: ChildProcess;
+  ws: any;
+  sessionId: string;
+}
+
+const activeProcesses = new Map<string, ActiveProcess>();
 
 const server = Bun.serve({
   port: PORT,
@@ -828,14 +840,15 @@ const server = Bun.serve({
         const data: ClientMessage = JSON.parse(message.toString());
 
         if (data.type === "query" && data.prompt) {
-          handleQuery(ws, data);
+          console.log(`[${data.sessionId}] Starting query: "${data.prompt.slice(0, 50)}..."`);
+          handleQueryWithProcess(ws, data);
         } else if (data.type === "abort" && data.sessionId) {
-          const active = activeQueries.get(data.sessionId);
+          const active = activeProcesses.get(data.sessionId);
           if (active) {
             console.log(`Aborting query for session ${data.sessionId}`);
-            active.abort();
-            activeQueries.delete(data.sessionId);
-            ws.send(JSON.stringify({ type: "aborted", sessionId: data.sessionId }));
+            active.process.kill("SIGTERM");
+            activeProcesses.delete(data.sessionId);
+            ws.send(JSON.stringify({ type: "aborted", uiSessionId: data.sessionId }));
           }
         }
       } catch (error) {
@@ -853,6 +866,123 @@ const server = Bun.serve({
     },
   },
 });
+
+function handleQueryWithProcess(ws: any, data: ClientMessage) {
+  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model } = data;
+
+  const session = sessionId ? sessions.get(sessionId) : null;
+  const project = projectId ? projects.get(projectId) : null;
+  const workingDirectory = project?.path || process.cwd();
+
+  console.log(`[${sessionId}] Spawning worker process in ${workingDirectory}`);
+
+  const needsAutoTitle = session?.title === "New Chat" || session?.title === "New conversation";
+  
+  if (sessionId && prompt) {
+    const msgId = crypto.randomUUID();
+    messages.create(msgId, sessionId, "user", JSON.stringify(prompt), Date.now());
+  }
+
+  const workerPath = join(__dirname, "query-worker.ts");
+  const inputJson = JSON.stringify({
+    prompt,
+    cwd: workingDirectory,
+    resume: claudeSessionId || session?.claude_session_id,
+    model,
+    allowedTools,
+    sessionId,
+  });
+
+  const child = spawn("bun", ["run", workerPath, inputJson], {
+    cwd: workingDirectory,
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env },
+  });
+
+  if (sessionId) {
+    activeProcesses.set(sessionId, { process: child, ws, sessionId });
+  }
+
+  let buffer = "";
+  
+  child.stdout?.on("data", (chunk) => {
+    buffer += chunk.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const msg = JSON.parse(line);
+        
+        if (msg.type === "message") {
+          ws.send(JSON.stringify(msg.data));
+        } else if (msg.type === "complete") {
+          if (sessionId && msg.lastAssistantContent?.length > 0) {
+            const msgId = crypto.randomUUID();
+            messages.create(msgId, sessionId, "assistant", JSON.stringify(msg.lastAssistantContent), Date.now());
+            
+            if (needsAutoTitle && prompt) {
+              generateChatTitle(prompt, msg.lastAssistantContent, sessionId);
+            }
+          }
+
+          if (sessionId && msg.resultData) {
+            sessions.updateClaudeSession(
+              msg.resultData.session_id,
+              msg.resultData.model || null,
+              msg.resultData.total_cost_usd || 0,
+              msg.resultData.num_turns || 0,
+              msg.resultData.usage?.input_tokens || 0,
+              msg.resultData.usage?.output_tokens || 0,
+              Date.now(),
+              sessionId
+            );
+          }
+
+          ws.send(JSON.stringify({ type: "done", uiSessionId: sessionId }));
+          if (sessionId) activeProcesses.delete(sessionId);
+        } else if (msg.type === "error") {
+          ws.send(JSON.stringify({ 
+            type: "error", 
+            uiSessionId: sessionId,
+            error: msg.error 
+          }));
+          if (sessionId) activeProcesses.delete(sessionId);
+        }
+      } catch (e) {
+        console.log(`[${sessionId}] Non-JSON stdout:`, line);
+      }
+    }
+  });
+
+  child.stderr?.on("data", (data) => {
+    console.error(`[${sessionId}] stderr:`, data.toString());
+  });
+
+  child.on("error", (error) => {
+    console.error(`[${sessionId}] Process error:`, error);
+    ws.send(JSON.stringify({ 
+      type: "error", 
+      uiSessionId: sessionId,
+      error: error.message 
+    }));
+    if (sessionId) activeProcesses.delete(sessionId);
+  });
+
+  child.on("exit", (code) => {
+    console.log(`[${sessionId}] Process exited with code ${code}`);
+    if (buffer.trim()) {
+      try {
+        const msg = JSON.parse(buffer);
+        if (msg.type === "complete") {
+          ws.send(JSON.stringify({ type: "done", uiSessionId: sessionId }));
+        }
+      } catch {}
+    }
+    if (sessionId) activeProcesses.delete(sessionId);
+  });
+}
 
 async function handleQuery(ws: any, data: ClientMessage) {
   const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model } = data;
@@ -895,17 +1025,19 @@ async function handleQuery(ws: any, data: ClientMessage) {
     });
 
     activeQueries.set(queryKey, { abort: () => q.interrupt(), ws });
+    console.log(`[${sessionId}] Query registered, starting iteration...`);
 
     let lastAssistantContent: any[] = [];
     let resultData: any = null;
     let wasAborted = false;
 
     for await (const msg of q) {
+      console.log(`[${sessionId}] Got message type: ${msg.type}`);
       if (!activeQueries.has(queryKey)) {
         wasAborted = true;
         break;
       }
-      const formatted = formatMessage(msg);
+      const formatted = formatMessage(msg, sessionId);
       ws.send(JSON.stringify(formatted));
 
       if (msg.type === "assistant") {
@@ -1034,12 +1166,13 @@ async function generateChatTitle(userPrompt: string, assistantContent: any[], se
   }
 }
 
-function formatMessage(msg: SDKMessage): any {
+function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
   switch (msg.type) {
     case "system":
       return {
         type: "system",
-        sessionId: msg.session_id,
+        uiSessionId,
+        claudeSessionId: msg.session_id,
         subtype: msg.subtype,
         ...(msg.subtype === "init" && {
           cwd: (msg as any).cwd,
@@ -1051,7 +1184,8 @@ function formatMessage(msg: SDKMessage): any {
     case "assistant":
       return {
         type: "assistant",
-        sessionId: msg.session_id,
+        uiSessionId,
+        claudeSessionId: msg.session_id,
         content: msg.message.content,
         parentToolUseId: msg.parent_tool_use_id || null,
       };
@@ -1059,6 +1193,7 @@ function formatMessage(msg: SDKMessage): any {
     case "user":
       return {
         type: "user",
+        uiSessionId,
         content: msg.message.content,
         parentToolUseId: msg.parent_tool_use_id || null,
       };
@@ -1066,7 +1201,8 @@ function formatMessage(msg: SDKMessage): any {
     case "result":
       return {
         type: "result",
-        sessionId: msg.session_id,
+        uiSessionId,
+        claudeSessionId: msg.session_id,
         costUsd: msg.total_cost_usd,
         durationMs: msg.duration_ms,
         numTurns: msg.num_turns,
@@ -1076,6 +1212,7 @@ function formatMessage(msg: SDKMessage): any {
     case "tool_progress":
       return {
         type: "tool_progress",
+        uiSessionId,
         toolUseId: msg.tool_use_id,
         toolName: msg.tool_name,
         parentToolUseId: msg.parent_tool_use_id || null,
@@ -1083,7 +1220,7 @@ function formatMessage(msg: SDKMessage): any {
       };
 
     default:
-      return { type: "unknown", raw: msg };
+      return { type: "unknown", uiSessionId, raw: msg };
   }
 }
 
