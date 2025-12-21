@@ -153,3 +153,7 @@ function createOnboardingStore() {
 }
 
 export const onboardingComplete = createOnboardingStore();
+
+export const messageQueue = writable<string[]>([]);
+
+export const loadingSessions = writable<Set<string>>(new Set());

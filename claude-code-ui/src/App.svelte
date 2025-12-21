@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { messages, currentSession as session, isConnected, projects, availableModels, onboardingComplete } from "./lib/stores";
+  import { messages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, type Project, type Session } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -59,6 +59,7 @@
   
   let sidebarProjects = $state<Project[]>([]);
   let sidebarSessions = $state<Session[]>([]);
+  let recentChats = $state<Session[]>([]);
   let showNewProjectModal = $state(false);
   let newProjectName = $state("");
   let newProjectPath = $state("");
@@ -115,6 +116,8 @@
   }
 
   let currentProject = $derived(sidebarProjects.find(p => p.id === $session.projectId));
+  let currentSessionLoading = $derived($session.sessionId && $loadingSessions.has($session.sessionId));
+  let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.startsWith($session.sessionId + ':')).length : 0);
   let showOnboarding = $state(!$onboardingComplete);
 
   $effect(() => {
@@ -131,6 +134,7 @@
 
   onMount(async () => {
     loadProjects();
+    loadRecentChats();
     loadConfig();
     loadModels();
 
@@ -156,6 +160,14 @@
       projects.set(sidebarProjects);
     } catch (e) {
       console.error("Failed to load projects:", e);
+    }
+  }
+
+  async function loadRecentChats() {
+    try {
+      recentChats = await api.sessions.listRecent(10);
+    } catch (e) {
+      console.error("Failed to load recent chats:", e);
     }
   }
 
@@ -421,6 +433,7 @@ Respond in this exact JSON format only, no other text:
       const newSession = await api.sessions.create($session.projectId, { title: "New Chat" });
       sidebarSessions = [newSession, ...sidebarSessions];
       selectSession(newSession);
+      loadRecentChats();
     } catch (e) {
       console.error("Failed to create session:", e);
     }
@@ -460,6 +473,7 @@ Respond in this exact JSON format only, no other text:
     try {
       await api.sessions.delete(id);
       sidebarSessions = sidebarSessions.filter(s => s.id !== id);
+      loadRecentChats();
       if ($session.sessionId === id) {
         messages.clear();
         session.setSession(null);
@@ -558,6 +572,29 @@ Respond in this exact JSON format only, no other text:
       case "done":
         session.setLoading(false);
         activeSubagents = new Map();
+        const doneSessionId = (msg as any).sessionId || $session.sessionId;
+        if (doneSessionId) {
+          loadingSessions.update(s => { s.delete(doneSessionId); return new Set(s); });
+          processMessageQueue(doneSessionId);
+        }
+        break;
+
+      case "aborted":
+        session.setLoading(false);
+        activeSubagents = new Map();
+        const abortedSessionId = (msg as any).sessionId || $session.sessionId;
+        if (abortedSessionId) {
+          loadingSessions.update(s => { s.delete(abortedSessionId); return new Set(s); });
+        }
+        messages.addMessage({
+          id: crypto.randomUUID(),
+          role: "system",
+          content: "Request stopped",
+          timestamp: new Date(),
+        });
+        if (abortedSessionId) {
+          processMessageQueue(abortedSessionId);
+        }
         break;
     }
   }
@@ -571,6 +608,55 @@ Respond in this exact JSON format only, no other text:
     }, 50);
   }
 
+  function processMessageQueue(sessionId: string) {
+    const queue = $messageQueue.filter(m => m.startsWith(`${sessionId}:`));
+    if (queue.length === 0) return;
+    
+    const first = queue[0];
+    messageQueue.update(q => q.filter(m => m !== first));
+    
+    const prompt = first.substring(sessionId.length + 1);
+    
+    messages.addMessage({
+      id: crypto.randomUUID(),
+      role: "user",
+      content: prompt,
+      timestamp: new Date(),
+    });
+
+    session.setLoading(true);
+    loadingSessions.update(s => { s.add(sessionId); return new Set(s); });
+
+    client.query({
+      prompt,
+      projectId: $session.projectId || undefined,
+      sessionId,
+      claudeSessionId: $session.claudeSessionId || undefined,
+      model: $session.selectedModel || undefined,
+    });
+
+    scrollToBottom();
+  }
+
+  function stopGeneration() {
+    const sessionId = $session.sessionId;
+    if (!sessionId) return;
+    
+    try {
+      client.abort(sessionId);
+    } catch (e) {
+      console.error("Failed to abort:", e);
+      session.setLoading(false);
+      loadingSessions.update(s => { s.delete(sessionId); return new Set(s); });
+      messages.addMessage({
+        id: crypto.randomUUID(),
+        role: "system",
+        content: "Request stopped",
+        timestamp: new Date(),
+      });
+    }
+  }
+
   async function sendMessage() {
     if (!inputText.trim() || !$isConnected) return;
     if (!$session.projectId) {
@@ -580,6 +666,15 @@ Respond in this exact JSON format only, no other text:
 
     if (!$session.sessionId) {
         await createNewChat();
+    }
+
+    const currentSessionId = $session.sessionId!;
+    const isCurrentSessionLoading = $loadingSessions.has(currentSessionId);
+    
+    if (isCurrentSessionLoading) {
+      messageQueue.update(q => [...q, `${currentSessionId}:${inputText.trim()}`]);
+      inputText = "";
+      return;
     }
 
     const currentInput = inputText;
@@ -593,11 +688,12 @@ Respond in this exact JSON format only, no other text:
     });
 
     session.setLoading(true);
+    loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
 
     client.query({
       prompt: currentInput,
       projectId: $session.projectId || undefined,
-      sessionId: $session.sessionId || undefined,
+      sessionId: currentSessionId,
       claudeSessionId: $session.claudeSessionId || undefined,
       model: $session.selectedModel || undefined,
     });
@@ -924,6 +1020,30 @@ Respond in this exact JSON format only, no other text:
 
                  {/if}
 
+                 {#if recentChats.length > 0}
+                   <div class="mt-6">
+                     <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2">Recent Chats</h3>
+                     <div class="space-y-0.5">
+                       {#each recentChats.slice(0, 5) as chat}
+                         <button
+                           onclick={() => {
+                             session.setProject(chat.project_id);
+                             session.setSession(chat.id);
+                           }}
+                           class="w-full text-left px-2.5 py-2 rounded-md text-gray-600 hover:bg-gray-200/50 hover:text-gray-900 transition-colors"
+                         >
+                           <div class="text-[13px] font-medium truncate">{chat.title}</div>
+                           <div class="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400">
+                             <span class="truncate">{chat.project_name}</span>
+                             <span class="text-gray-300">·</span>
+                             <span>{relativeTime(chat.updated_at)}</span>
+                           </div>
+                         </button>
+                       {/each}
+                     </div>
+                   </div>
+                 {/if}
+
              </div>
 
         {:else}
@@ -942,9 +1062,9 @@ Respond in this exact JSON format only, no other text:
 
                  
 
-                 <div class="mb-6 px-1">
+                 <button onclick={() => { session.setSession(null); messages.set([]); }} class="mb-6 px-1 text-left w-full hover:bg-gray-100 rounded-lg py-2 -my-2 transition-colors group">
 
-                     <h2 class="text-sm font-semibold text-gray-900 truncate flex items-center gap-2">
+                     <h2 class="text-sm font-semibold text-gray-900 truncate flex items-center gap-2 group-hover:text-gray-700">
 
                         <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
 
@@ -954,7 +1074,7 @@ Respond in this exact JSON format only, no other text:
 
                      <p class="text-[11px] text-gray-400 truncate mt-0.5 pl-6" title={currentProject.path}>{currentProject.path}</p>
 
-                 </div>
+                 </button>
 
 
 
@@ -1132,44 +1252,67 @@ Respond in this exact JSON format only, no other text:
 
         <div class="flex-1 flex flex-col items-center justify-center text-center p-8 bg-gray-50/30">
 
-            <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-gray-200 mb-6">
-
-                <div class="w-8 h-8 bg-gray-900 rounded-md flex items-center justify-center text-white font-bold text-lg">C</div>
-
+            <div class="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-gray-200 mb-5">
+                <div class="w-7 h-7 bg-gray-900 rounded-md flex items-center justify-center text-white font-bold text-base">C</div>
             </div>
 
-            <h1 class="text-xl font-semibold text-gray-900 mb-2">Claude Code</h1>
+            <h1 class="text-xl font-semibold text-gray-900 mb-1">Claude Code</h1>
+            <p class="text-sm text-gray-500 mb-6">Select a project or continue a recent chat</p>
 
-            <p class="text-sm text-gray-500 max-w-sm mb-6 leading-relaxed">Select a project to begin your session.</p>
-
-            <button onclick={() => showNewProjectModal = true} class="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium shadow-sm transition-all hover:shadow-md mb-8">
-
+            <button onclick={() => showNewProjectModal = true} class="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium shadow-sm transition-all hover:shadow-md mb-10">
                 Create New Project
-
             </button>
 
-            {#if sidebarProjects.length > 0}
-              <div class="w-full max-w-md">
-                <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Recent Projects</h3>
-                <div class="space-y-2">
-                  {#each sidebarProjects.slice(0, 5) as proj}
-                    <button 
-                      onclick={() => selectProject(proj)}
-                      class="w-full text-left px-4 py-3 rounded-lg bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all group"
-                    >
-                      <div class="flex items-center gap-3">
-                        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                        <div class="flex-1 min-w-0">
-                          <div class="text-sm font-medium text-gray-900 truncate">{proj.name}</div>
-                          <div class="text-[11px] text-gray-400">{proj.session_count || 0} chats · {relativeTime(proj.last_activity || proj.updated_at)}</div>
+            <div class="w-full max-w-2xl grid grid-cols-1 md:grid-cols-2 gap-6">
+              {#if sidebarProjects.length > 0}
+                <div>
+                  <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Projects</h3>
+                  <div class="space-y-2">
+                    {#each sidebarProjects.slice(0, 5) as proj}
+                      <button 
+                        onclick={() => selectProject(proj)}
+                        class="w-full text-left px-4 py-3 rounded-lg bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all group"
+                      >
+                        <div class="flex items-center gap-3">
+                          <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                          <div class="flex-1 min-w-0">
+                            <div class="text-sm font-medium text-gray-900 truncate">{proj.name}</div>
+                            <div class="text-[11px] text-gray-400">{proj.session_count || 0} chats · {relativeTime(proj.last_activity || proj.updated_at)}</div>
+                          </div>
+                          <svg class="w-4 h-4 text-gray-300 group-hover:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
                         </div>
-                        <svg class="w-4 h-4 text-gray-300 group-hover:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
-                      </div>
-                    </button>
-                  {/each}
+                      </button>
+                    {/each}
+                  </div>
                 </div>
-              </div>
-            {/if}
+              {/if}
+
+              {#if recentChats.length > 0}
+                <div>
+                  <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Recent Chats</h3>
+                  <div class="space-y-2">
+                    {#each recentChats.slice(0, 5) as chat}
+                      <button 
+                        onclick={() => {
+                          session.setProject(chat.project_id);
+                          session.setSession(chat.id);
+                        }}
+                        class="w-full text-left px-4 py-3 rounded-lg bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all group"
+                      >
+                        <div class="flex items-center gap-3">
+                          <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                          <div class="flex-1 min-w-0">
+                            <div class="text-sm font-medium text-gray-900 truncate">{chat.title}</div>
+                            <div class="text-[11px] text-gray-400">{chat.project_name} · {relativeTime(chat.updated_at)}</div>
+                          </div>
+                          <svg class="w-4 h-4 text-gray-300 group-hover:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
+                        </div>
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            </div>
 
         </div>
 
@@ -1201,55 +1344,50 @@ Respond in this exact JSON format only, no other text:
 
             {#if $messages.length === 0 && !$session.sessionId}
 
-                <div class="flex flex-col items-center justify-center text-center min-h-[60vh] animate-in fade-in duration-500">
+                <div class="flex flex-col items-center justify-center text-center min-h-[70vh] animate-in fade-in duration-500">
 
-                  <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-gray-100 to-gray-50 border border-gray-200 flex items-center justify-center mb-5 shadow-sm">
-                    <svg class="w-7 h-7 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                  <h2 class="text-xl font-semibold text-gray-900 mb-1">Start a conversation</h2>
+                  <p class="text-sm text-gray-500 mb-8">in <span class="font-medium text-gray-700">{currentProject.name}</span></p>
+
+                  <!-- Centered Input Box -->
+                  <div class="w-full max-w-xl mb-6">
+                    <div class="relative group bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-200 transition-shadow focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] focus-within:border-gray-300">
+                      <textarea
+                        bind:value={inputText}
+                        onkeydown={handleKeydown}
+                        placeholder="Type a message to Claude..."
+                        disabled={!$isConnected}
+                        class="w-full bg-transparent text-gray-900 placeholder-gray-400 border-none rounded-xl pl-4 pr-14 py-3.5 focus:outline-none focus:ring-0 resize-none max-h-48 min-h-[56px] text-[15px] disabled:opacity-50"
+                        rows="1"
+                      ></textarea>
+                      <div class="absolute right-2 bottom-2 flex items-center gap-1">
+                        <button
+                          onclick={sendMessage}
+                          disabled={!$isConnected || !inputText.trim()}
+                          class="p-1.5 text-gray-400 bg-transparent rounded-lg hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                        >
+                          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
-                  <h2 class="text-lg font-semibold text-gray-900 mb-1">Start a conversation</h2>
-                  <p class="text-sm text-gray-500 mb-6">in <span class="font-medium text-gray-700">{currentProject.name}</span></p>
-
                   {#if projectContext}
-                    <div class="w-full max-w-md space-y-4 mb-6 text-left">
-                      <div class="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                        <div class="flex items-start gap-3">
-                          <div class="p-1.5 bg-blue-100 rounded-lg shrink-0">
-                            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                          </div>
-                          <div>
-                            <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">About this project</h3>
-                            <p class="text-sm text-gray-700 leading-relaxed">{projectContext.summary}</p>
-                          </div>
-                        </div>
+                    {#if projectContext.suggestions && projectContext.suggestions.length > 0}
+                      <div class="flex flex-wrap gap-2 justify-center max-w-xl mb-6">
+                        {#each projectContext.suggestions as suggestion}
+                          <button 
+                            onclick={() => { inputText = suggestion; }}
+                            class="text-sm text-gray-600 hover:text-gray-900 bg-white hover:bg-gray-50 rounded-full px-4 py-2 transition-all border border-gray-200 hover:border-gray-300 hover:shadow-sm"
+                          >
+                            {suggestion}
+                          </button>
+                        {/each}
                       </div>
-                      
-                      {#if projectContext.suggestions && projectContext.suggestions.length > 0}
-                        <div class="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                          <div class="flex items-start gap-3">
-                            <div class="p-1.5 bg-emerald-100 rounded-lg shrink-0">
-                              <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
-                            </div>
-                            <div class="flex-1">
-                              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Suggested tasks</h3>
-                              <div class="space-y-1.5">
-                                {#each projectContext.suggestions as suggestion}
-                                  <button 
-                                    onclick={() => { inputText = suggestion; }}
-                                    class="w-full text-left text-sm text-gray-600 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors border border-transparent hover:border-gray-200"
-                                  >
-                                    {suggestion}
-                                  </button>
-                                {/each}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      {/if}
-                    </div>
+                    {/if}
+                    
+                    <p class="text-xs text-gray-400 text-center max-w-md">{projectContext.summary}</p>
                   {/if}
-
-                  <p class="text-xs text-gray-400 max-w-sm">{projectContext ? "Click a suggestion or type your own message below." : "Type a message below to start chatting with Claude."}</p>
 
                 </div>
 
@@ -1300,11 +1438,9 @@ Respond in this exact JSON format only, no other text:
                    <!-- System Message -->
 
                    {:else if msg.role === 'system'}
-
-                        <div class="w-full bg-red-50 border border-red-100 rounded-lg px-4 py-3 text-xs font-mono text-red-800 break-all">
-
+                        {@const isError = typeof msg.content === 'string' && msg.content.startsWith('Error:')}
+                        <div class="w-full {isError ? 'bg-red-50 border-red-100 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-500'} border rounded-lg px-4 py-2.5 text-xs break-all">
                              {formatContent(msg.content)}
-
                         </div>
 
 
@@ -1420,50 +1556,49 @@ Respond in this exact JSON format only, no other text:
 
 
 
-        <!-- Input Area -->
-
-        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center">
+        <!-- Input Area (hidden on project home via CSS) -->
+        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center {$messages.length === 0 && !$session.sessionId ? 'hidden' : ''}">
 
             <div class="w-full max-w-3xl pointer-events-auto">
 
                 <div class="relative group bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-200 transition-shadow focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] focus-within:border-gray-300">
 
                     <textarea
-
                         bind:value={inputText}
-
                         onkeydown={handleKeydown}
-
-                        placeholder="Type a message to Claude..."
-
-                        disabled={!$isConnected || $session.isLoading}
-
+                        placeholder={currentSessionLoading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : "Type a message to Claude..."}
+                        disabled={!$isConnected}
                         class="w-full bg-transparent text-gray-900 placeholder-gray-400 border-none rounded-xl pl-4 pr-24 py-3.5 focus:outline-none focus:ring-0 resize-none max-h-48 min-h-[56px] text-[15px] disabled:opacity-50"
-
                         rows="1"
-
                     ></textarea>
-
                     
-
                     <div class="absolute right-2 bottom-2 flex items-center gap-1">
                       <AudioRecorder 
                         onTranscript={(text) => { inputText = inputText ? inputText + " " + text : text; }}
-                        disabled={!$isConnected || $session.isLoading}
+                        disabled={!$isConnected}
                       />
-                      <button
-
-                          onclick={sendMessage}
-
-                          disabled={!$isConnected || $session.isLoading || !inputText.trim()}
-
-                          class="p-1.5 text-gray-400 bg-transparent rounded-lg hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-
-                      >
-
-                          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
-
-                      </button>
+                      {#if currentSessionLoading}
+                        {#if queuedCount > 0}
+                          <span class="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg font-medium">
+                            {queuedCount} queued
+                          </span>
+                        {/if}
+                        <button
+                            onclick={stopGeneration}
+                            class="p-1.5 text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-all"
+                            title="Stop generation"
+                        >
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+                        </button>
+                      {:else}
+                        <button
+                            onclick={sendMessage}
+                            disabled={!$isConnected || !inputText.trim()}
+                            class="p-1.5 text-gray-400 bg-transparent rounded-lg hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                        >
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+                        </button>
+                      {/if}
                     </div>
 
                 </div>

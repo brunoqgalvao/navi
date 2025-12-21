@@ -78,7 +78,8 @@ export type ClaudeMessage =
   | ErrorMessage
   | DoneMessage
   | ToolProgressMessage
-  | { type: "connected" };
+  | { type: "connected" }
+  | { type: "aborted"; sessionId?: string };
 
 export class ClaudeClient {
   private ws: WebSocket | null = null;
@@ -153,5 +154,18 @@ export class ClaudeClient {
 
   get isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  abort(sessionId?: string) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error("Not connected to server");
+    }
+
+    this.ws.send(
+      JSON.stringify({
+        type: "abort",
+        sessionId,
+      })
+    );
   }
 }

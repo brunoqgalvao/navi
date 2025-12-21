@@ -19,7 +19,7 @@ function json(data: any, status = 200) {
 }
 
 interface ClientMessage {
-  type: "query" | "cancel";
+  type: "query" | "cancel" | "abort";
   prompt?: string;
   projectId?: string;
   sessionId?: string;
@@ -27,6 +27,8 @@ interface ClientMessage {
   allowedTools?: string[];
   model?: string;
 }
+
+const activeQueries = new Map<string, { abort: () => void; ws: any }>();
 
 const server = Bun.serve({
   port: PORT,
@@ -108,6 +110,11 @@ const server = Bun.serve({
         projects.delete(id);
         return json({ success: true });
       }
+    }
+
+    if (url.pathname === "/api/sessions/recent" && method === "GET") {
+      const limit = parseInt(url.searchParams.get("limit") || "10");
+      return json(sessions.listRecent(limit));
     }
 
     const sessionsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions$/);
@@ -260,6 +267,20 @@ const server = Bun.serve({
             svg: "image/svg+xml",
             ico: "image/x-icon",
             bmp: "image/bmp",
+            mp3: "audio/mpeg",
+            wav: "audio/wav",
+            ogg: "audio/ogg",
+            flac: "audio/flac",
+            aac: "audio/aac",
+            m4a: "audio/mp4",
+            wma: "audio/x-ms-wma",
+            mp4: "video/mp4",
+            webm: "video/webm",
+            mov: "video/quicktime",
+            avi: "video/x-msvideo",
+            mkv: "video/x-matroska",
+            m4v: "video/mp4",
+            ogv: "video/ogg",
           };
           const contentType = mimeTypes[ext] || "application/octet-stream";
           return new Response(file, {
@@ -807,7 +828,15 @@ const server = Bun.serve({
         const data: ClientMessage = JSON.parse(message.toString());
 
         if (data.type === "query" && data.prompt) {
-          await handleQuery(ws, data);
+          handleQuery(ws, data);
+        } else if (data.type === "abort" && data.sessionId) {
+          const active = activeQueries.get(data.sessionId);
+          if (active) {
+            console.log(`Aborting query for session ${data.sessionId}`);
+            active.abort();
+            activeQueries.delete(data.sessionId);
+            ws.send(JSON.stringify({ type: "aborted", sessionId: data.sessionId }));
+          }
         }
       } catch (error) {
         ws.send(
@@ -841,6 +870,8 @@ async function handleQuery(ws: any, data: ClientMessage) {
     messages.create(msgId, sessionId, "user", JSON.stringify(prompt), Date.now());
   }
 
+  const queryKey = sessionId || crypto.randomUUID();
+  
   try {
     const q = query({
       prompt: prompt!,
@@ -863,10 +894,17 @@ async function handleQuery(ws: any, data: ClientMessage) {
       },
     });
 
+    activeQueries.set(queryKey, { abort: () => q.interrupt(), ws });
+
     let lastAssistantContent: any[] = [];
     let resultData: any = null;
+    let wasAborted = false;
 
     for await (const msg of q) {
+      if (!activeQueries.has(queryKey)) {
+        wasAborted = true;
+        break;
+      }
       const formatted = formatMessage(msg);
       ws.send(JSON.stringify(formatted));
 
@@ -876,6 +914,12 @@ async function handleQuery(ws: any, data: ClientMessage) {
       if (msg.type === "result") {
         resultData = msg;
       }
+    }
+
+    activeQueries.delete(queryKey);
+
+    if (wasAborted) {
+      return;
     }
 
     if (sessionId && lastAssistantContent.length > 0) {
@@ -900,7 +944,7 @@ async function handleQuery(ws: any, data: ClientMessage) {
       );
     }
 
-    ws.send(JSON.stringify({ type: "done" }));
+    ws.send(JSON.stringify({ type: "done", sessionId }));
   } catch (error) {
     ws.send(
       JSON.stringify({

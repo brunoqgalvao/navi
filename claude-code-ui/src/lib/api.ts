@@ -75,6 +75,7 @@ export const api = {
 
   sessions: {
     list: (projectId: string) => request<Session[]>(`/projects/${projectId}/sessions`),
+    listRecent: (limit: number = 10) => request<Session[]>(`/sessions/recent?limit=${limit}`),
     get: (id: string) => request<Session>(`/sessions/${id}`),
     create: (projectId: string, data: { title?: string }) =>
       request<Session>(`/projects/${projectId}/sessions`, {

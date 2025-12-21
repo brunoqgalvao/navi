@@ -3,7 +3,7 @@
   import { marked } from "marked";
   import hljs from "highlight.js";
 
-  type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "none";
+  type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "none";
 
   interface Props {
     source: string;
@@ -28,6 +28,9 @@
   let showDebug = $state(false);
 
   const imageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp"];
+  const audioExtensions = ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma"];
+  const videoExtensions = ["mp4", "webm", "mov", "avi", "mkv", "m4v", "ogv"];
+  const csvExtensions = ["csv", "tsv"];
   const codeExtensions = ["js", "ts", "jsx", "tsx", "svelte", "vue", "py", "rs", "go", "java", "c", "cpp", "h", "css", "scss", "sass", "less", "html", "xml", "json", "yaml", "yml", "toml", "sh", "bash", "zsh", "sql", "graphql", "prisma"];
   const markdownExtensions = ["md", "mdx", "markdown"];
   const pdfExtensions = ["pdf"];
@@ -42,6 +45,9 @@
     const ext = src.split(".").pop()?.toLowerCase() || "";
     
     if (imageExtensions.includes(ext)) return "image";
+    if (audioExtensions.includes(ext)) return "audio";
+    if (videoExtensions.includes(ext)) return "video";
+    if (csvExtensions.includes(ext)) return "csv";
     if (pdfExtensions.includes(ext)) return "pdf";
     if (markdownExtensions.includes(ext)) return "markdown";
     if (codeExtensions.includes(ext)) return "code";
@@ -96,6 +102,43 @@
       return hljs.highlight(code, { language: lang }).value;
     }
     return hljs.highlightAuto(code).value;
+  }
+
+  let csvData = $state<string[][]>([]);
+  let csvHeaders = $state<string[]>([]);
+
+  function parseCSV(text: string, delimiter = ","): { headers: string[]; rows: string[][] } {
+    const lines = text.trim().split("\n");
+    if (lines.length === 0) return { headers: [], rows: [] };
+    
+    const parseRow = (line: string): string[] => {
+      const result: string[] = [];
+      let current = "";
+      let inQuotes = false;
+      
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            current += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (char === delimiter && !inQuotes) {
+          result.push(current.trim());
+          current = "";
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim());
+      return result;
+    };
+    
+    const headers = parseRow(lines[0]);
+    const rows = lines.slice(1).map(parseRow);
+    return { headers, rows };
   }
 
   function navigateTo(url: string, addToHistory = true) {
@@ -167,12 +210,32 @@
         iframeError = "";
         iframeKey++;
       }
+    } else if (detectedType === "csv") {
+      if (source !== lastSource) {
+        lastSource = source;
+        loading = true;
+        error = "";
+        fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(source)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.error) {
+              error = data.error;
+            } else {
+              const delimiter = source.endsWith(".tsv") ? "\t" : ",";
+              const parsed = parseCSV(data.content, delimiter);
+              csvHeaders = parsed.headers;
+              csvData = parsed.rows;
+            }
+          })
+          .catch(() => { error = "Failed to load file"; })
+          .finally(() => { loading = false; });
+      }
     } else if (detectedType === "markdown" || detectedType === "code" || detectedType === "file") {
       if (source !== lastSource) {
         lastSource = source;
         loadFile(source);
       }
-    } else if (detectedType === "image" || detectedType === "pdf") {
+    } else if (detectedType === "image" || detectedType === "pdf" || detectedType === "audio" || detectedType === "video") {
       content = source;
       lastSource = source;
     }
@@ -236,6 +299,12 @@
             <svg class="w-3.5 h-3.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
           {:else if detectedType === "image"}
             <svg class="w-3.5 h-3.5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+          {:else if detectedType === "audio"}
+            <svg class="w-3.5 h-3.5 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg>
+          {:else if detectedType === "video"}
+            <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+          {:else if detectedType === "csv"}
+            <svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
           {:else if detectedType === "markdown"}
             <svg class="w-3.5 h-3.5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
           {:else}
@@ -338,6 +407,67 @@
     {:else if detectedType === "image"}
       <div class="flex items-center justify-center h-full p-4 bg-[#f5f5f5]" style="background-image: url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2220%22><rect width=%2220%22 height=%2220%22 fill=%22%23f5f5f5%22/><rect width=%2210%22 height=%2210%22 fill=%22%23e5e5e5%22/><rect x=%2210%22 y=%2210%22 width=%2210%22 height=%2210%22 fill=%22%23e5e5e5%22/></svg>')">
         <img src={`http://localhost:3001/api/fs/read?path=${encodeURIComponent(source)}&raw=true`} alt="Preview" class="max-w-full max-h-full object-contain shadow-lg rounded" />
+      </div>
+    {:else if detectedType === "audio"}
+      <div class="flex flex-col items-center justify-center h-full gap-5 p-8 bg-gray-50">
+        <div class="w-20 h-20 rounded-2xl bg-gray-100 border border-gray-200 flex items-center justify-center">
+          <svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg>
+        </div>
+        <div class="text-center">
+          <p class="text-sm font-medium text-gray-700 mb-0.5">{source.split('/').pop()}</p>
+          <p class="text-xs text-gray-400">Audio</p>
+        </div>
+        <audio 
+          controls 
+          src={`http://localhost:3001/api/fs/read?path=${encodeURIComponent(source)}&raw=true`}
+          class="w-full max-w-sm"
+        >
+          Your browser does not support the audio element.
+        </audio>
+      </div>
+    {:else if detectedType === "video"}
+      <div class="flex flex-col h-full bg-black">
+        <video 
+          controls 
+          src={`http://localhost:3001/api/fs/read?path=${encodeURIComponent(source)}&raw=true`}
+          class="flex-1 w-full h-full object-contain"
+        >
+          Your browser does not support the video element.
+        </video>
+        <div class="px-3 py-2 bg-gray-900">
+          <span class="text-xs text-gray-400 truncate">{source.split('/').pop()}</span>
+        </div>
+      </div>
+    {:else if detectedType === "csv"}
+      <div class="h-full overflow-auto">
+        <div class="p-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between sticky top-0">
+          <span class="text-xs text-gray-500">{csvData.length} rows × {csvHeaders.length} columns</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead class="bg-gray-50 sticky top-[41px]">
+              <tr>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b border-gray-200 bg-gray-100 w-12">#</th>
+                {#each csvHeaders as header, i}
+                  <th class="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200 bg-gray-50 whitespace-nowrap">{header || `Column ${i + 1}`}</th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              {#each csvData as row, rowIndex}
+                <tr class="hover:bg-blue-50/50 transition-colors {rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}">
+                  <td class="px-3 py-1.5 text-xs text-gray-400 border-b border-gray-100 font-mono">{rowIndex + 1}</td>
+                  {#each row as cell}
+                    <td class="px-3 py-1.5 text-gray-700 border-b border-gray-100 whitespace-nowrap max-w-xs truncate" title={cell}>{cell}</td>
+                  {/each}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        {#if csvData.length === 0 && !loading}
+          <div class="flex items-center justify-center h-32 text-gray-400 text-sm">No data</div>
+        {/if}
       </div>
     {:else if detectedType === "markdown"}
       <article class="prose prose-gray max-w-none p-6 prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:text-pink-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">

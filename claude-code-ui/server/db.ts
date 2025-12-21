@@ -164,9 +164,21 @@ export const projects = {
     run("UPDATE projects SET summary = ?, summary_updated_at = ? WHERE id = ?", [summary, updated_at, id]),
 };
 
+export interface SessionWithProject extends Session {
+  project_name: string;
+}
+
 export const sessions = {
   listByProject: (projectId: string) => 
     queryAll<Session>("SELECT * FROM sessions WHERE project_id = ? ORDER BY updated_at DESC", [projectId]),
+  listRecent: (limit: number = 10) =>
+    queryAll<SessionWithProject>(`
+      SELECT s.*, p.name as project_name 
+      FROM sessions s 
+      LEFT JOIN projects p ON s.project_id = p.id
+      ORDER BY s.updated_at DESC 
+      LIMIT ?
+    `, [limit]),
   get: (id: string) => queryOne<Session>("SELECT * FROM sessions WHERE id = ?", [id]),
   create: (id: string, project_id: string, title: string, created_at: number, updated_at: number) =>
     run("INSERT INTO sessions (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
