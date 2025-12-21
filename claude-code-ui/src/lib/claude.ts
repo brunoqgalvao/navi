@@ -32,11 +32,13 @@ export interface AssistantMessage {
   type: "assistant";
   sessionId: string;
   content: ContentBlock[];
+  parentToolUseId: string | null;
 }
 
 export interface UserMessage {
   type: "user";
   content: ContentBlock[];
+  parentToolUseId: string | null;
 }
 
 export interface ResultMessage {
@@ -60,6 +62,14 @@ export interface DoneMessage {
   type: "done";
 }
 
+export interface ToolProgressMessage {
+  type: "tool_progress";
+  toolUseId: string;
+  toolName: string;
+  parentToolUseId: string | null;
+  elapsedTimeSeconds: number;
+}
+
 export type ClaudeMessage =
   | SystemMessage
   | AssistantMessage
@@ -67,6 +77,7 @@ export type ClaudeMessage =
   | ResultMessage
   | ErrorMessage
   | DoneMessage
+  | ToolProgressMessage
   | { type: "connected" };
 
 export class ClaudeClient {
@@ -121,8 +132,10 @@ export class ClaudeClient {
 
   query(options: {
     prompt: string;
-    workingDirectory?: string;
+    projectId?: string;
     sessionId?: string;
+    claudeSessionId?: string;
+    workingDirectory?: string;
     allowedTools?: string[];
   }) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {

@@ -1,0 +1,24 @@
+@import "highlight.js/styles/github.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Refined, minimal scrollbar for light theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e5e7eb; /* gray-200 */
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d1d5db; /* gray-300 */
+}
+
+body {
+  @apply bg-white text-gray-900 antialiased;
+}
