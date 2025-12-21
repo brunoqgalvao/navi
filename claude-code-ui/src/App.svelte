@@ -218,6 +218,27 @@
     indexProjectFiles(project.path);
     loadProjectContext(project);
   }
+
+  async function goToChat(chat: Session) {
+    const project = sidebarProjects.find(p => p.id === chat.project_id);
+    if (!project) return;
+    
+    session.setProject(chat.project_id);
+    projectFileIndex = new Map();
+    projectContext = null;
+    projectContextError = null;
+    
+    try {
+      const sessionsList = await api.sessions.list(chat.project_id);
+      sidebarSessions = sessionsList.sort((a, b) => b.updated_at - a.updated_at);
+    } catch (e) {
+      console.error("Failed to load sessions:", e);
+    }
+    
+    selectSession({ ...chat, claude_session_id: chat.claude_session_id } as Session);
+    indexProjectFiles(project.path);
+    loadProjectContext(project);
+  }
   
   async function loadProjectContext(project: Project) {
     const cached = project.summary || project.description;
@@ -1055,10 +1076,7 @@ Respond in this exact JSON format only, no other text:
                      <div class="space-y-0.5">
                        {#each recentChats.slice(0, 5) as chat}
                          <button
-                           onclick={() => {
-                             session.setProject(chat.project_id);
-                             session.setSession(chat.id);
-                           }}
+                           onclick={() => goToChat(chat)}
                            class="w-full text-left px-2.5 py-2 rounded-md text-gray-600 hover:bg-gray-200/50 hover:text-gray-900 transition-colors"
                          >
                            <div class="text-[13px] font-medium truncate">{chat.title}</div>
@@ -1279,51 +1297,46 @@ Respond in this exact JSON format only, no other text:
 
     {#if !currentProject}
 
-        <div class="flex-1 flex flex-col items-center justify-center p-8 bg-gray-50/50 min-h-full">
+        <div class="flex-1 flex flex-col items-center justify-center p-8 bg-white min-h-full">
 
             <div class="w-full max-w-4xl mx-auto flex flex-col items-center">
-                <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-lg shadow-gray-200/50 border border-gray-100 mb-6 rotate-3 hover:rotate-0 transition-transform duration-300">
-                    <div class="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">C</div>
+                <div class="w-16 h-16 bg-white rounded-xl flex items-center justify-center shadow-sm border border-gray-200 mb-6">
+                    <div class="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center text-white font-serif font-bold text-xl">C</div>
                 </div>
 
-                <h1 class="text-3xl font-bold text-gray-900 mb-2 tracking-tight">Claude Code</h1>
-                <p class="text-base text-gray-500 mb-8 max-w-md text-center">Select a project to start coding or continue where you left off</p>
+                <h1 class="text-3xl font-serif text-gray-900 mb-3 tracking-tight">Claude Code</h1>
+                <p class="text-base text-gray-500 mb-10 max-w-md text-center font-light">Select a project to start coding or continue where you left off</p>
 
                 <button 
                     onclick={() => showNewProjectModal = true} 
-                    class="group relative inline-flex items-center justify-center gap-2 px-8 py-3.5 text-sm font-semibold text-white transition-all duration-200 bg-gray-900 rounded-full hover:bg-gray-800 hover:shadow-xl hover:shadow-gray-900/20 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 mb-16"
+                    class="group relative inline-flex items-center justify-center gap-2 px-6 py-3 text-[15px] font-medium text-white transition-all duration-200 bg-gray-900 rounded-lg hover:bg-gray-800 hover:shadow-lg hover:shadow-gray-900/10 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 mb-16"
                 >
-                    <svg class="w-5 h-5 transition-transform duration-300 group-hover:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg class="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                     </svg>
                     Create New Project
                 </button>
 
-                <div class="w-full grid grid-cols-1 md:grid-cols-2 gap-8 px-4">
+                <div class="w-full grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 px-4">
                   {#if sidebarProjects.length > 0}
                     <div class="flex flex-col gap-4">
-                      <div class="flex items-center gap-2 px-1">
-                          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest">Projects</h3>
-                          <div class="h-px bg-gray-200 flex-1"></div>
+                      <div class="flex items-center gap-3 pb-2 border-b border-gray-100">
+                          <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-widest">Projects</h3>
                       </div>
-                      <div class="space-y-3">
+                      <div class="space-y-2">
                         {#each sidebarProjects.slice(0, 5) as proj}
                           <button 
                             onclick={() => selectProject(proj)}
-                            class="group flex items-center w-full p-4 text-left bg-white border border-gray-100 rounded-xl transition-all duration-200 hover:border-gray-300 hover:shadow-md hover:-translate-y-0.5"
+                            class="group flex items-center w-full p-3 -mx-3 text-left rounded-lg transition-colors duration-200 hover:bg-gray-50"
                           >
-                            <div class="flex items-center justify-center w-10 h-10 mr-4 transition-colors bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-100 group-hover:text-blue-700 shadow-sm">
-                              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                            <div class="flex items-center justify-center w-8 h-8 mr-3 text-gray-400 bg-white border border-gray-200 rounded-md shadow-sm group-hover:border-gray-300 group-hover:text-gray-600 transition-all">
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                             </div>
                             <div class="flex-1 min-w-0">
-                              <h4 class="font-medium text-gray-900 truncate group-hover:text-blue-700 transition-colors">{proj.name}</h4>
-                              <p class="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
-                                <span>{proj.session_count || 0} chats</span>
-                                <span class="w-0.5 h-0.5 bg-gray-300 rounded-full"></span>
-                                <span>{relativeTime(proj.last_activity || proj.updated_at)}</span>
-                              </p>
+                              <h4 class="text-[15px] font-medium text-gray-900 truncate group-hover:text-gray-900">{proj.name}</h4>
+                              <p class="text-xs text-gray-500 mt-0.5">{relativeTime(proj.last_activity || proj.updated_at)}</p>
                             </div>
-                            <svg class="w-5 h-5 text-gray-300 transition-transform transform group-hover:translate-x-1 group-hover:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
+                            <svg class="w-4 h-4 text-gray-300 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
                           </button>
                         {/each}
                       </div>
@@ -1332,31 +1345,23 @@ Respond in this exact JSON format only, no other text:
 
                   {#if recentChats.length > 0}
                     <div class="flex flex-col gap-4">
-                      <div class="flex items-center gap-2 px-1">
-                          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest">Recent Chats</h3>
-                          <div class="h-px bg-gray-200 flex-1"></div>
+                      <div class="flex items-center gap-3 pb-2 border-b border-gray-100">
+                          <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-widest">Recent Chats</h3>
                       </div>
-                      <div class="space-y-3">
+                      <div class="space-y-2">
                         {#each recentChats.slice(0, 5) as chat}
                           <button 
-                            onclick={() => {
-                              session.setProject(chat.project_id);
-                              session.setSession(chat.id);
-                            }}
-                            class="group flex items-center w-full p-4 text-left bg-white border border-gray-100 rounded-xl transition-all duration-200 hover:border-gray-300 hover:shadow-md hover:-translate-y-0.5"
+                            onclick={() => goToChat(chat)}
+                            class="group flex items-center w-full p-3 -mx-3 text-left rounded-lg transition-colors duration-200 hover:bg-gray-50"
                           >
-                            <div class="flex items-center justify-center w-10 h-10 mr-4 transition-colors bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-emerald-100 group-hover:text-emerald-700 shadow-sm">
-                              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                            <div class="flex items-center justify-center w-8 h-8 mr-3 text-gray-400 bg-white border border-gray-200 rounded-md shadow-sm group-hover:border-gray-300 group-hover:text-gray-600 transition-all">
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                             </div>
                             <div class="flex-1 min-w-0">
-                              <h4 class="font-medium text-gray-900 truncate group-hover:text-emerald-700 transition-colors">{chat.title}</h4>
-                              <p class="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
-                                <span class="truncate max-w-[120px]">{chat.project_name}</span>
-                                <span class="w-0.5 h-0.5 bg-gray-300 rounded-full"></span>
-                                <span>{relativeTime(chat.updated_at)}</span>
-                              </p>
+                              <h4 class="text-[15px] font-medium text-gray-900 truncate group-hover:text-gray-900">{chat.title}</h4>
+                              <p class="text-xs text-gray-500 mt-0.5 truncate">{chat.project_name} · {relativeTime(chat.updated_at)}</p>
                             </div>
-                            <svg class="w-5 h-5 text-gray-300 transition-transform transform group-hover:translate-x-1 group-hover:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
+                            <svg class="w-4 h-4 text-gray-300 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
                           </button>
                         {/each}
                       </div>
@@ -1397,7 +1402,7 @@ Respond in this exact JSON format only, no other text:
 
                 <div class="flex flex-col items-center justify-center text-center min-h-[70vh] animate-in fade-in duration-500">
 
-                  <h2 class="text-2xl font-bold text-gray-900 mb-1">Start a conversation</h2>
+                  <h2 class="text-2xl font-serif font-medium text-gray-900 mb-1">Start a conversation</h2>
                   <p class="text-sm text-gray-500 mb-8">in <span class="font-medium text-gray-700">{currentProject.name}</span></p>
 
                   <!-- Centered Input Box -->
@@ -1740,7 +1745,7 @@ Respond in this exact JSON format only, no other text:
 
             <div class="px-6 py-5 border-b border-gray-100">
 
-                <h3 class="font-bold text-xl text-gray-900">Create New Project</h3>
+                <h3 class="font-serif text-2xl text-gray-900">Create New Project</h3>
 
             </div>
 
