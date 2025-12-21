@@ -40,6 +40,8 @@ export async function initDb() {
       model TEXT,
       total_cost_usd REAL DEFAULT 0,
       total_turns INTEGER DEFAULT 0,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -55,6 +57,19 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
   `);
+
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN input_tokens INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN summary TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN summary_updated_at INTEGER");
+  } catch {}
   
   saveDb();
   return db;
@@ -73,6 +88,8 @@ export interface Project {
   name: string;
   path: string;
   description: string | null;
+  summary: string | null;
+  summary_updated_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -85,6 +102,8 @@ export interface Session {
   model: string | null;
   total_cost_usd: number;
   total_turns: number;
+  input_tokens: number;
+  output_tokens: number;
   created_at: number;
   updated_at: number;
 }
@@ -121,6 +140,8 @@ function run(sql: string, params: any[] = []) {
 export interface ProjectWithStats extends Project {
   session_count: number;
   last_activity: number | null;
+  summary: string | null;
+  summary_updated_at: number | null;
 }
 
 export const projects = {
@@ -139,6 +160,8 @@ export const projects = {
     run("UPDATE projects SET name = ?, path = ?, description = ?, updated_at = ? WHERE id = ?",
         [name, path, description, updated_at, id]),
   delete: (id: string) => run("DELETE FROM projects WHERE id = ?", [id]),
+  updateSummary: (id: string, summary: string, updated_at: number) =>
+    run("UPDATE projects SET summary = ?, summary_updated_at = ? WHERE id = ?", [summary, updated_at, id]),
 };
 
 export const sessions = {
@@ -150,9 +173,9 @@ export const sessions = {
         [id, project_id, title, created_at, updated_at]),
   updateTitle: (title: string, updated_at: number, id: string) =>
     run("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", [title, updated_at, id]),
-  updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, updated_at: number, id: string) =>
-    run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = ?, total_turns = ?, updated_at = ? WHERE id = ?",
-        [claude_session_id, model, cost, turns, updated_at, id]),
+  updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, inputTokens: number, outputTokens: number, updated_at: number, id: string) =>
+    run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ?, updated_at = ? WHERE id = ?",
+        [claude_session_id, model, cost, turns, inputTokens, outputTokens, updated_at, id]),
   delete: (id: string) => run("DELETE FROM sessions WHERE id = ?", [id]),
   search: (projectId: string, query: string) =>
     queryAll<Session>(`

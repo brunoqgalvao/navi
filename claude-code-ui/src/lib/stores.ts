@@ -128,3 +128,28 @@ export const currentProject = derived(
   ([$projects, $current]) =>
     $current.projectId ? $projects.find((p) => p.id === $current.projectId) : null
 );
+
+const ONBOARDING_KEY = "claude-code-ui-onboarding-complete";
+
+function createOnboardingStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(ONBOARDING_KEY) : null;
+  const { subscribe, set } = writable(stored === "true");
+
+  return {
+    subscribe,
+    complete: () => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(ONBOARDING_KEY, "true");
+      }
+      set(true);
+    },
+    reset: () => {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(ONBOARDING_KEY);
+      }
+      set(false);
+    },
+  };
+}
+
+export const onboardingComplete = createOnboardingStore();

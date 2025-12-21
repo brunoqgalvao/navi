@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { messages, currentSession as session, isConnected, projects, availableModels } from "./lib/stores";
+  import { messages, currentSession as session, isConnected, projects, availableModels, onboardingComplete } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, type Project, type Session } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -35,6 +35,9 @@
   import FileBrowser from "./lib/FileBrowser.svelte";
   import Modal from "./lib/components/Modal.svelte";
   import SubagentBlock from "./lib/components/SubagentBlock.svelte";
+  import AudioRecorder from "./lib/components/AudioRecorder.svelte";
+  import Onboarding from "./lib/components/Onboarding.svelte";
+  import Settings from "./lib/components/Settings.svelte";
 
   function relativeTime(timestamp: number | null | undefined): string {
     if (!timestamp) return "Never";
@@ -70,15 +73,58 @@
   let editingSession = $state<Session | null>(null);
   let editSessionTitle = $state("");
   let messagesContainer: HTMLElement;
+  let modelSelection = $state("");
+  let lastSessionModel = $state("");
+  let showSettings = $state(false);
+  let sidebarCollapsed = $state(false);
+  let messageMenuId: string | null = $state(null);
+  let messageMenuPos = $state({ x: 0, y: 0 });
 
   let showPreview = $state(false);
   let previewSource = $state("");
   let showFileBrowser = $state(false);
-  let rightPanelMode = $state<"preview" | "files">("preview");
+  let showBrowser = $state(false);
+  let browserUrl = $state("http://localhost:3000");
+  let rightPanelMode = $state<"preview" | "files" | "browser">("preview");
   let projectFileIndex = $state<Map<string, string>>(new Map());
   let activeSubagents = $state<Map<string, { elapsed: number }>>(new Map());
+  
+  let rightPanelWidth = $state(600);
+  let isResizingRight = $state(false);
+  
+  let projectContext = $state<{ summary: string; suggestions: string[] } | null>(null);
+  let projectContextError = $state<string | null>(null);
+
+  function startResizingRight() {
+    isResizingRight = true;
+  }
+
+  function stopResizingRight() {
+    isResizingRight = false;
+  }
+
+  function handleMouseMove(e: MouseEvent) {
+    if (!isResizingRight) return;
+    const newWidth = window.innerWidth - e.clientX;
+    if (newWidth >= 400 && newWidth <= window.innerWidth - 400) {
+      rightPanelWidth = newWidth;
+    }
+  }
 
   let currentProject = $derived(sidebarProjects.find(p => p.id === $session.projectId));
+  let showOnboarding = $state(!$onboardingComplete);
+
+  $effect(() => {
+    if ($session.selectedModel !== lastSessionModel) {
+      lastSessionModel = $session.selectedModel;
+      modelSelection = $session.selectedModel;
+    }
+  });
+
+  function handleOnboardingComplete() {
+    onboardingComplete.complete();
+    showOnboarding = false;
+  }
 
   onMount(async () => {
     loadProjects();
@@ -95,6 +141,7 @@
 
     client.onMessage(handleMessage);
   });
+
 
   onDestroy(() => {
     client?.disconnect();
@@ -130,11 +177,19 @@
     }
   }
 
+  function handleModelSelect(model: string) {
+    modelSelection = model;
+    session.setSelectedModel(model);
+  }
+
   async function selectProject(project: Project) {
     session.setProject(project.id);
+    session.setSession(null);
     messages.clear();
     sidebarSessions = [];
     projectFileIndex = new Map();
+    projectContext = null;
+    projectContextError = null;
     
     try {
       const sessionsList = await api.sessions.list(project.id);
@@ -144,6 +199,50 @@
     }
     
     indexProjectFiles(project.path);
+    loadProjectContext(project);
+  }
+  
+  async function loadProjectContext(project: Project) {
+    const cached = project.summary || project.description;
+    const cacheAge = project.summary_updated_at ? Date.now() - project.summary_updated_at : Infinity;
+    const maxAge = 7 * 24 * 60 * 60 * 1000;
+    
+    if (cached && cacheAge < maxAge) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed.summary) {
+          projectContext = parsed;
+          return;
+        }
+      } catch {}
+    }
+    
+    projectContext = null;
+    projectContextError = null;
+    
+    api.ephemeral.chat({
+      prompt: `Analyze this project directory and provide:
+1. A brief summary (2-3 sentences) of what this project is about and its main technologies
+2. 3-4 suggested next steps or tasks the user might want to do
+
+Respond in this exact JSON format only, no other text:
+{"summary": "...", "suggestions": ["...", "...", "..."]}`,
+      projectPath: project.path,
+      useTools: true,
+      maxTokens: 500,
+    }).then(response => {
+      try {
+        const jsonMatch = response.result.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          projectContext = JSON.parse(jsonMatch[0]);
+          api.projects.generateSummary(project.id).catch(() => {});
+        }
+      } catch {
+        projectContext = { summary: response.result.slice(0, 500), suggestions: [] };
+      }
+    }).catch(e => {
+      console.error("Project context error:", e);
+    });
   }
 
   async function indexProjectFiles(rootPath: string, currentPath: string = rootPath) {
@@ -326,6 +425,8 @@
 
   async function selectSession(s: Session) {
     session.setSession(s.id, s.claude_session_id);
+    session.setCost(s.total_cost_usd || 0);
+    session.setUsage(s.input_tokens || 0, s.output_tokens || 0);
     messages.clear();
     
     try {
@@ -426,9 +527,12 @@
         break;
 
       case "result":
-        session.setCost(msg.costUsd);
+        session.setCost($session.costUsd + (msg.costUsd || 0));
         if (msg.usage) {
-          session.setUsage(msg.usage.input_tokens, msg.usage.output_tokens);
+          session.setUsage(
+            $session.inputTokens + (msg.usage.input_tokens || 0),
+            $session.outputTokens + (msg.usage.output_tokens || 0)
+          );
         }
         session.setLoading(false);
         if ($session.projectId) {
@@ -492,6 +596,7 @@
       projectId: $session.projectId || undefined,
       sessionId: $session.sessionId || undefined,
       claudeSessionId: $session.claudeSessionId || undefined,
+      model: $session.selectedModel || undefined,
     });
 
     scrollToBottom();
@@ -539,9 +644,20 @@
   }
 
   function openPreview(source: string) {
-    previewSource = source;
-    showPreview = true;
-    rightPanelMode = "preview";
+    const isUrl = source.startsWith("http://") || source.startsWith("https://") || source.startsWith("localhost") || source.match(/^:\d+/);
+    if (isUrl) {
+      openBrowser(source);
+    } else {
+      previewSource = source;
+      showPreview = true;
+      rightPanelMode = "preview";
+    }
+  }
+
+  function openBrowser(url: string) {
+    browserUrl = url.startsWith(":") ? `http://localhost${url}` : url.startsWith("localhost") ? `http://${url}` : url;
+    showBrowser = true;
+    rightPanelMode = "browser";
   }
 
   function closePreview() {
@@ -572,12 +688,21 @@
   function closeRightPanel() {
     showFileBrowser = false;
     showPreview = false;
+    showBrowser = false;
     previewSource = "";
   }
 
   function renderMarkdown(content: string): string {
     const html = marked.parse(content) as string;
-    return linkifyCodePaths(html, currentProject?.path);
+    return linkifyUrls(linkifyCodePaths(html, currentProject?.path));
+  }
+
+  function linkifyUrls(html: string): string {
+    const urlPattern = /(https?:\/\/localhost[:\d]*[^\s<"']*|https?:\/\/127\.0\.0\.1[:\d]*[^\s<"']*|(?<![\/\w])localhost:\d+[^\s<"']*|(?<![\/\w])127\.0\.0\.1:\d+[^\s<"']*)/g;
+    return html.replace(urlPattern, (url) => {
+      const fullUrl = url.startsWith("http") ? url : `http://${url}`;
+      return `<a href="#" class="preview-link" data-url="${escapeHtml(fullUrl)}">${url}</a>`;
+    });
   }
 
   function linkifyCodePaths(html: string, projectPath: string | undefined): string {
@@ -614,33 +739,99 @@
       if (path) {
         openPreview(path);
       }
+    } else if (target.classList.contains("preview-link")) {
+      e.preventDefault();
+      const url = target.dataset.url;
+      if (url) {
+        openPreview(url);
+      }
     }
   }
+
+  function showMessageMenu(e: MouseEvent, msgId: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    messageMenuId = msgId;
+    messageMenuPos = { x: e.clientX, y: e.clientY };
+  }
+
+  function closeMessageMenu() {
+    messageMenuId = null;
+  }
+
+  function copyMessageContent(msgId: string) {
+    const msg = $messages.find(m => m.id === msgId);
+    if (msg) {
+      const text = formatContent(msg.content);
+      navigator.clipboard.writeText(text);
+    }
+    closeMessageMenu();
+  }
+
+  function editAsNewMessage(msgId: string) {
+    const msg = $messages.find(m => m.id === msgId);
+    if (msg && msg.role === "user") {
+      inputText = formatContent(msg.content);
+    }
+    closeMessageMenu();
+  }
+
+  async function forkFromMessage(msgId: string) {
+    if (!$session.sessionId) return;
+    
+    try {
+      const forkedSession = await api.sessions.fork($session.sessionId, { fromMessageId: msgId });
+      sidebarSessions = [forkedSession, ...sidebarSessions];
+      selectSession(forkedSession);
+    } catch (e) {
+      console.error("Failed to fork session:", e);
+    }
+    closeMessageMenu();
+  }
 </script>
+
+<svelte:window onmousemove={handleMouseMove} onmouseup={stopResizingRight} />
+
+{#if showOnboarding}
+  <Onboarding onComplete={handleOnboardingComplete} />
+{/if}
 
 <div class="flex h-screen bg-white text-gray-900 font-sans overflow-hidden selection:bg-gray-100 selection:text-gray-900">
 
   <!-- Sidebar -->
 
-  <aside class="w-72 bg-gray-50/50 border-r border-gray-200 flex flex-col hidden md:flex shrink-0">
+  <aside class={`${sidebarCollapsed ? 'w-14' : 'w-72'} bg-gray-50/50 border-r border-gray-200 flex flex-col hidden md:flex shrink-0 transition-all duration-200`}>
 
     <!-- Header -->
 
-    <div class="h-14 px-4 border-b border-gray-100 flex items-center justify-between">
+    <div class="h-14 px-2 border-b border-gray-100 flex items-center justify-between">
 
-        <div class="flex items-center gap-2.5">
+        {#if sidebarCollapsed}
+          <button onclick={() => sidebarCollapsed = false} class="w-10 h-10 mx-auto flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all" title="Expand sidebar">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
+          </button>
+        {:else}
+          <div class="flex items-center gap-2.5 px-2">
 
-            <div class="w-6 h-6 rounded bg-gray-900 flex items-center justify-center font-bold text-white text-xs">C</div>
+              <div class="w-6 h-6 rounded bg-gray-900 flex items-center justify-center font-bold text-white text-xs">C</div>
 
-            <span class="font-medium text-sm tracking-tight text-gray-900">Claude Code</span>
+              <span class="font-medium text-sm tracking-tight text-gray-900">Claude Code</span>
 
-        </div>
+          </div>
 
-        <button onclick={() => showNewProjectModal = true} class="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all duration-200" title="New Project">
+          <div class="flex items-center gap-0.5">
+            {#if currentProject}
+            <button onclick={createNewChat} class="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all duration-200" title="New Chat">
 
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"></path></svg>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"></path></svg>
 
-        </button>
+            </button>
+            {/if}
+            <button onclick={() => sidebarCollapsed = true} class="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all duration-200" title="Collapse sidebar">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
+            </button>
+          </div>
+        {/if}
 
     </div>
 
@@ -650,11 +841,36 @@
 
     <div class="flex-1 overflow-y-auto min-h-0 flex flex-col py-2">
 
-        {#if !currentProject}
+        {#if sidebarCollapsed}
+          <!-- Collapsed view: minimal icons -->
+          <div class="flex flex-col items-center gap-1 px-2">
+            <button 
+              onclick={() => sidebarCollapsed = false}
+              class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all"
+              title="Projects"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+            </button>
+            {#if currentProject}
+              <button 
+                onclick={createNewChat}
+                class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all"
+                title="New chat"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"></path></svg>
+              </button>
+            {/if}
+          </div>
+        {:else if !currentProject}
 
              <div class="px-3">
 
-                 <h3 class="px-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-2">Projects</h3>
+                 <div class="flex items-center justify-between mb-2 mt-2 px-2">
+                   <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Projects</h3>
+                   <button onclick={() => showNewProjectModal = true} class="text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-0.5 rounded transition-colors border border-gray-200">
+                      + New
+                   </button>
+                 </div>
 
                  {#if sidebarProjects.length === 0}
 
@@ -818,17 +1034,19 @@
 
     <!-- Footer Stats -->
 
-    <div class="px-4 py-3 border-t border-gray-200 bg-gray-50/50 space-y-2">
+    <div class={`${sidebarCollapsed ? 'px-2' : 'px-4'} py-3 border-t border-gray-200 bg-gray-50/50 space-y-2`}>
 
       <!-- Model Selector -->
-      <ModelSelector 
-        models={$availableModels} 
-        bind:selectedModel={$session.selectedModel}
-        onSelect={(m) => session.setSelectedModel(m)}
-      />
+      {#if $session.sessionId && !sidebarCollapsed}
+        <ModelSelector 
+          models={$availableModels} 
+          bind:selectedModel={modelSelection}
+          onSelect={handleModelSelect}
+        />
+      {/if}
 
       <!-- Context Usage -->
-      {#if $session.inputTokens > 0}
+      {#if $session.inputTokens > 0 && !sidebarCollapsed}
         {@const contextWindow = 200000}
         {@const usagePercent = Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100))}
         <div class="space-y-1">
@@ -845,6 +1063,14 @@
         </div>
       {/if}
 
+      {#if sidebarCollapsed}
+        <div class="flex flex-col items-center gap-2">
+          <span class={`w-2 h-2 rounded-full ${$isConnected ? "bg-emerald-500" : "bg-red-400"}`} title={$isConnected ? "Online" : "Offline"}></span>
+          <button onclick={() => showSettings = true} class="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Settings">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+          </button>
+        </div>
+      {:else}
       <div class="flex items-center justify-between text-[11px]">
 
         <div class="flex items-center gap-1.5 text-gray-500">
@@ -855,13 +1081,17 @@
 
         </div>
 
-        {#if $session.costUsd > 0}
-
-            <span class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200">${$session.costUsd.toFixed(4)}</span>
-
-        {/if}
+        <div class="flex items-center gap-2">
+          {#if $session.costUsd > 0}
+              <span class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200">${$session.costUsd.toFixed(4)}</span>
+          {/if}
+          <button onclick={() => showSettings = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Settings">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+          </button>
+        </div>
 
       </div>
+      {/if}
 
     </div>
 
@@ -873,7 +1103,7 @@
   <div class="flex-1 flex min-w-0 min-h-0 overflow-hidden">
 
   <!-- Chat Area -->
-  <main class={`flex-1 flex flex-col min-w-0 min-h-0 bg-white relative overflow-hidden ${showPreview || showFileBrowser ? 'w-1/2' : ''}`}>
+  <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-white relative overflow-hidden">
 
     <!-- Toolbar Buttons -->
     {#if currentProject}
@@ -886,11 +1116,11 @@
         <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
       </button>
       <button 
-        onclick={handlePreviewInput}
-        class={`p-2 border rounded-lg shadow-sm transition-all group ${showPreview && rightPanelMode === 'preview' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
-        title="Open Preview"
+        onclick={() => { showBrowser = true; rightPanelMode = 'browser'; }}
+        class={`p-2 border rounded-lg shadow-sm transition-all group ${showBrowser && rightPanelMode === 'browser' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
+        title="Open Browser"
       >
-        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
       </button>
     </div>
     {/if}
@@ -907,13 +1137,36 @@
 
             <h1 class="text-xl font-semibold text-gray-900 mb-2">Claude Code</h1>
 
-            <p class="text-sm text-gray-500 max-w-sm mb-8 leading-relaxed">Select a project from the sidebar or create a new one to begin your session.</p>
+            <p class="text-sm text-gray-500 max-w-sm mb-6 leading-relaxed">Select a project to begin your session.</p>
 
-            <button onclick={() => showNewProjectModal = true} class="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium shadow-sm transition-all hover:shadow-md">
+            <button onclick={() => showNewProjectModal = true} class="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium shadow-sm transition-all hover:shadow-md mb-8">
 
                 Create New Project
 
             </button>
+
+            {#if sidebarProjects.length > 0}
+              <div class="w-full max-w-md">
+                <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Recent Projects</h3>
+                <div class="space-y-2">
+                  {#each sidebarProjects.slice(0, 5) as proj}
+                    <button 
+                      onclick={() => selectProject(proj)}
+                      class="w-full text-left px-4 py-3 rounded-lg bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all group"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                        <div class="flex-1 min-w-0">
+                          <div class="text-sm font-medium text-gray-900 truncate">{proj.name}</div>
+                          <div class="text-[11px] text-gray-400">{proj.session_count || 0} chats · {relativeTime(proj.last_activity || proj.updated_at)}</div>
+                        </div>
+                        <svg class="w-4 h-4 text-gray-300 group-hover:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
+                      </div>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
 
         </div>
 
@@ -943,20 +1196,67 @@
 
         <div class="max-w-3xl mx-auto w-full md:pt-10 space-y-8 pb-64">
 
-            {#if $messages.length === 0}
+            {#if $messages.length === 0 && !$session.sessionId}
 
-                <div class="flex flex-col items-center justify-center text-gray-400 space-y-4 py-20 animate-in fade-in duration-500">
+                <div class="flex flex-col items-center justify-center text-center min-h-[60vh] animate-in fade-in duration-500">
 
-                <div class="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
+                  <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-gray-100 to-gray-50 border border-gray-200 flex items-center justify-center mb-5 shadow-sm">
+                    <svg class="w-7 h-7 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                  </div>
 
+                  <h2 class="text-lg font-semibold text-gray-900 mb-1">Start a conversation</h2>
+                  <p class="text-sm text-gray-500 mb-6">in <span class="font-medium text-gray-700">{currentProject.name}</span></p>
+
+                  {#if projectContext}
+                    <div class="w-full max-w-md space-y-4 mb-6 text-left">
+                      <div class="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+                        <div class="flex items-start gap-3">
+                          <div class="p-1.5 bg-blue-100 rounded-lg shrink-0">
+                            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                          </div>
+                          <div>
+                            <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">About this project</h3>
+                            <p class="text-sm text-gray-700 leading-relaxed">{projectContext.summary}</p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {#if projectContext.suggestions && projectContext.suggestions.length > 0}
+                        <div class="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+                          <div class="flex items-start gap-3">
+                            <div class="p-1.5 bg-emerald-100 rounded-lg shrink-0">
+                              <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                            </div>
+                            <div class="flex-1">
+                              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Suggested tasks</h3>
+                              <div class="space-y-1.5">
+                                {#each projectContext.suggestions as suggestion}
+                                  <button 
+                                    onclick={() => { inputText = suggestion; }}
+                                    class="w-full text-left text-sm text-gray-600 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors border border-transparent hover:border-gray-200"
+                                  >
+                                    {suggestion}
+                                  </button>
+                                {/each}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      {/if}
+                    </div>
+                  {/if}
+
+                  <p class="text-xs text-gray-400 max-w-sm">{projectContext ? "Click a suggestion or type your own message below." : "Type a message below to start chatting with Claude."}</p>
+
+                </div>
+
+            {:else if $messages.length === 0}
+                <div class="flex flex-col items-center justify-center text-gray-400 space-y-4 min-h-[40vh] animate-in fade-in duration-500">
+                  <div class="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
                     <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
-
+                  </div>
+                  <p class="text-sm">Continue the conversation...</p>
                 </div>
-
-                <p class="text-sm">Start a conversation in <span class="font-medium text-gray-600">{currentProject.name}</span></p>
-
-                </div>
-
             {/if}
 
 
@@ -969,10 +1269,21 @@
 
                    {#if msg.role === 'user'}
 
-                        <div class="bg-gray-100 text-gray-900 px-5 py-3 rounded-2xl rounded-tr-sm max-w-[85%] text-[15px] leading-relaxed">
-
+                        <div class="relative max-w-[85%]">
+                          <div class="bg-gray-100 text-gray-900 px-5 py-3 rounded-2xl rounded-tr-sm text-[15px] leading-relaxed">
                             <div class="whitespace-pre-wrap break-words">{formatContent(msg.content)}</div>
-
+                          </div>
+                          <div class="absolute -top-8 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5">
+                            <button onclick={() => copyMessageContent(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Copy">
+                              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                            </button>
+                            <button onclick={() => editAsNewMessage(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Edit as new message">
+                              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                            </button>
+                            <button onclick={() => forkFromMessage(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Fork from here">
+                              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                            </button>
+                          </div>
                         </div>
 
                         <span class="text-[10px] text-gray-400 mt-1.5 mr-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -999,13 +1310,22 @@
 
                    {:else}
 
-                        <div class="flex gap-4 w-full pr-4 md:pr-0">
+                        <div class="flex gap-4 w-full pr-4 md:pr-0 relative">
 
                              <div class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex-shrink-0 flex items-center justify-center shadow-sm text-gray-900 font-bold text-xs select-none">C</div>
 
                              <!-- svelte-ignore a11y_click_events_have_key_events -->
                              <!-- svelte-ignore a11y_no_static_element_interactions -->
-                             <div class="flex-1 min-w-0 space-y-2" onclick={handleMessageClick}>
+                             <div class="flex-1 min-w-0 space-y-2 relative" onclick={handleMessageClick}>
+                                 
+                                 <div class="absolute -top-6 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5">
+                                   <button onclick={() => copyMessageContent(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Copy">
+                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                   </button>
+                                   <button onclick={() => forkFromMessage(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Fork from here">
+                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                                   </button>
+                                 </div>
 
                                  <div class="text-[15px] leading-7 text-gray-800 markdown-body">
 
@@ -1115,7 +1435,7 @@
 
                         disabled={!$isConnected || $session.isLoading}
 
-                        class="w-full bg-transparent text-gray-900 placeholder-gray-400 border-none rounded-xl pl-4 pr-12 py-3.5 focus:outline-none focus:ring-0 resize-none max-h-48 min-h-[56px] text-[15px] disabled:opacity-50"
+                        class="w-full bg-transparent text-gray-900 placeholder-gray-400 border-none rounded-xl pl-4 pr-24 py-3.5 focus:outline-none focus:ring-0 resize-none max-h-48 min-h-[56px] text-[15px] disabled:opacity-50"
 
                         rows="1"
 
@@ -1123,19 +1443,25 @@
 
                     
 
-                    <button
+                    <div class="absolute right-2 bottom-2 flex items-center gap-1">
+                      <AudioRecorder 
+                        onTranscript={(text) => { inputText = inputText ? inputText + " " + text : text; }}
+                        disabled={!$isConnected || $session.isLoading}
+                      />
+                      <button
 
-                        onclick={sendMessage}
+                          onclick={sendMessage}
 
-                        disabled={!$isConnected || $session.isLoading || !inputText.trim()}
+                          disabled={!$isConnected || $session.isLoading || !inputText.trim()}
 
-                        class="absolute right-2 bottom-2 p-1.5 text-gray-400 bg-transparent rounded-lg hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                          class="p-1.5 text-gray-400 bg-transparent rounded-lg hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
 
-                    >
+                      >
 
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+                          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
 
-                    </button>
+                      </button>
+                    </div>
 
                 </div>
 
@@ -1153,9 +1479,18 @@
 
   </main>
 
-  <!-- Right Panel (File Browser / Preview) -->
-  {#if showFileBrowser || showPreview}
-    <div class="w-1/2 min-w-[400px] max-w-[800px] flex flex-col border-l border-gray-200">
+  <!-- Right Panel (File Browser / Preview / Browser) -->
+  {#if showFileBrowser || showPreview || showBrowser}
+    <!-- Resizer Handle -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="w-1 bg-transparent hover:bg-blue-500 cursor-col-resize z-30 transition-colors flex flex-col justify-center items-center group relative -mr-[1px]"
+      onmousedown={startResizingRight}
+    >
+      <div class="w-[1px] h-full bg-gray-200 group-hover:bg-transparent"></div>
+    </div>
+
+    <div style="width: {rightPanelWidth}px" class="flex flex-col border-l border-gray-200 min-w-[400px]">
       <!-- Panel Header with Tabs -->
       <div class="h-10 px-2 border-b border-gray-200 flex items-center gap-1 bg-gray-50/50 shrink-0">
         <button
@@ -1170,6 +1505,13 @@
         >
           Preview
         </button>
+        <button
+          onclick={() => { rightPanelMode = "browser"; showBrowser = true; }}
+          class={`px-3 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${rightPanelMode === 'browser' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
+        >
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+          Browser
+        </button>
         <div class="flex-1"></div>
         <button onclick={closeRightPanel} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Close">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -1177,11 +1519,13 @@
       </div>
       
       <!-- Panel Content -->
-      <div class="flex-1 overflow-hidden">
+      <div class="flex-1 overflow-hidden flex flex-col">
         {#if rightPanelMode === "files" && currentProject}
           <FileBrowser rootPath={currentProject.path} onPreview={handleFileSelect} />
         {:else if rightPanelMode === "preview"}
           <Preview source={previewSource} />
+        {:else if rightPanelMode === "browser"}
+          <Preview source={browserUrl} type="url" onUrlChange={(url) => browserUrl = url} />
         {/if}
       </div>
     </div>
@@ -1224,10 +1568,13 @@
                 {#if projectCreationMode === "quick"}
                     <div class="space-y-1.5">
                         <label class="text-xs font-medium text-gray-700">Project Name</label>
+                        <!-- svelte-ignore a11y_autofocus -->
                         <input 
                             type="text" 
                             bind:value={newProjectQuickName}
                             placeholder="e.g. my-new-app" 
+                            onkeydown={(e) => e.key === "Enter" && createProject()}
+                            autofocus
                             class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none focus:ring-0 transition-colors placeholder:text-gray-400"
                         />
                     </div>
@@ -1359,6 +1706,8 @@
       <button onclick={updateSession} class="px-4 py-2 text-sm font-medium bg-gray-900 hover:bg-black text-white rounded-lg shadow-sm transition-all active:scale-95">Save</button>
     {/snippet}
   </Modal>
+
+  <Settings open={showSettings} onClose={() => showSettings = false} />
 
 </div>
 
@@ -1503,6 +1852,34 @@
   :global(.file-link::before) {
     content: "📄 ";
     font-size: 0.85em;
+  }
+
+  :global(.preview-link) {
+    color: #2563eb;
+    cursor: pointer;
+    background-color: #eff6ff;
+    padding: 0.15em 0.4em;
+    border-radius: 0.25em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.9em;
+    transition: all 0.15s;
+    border: 1px solid transparent;
+    text-decoration: none;
+  }
+
+  :global(.preview-link:hover) {
+    background-color: #dbeafe;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+  }
+
+  :global(.preview-link::before) {
+    content: "🌐 ";
+    font-size: 0.85em;
+  }
+
+  :global(.preview-link::after) {
+    content: none !important;
   }
 
 </style>

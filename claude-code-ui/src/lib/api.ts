@@ -5,6 +5,8 @@ export interface Project {
   name: string;
   path: string;
   description: string | null;
+  summary?: string | null;
+  summary_updated_at?: number | null;
   created_at: number;
   updated_at: number;
   session_count?: number;
@@ -19,6 +21,8 @@ export interface Session {
   model: string | null;
   total_cost_usd: number;
   total_turns: number;
+  input_tokens: number;
+  output_tokens: number;
   created_at: number;
   updated_at: number;
   project_name?: string;
@@ -63,6 +67,10 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ success: boolean }>(`/projects/${id}`, { method: "DELETE" }),
+    getSummary: (id: string) =>
+      request<{ summary: string | null; summaryUpdatedAt: number | null }>(`/projects/${id}/summary`),
+    generateSummary: (id: string) =>
+      request<{ summary: string; summaryUpdatedAt: number }>(`/projects/${id}/summary`, { method: "POST" }),
   },
 
   sessions: {
@@ -120,10 +128,95 @@ export const api = {
   },
 
   config: {
-    get: () => request<{ defaultProjectsDir: string }>("/config"),
+    get: () => request<{ defaultProjectsDir: string; hasOpenAIKey: boolean; openAIKeyPreview: string | null; autoTitleEnabled: boolean }>("/config"),
+    setOpenAIKey: (apiKey: string) =>
+      request<{ success: boolean }>("/config/openai-key", {
+        method: "POST",
+        body: JSON.stringify({ apiKey }),
+      }),
+    setAutoTitle: (enabled: boolean) =>
+      request<{ success: boolean; enabled: boolean }>("/config/auto-title", {
+        method: "POST",
+        body: JSON.stringify({ enabled }),
+      }),
   },
 
   models: {
     list: () => request<Array<{ value: string; displayName: string; description: string }>>("/models"),
+  },
+
+  auth: {
+    status: () =>
+      request<{
+        claudeInstalled: boolean;
+        claudePath: string;
+        authenticated: boolean;
+        authMethod: "oauth" | "api_key" | null;
+        hasApiKey: boolean;
+      }>("/auth/status"),
+    setApiKey: (apiKey: string) =>
+      request<{ success: boolean }>("/auth/api-key", {
+        method: "POST",
+        body: JSON.stringify({ apiKey }),
+      }),
+    login: () =>
+      request<{ success: boolean; error?: string; requiresTerminal?: boolean }>("/auth/login", {
+        method: "POST",
+      }),
+  },
+
+  async transcribe(audioBlob: Blob): Promise<{ text: string }> {
+    const formData = new FormData();
+    formData.append("audio", audioBlob, "recording.webm");
+    
+    const res = await fetch(`${API_BASE}/transcribe`, {
+      method: "POST",
+      body: formData,
+    });
+    
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Transcription failed: ${res.status}`);
+    }
+    
+    return res.json();
+  },
+
+  async saveAudio(audioBlob: Blob): Promise<{ path: string }> {
+    const formData = new FormData();
+    formData.append("audio", audioBlob, "recording.webm");
+    
+    const res = await fetch(`${API_BASE}/audio/save`, {
+      method: "POST",
+      body: formData,
+    });
+    
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to save audio: ${res.status}`);
+    }
+    
+    return res.json();
+  },
+
+  ephemeral: {
+    chat: (options: {
+      prompt: string;
+      systemPrompt?: string;
+      model?: string;
+      maxTokens?: number;
+      projectPath?: string;
+      useTools?: boolean;
+      provider?: "auto" | "openai" | "anthropic" | "sdk";
+    }) =>
+      request<{
+        result: string;
+        usage: { input_tokens: number; output_tokens: number };
+        costUsd: number;
+        provider: string;
+      }>("/ephemeral", {
+        method: "POST",
+        body: JSON.stringify(options),
+      }),
   },
 };

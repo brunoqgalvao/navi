@@ -137,6 +137,7 @@ export class ClaudeClient {
     claudeSessionId?: string;
     workingDirectory?: string;
     allowedTools?: string[];
+    model?: string;
   }) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected to server");

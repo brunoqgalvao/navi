@@ -25,6 +25,7 @@ interface ClientMessage {
   sessionId?: string;
   claudeSessionId?: string;
   allowedTools?: string[];
+  model?: string;
 }
 
 const server = Bun.serve({
@@ -316,7 +317,69 @@ const server = Bun.serve({
       const { homedir } = await import("os");
       const { join } = await import("path");
       const defaultProjectsDir = join(homedir(), "claude-projects");
-      return json({ defaultProjectsDir });
+      const isTestMode = process.env.DEV_ENV === "TEST";
+      const openAIKey = isTestMode ? null : process.env.OPENAI_API_KEY;
+      const hasOpenAIKey = !!openAIKey;
+      const openAIKeyPreview = openAIKey ? `${openAIKey.slice(0, 7)}...${openAIKey.slice(-4)}` : null;
+      const autoTitleEnabled = process.env.AUTO_TITLE !== "false";
+      return json({ defaultProjectsDir, hasOpenAIKey, openAIKeyPreview, autoTitleEnabled });
+    }
+
+    if (url.pathname === "/api/config/auto-title" && method === "POST") {
+      const body = await req.json();
+      const enabled = body.enabled;
+      
+      process.env.AUTO_TITLE = enabled ? "true" : "false";
+
+      const { homedir } = await import("os");
+      const { join } = await import("path");
+      const fs = await import("fs/promises");
+      
+      const configDir = join(homedir(), ".claude-code-ui");
+      await fs.mkdir(configDir, { recursive: true });
+      
+      const envPath = join(configDir, ".env");
+      let envContent = "";
+      try {
+        envContent = await fs.readFile(envPath, "utf-8");
+      } catch {}
+      
+      if (envContent.includes("AUTO_TITLE=")) {
+        envContent = envContent.replace(/AUTO_TITLE=.*/g, `AUTO_TITLE=${enabled}`);
+      } else {
+        envContent += `AUTO_TITLE=${enabled}\n`;
+      }
+      
+      await fs.writeFile(envPath, envContent);
+      
+      return json({ success: true, enabled });
+    }
+
+    if (url.pathname === "/api/config/openai-key" && method === "POST") {
+      const body = await req.json();
+      const apiKey = body.apiKey;
+      
+      if (!apiKey || typeof apiKey !== "string") {
+        return json({ error: "API key required" }, 400);
+      }
+      
+      if (!apiKey.startsWith("sk-")) {
+        return json({ error: "Invalid API key format" }, 400);
+      }
+
+      process.env.OPENAI_API_KEY = apiKey;
+
+      const { homedir } = await import("os");
+      const { join } = await import("path");
+      const fs = await import("fs/promises");
+      
+      const configDir = join(homedir(), ".claude-code-ui");
+      await fs.mkdir(configDir, { recursive: true });
+      
+      const envPath = join(configDir, ".env");
+      await fs.writeFile(envPath, `OPENAI_API_KEY=${apiKey}\n`);
+      
+      return json({ success: true });
     }
 
     if (url.pathname === "/api/models") {
@@ -330,6 +393,403 @@ const server = Bun.serve({
         return json(models);
       } catch (e) {
         return json({ error: "Failed to fetch models" }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/auth/status") {
+      const isTestMode = process.env.DEV_ENV === "TEST";
+      
+      if (isTestMode) {
+        return json({
+          claudeInstalled: false,
+          claudePath: "",
+          authenticated: false,
+          authMethod: null,
+          hasApiKey: false,
+        });
+      }
+      
+      const { exec } = await import("child_process");
+      const { promisify } = await import("util");
+      const execAsync = promisify(exec);
+      
+      let claudeInstalled = false;
+      let claudePath = "";
+      
+      const pathsToTry = [
+        "which claude",
+        "command -v claude",
+      ];
+      
+      for (const cmd of pathsToTry) {
+        try {
+          const { stdout } = await execAsync(cmd);
+          claudePath = stdout.trim();
+          if (claudePath) {
+            claudeInstalled = true;
+            break;
+          }
+        } catch {}
+      }
+
+      let authenticated = false;
+      let authMethod: "oauth" | "api_key" | null = null;
+      
+      try {
+        const q = query({
+          prompt: "",
+          options: { cwd: process.cwd() },
+        });
+        const models = await q.supportedModels();
+        await q.interrupt();
+        
+        if (models && models.length > 0) {
+          authenticated = true;
+          authMethod = process.env.ANTHROPIC_API_KEY ? "api_key" : "oauth";
+          claudeInstalled = true;
+        }
+      } catch (e: any) {
+        authenticated = false;
+        if (process.env.ANTHROPIC_API_KEY) {
+          authMethod = "api_key";
+        }
+      }
+
+      return json({
+        claudeInstalled,
+        claudePath,
+        authenticated,
+        authMethod,
+        hasApiKey: !!process.env.ANTHROPIC_API_KEY,
+      });
+    }
+
+    if (url.pathname === "/api/auth/api-key" && method === "POST") {
+      const body = await req.json();
+      const apiKey = body.apiKey;
+      
+      if (!apiKey || typeof apiKey !== "string") {
+        return json({ error: "API key required" }, 400);
+      }
+      
+      if (!apiKey.startsWith("sk-ant-")) {
+        return json({ error: "Invalid Anthropic API key format. Key should start with 'sk-ant-'" }, 400);
+      }
+
+      process.env.ANTHROPIC_API_KEY = apiKey;
+
+      const { homedir } = await import("os");
+      const { join } = await import("path");
+      const fs = await import("fs/promises");
+      
+      const configDir = join(homedir(), ".claude-code-ui");
+      await fs.mkdir(configDir, { recursive: true });
+      
+      const envPath = join(configDir, ".env");
+      let envContent = "";
+      try {
+        envContent = await fs.readFile(envPath, "utf-8");
+      } catch {}
+      
+      if (envContent.includes("ANTHROPIC_API_KEY=")) {
+        envContent = envContent.replace(/ANTHROPIC_API_KEY=.*/g, `ANTHROPIC_API_KEY=${apiKey}`);
+      } else {
+        envContent += `ANTHROPIC_API_KEY=${apiKey}\n`;
+      }
+      
+      await fs.writeFile(envPath, envContent);
+      
+      return json({ success: true });
+    }
+
+    if (url.pathname === "/api/auth/login" && method === "POST") {
+      const { spawn } = await import("child_process");
+      
+      return new Promise((resolve) => {
+        const loginProcess = spawn("claude", ["login"], {
+          stdio: ["inherit", "pipe", "pipe"],
+        });
+
+        let output = "";
+        loginProcess.stdout?.on("data", (data) => {
+          output += data.toString();
+        });
+        loginProcess.stderr?.on("data", (data) => {
+          output += data.toString();
+        });
+
+        loginProcess.on("close", (code) => {
+          if (code === 0) {
+            resolve(json({ success: true, message: "Login successful" }));
+          } else {
+            resolve(json({ success: false, error: output || "Login failed" }, 400));
+          }
+        });
+
+        loginProcess.on("error", (err) => {
+          resolve(json({ success: false, error: err.message }, 500));
+        });
+
+        setTimeout(() => {
+          loginProcess.kill();
+          resolve(json({ 
+            success: false, 
+            error: "Login requires interactive terminal. Please run 'claude login' in your terminal.",
+            requiresTerminal: true 
+          }, 400));
+        }, 2000);
+      });
+    }
+
+    if (url.pathname === "/api/transcribe" && method === "POST") {
+      try {
+        const formData = await req.formData();
+        const audioFile = formData.get("audio") as File;
+        
+        if (!audioFile) {
+          return json({ error: "No audio file provided" }, 400);
+        }
+
+        const audioBuffer = await audioFile.arrayBuffer();
+        const audioBytes = new Uint8Array(audioBuffer);
+
+        const whisperApiKey = process.env.OPENAI_API_KEY;
+        if (!whisperApiKey) {
+          return json({ error: "OPENAI_API_KEY not configured" }, 500);
+        }
+
+        const whisperFormData = new FormData();
+        whisperFormData.append("file", new Blob([audioBytes], { type: "audio/webm" }), "audio.webm");
+        whisperFormData.append("model", "whisper-1");
+        whisperFormData.append("response_format", "json");
+
+        const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${whisperApiKey}`,
+          },
+          body: whisperFormData,
+        });
+
+        if (!whisperRes.ok) {
+          const errorData = await whisperRes.json().catch(() => ({}));
+          console.error("Whisper API error:", errorData);
+          return json({ error: errorData.error?.message || "Transcription failed" }, whisperRes.status);
+        }
+
+        const result = await whisperRes.json();
+        return json({ text: result.text });
+      } catch (e) {
+        console.error("Transcription error:", e);
+        return json({ error: e instanceof Error ? e.message : "Transcription failed" }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/audio/save" && method === "POST") {
+      try {
+        const formData = await req.formData();
+        const audioFile = formData.get("audio") as File;
+        
+        if (!audioFile) {
+          return json({ error: "No audio file provided" }, 400);
+        }
+
+        const { homedir } = await import("os");
+        const { join } = await import("path");
+        const fs = await import("fs/promises");
+
+        const audioDir = join(homedir(), ".claude-code-ui", "audio-backups");
+        await fs.mkdir(audioDir, { recursive: true });
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const filename = `recording-${timestamp}.webm`;
+        const filepath = join(audioDir, filename);
+
+        const audioBuffer = await audioFile.arrayBuffer();
+        await fs.writeFile(filepath, new Uint8Array(audioBuffer));
+
+        console.log(`Audio backup saved: ${filepath}`);
+        return json({ path: filepath });
+      } catch (e) {
+        console.error("Audio save error:", e);
+        return json({ error: e instanceof Error ? e.message : "Failed to save audio" }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/ephemeral" && method === "POST") {
+      try {
+        const body = await req.json();
+        const { 
+          prompt, 
+          systemPrompt,
+          model = "claude-sonnet-4-20250514",
+          maxTokens = 1024,
+          projectPath,
+          useTools = false,
+          provider = "auto"
+        } = body;
+        
+        if (!prompt) {
+          return json({ error: "Prompt is required" }, 400);
+        }
+
+        let result = "";
+        let usage = { input_tokens: 0, output_tokens: 0 };
+        let costUsd = 0;
+
+        const effectiveProvider = provider === "auto" 
+          ? (process.env.OPENAI_API_KEY ? "openai" : "anthropic")
+          : provider;
+
+        if (effectiveProvider === "openai" && process.env.OPENAI_API_KEY && !useTools) {
+          const openaiModel = model.includes("haiku") ? "gpt-4o-mini" : "gpt-4o-mini";
+          const messages: any[] = [];
+          if (systemPrompt) {
+            messages.push({ role: "system", content: systemPrompt });
+          }
+          messages.push({ role: "user", content: prompt });
+
+          const res = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+            },
+            body: JSON.stringify({
+              model: openaiModel,
+              messages,
+              max_tokens: maxTokens,
+              temperature: 0.7,
+            }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error?.message || "OpenAI API error");
+          }
+
+          const data = await res.json();
+          result = data.choices?.[0]?.message?.content || "";
+          usage = {
+            input_tokens: data.usage?.prompt_tokens || 0,
+            output_tokens: data.usage?.completion_tokens || 0,
+          };
+          costUsd = (usage.input_tokens * 0.00015 + usage.output_tokens * 0.0006) / 1000;
+        } else if (process.env.ANTHROPIC_API_KEY && !useTools) {
+          const anthropicModel = model.includes("haiku") ? "claude-3-haiku-20240307" : "claude-3-haiku-20240307";
+          
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": process.env.ANTHROPIC_API_KEY,
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify({
+              model: anthropicModel,
+              max_tokens: maxTokens,
+              system: systemPrompt || undefined,
+              messages: [{ role: "user", content: prompt }],
+            }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error?.message || "Anthropic API error");
+          }
+
+          const data = await res.json();
+          result = data.content?.[0]?.text || "";
+          usage = {
+            input_tokens: data.usage?.input_tokens || 0,
+            output_tokens: data.usage?.output_tokens || 0,
+          };
+          costUsd = (usage.input_tokens * 0.00025 + usage.output_tokens * 0.00125) / 1000;
+        } else {
+          const q = query({
+            prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
+            options: {
+              cwd: projectPath || process.cwd(),
+              allowedTools: useTools ? ["Read", "Glob", "Grep", "Bash"] : [],
+              maxTurns: useTools ? 5 : 1,
+              model: model,
+            },
+          });
+
+          for await (const msg of q) {
+            if (msg.type === "assistant") {
+              const textBlock = msg.message.content.find((b: any) => b.type === "text");
+              if (textBlock) {
+                result = textBlock.text;
+              }
+            }
+            if (msg.type === "result") {
+              usage = msg.usage || usage;
+              costUsd = msg.total_cost_usd || 0;
+            }
+          }
+        }
+
+        return json({ 
+          result, 
+          usage,
+          costUsd,
+          provider: effectiveProvider,
+        });
+      } catch (e) {
+        console.error("Ephemeral chat error:", e);
+        return json({ error: e instanceof Error ? e.message : "Ephemeral chat failed" }, 500);
+      }
+    }
+
+    const summaryMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/summary$/);
+    if (summaryMatch) {
+      const projectId = summaryMatch[1];
+      const project = projects.get(projectId);
+      
+      if (!project) {
+        return json({ error: "Project not found" }, 404);
+      }
+
+      if (method === "GET") {
+        return json({ 
+          summary: project.summary || null,
+          summaryUpdatedAt: project.summary_updated_at || null,
+        });
+      }
+
+      if (method === "POST") {
+        try {
+          const prompt = `Analyze this project directory and provide a brief summary (2-3 sentences) of what this project is about, its main technologies, and current state. Be concise.`;
+          
+          const q = query({
+            prompt,
+            options: {
+              cwd: project.path,
+              allowedTools: ["Read", "Glob", "Grep"],
+              maxTurns: 3,
+            },
+          });
+
+          let summary = "";
+          for await (const msg of q) {
+            if (msg.type === "assistant") {
+              const textBlock = msg.message.content.find((b: any) => b.type === "text");
+              if (textBlock) {
+                summary = textBlock.text;
+              }
+            }
+          }
+
+          if (summary) {
+            projects.updateSummary(projectId, summary, Date.now());
+          }
+
+          return json({ summary, summaryUpdatedAt: Date.now() });
+        } catch (e) {
+          console.error("Failed to generate project summary:", e);
+          return json({ error: "Failed to generate summary" }, 500);
+        }
       }
     }
 
@@ -366,7 +826,7 @@ const server = Bun.serve({
 });
 
 async function handleQuery(ws: any, data: ClientMessage) {
-  const { prompt, projectId, sessionId, claudeSessionId, allowedTools } = data;
+  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model } = data;
 
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
@@ -374,14 +834,11 @@ async function handleQuery(ws: any, data: ClientMessage) {
 
   console.log(`Query: "${prompt}" in ${workingDirectory}`);
 
+  const needsAutoTitle = session?.title === "New Chat" || session?.title === "New conversation";
+  
   if (sessionId && prompt) {
     const msgId = crypto.randomUUID();
     messages.create(msgId, sessionId, "user", JSON.stringify(prompt), Date.now());
-    
-    if (session?.title === "New conversation") {
-      const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
-      sessions.updateTitle(title, Date.now(), sessionId);
-    }
   }
 
   try {
@@ -390,6 +847,7 @@ async function handleQuery(ws: any, data: ClientMessage) {
       options: {
         cwd: workingDirectory,
         resume: claudeSessionId || session?.claude_session_id || undefined,
+        model: model || undefined,
         allowedTools: allowedTools || [
           "Read",
           "Write",
@@ -423,6 +881,10 @@ async function handleQuery(ws: any, data: ClientMessage) {
     if (sessionId && lastAssistantContent.length > 0) {
       const msgId = crypto.randomUUID();
       messages.create(msgId, sessionId, "assistant", JSON.stringify(lastAssistantContent), Date.now());
+      
+      if (needsAutoTitle && prompt) {
+        generateChatTitle(prompt, lastAssistantContent, sessionId);
+      }
     }
 
     if (sessionId && resultData) {
@@ -431,6 +893,8 @@ async function handleQuery(ws: any, data: ClientMessage) {
         resultData.model || null,
         resultData.total_cost_usd || 0,
         resultData.num_turns || 0,
+        resultData.usage?.input_tokens || 0,
+        resultData.usage?.output_tokens || 0,
         Date.now(),
         sessionId
       );
@@ -444,6 +908,85 @@ async function handleQuery(ws: any, data: ClientMessage) {
         error: error instanceof Error ? error.message : "Query failed",
       })
     );
+  }
+}
+
+async function generateChatTitle(userPrompt: string, assistantContent: any[], sessionId: string) {
+  const autoTitleEnabled = process.env.AUTO_TITLE !== "false";
+  if (!autoTitleEnabled) {
+    const fallbackTitle = userPrompt.slice(0, 50) + (userPrompt.length > 50 ? "..." : "");
+    sessions.updateTitle(fallbackTitle, Date.now(), sessionId);
+    return;
+  }
+
+  try {
+    const assistantText = assistantContent
+      .filter((block: any) => block.type === "text")
+      .map((block: any) => block.text)
+      .join(" ")
+      .slice(0, 300);
+    
+    const systemPrompt = "Generate a very short title (3-6 words max) for this conversation. Return ONLY the title text, nothing else. No quotes.";
+    const userContent = `User: ${userPrompt.slice(0, 150)}\nAssistant: ${assistantText.slice(0, 150)}`;
+
+    let title = "";
+    
+    if (process.env.OPENAI_API_KEY) {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userContent },
+          ],
+          max_tokens: 20,
+          temperature: 0.7,
+        }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        title = data.choices?.[0]?.message?.content?.trim() || "";
+      }
+    } else if (process.env.ANTHROPIC_API_KEY) {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-3-haiku-20240307",
+          max_tokens: 20,
+          system: systemPrompt,
+          messages: [{ role: "user", content: userContent }],
+        }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        title = data.content?.[0]?.text?.trim() || "";
+      }
+    }
+
+    title = title.replace(/^["']|["']$/g, "").slice(0, 60);
+    
+    if (title && title.length > 2) {
+      sessions.updateTitle(title, Date.now(), sessionId);
+    } else {
+      const fallbackTitle = userPrompt.slice(0, 50) + (userPrompt.length > 50 ? "..." : "");
+      sessions.updateTitle(fallbackTitle, Date.now(), sessionId);
+    }
+  } catch (e) {
+    console.error("Failed to generate chat title:", e);
+    const fallbackTitle = userPrompt.slice(0, 50) + (userPrompt.length > 50 ? "..." : "");
+    sessions.updateTitle(fallbackTitle, Date.now(), sessionId);
   }
 }
 
