@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionHistoryContext, type ChatMessage } from "./lib/stores";
+  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, type ChatMessage, type TodoItem } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, type Project, type Session } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -48,11 +48,15 @@
   import AudioRecorder from "./lib/components/AudioRecorder.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Settings from "./lib/components/Settings.svelte";
-  import TodoPanel from "./lib/components/TodoPanel.svelte";
   import ToolRenderer from "./lib/components/ToolRenderer.svelte";
   import ToolConfirmDialog from "./lib/components/ToolConfirmDialog.svelte";
   import SearchModal from "./lib/components/SearchModal.svelte";
+  import NotificationToast from "./lib/components/NotificationToast.svelte";
+  import NotificationBadge from "./lib/components/NotificationBadge.svelte";
+  import PermissionRequest from "./lib/components/PermissionRequest.svelte";
+  import PermissionEditor from "./lib/components/PermissionEditor.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
+  import type { PermissionSettings } from "./lib/api";
 
   function relativeTime(timestamp: number | null | undefined): string {
     if (!timestamp) return "Never";
@@ -73,6 +77,7 @@
   let inputText = $state("");
   
   let currentMessages = $derived($session.sessionId ? ($sessionMessages.get($session.sessionId) || []) : []);
+  let currentTodos = $derived($session.sessionId ? ($sessionTodos.get($session.sessionId) || []) : []);
   
   let sidebarProjects = $state<Project[]>([]);
   let sidebarSessions = $state<Session[]>([]);
@@ -107,6 +112,11 @@
   let dragOverProjectId = $state<string | null>(null);
   let draggedSessionId = $state<string | null>(null);
   let dragOverSessionId = $state<string | null>(null);
+  let sessionMenuId = $state<string | null>(null);
+  let projectMenuId = $state<string | null>(null);
+  let showProjectPermissions = $state<Project | null>(null);
+  let globalPermissionSettings = $state<PermissionSettings | null>(null);
+  let permissionDefaults = $state<{ tools: string[]; dangerous: string[] }>({ tools: [], dangerous: [] });
 
   let showPreview = $state(false);
   let previewSource = $state("");
@@ -197,9 +207,16 @@
 
   let pendingPermissionRequest = $state<{ requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string } | null>(null);
 
-  function handlePermissionApprove() {
+  function handlePermissionApprove(approveAll: boolean = false) {
     if (pendingPermissionRequest && client) {
-      client.respondToPermission(pendingPermissionRequest.requestId, true, false);
+      client.respondToPermission(pendingPermissionRequest.requestId, true, approveAll);
+      const reqId = pendingPermissionRequest.requestId;
+      $pendingPermissionRequests
+        .filter(n => (n.data?.requestId as string) === reqId)
+        .forEach(n => notifications.dismiss(n.id));
+      if ($session.sessionId && $session.projectId) {
+        sessionStatus.setRunning($session.sessionId, $session.projectId);
+      }
       pendingPermissionRequest = null;
     }
   }
@@ -207,13 +224,13 @@
   function handlePermissionDeny() {
     if (pendingPermissionRequest && client) {
       client.respondToPermission(pendingPermissionRequest.requestId, false, false);
-      pendingPermissionRequest = null;
-    }
-  }
-
-  function handlePermissionApproveAll() {
-    if (pendingPermissionRequest && client) {
-      client.respondToPermission(pendingPermissionRequest.requestId, true, true);
+      const reqId = pendingPermissionRequest.requestId;
+      $pendingPermissionRequests
+        .filter(n => (n.data?.requestId as string) === reqId)
+        .forEach(n => notifications.dismiss(n.id));
+      if ($session.sessionId && $session.projectId) {
+        sessionStatus.setIdle($session.sessionId, $session.projectId);
+      }
       pendingPermissionRequest = null;
     }
   }
@@ -284,6 +301,7 @@
     loadRecentChats();
     loadConfig();
     loadModels();
+    loadPermissions();
 
     client = new ClaudeClient();
     try {
@@ -294,6 +312,13 @@
     }
 
     client.onMessage(handleMessage);
+
+    const handleGlobalClick = () => {
+      sessionMenuId = null;
+      projectMenuId = null;
+    };
+    document.addEventListener("click", handleGlobalClick);
+    return () => document.removeEventListener("click", handleGlobalClick);
   });
 
 
@@ -339,6 +364,16 @@
     }
   }
 
+  async function loadPermissions() {
+    try {
+      const perms = await api.permissions.get();
+      globalPermissionSettings = perms.global;
+      permissionDefaults = perms.defaults;
+    } catch (e) {
+      console.error("Failed to load permissions:", e);
+    }
+  }
+
   function handleModelSelect(model: string) {
     modelSelection = model;
     session.setSelectedModel(model);
@@ -347,7 +382,6 @@
   async function selectProject(project: Project) {
     session.setProject(project.id);
     session.setSession(null);
-    todos.clear();
     sidebarSessions = [];
     projectFileIndex = new Map();
     projectContext = null;
@@ -635,7 +669,7 @@ Respond in this exact JSON format only, no other text:
     session.setSession(s.id, s.claude_session_id);
     session.setCost(s.total_cost_usd || 0);
     session.setUsage(s.input_tokens || 0, s.output_tokens || 0);
-    todos.clear();
+    sessionStatus.markSeen(s.id);
     
     if (!$sessionMessages.has(s.id)) {
       try {
@@ -881,9 +915,25 @@ Respond in this exact JSON format only, no other text:
         if (!uiSessionId) break;
         const parentId = (msg as any).parentToolUseId;
         const existingMsgs = $sessionMessages.get(uiSessionId) || [];
-        const matchingMsg = existingMsgs.findLast(
-          (m: ChatMessage) => m.role === "assistant" && m.parentToolUseId === parentId
-        );
+        
+        let lastUserIdx = -1;
+        for (let i = existingMsgs.length - 1; i >= 0; i--) {
+          if (existingMsgs[i].role === "user" && !existingMsgs[i].parentToolUseId) {
+            lastUserIdx = i;
+            break;
+          }
+        }
+        
+        let matchingMsg = null;
+        for (let i = existingMsgs.length - 1; i >= 0; i--) {
+          const m = existingMsgs[i];
+          if (m.role === "assistant" && m.parentToolUseId === parentId) {
+            if (parentId || i > lastUserIdx) {
+              matchingMsg = m;
+            }
+            break;
+          }
+        }
         
         if (matchingMsg) {
           sessionMessages.updateLastAssistant(uiSessionId, (msg as any).content, parentId);
@@ -897,12 +947,12 @@ Respond in this exact JSON format only, no other text:
           });
         }
         const msgContent = (msg as any).content;
-        if (Array.isArray(msgContent)) {
+        if (Array.isArray(msgContent) && uiSessionId) {
           const todoTool = msgContent.find(
             (b: any): b is ToolUseBlock => b.type === "tool_use" && b.name === "TodoWrite"
           );
           if (todoTool?.input?.todos) {
-            todos.set(todoTool.input.todos);
+            sessionTodos.setForSession(uiSessionId, todoTool.input.todos);
           }
         }
         if (uiSessionId === $session.sessionId) {
@@ -926,6 +976,13 @@ Respond in this exact JSON format only, no other text:
         }
         if (uiSessionId) {
           loadingSessions.update(s => { s.delete(uiSessionId); return new Set(s); });
+          if ($session.projectId) {
+            if (uiSessionId !== $session.sessionId) {
+              sessionStatus.setUnread(uiSessionId, $session.projectId);
+            } else {
+              sessionStatus.setIdle(uiSessionId, $session.projectId);
+            }
+          }
         }
         if ($session.projectId) {
           api.sessions.list($session.projectId).then(list => {
@@ -943,6 +1000,9 @@ Respond in this exact JSON format only, no other text:
             timestamp: new Date(),
           });
           loadingSessions.update(s => { s.delete(uiSessionId); return new Set(s); });
+          if ($session.projectId) {
+            sessionStatus.setIdle(uiSessionId, $session.projectId);
+          }
         }
         break;
 
@@ -951,6 +1011,13 @@ Respond in this exact JSON format only, no other text:
         if (doneSessionId) {
           loadingSessions.update(s => { s.delete(doneSessionId); return new Set(s); });
           processMessageQueue(doneSessionId);
+          if ($session.projectId) {
+            if (doneSessionId !== $session.sessionId) {
+              sessionStatus.setUnread(doneSessionId, $session.projectId);
+            } else {
+              sessionStatus.setIdle(doneSessionId, $session.projectId);
+            }
+          }
         }
         if (doneSessionId === $session.sessionId) {
           activeSubagents = new Map();
@@ -968,6 +1035,9 @@ Respond in this exact JSON format only, no other text:
             timestamp: new Date(),
           });
           processMessageQueue(abortedSessionId);
+          if ($session.projectId) {
+            sessionStatus.setIdle(abortedSessionId, $session.projectId);
+          }
         }
         if (abortedSessionId === $session.sessionId) {
           activeSubagents = new Map();
@@ -982,6 +1052,21 @@ Respond in this exact JSON format only, no other text:
           toolInput: permMsg.toolInput,
           message: permMsg.message,
         };
+        if ($session.projectId && $session.sessionId) {
+          sessionStatus.setPermissionRequired($session.sessionId, $session.projectId);
+        }
+        notifications.add({
+          type: "permission_request",
+          title: `${permMsg.tools[0]} Permission Required`,
+          message: permMsg.message,
+          sessionId: $session.sessionId || undefined,
+          persistent: true,
+          data: {
+            requestId: permMsg.requestId,
+            tools: permMsg.tools,
+            toolInput: permMsg.toolInput,
+          },
+        });
         break;
     }
   }
@@ -1012,6 +1097,9 @@ Respond in this exact JSON format only, no other text:
     });
 
     loadingSessions.update(s => { s.add(sessionId); return new Set(s); });
+    if ($session.projectId) {
+      sessionStatus.setRunning(sessionId, $session.projectId);
+    }
 
     client.query({
       prompt,
@@ -1077,6 +1165,7 @@ Respond in this exact JSON format only, no other text:
     });
 
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
+    sessionStatus.setRunning(currentSessionId, $session.projectId!);
 
     const historyCtx = $sessionHistoryContext.get(currentSessionId);
     
@@ -1345,7 +1434,7 @@ Respond in this exact JSON format only, no other text:
     if (!editingMessageId || !$session.sessionId) return;
     
     try {
-      await api.messages.update(editingMessageId, editingMessageContent);
+      const result = await api.messages.update(editingMessageId, editingMessageContent);
       
       sessionMessages.setMessages($session.sessionId, 
         currentMessages.map(m => 
@@ -1354,6 +1443,17 @@ Respond in this exact JSON format only, no other text:
             : m
         )
       );
+      
+      if (result.sessionReset) {
+        session.setSession($session.sessionId, null);
+      }
+      
+      if (result.historyContext) {
+        sessionHistoryContext.update(map => {
+          map.set($session.sessionId!, result.historyContext!);
+          return new Map(map);
+        });
+      }
       
       editingMessageId = null;
       editingMessageContent = "";
@@ -1451,8 +1551,6 @@ Respond in this exact JSON format only, no other text:
 {#if showOnboarding}
   <Onboarding onComplete={handleOnboardingComplete} />
 {/if}
-
-<TodoPanel />
 
 <div class="flex h-screen bg-white text-gray-900 font-sans overflow-hidden selection:bg-gray-100 selection:text-gray-900">
 
@@ -1564,6 +1662,11 @@ Respond in this exact JSON format only, no other text:
                                         <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                                     {/if}
                                     <span class="text-[13px] font-medium truncate">{proj.name}</span>
+                                    {#if $projectStatus.get(proj.id) === "attention"}
+                                        <span class="shrink-0 w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Needs attention"></span>
+                                    {:else if $projectStatus.get(proj.id) === "active"}
+                                        <span class="shrink-0 w-1.5 h-1.5 bg-blue-400 rounded-full" title="Active"></span>
+                                    {/if}
                                 </div>
                                 <div class="flex items-center gap-2 mt-0.5 pl-5.5 text-[10px] text-gray-400">
                                     <span>{proj.session_count || 0} chats</span>
@@ -1571,28 +1674,48 @@ Respond in this exact JSON format only, no other text:
                                     <span>{relativeTime(proj.last_activity || proj.updated_at)}</span>
                                 </div>
                             </button>
-                            <div class="absolute right-1 top-2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button 
-                                    onclick={(e) => toggleProjectPin(proj, e)}
-                                    class="p-1 {proj.pinned ? 'text-amber-500 hover:text-amber-600' : 'text-gray-400 hover:text-amber-500'} transition-colors"
-                                    title={proj.pinned ? "Unpin project" : "Pin project"}
-                                >
-                                    <svg class="w-3 h-3" fill={proj.pinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
-                                </button>
-                                <button 
-                                    onclick={(e) => openEditProject(proj, e)}
-                                    class="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                                    title="Edit project"
-                                >
-                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                                </button>
-                                <button 
-                                    onclick={(e) => openDeleteConfirm(proj, e)}
-                                    class="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                    title="Delete project"
-                                >
-                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                </button>
+                            <div class="absolute right-1 top-1/2 -translate-y-1/2 z-20">
+                                <div class="relative">
+                                    <button 
+                                        onclick={(e) => { e.stopPropagation(); projectMenuId = projectMenuId === proj.id ? null : proj.id; }}
+                                        class="p-1 text-gray-400 hover:text-gray-600 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
+                                    </button>
+                                    {#if projectMenuId === proj.id}
+                                        <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[160px] z-50">
+                                            <button 
+                                                onclick={(e) => { toggleProjectPin(proj, e); projectMenuId = null; }}
+                                                class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                            >
+                                                <svg class="w-4 h-4" fill={proj.pinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
+                                                {proj.pinned ? "Unpin" : "Pin"}
+                                            </button>
+                                            <button 
+                                                onclick={(e) => { openEditProject(proj, e); projectMenuId = null; }}
+                                                class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                            >
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                                Rename
+                                            </button>
+                                            <button 
+                                                onclick={(e) => { e.stopPropagation(); showProjectPermissions = proj; projectMenuId = null; }}
+                                                class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                            >
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                                                Permissions
+                                            </button>
+                                            <div class="border-t border-gray-100 my-1"></div>
+                                            <button 
+                                                onclick={(e) => { openDeleteConfirm(proj, e); projectMenuId = null; }}
+                                                class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                            >
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                Delete
+                                            </button>
+                                        </div>
+                                    {/if}
+                                </div>
                             </div>
                         </div>
 
@@ -1725,7 +1848,7 @@ Respond in this exact JSON format only, no other text:
 
                                 >
 
-                                    <div class="truncate pr-12 font-medium flex items-center gap-1.5">
+                                    <div class="truncate pr-14 font-medium flex items-center gap-1.5">
                                         {#if sess.pinned}
                                             <svg class="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
                                         {/if}
@@ -1733,35 +1856,52 @@ Respond in this exact JSON format only, no other text:
                                     </div>
 
                                     <div class="text-[10px] opacity-60 mt-0.5 flex justify-between">
-
                                         <span>{new Date(sess.updated_at).toLocaleDateString()}</span>
-
                                     </div>
 
                                 </button>
 
-                                <div class="absolute right-1 top-2.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                                    <button 
-                                        onclick={(e) => toggleSessionPin(sess, e)}
-                                        class="p-0.5 {sess.pinned ? 'text-amber-500 hover:text-amber-600' : 'text-gray-400 hover:text-amber-500'} transition-colors"
-                                        title={sess.pinned ? "Unpin chat" : "Pin chat"}
-                                    >
-                                        <svg class="w-3.5 h-3.5" fill={sess.pinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
-                                    </button>
-                                    <button 
-                                        onclick={(e) => openEditSession(sess, e)}
-                                        class="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
-                                        title="Edit chat name"
-                                    >
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                                    </button>
-                                    <button 
-                                        onclick={(e) => deleteSession(e, sess.id)}
-                                        class="p-0.5 text-gray-400 hover:text-red-600 transition-colors"
-                                        title="Delete chat"
-                                    >
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                    </button>
+                                <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 z-20">
+                                    {#if $sessionStatus.get(sess.id)?.status === "running"}
+                                        <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    {:else if $sessionStatus.get(sess.id)?.status === "permission"}
+                                        <span class="w-2.5 h-2.5 bg-[#D97706] rounded-full animate-pulse" title="Permission required"></span>
+                                    {:else if $sessionStatus.get(sess.id)?.status === "unread"}
+                                        <span class="w-2 h-2 bg-gray-400 rounded-full" title="New results"></span>
+                                    {/if}
+                                    <div class="relative">
+                                        <button 
+                                            onclick={(e) => { e.stopPropagation(); sessionMenuId = sessionMenuId === sess.id ? null : sess.id; }}
+                                            class="p-1 text-gray-400 hover:text-gray-600 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
+                                        </button>
+                                        {#if sessionMenuId === sess.id}
+                                            <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px] z-50">
+                                                <button 
+                                                    onclick={(e) => { toggleSessionPin(sess, e); sessionMenuId = null; }}
+                                                    class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                                >
+                                                    <svg class="w-4 h-4" fill={sess.pinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
+                                                    {sess.pinned ? "Unpin" : "Pin"}
+                                                </button>
+                                                <button 
+                                                    onclick={(e) => { openEditSession(sess, e); sessionMenuId = null; }}
+                                                    class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                                >
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                                    Rename
+                                                </button>
+                                                <button 
+                                                    onclick={(e) => { deleteSession(e, sess.id); sessionMenuId = null; }}
+                                                    class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                                >
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        {/if}
+                                    </div>
                                 </div>
 
                             </div>
@@ -2254,30 +2394,66 @@ Respond in this exact JSON format only, no other text:
 
             {/each}
 
-
+            {#if pendingPermissionRequest}
+              <PermissionRequest
+                requestId={pendingPermissionRequest.requestId}
+                toolName={pendingPermissionRequest.tools[0]}
+                toolInput={pendingPermissionRequest.toolInput}
+                message={pendingPermissionRequest.message}
+                onApprove={(approveAll) => handlePermissionApprove(approveAll)}
+                onDeny={handlePermissionDeny}
+              />
+            {/if}
 
             {#if $session.sessionId && $loadingSessions.has($session.sessionId)}
-
-                <div class="flex gap-4">
-
+                <div class="flex gap-4 w-full">
                     <div class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex-shrink-0 flex items-center justify-center shadow-sm">
-
                         <div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
-
                     </div>
-
-                    <div class="flex items-center gap-1.5 pt-2">
-
-                        <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
-
-                        <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-75"></div>
-
-                        <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-150"></div>
-
+                    <div class="flex-1">
+                        {#if currentTodos.length > 0}
+                            {@const completedCount = currentTodos.filter(t => t.status === "completed").length}
+                            {@const inProgressItem = currentTodos.find(t => t.status === "in_progress")}
+                            <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
+                                    </svg>
+                                    <span class="text-xs font-medium text-gray-700">Execution Plan</span>
+                                    <span class="text-xs text-gray-500">{completedCount}/{currentTodos.length}</span>
+                                </div>
+                                <div class="space-y-1.5 max-h-32 overflow-y-auto">
+                                    {#each currentTodos as todo}
+                                        <div class="flex items-start gap-2">
+                                            <div class="mt-0.5 shrink-0">
+                                                {#if todo.status === "completed"}
+                                                    <div class="w-4 h-4 rounded-full bg-green-100 flex items-center justify-center">
+                                                        <svg class="w-2.5 h-2.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                                        </svg>
+                                                    </div>
+                                                {:else if todo.status === "in_progress"}
+                                                    <div class="w-4 h-4 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
+                                                {:else}
+                                                    <div class="w-4 h-4 rounded-full border-2 border-gray-300"></div>
+                                                {/if}
+                                            </div>
+                                            <span class={`text-xs ${todo.status === "completed" ? "text-gray-400 line-through" : todo.status === "in_progress" ? "text-gray-900 font-medium" : "text-gray-600"}`}>
+                                                {todo.status === "in_progress" && todo.activeForm ? todo.activeForm + "..." : todo.content}
+                                            </span>
+                                        </div>
+                                    {/each}
+                                </div>
+                            </div>
+                        {:else}
+                            <div class="flex items-center gap-1.5 pt-2">
+                                <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
+                                <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-75"></div>
+                                <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-150"></div>
+                            </div>
+                        {/if}
                     </div>
-
                 </div>
-
             {/if}
 
         </div>
@@ -2622,16 +2798,6 @@ Respond in this exact JSON format only, no other text:
     </div>
   {/if}
 
-  {#if pendingPermissionRequest}
-    <ToolConfirmDialog
-      tools={pendingPermissionRequest.tools}
-      toolInput={pendingPermissionRequest.toolInput}
-      message={pendingPermissionRequest.message}
-      onApprove={handlePermissionApprove}
-      onDeny={handlePermissionDeny}
-      onApproveAll={handlePermissionApproveAll}
-    />
-  {/if}
 
   <!-- CLAUDE.md Modal -->
   {#if showClaudeMdModal}
@@ -2671,9 +2837,88 @@ Respond in this exact JSON format only, no other text:
     </div>
   {/if}
 
+  {#if showProjectPermissions}
+    <div 
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/20 backdrop-blur-sm"
+      onclick={() => showProjectPermissions = null}
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+    >
+      <div 
+        class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden animate-in zoom-in-95 duration-200"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white">
+          <div class="flex items-center gap-3">
+            <div class="p-2 bg-purple-100 rounded-lg">
+              <svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <div>
+              <h3 class="font-semibold text-sm text-gray-900">Permissions</h3>
+              <p class="text-xs text-gray-500">{showProjectPermissions.name}</p>
+            </div>
+          </div>
+          <button onclick={() => showProjectPermissions = null} class="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6 overflow-y-auto max-h-[calc(80vh-80px)]">
+          <div class="space-y-4">
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-amber-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div class="text-sm">
+                  <p class="font-medium text-amber-800">Session-based permissions</p>
+                  <p class="text-amber-700 mt-1">When you click "Always Allow" on a permission request, that permission is granted for the rest of the chat session. Start a new chat to reset permissions.</p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="border border-gray-200 rounded-lg p-4">
+              <h4 class="font-medium text-sm text-gray-900 mb-2">Global Settings</h4>
+              <p class="text-xs text-gray-500 mb-3">These settings apply to all projects. Edit in Settings → Permissions.</p>
+              {#if globalPermissionSettings}
+                <div class="space-y-2 text-sm">
+                  <div class="flex items-center justify-between py-1">
+                    <span class="text-gray-600">Auto-accept all</span>
+                    <span class={globalPermissionSettings.autoAcceptAll ? "text-amber-600 font-medium" : "text-gray-400"}>
+                      {globalPermissionSettings.autoAcceptAll ? "Enabled" : "Disabled"}
+                    </span>
+                  </div>
+                  <div class="flex items-center justify-between py-1">
+                    <span class="text-gray-600">Tools requiring confirmation</span>
+                    <span class="text-gray-900 font-medium">{globalPermissionSettings.requireConfirmation.length}</span>
+                  </div>
+                </div>
+              {:else}
+                <p class="text-sm text-gray-500">Loading...</p>
+              {/if}
+            </div>
+
+            <div class="flex justify-end">
+              <button 
+                onclick={() => { showProjectPermissions = null; showSettings = true; }}
+                class="px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-lg transition-colors"
+              >
+                Open Global Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
 </div>
 
-
+<NotificationToast />
 
 <style>
 

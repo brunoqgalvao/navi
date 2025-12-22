@@ -130,7 +130,7 @@ export const api = {
     list: (sessionId: string) => request<Message[]>(`/sessions/${sessionId}/messages`),
     get: (id: string) => request<Message>(`/messages/${id}`),
     update: (id: string, content: any) =>
-      request<{ success: boolean }>(`/messages/${id}`, {
+      request<{ success: boolean; sessionReset?: boolean; historyContext?: string }>(`/messages/${id}`, {
         method: "PUT",
         body: JSON.stringify({ content }),
       }),

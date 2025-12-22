@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type PermissionSettings } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode } from "../stores";
+  import { advancedMode, onboardingComplete } from "../stores";
 
   interface Props {
     open: boolean;
@@ -667,6 +667,21 @@
                       Tool calls will be collapsible. You can view loaded CLAUDE.md and system context.
                     </p>
                   {/if}
+                </div>
+
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900">Show Onboarding</h5>
+                      <p class="text-sm text-gray-500">View the welcome screen and setup wizard again</p>
+                    </div>
+                    <button
+                      onclick={() => { onboardingComplete.reset(); onClose(); }}
+                      class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                    >
+                      Show Onboarding
+                    </button>
+                  </div>
                 </div>
 
                 <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">

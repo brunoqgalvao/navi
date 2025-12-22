@@ -215,16 +215,318 @@ export interface TodoItem {
   activeForm?: string;
 }
 
-function createTodosStore() {
-  const { subscribe, set } = writable<TodoItem[]>([]);
+function createSessionTodosStore() {
+  const { subscribe, set, update } = writable<Map<string, TodoItem[]>>(new Map());
 
   return {
     subscribe,
-    set,
-    clear: () => set([]),
+    setForSession: (sessionId: string, items: TodoItem[]) =>
+      update((map) => {
+        map.set(sessionId, items);
+        return new Map(map);
+      }),
+    getForSession: (sessionId: string, map: Map<string, TodoItem[]>) => map.get(sessionId) || [],
+    clearSession: (sessionId: string) =>
+      update((map) => {
+        map.delete(sessionId);
+        return new Map(map);
+      }),
+    clear: () => set(new Map()),
   };
 }
 
-export const todos = createTodosStore();
+export const sessionTodos = createSessionTodosStore();
+
+export const todos = writable<TodoItem[]>([]);
 
 export const sessionHistoryContext = writable<Map<string, string>>(new Map());
+
+export type NotificationType = "info" | "success" | "warning" | "error" | "permission_request";
+
+export interface NotificationAction {
+  label: string;
+  variant?: "primary" | "secondary" | "danger";
+  handler: () => void;
+}
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message?: string;
+  timestamp: Date;
+  read: boolean;
+  dismissed: boolean;
+  persistent: boolean;
+  sessionId?: string;
+  projectId?: string;
+  data?: Record<string, unknown>;
+  actions?: NotificationAction[];
+}
+
+interface NotificationOptions {
+  type?: NotificationType;
+  title: string;
+  message?: string;
+  persistent?: boolean;
+  sessionId?: string;
+  projectId?: string;
+  data?: Record<string, unknown>;
+  actions?: NotificationAction[];
+  browserNotification?: boolean;
+  sound?: boolean;
+}
+
+function createNotificationsStore() {
+  const { subscribe, set, update } = writable<Notification[]>([]);
+  
+  let browserPermission: NotificationPermission = "default";
+  if (typeof window !== "undefined" && "Notification" in window) {
+    browserPermission = Notification.permission;
+  }
+
+  const requestBrowserPermission = async (): Promise<boolean> => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return false;
+    }
+    if (Notification.permission === "granted") {
+      browserPermission = "granted";
+      return true;
+    }
+    if (Notification.permission !== "denied") {
+      const permission = await Notification.requestPermission();
+      browserPermission = permission;
+      return permission === "granted";
+    }
+    return false;
+  };
+
+  const showBrowserNotification = (title: string, options?: { body?: string; tag?: string; requireInteraction?: boolean }) => {
+    if (browserPermission === "granted" && typeof window !== "undefined" && "Notification" in window) {
+      try {
+        const notification = new Notification(title, {
+          body: options?.body,
+          tag: options?.tag,
+          icon: "/favicon.ico",
+          requireInteraction: options?.requireInteraction ?? false,
+        });
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+        return notification;
+      } catch (e) {
+        console.error("Browser notification failed:", e);
+      }
+    }
+    return null;
+  };
+
+  const add = (options: NotificationOptions): string => {
+    const id = crypto.randomUUID();
+    const notification: Notification = {
+      id,
+      type: options.type || "info",
+      title: options.title,
+      message: options.message,
+      timestamp: new Date(),
+      read: false,
+      dismissed: false,
+      persistent: options.persistent ?? (options.type === "permission_request"),
+      sessionId: options.sessionId,
+      projectId: options.projectId,
+      data: options.data,
+      actions: options.actions,
+    };
+
+    update(n => [notification, ...n]);
+
+    if (options.browserNotification !== false && options.type === "permission_request") {
+      showBrowserNotification(options.title, {
+        body: options.message,
+        tag: id,
+        requireInteraction: true,
+      });
+    }
+
+    if (!options.persistent && options.type !== "permission_request") {
+      setTimeout(() => {
+        dismiss(id);
+      }, 5000);
+    }
+
+    return id;
+  };
+
+  const dismiss = (id: string) => {
+    update(n => n.map(x => x.id === id ? { ...x, dismissed: true } : x));
+  };
+
+  const remove = (id: string) => {
+    update(n => n.filter(x => x.id !== id));
+  };
+
+  const markRead = (id: string) => {
+    update(n => n.map(x => x.id === id ? { ...x, read: true } : x));
+  };
+
+  const markAllRead = () => {
+    update(n => n.map(x => ({ ...x, read: true })));
+  };
+
+  const clearDismissed = () => {
+    update(n => n.filter(x => !x.dismissed));
+  };
+
+  const clearAll = () => {
+    set([]);
+  };
+
+  return {
+    subscribe,
+    add,
+    dismiss,
+    remove,
+    markRead,
+    markAllRead,
+    clearDismissed,
+    clearAll,
+    requestBrowserPermission,
+    showBrowserNotification,
+  };
+}
+
+export const notifications = createNotificationsStore();
+
+export const unreadNotificationCount = derived(
+  notifications,
+  ($notifications) => $notifications.filter(n => !n.read && !n.dismissed).length
+);
+
+export const activeNotifications = derived(
+  notifications,
+  ($notifications) => $notifications.filter(n => !n.dismissed)
+);
+
+export const pendingPermissionRequests = derived(
+  notifications,
+  ($notifications) => $notifications.filter(n => n.type === "permission_request" && !n.dismissed)
+);
+
+export type SessionStatusType = "idle" | "running" | "permission" | "unread";
+
+export interface SessionStatus {
+  sessionId: string;
+  projectId: string;
+  status: SessionStatusType;
+  lastActivity: Date;
+  hasUnreadResults: boolean;
+}
+
+function createSessionStatusStore() {
+  const { subscribe, set, update } = writable<Map<string, SessionStatus>>(new Map());
+
+  const setStatus = (sessionId: string, projectId: string, status: SessionStatusType) => {
+    update(map => {
+      const existing = map.get(sessionId);
+      map.set(sessionId, {
+        sessionId,
+        projectId,
+        status,
+        lastActivity: new Date(),
+        hasUnreadResults: status === "unread" || (existing?.hasUnreadResults === true && status === "running"),
+      });
+      return new Map(map);
+    });
+  };
+
+  const setRunning = (sessionId: string, projectId: string) => {
+    setStatus(sessionId, projectId, "running");
+  };
+
+  const setPermissionRequired = (sessionId: string, projectId: string) => {
+    setStatus(sessionId, projectId, "permission");
+  };
+
+  const setUnread = (sessionId: string, projectId: string) => {
+    setStatus(sessionId, projectId, "unread");
+  };
+
+  const markSeen = (sessionId: string) => {
+    update(map => {
+      const existing = map.get(sessionId);
+      if (existing) {
+        map.set(sessionId, {
+          ...existing,
+          status: "idle",
+          hasUnreadResults: false,
+        });
+      }
+      return new Map(map);
+    });
+  };
+
+  const setIdle = (sessionId: string, projectId: string) => {
+    update(map => {
+      const existing = map.get(sessionId);
+      if (existing?.hasUnreadResults) {
+        map.set(sessionId, { ...existing, status: "unread" });
+      } else {
+        map.set(sessionId, {
+          sessionId,
+          projectId,
+          status: "idle",
+          lastActivity: new Date(),
+          hasUnreadResults: false,
+        });
+      }
+      return new Map(map);
+    });
+  };
+
+  const remove = (sessionId: string) => {
+    update(map => {
+      map.delete(sessionId);
+      return new Map(map);
+    });
+  };
+
+  const getForProject = (projectId: string, statuses: Map<string, SessionStatus>): SessionStatus[] => {
+    return Array.from(statuses.values()).filter(s => s.projectId === projectId);
+  };
+
+  return {
+    subscribe,
+    setRunning,
+    setPermissionRequired,
+    setUnread,
+    setIdle,
+    markSeen,
+    remove,
+    getForProject,
+    reset: () => set(new Map()),
+  };
+}
+
+export const sessionStatus = createSessionStatusStore();
+
+export type ProjectStatusType = "idle" | "active" | "attention";
+
+export const projectStatus = derived(
+  sessionStatus,
+  ($sessionStatus) => {
+    const projectMap = new Map<string, ProjectStatusType>();
+    
+    $sessionStatus.forEach(status => {
+      const current = projectMap.get(status.projectId) || "idle";
+      
+      if (status.status === "permission" || status.status === "unread") {
+        projectMap.set(status.projectId, "attention");
+      } else if (status.status === "running" && current !== "attention") {
+        projectMap.set(status.projectId, "active");
+      }
+    });
+    
+    return projectMap;
+  }
+);

@@ -46,6 +46,7 @@ interface ActiveProcess {
 
 const activeProcesses = new Map<string, ActiveProcess>();
 const pendingPermissions = new Map<string, { sessionId: string }>();
+const sessionApprovedAll = new Set<string>();
 
 const server = Bun.serve({
   port: PORT,
@@ -281,7 +282,26 @@ const server = Bun.serve({
           const msg = messages.get(messageId);
           if (!msg) return json({ error: "Message not found - it may not be saved yet" }, 404);
           messages.update(messageId, JSON.stringify(body.content));
-          return json({ success: true });
+          
+          const sess = sessions.get(msg.session_id);
+          if (sess) {
+            sessions.updateClaudeSession(null, sess.model, 0, 0, 0, 0, Date.now(), msg.session_id);
+          }
+          
+          const allMsgs = messages.listBySession(msg.session_id);
+          let historyContext = "";
+          if (allMsgs.length > 0) {
+            historyContext = "<conversation_history>\n";
+            for (const m of allMsgs) {
+              const content = JSON.parse(m.content);
+              const text = typeof content === "string" ? content : 
+                (Array.isArray(content) ? content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n") : "");
+              historyContext += `<${m.role}>${text}</${m.role}>\n`;
+            }
+            historyContext += "</conversation_history>\n\nContinue from this conversation context. The previous messages above are your conversation history.";
+          }
+          
+          return json({ success: true, sessionReset: true, historyContext });
         } catch (e) {
           console.error("Failed to update message:", e);
           return json({ error: e instanceof Error ? e.message : "Update failed" }, 500);
@@ -1115,6 +1135,9 @@ const server = Bun.serve({
         } else if (data.type === "permission_response" && data.permissionRequestId) {
           const pending = pendingPermissions.get(data.permissionRequestId);
           if (pending) {
+            if (data.approveAll && pending.sessionId) {
+              sessionApprovedAll.add(pending.sessionId);
+            }
             const active = activeProcesses.get(pending.sessionId);
             if (active && active.process.stdin) {
               const response = JSON.stringify({
@@ -1169,6 +1192,7 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
     : prompt;
 
   const workerPath = join(__dirname, "query-worker.ts");
+  const isSessionApprovedAll = sessionId ? sessionApprovedAll.has(sessionId) : false;
   const inputJson = JSON.stringify({
     prompt: effectivePrompt,
     cwd: workingDirectory,
@@ -1177,7 +1201,7 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
     allowedTools: allowedTools || permissionSettings.allowedTools,
     sessionId,
     permissionSettings: {
-      autoAcceptAll: permissionSettings.autoAcceptAll,
+      autoAcceptAll: permissionSettings.autoAcceptAll || isSessionApprovedAll,
       requireConfirmation: permissionSettings.requireConfirmation,
     },
   });
