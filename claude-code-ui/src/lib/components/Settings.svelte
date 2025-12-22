@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type PermissionSettings } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, onboardingComplete } from "../stores";
+  import { advancedMode, onboardingComplete, tour } from "../stores";
 
   interface Props {
     open: boolean;
@@ -763,6 +763,21 @@
                       class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
                     >
                       Show Onboarding
+                    </button>
+                  </div>
+                </div>
+
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900">Feature Tour</h5>
+                      <p class="text-sm text-gray-500">Take a guided tour of the app's features</p>
+                    </div>
+                    <button
+                      onclick={() => { onClose(); setTimeout(() => { tour.reset(); tour.start(); }, 100); }}
+                      class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                    >
+                      Start Tour
                     </button>
                   </div>
                 </div>

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, type ChatMessage, type TodoItem } from "./lib/stores";
+  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, type ChatMessage, type TodoItem, type TourStep } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, type Project, type Session } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -58,7 +59,8 @@
   import PermissionEditor from "./lib/components/PermissionEditor.svelte";
   import Confetti from "./lib/components/Confetti.svelte";
   import CopyButton from "./lib/components/CopyButton.svelte";
-  import WelcomeScreen from "./lib/components/WelcomeScreen.svelte";
+  import WelcomeScreen from "./lib/components/WelcomeScreenLogo.svelte";
+  import TourOverlay from "./lib/components/TourOverlay.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings } from "./lib/api";
 
@@ -150,7 +152,58 @@
   let sidebarSearchQuery = $state("");
 
   let showConfetti = $state(false);
-  let showWelcome = $state(true);
+  let showWelcome = $state(false);
+
+  const TOUR_STEPS: Record<string, TourStep[]> = {
+    main: [
+      {
+        id: "workspaces",
+        target: "[data-tour='workspaces']",
+        title: "Your Workspaces",
+        content: "Create and manage project workspaces here. Each workspace is linked to a folder on your machine.",
+        position: "right"
+      },
+      {
+        id: "new-workspace",
+        target: "[data-tour='new-workspace']",
+        title: "Create a Workspace",
+        content: "Click here to add a new project folder. You can point to an existing project or create a new one.",
+        position: "bottom"
+      },
+      {
+        id: "settings",
+        target: "[data-tour='settings']",
+        title: "Settings & Search",
+        content: "Access settings here. Use ⌘K to quickly search chats and navigate anywhere in the app.",
+        position: "top"
+      }
+    ],
+    project: [
+      {
+        id: "pin-project",
+        target: "[data-tour='project-menu']",
+        title: "Pin Your Favorites",
+        content: "Use this menu to pin projects to the top, rename them, or manage permissions.",
+        position: "right"
+      },
+      {
+        id: "chat-input",
+        target: "[data-tour='chat-input']",
+        title: "Start a Conversation",
+        content: "Type your message here to chat with Claude. Ask questions, request code changes, or run terminal commands.",
+        position: "top"
+      }
+    ],
+    chat: [
+      {
+        id: "message-menu",
+        target: "[data-tour='message-menu']",
+        title: "Message Actions",
+        content: "Edit your messages, rollback the conversation, or fork from any point to explore different approaches.",
+        position: "left"
+      }
+    ]
+  };
 
   const HOTKEYS = [
     { key: "Cmd/Ctrl + K", action: "Open search" },
@@ -302,10 +355,18 @@
   });
 
   function handleOnboardingComplete() {
+    showWelcome = true;
     onboardingComplete.complete();
+    if (!$tour.completedTours.includes("main")) {
+      setTimeout(() => tour.start("main"), 300);
+    }
   }
 
   onMount(async () => {
+    if ($onboardingComplete) {
+      showWelcome = true;
+    }
+    
     loadProjects();
     loadRecentChats();
     loadConfig();
@@ -325,6 +386,7 @@
     const handleGlobalClick = () => {
       sessionMenuId = null;
       projectMenuId = null;
+      messageMenuId = null;
     };
     document.addEventListener("click", handleGlobalClick);
     return () => document.removeEventListener("click", handleGlobalClick);
@@ -1166,6 +1228,11 @@ Respond in this exact JSON format only, no other text:
     const currentInput = inputText;
     inputText = "";
     
+    const currentTodos = get(todos);
+    if (currentTodos.length > 0 && currentTodos.every(t => t.status === "completed")) {
+      todos.set([]);
+    }
+    
     const thanksPatterns = /\b(thanks|thank you|thx|ty|awesome|perfect|great job|well done|amazing|love it)\b/i;
     if (thanksPatterns.test(currentInput)) {
       showConfetti = true;
@@ -1228,7 +1295,7 @@ Respond in this exact JSON format only, no other text:
 
   function getToolCalls(content: ContentBlock[] | string): ToolUseBlock[] {
     if (typeof content === "string") return [];
-    return content.filter((b): b is ToolUseBlock => b.type === "tool_use");
+    return content.filter((b): b is ToolUseBlock => b.type === "tool_use" && b.name !== "TodoWrite");
   }
 
   function isTaskTool(tool: ToolUseBlock): boolean {
@@ -1568,7 +1635,9 @@ Respond in this exact JSON format only, no other text:
   <Onboarding onComplete={handleOnboardingComplete} />
 {/if}
 
-<div class="flex h-screen bg-white text-gray-900 font-sans overflow-hidden selection:bg-gray-100 selection:text-gray-900">
+<TourOverlay tourSteps={TOUR_STEPS} />
+
+<div class="flex h-screen bg-white text-gray-900 font-sans overflow-hidden selection:bg-blue-100 selection:text-blue-900">
 
   <!-- Sidebar -->
 
@@ -1638,11 +1707,11 @@ Respond in this exact JSON format only, no other text:
           </div>
         {:else if !currentProject}
 
-             <div class="px-3">
+             <div class="px-3" data-tour="workspaces">
 
                  <div class="flex items-center justify-between mb-2 mt-2 px-2">
                    <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Workspaces</h3>
-                   <button onclick={() => showNewProjectModal = true} class="text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-0.5 rounded transition-colors border border-gray-200">
+                   <button onclick={() => showNewProjectModal = true} class="text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-0.5 rounded transition-colors border border-gray-200" data-tour="new-workspace">
                       + New
                    </button>
                  </div>
@@ -1997,7 +2066,7 @@ Respond in this exact JSON format only, no other text:
           <button onclick={() => showHotkeysHelp = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Keyboard shortcuts (?)">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
           </button>
-          <button onclick={() => showSettings = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Settings">
+          <button onclick={() => showSettings = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Settings" data-tour="settings">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
           </button>
         </div>
@@ -2493,7 +2562,7 @@ Respond in this exact JSON format only, no other text:
 
             <div class="w-full max-w-3xl pointer-events-auto">
 
-                <div class="relative group bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-200 transition-shadow focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] focus-within:border-gray-300">
+                <div class="relative group bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-200 transition-shadow focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] focus-within:border-gray-300" data-tour="chat-input">
 
                     <textarea
                         bind:this={inputRef}

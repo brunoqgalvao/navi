@@ -130,6 +130,14 @@ const server = Bun.serve({
       return json(searchIndex.getStats());
     }
 
+    if (url.pathname === "/api/search/debug" && method === "GET") {
+      const entityType = url.searchParams.get("type") || undefined;
+      return json({
+        stats: searchIndex.getStats(),
+        items: searchIndex.debugList(entityType),
+      });
+    }
+
     if (url.pathname === "/api/projects") {
       if (method === "GET") {
         return json(projects.list());

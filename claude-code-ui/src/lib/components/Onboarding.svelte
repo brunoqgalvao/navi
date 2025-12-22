@@ -1,6 +1,5 @@
 <script lang="ts">
   import { api } from "../api";
-  import Confetti from "./Confetti.svelte";
 
   interface Props {
     onComplete: () => void;
@@ -8,7 +7,7 @@
 
   let { onComplete }: Props = $props();
 
-  type Step = "checking" | "setup" | "choose-auth" | "api-key" | "terminal-login" | "no-account" | "complete";
+  type Step = "intro-1" | "intro-2" | "intro-3" | "checking" | "setup" | "choose-auth" | "api-key" | "terminal-login" | "no-account" | "complete";
   type AuthStatus = {
     claudeInstalled: boolean;
     claudePath: string;
@@ -19,17 +18,12 @@
     preferredAuth: "oauth" | "api_key" | null;
   };
 
-  let step = $state<Step>("checking");
+  let step = $state<Step>("intro-1");
   let authStatus = $state<AuthStatus | null>(null);
   let apiKey = $state("");
   let error = $state("");
   let isLoading = $state(false);
   let settingPreferred = $state(false);
-  let showCelebration = $state(false);
-
-  $effect(() => {
-    checkAuthStatus();
-  });
 
   async function checkAuthStatus() {
     step = "checking";
@@ -117,23 +111,201 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && !isLoading) {
-      submitApiKey();
+      if (step === "api-key") {
+        submitApiKey();
+      } else if (step.startsWith("intro-")) {
+        nextIntro();
+      }
     }
   }
 
+  function nextIntro() {
+    if (step === "intro-1") step = "intro-2";
+    else if (step === "intro-2") step = "intro-3";
+    else if (step === "intro-3") checkAuthStatus();
+  }
+
+  function prevIntro() {
+    if (step === "intro-2") step = "intro-1";
+    else if (step === "intro-3") step = "intro-2";
+  }
+
   function handleComplete() {
-    showCelebration = true;
-    setTimeout(() => {
-      onComplete();
-    }, 1200);
+    onComplete();
+  }
+
+  const introSteps = ["intro-1", "intro-2", "intro-3"];
+  $effect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (introSteps.includes(step)) {
+        if (e.key === "ArrowRight" || e.key === " ") {
+          e.preventDefault();
+          nextIntro();
+        } else if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          prevIntro();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  });
+
+  function getCurrentIntroIndex(): number {
+    if (step === "intro-1") return 0;
+    if (step === "intro-2") return 1;
+    if (step === "intro-3") return 2;
+    return -1;
   }
 </script>
 
-<Confetti trigger={showCelebration} />
-
 <div class="fixed inset-0 z-[100] bg-white flex items-center justify-center">
-  <div class="max-w-md w-full mx-4">
+  <div class="max-w-lg w-full mx-6">
     
+    {#if step === "intro-1"}
+      <div class="text-center space-y-8">
+        <div class="w-20 h-20 mx-auto bg-gray-900 rounded-2xl flex items-center justify-center">
+          <svg width="40" height="32" viewBox="0 0 160 120" stroke="white" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none">
+            <path d="M 35 30 L 10 60 L 35 90" />
+            <path d="M 70 95 L 90 25" />
+            <path d="M 125 30 L 150 60 L 125 90" />
+          </svg>
+        </div>
+        
+        <div class="space-y-3">
+          <h1 class="text-2xl font-semibold text-gray-900">Welcome to Navi</h1>
+          <p class="text-gray-500 leading-relaxed">
+            Your local AI coding assistant. Navi runs entirely on your machine, keeping your code private while giving you the full power of Claude.
+          </p>
+        </div>
+        
+        <div class="flex items-center justify-center gap-2">
+          {#each [0, 1, 2] as i}
+            <div class="w-2 h-2 rounded-full transition-all {i === 0 ? 'bg-gray-900' : 'bg-gray-200'}"></div>
+          {/each}
+        </div>
+        
+        <button
+          onclick={nextIntro}
+          class="bg-gray-900 hover:bg-gray-800 text-white px-8 py-3 rounded-xl text-sm font-medium transition-colors"
+        >
+          Get Started
+        </button>
+        
+        <p class="text-xs text-gray-400">Press Enter or use arrow keys to navigate</p>
+      </div>
+    {/if}
+
+    {#if step === "intro-2"}
+      <div class="text-center space-y-8">
+        <div class="w-20 h-20 mx-auto bg-indigo-50 rounded-2xl flex items-center justify-center">
+          <svg class="w-10 h-10 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+        </div>
+        
+        <div class="space-y-3">
+          <h2 class="text-2xl font-semibold text-gray-900">What Navi Can Do</h2>
+          <p class="text-gray-500 leading-relaxed">
+            Edit multiple files at once, run terminal commands, search the web, and navigate your codebase - all through natural conversation.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 text-left max-w-sm mx-auto">
+          <div class="bg-gray-50 rounded-xl p-3">
+            <div class="text-sm font-medium text-gray-900">Multi-file editing</div>
+            <div class="text-xs text-gray-500 mt-0.5">Refactor across your entire project</div>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-3">
+            <div class="text-sm font-medium text-gray-900">Terminal access</div>
+            <div class="text-xs text-gray-500 mt-0.5">Run commands, tests, and builds</div>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-3">
+            <div class="text-sm font-medium text-gray-900">Web search</div>
+            <div class="text-xs text-gray-500 mt-0.5">Find docs and solutions online</div>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-3">
+            <div class="text-sm font-medium text-gray-900">File preview</div>
+            <div class="text-xs text-gray-500 mt-0.5">See changes as they happen</div>
+          </div>
+        </div>
+        
+        <div class="flex items-center justify-center gap-2">
+          {#each [0, 1, 2] as i}
+            <div class="w-2 h-2 rounded-full transition-all {i === 1 ? 'bg-gray-900' : 'bg-gray-200'}"></div>
+          {/each}
+        </div>
+        
+        <div class="flex justify-center gap-3">
+          <button onclick={prevIntro} class="text-gray-500 hover:text-gray-700 px-4 py-2 text-sm font-medium transition-colors">
+            Back
+          </button>
+          <button
+            onclick={nextIntro}
+            class="bg-gray-900 hover:bg-gray-800 text-white px-8 py-3 rounded-xl text-sm font-medium transition-colors"
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    {/if}
+
+    {#if step === "intro-3"}
+      <div class="text-center space-y-8">
+        <div class="w-20 h-20 mx-auto bg-amber-50 rounded-2xl flex items-center justify-center">
+          <svg class="w-10 h-10 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+        </div>
+        
+        <div class="space-y-3">
+          <h2 class="text-2xl font-semibold text-gray-900">Private & Secure</h2>
+          <p class="text-gray-500 leading-relaxed">
+            Your code stays on your machine. Navi communicates directly with Anthropic's API - no middleman, no data storage, no tracking.
+          </p>
+        </div>
+
+        <div class="bg-gray-50 rounded-xl p-4 text-left max-w-sm mx-auto space-y-3">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-green-600 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+            <div class="text-sm text-gray-600">Code processed locally, sent only to Anthropic</div>
+          </div>
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-green-600 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+            <div class="text-sm text-gray-600">Credentials stored locally in your home directory</div>
+          </div>
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-green-600 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+            <div class="text-sm text-gray-600">Open source - inspect the code yourself</div>
+          </div>
+        </div>
+        
+        <div class="flex items-center justify-center gap-2">
+          {#each [0, 1, 2] as i}
+            <div class="w-2 h-2 rounded-full transition-all {i === 2 ? 'bg-gray-900' : 'bg-gray-200'}"></div>
+          {/each}
+        </div>
+        
+        <div class="flex justify-center gap-3">
+          <button onclick={prevIntro} class="text-gray-500 hover:text-gray-700 px-4 py-2 text-sm font-medium transition-colors">
+            Back
+          </button>
+          <button
+            onclick={nextIntro}
+            class="bg-gray-900 hover:bg-gray-800 text-white px-8 py-3 rounded-xl text-sm font-medium transition-colors"
+          >
+            Set Up Authentication
+          </button>
+        </div>
+      </div>
+    {/if}
+
     {#if step === "checking"}
       <div class="text-center space-y-4">
         <div class="w-10 h-10 mx-auto">
@@ -415,7 +587,7 @@
         </div>
         
         <div class="space-y-1">
-          <h2 class="text-xl font-semibold text-gray-900">Ready to go</h2>
+          <h2 class="text-xl font-semibold text-gray-900">You're all set!</h2>
           <p class="text-sm text-gray-500">
             {#if authStatus?.authMethod === "oauth"}
               Connected via Anthropic

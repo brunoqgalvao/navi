@@ -233,28 +233,7 @@
       </div>
 
     {:else if tool.name === "TodoWrite"}
-      <div class="space-y-1">
-        {#if tool.input.todos && Array.isArray(tool.input.todos)}
-          <div class="text-xs text-gray-500">{tool.input.todos.length} todo items</div>
-          <div class="space-y-0.5 max-h-32 overflow-y-auto">
-            {#each tool.input.todos.slice(0, 5) as todo}
-              <div class="flex items-center gap-1.5 text-xs">
-                {#if todo.status === "completed"}
-                  <svg class="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                {:else if todo.status === "in_progress"}
-                  <svg class="w-3 h-3 text-blue-500 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                {:else}
-                  <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"></circle></svg>
-                {/if}
-                <span class={todo.status === "completed" ? "text-gray-400 line-through" : "text-gray-600"}>{todo.content}</span>
-              </div>
-            {/each}
-            {#if tool.input.todos.length > 5}
-              <div class="text-[10px] text-gray-400">+{tool.input.todos.length - 5} more</div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <div class="text-xs text-gray-500">Updated execution plan ({tool.input.todos?.length || 0} items)</div>
 
     {:else}
       <pre class="font-mono text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(tool.input, null, 2)}</pre>

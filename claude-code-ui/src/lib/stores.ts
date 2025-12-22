@@ -530,3 +530,81 @@ export const projectStatus = derived(
     return projectMap;
   }
 );
+
+export interface TourStep {
+  id: string;
+  target: string;
+  title: string;
+  content: string;
+  position?: "top" | "bottom" | "left" | "right";
+}
+
+const TOUR_COMPLETE_KEY = "claude-code-ui-tours-complete";
+
+function createTourStore() {
+  const getCompletedTours = (): string[] => {
+    if (typeof window === "undefined") return [];
+    try {
+      return JSON.parse(localStorage.getItem(TOUR_COMPLETE_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  };
+
+  const { subscribe, set, update } = writable<{
+    active: boolean;
+    currentStep: number;
+    tourId: string | null;
+    completedTours: string[];
+  }>({
+    active: false,
+    currentStep: 0,
+    tourId: null,
+    completedTours: getCompletedTours(),
+  });
+
+  const saveTours = (tours: string[]) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(TOUR_COMPLETE_KEY, JSON.stringify(tours));
+    }
+  };
+
+  return {
+    subscribe,
+    start: (tourId: string = "main") => update(s => ({ ...s, active: true, currentStep: 0, tourId })),
+    next: () => update(s => ({ ...s, currentStep: s.currentStep + 1 })),
+    prev: () => update(s => ({ ...s, currentStep: Math.max(0, s.currentStep - 1) })),
+    goTo: (step: number) => update(s => ({ ...s, currentStep: step })),
+    complete: () => update(s => {
+      const newCompleted = s.tourId && !s.completedTours.includes(s.tourId) 
+        ? [...s.completedTours, s.tourId] 
+        : s.completedTours;
+      saveTours(newCompleted);
+      return { active: false, currentStep: 0, tourId: null, completedTours: newCompleted };
+    }),
+    skip: () => update(s => {
+      const newCompleted = s.tourId && !s.completedTours.includes(s.tourId) 
+        ? [...s.completedTours, s.tourId] 
+        : s.completedTours;
+      saveTours(newCompleted);
+      return { active: false, currentStep: 0, tourId: null, completedTours: newCompleted };
+    }),
+    isCompleted: (tourId: string, state: { completedTours: string[] }) => state.completedTours.includes(tourId),
+    reset: (tourId?: string) => {
+      if (typeof window !== "undefined") {
+        if (tourId) {
+          update(s => {
+            const newCompleted = s.completedTours.filter(t => t !== tourId);
+            saveTours(newCompleted);
+            return { ...s, completedTours: newCompleted };
+          });
+        } else {
+          localStorage.removeItem(TOUR_COMPLETE_KEY);
+          set({ active: false, currentStep: 0, tourId: null, completedTours: [] });
+        }
+      }
+    },
+  };
+}
+
+export const tour = createTourStore();

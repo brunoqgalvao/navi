@@ -457,6 +457,18 @@ export const searchIndex = {
     );
     return { total: total?.count || 0, byType };
   },
+
+  debugList: (entityType?: string) => {
+    if (entityType) {
+      return queryAll<SearchIndexEntry>(
+        "SELECT * FROM search_index WHERE entity_type = ? ORDER BY updated_at DESC LIMIT 20",
+        [entityType]
+      );
+    }
+    return queryAll<SearchIndexEntry>(
+      "SELECT * FROM search_index ORDER BY entity_type, updated_at DESC LIMIT 50"
+    );
+  },
 };
 
 export function getDb() {
