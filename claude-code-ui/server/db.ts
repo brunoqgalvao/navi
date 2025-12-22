@@ -417,7 +417,14 @@ export const searchIndex = {
       params.push(`%${term}%`, `%${term}%`);
     }
     
-    sql += " ORDER BY si.updated_at DESC LIMIT ?";
+    sql += ` ORDER BY 
+      CASE si.entity_type 
+        WHEN 'project' THEN 1 
+        WHEN 'session' THEN 2 
+        WHEN 'message' THEN 3 
+      END,
+      si.updated_at DESC 
+      LIMIT ?`;
     params.push(limit);
     
     return queryAll<SearchResult>(sql, params);

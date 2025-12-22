@@ -56,6 +56,9 @@
   import NotificationBadge from "./lib/components/NotificationBadge.svelte";
   import PermissionRequest from "./lib/components/PermissionRequest.svelte";
   import PermissionEditor from "./lib/components/PermissionEditor.svelte";
+  import Confetti from "./lib/components/Confetti.svelte";
+  import CopyButton from "./lib/components/CopyButton.svelte";
+  import WelcomeScreen from "./lib/components/WelcomeScreen.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings } from "./lib/api";
 
@@ -145,6 +148,9 @@
   let inputRef: HTMLTextAreaElement | null = $state(null);
   let showSearchModal = $state(false);
   let sidebarSearchQuery = $state("");
+
+  let showConfetti = $state(false);
+  let showWelcome = $state(true);
 
   const HOTKEYS = [
     { key: "Cmd/Ctrl + K", action: "Open search" },
@@ -1159,6 +1165,11 @@ Respond in this exact JSON format only, no other text:
 
     const currentInput = inputText;
     inputText = "";
+    
+    const thanksPatterns = /\b(thanks|thank you|thx|ty|awesome|perfect|great job|well done|amazing|love it)\b/i;
+    if (thanksPatterns.test(currentInput)) {
+      showConfetti = true;
+    }
 
     sessionMessages.addMessage(currentSessionId, {
       id: crypto.randomUUID(),
@@ -1372,13 +1383,9 @@ Respond in this exact JSON format only, no other text:
     messageMenuId = null;
   }
 
-  function copyMessageContent(msgId: string) {
+  function getMessageText(msgId: string): string {
     const msg = currentMessages.find(m => m.id === msgId);
-    if (msg) {
-      const text = formatContent(msg.content);
-      navigator.clipboard.writeText(text);
-    }
-    closeMessageMenu();
+    return msg ? formatContent(msg.content) : "";
   }
 
   function editAsNewMessage(msgId: string) {
@@ -1551,6 +1558,12 @@ Respond in this exact JSON format only, no other text:
 
 <svelte:window onmousemove={handleMouseMove} onmouseup={() => { stopResizingRight(); stopResizingLeft(); }} onkeydown={handleGlobalKeydown} />
 
+{#if showWelcome}
+  <WelcomeScreen onComplete={() => showWelcome = false} />
+{/if}
+
+<Confetti trigger={showConfetti} onComplete={() => showConfetti = false} />
+
 {#if showOnboarding}
   <Onboarding onComplete={handleOnboardingComplete} />
 {/if}
@@ -1576,10 +1589,10 @@ Respond in this exact JSON format only, no other text:
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
           </button>
         {:else}
-          <div class="flex items-center gap-2.5 px-2">
+          <button onclick={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; }} class="flex items-center gap-2.5 px-2 hover:opacity-70 transition-opacity">
               <img src="/logo.png" alt="Logo" class="w-6 h-6" />
               <span class="font-medium text-sm tracking-tight text-gray-900">Navi</span>
-          </div>
+          </button>
 
           <div class="flex items-center gap-0.5">
             {#if currentProject}
@@ -1656,7 +1669,7 @@ Respond in this exact JSON format only, no other text:
                             >
                             <button 
                                 onclick={() => selectProject(proj)}
-                                class="w-full text-left px-2.5 py-2 rounded-md text-gray-600 hover:bg-gray-200/50 hover:text-gray-900 transition-colors {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
+                                class="w-full text-left px-2.5 py-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
                             >
                                 <div class="flex items-center gap-2">
                                     {#if proj.pinned}
@@ -1843,7 +1856,7 @@ Respond in this exact JSON format only, no other text:
 
                                     onclick={() => selectSession(sess)}
 
-                                    class={`w-full text-left px-2.5 py-2 rounded-md text-[13px] transition-all border ${sess.pinned ? '' : 'cursor-grab active:cursor-grabbing'} ${$session.sessionId === sess.id ? 'bg-white border-gray-200 shadow-sm text-gray-900 z-10 relative' : 'border-transparent text-gray-500 hover:bg-gray-200/50 hover:text-gray-800'}`}
+                                    class={`w-full text-left px-2.5 py-2 rounded-lg text-[13px] transition-all border sidebar-item-glow ${sess.pinned ? '' : 'cursor-grab active:cursor-grabbing'} ${$session.sessionId === sess.id ? 'bg-white border-gray-200 shadow-sm text-gray-900 z-10 relative' : 'border-transparent text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
 
                                 >
 
@@ -2224,18 +2237,28 @@ Respond in this exact JSON format only, no other text:
                               <div class="whitespace-pre-wrap break-words">{formatContent(msg.content)}</div>
                             </div>
                             <div class="absolute -top-8 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5">
-                              <button onclick={() => copyMessageContent(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Copy">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                              </button>
-                              <button onclick={() => startEditMessage(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Edit message">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                              </button>
-                              <button onclick={() => rollbackToMessage(msg.id)} class="p-1 text-gray-400 hover:text-amber-600 rounded transition-colors" title="Rollback to here (delete messages after)">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
-                              </button>
-                              <button onclick={() => forkFromMessage(msg.id)} class="p-1 text-gray-400 hover:text-blue-600 rounded transition-colors" title="Fork from here">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
-                              </button>
+                              <CopyButton text={getMessageText(msg.id)} />
+                              <div class="relative">
+                                <button onclick={(e) => { e.stopPropagation(); messageMenuId = messageMenuId === msg.id ? null : msg.id; }} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="More actions">
+                                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path></svg>
+                                </button>
+                                {#if messageMenuId === msg.id}
+                                  <div class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
+                                    <button onclick={() => { startEditMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                      <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                      Edit
+                                    </button>
+                                    <button onclick={() => { rollbackToMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                      <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
+                                      Rollback to here
+                                    </button>
+                                    <button onclick={() => { forkFromMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                      <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                                      Fork from here
+                                    </button>
+                                  </div>
+                                {/if}
+                              </div>
                             </div>
                           {/if}
                         </div>
@@ -2271,15 +2294,24 @@ Respond in this exact JSON format only, no other text:
                              <div class="flex-1 min-w-0 space-y-2 relative" onclick={handleMessageClick}>
                                  
                                  <div class="absolute -top-6 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5">
-                                   <button onclick={() => copyMessageContent(msg.id)} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Copy">
-                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                                   </button>
-                                   <button onclick={() => rollbackToMessage(msg.id)} class="p-1 text-gray-400 hover:text-amber-600 rounded transition-colors" title="Rollback to here (delete messages after)">
-                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
-                                   </button>
-                                   <button onclick={() => forkFromMessage(msg.id)} class="p-1 text-gray-400 hover:text-blue-600 rounded transition-colors" title="Fork from here">
-                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
-                                   </button>
+                                   <CopyButton text={getMessageText(msg.id)} />
+                                   <div class="relative">
+                                     <button onclick={(e) => { e.stopPropagation(); messageMenuId = messageMenuId === msg.id ? null : msg.id; }} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="More actions">
+                                       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path></svg>
+                                     </button>
+                                     {#if messageMenuId === msg.id}
+                                       <div class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
+                                         <button onclick={() => { rollbackToMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                           <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
+                                           Rollback to here
+                                         </button>
+                                         <button onclick={() => { forkFromMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                           <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                                           Fork from here
+                                         </button>
+                                       </div>
+                                     {/if}
+                                   </div>
                                  </div>
 
                                  <div class="text-[15px] leading-7 text-gray-800 markdown-body">
@@ -2409,14 +2441,12 @@ Respond in this exact JSON format only, no other text:
                     <div class="flex-1">
                         {#if currentTodos.length > 0}
                             {@const completedCount = currentTodos.filter(t => t.status === "completed").length}
-                            {@const inProgressItem = currentTodos.find(t => t.status === "in_progress")}
                             <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                                 <div class="flex items-center gap-2 mb-2">
-                                    <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
                                     </svg>
-                                    <span class="text-xs font-medium text-gray-700">Execution Plan</span>
-                                    <span class="text-xs text-gray-500">{completedCount}/{currentTodos.length}</span>
+                                    <span class="text-xs font-medium text-gray-600">{completedCount}/{currentTodos.length}</span>
                                 </div>
                                 <div class="space-y-1.5 max-h-32 overflow-y-auto">
                                     {#each currentTodos as todo}
@@ -2429,7 +2459,7 @@ Respond in this exact JSON format only, no other text:
                                                         </svg>
                                                     </div>
                                                 {:else if todo.status === "in_progress"}
-                                                    <div class="w-4 h-4 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
+                                                    <div class="w-4 h-4 rounded-full border-2 border-gray-400 border-t-transparent animate-spin"></div>
                                                 {:else}
                                                     <div class="w-4 h-4 rounded-full border-2 border-gray-300"></div>
                                                 {/if}
@@ -2444,8 +2474,8 @@ Respond in this exact JSON format only, no other text:
                         {:else}
                             <div class="flex items-center gap-1.5 pt-2">
                                 <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
-                                <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-75"></div>
-                                <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-150"></div>
+                                <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
+                                <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
                             </div>
                         {/if}
                     </div>
@@ -2763,6 +2793,11 @@ Respond in this exact JSON format only, no other text:
       await loadSessions(projectId);
       selectSession(sessionId);
     }}
+    onNavigateProject={async (projectId) => {
+      session.setProject(projectId);
+      session.setSession(null);
+      await loadSessions(projectId);
+    }}
   />
 
   {#if showHotkeysHelp}
@@ -2869,25 +2904,56 @@ Respond in this exact JSON format only, no other text:
         </div>
         <div class="p-6 overflow-y-auto max-h-[calc(80vh-80px)]">
           <div class="space-y-4">
-            <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
-              <div class="flex items-start gap-3">
-                <svg class="w-5 h-5 text-amber-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <div class="text-sm">
-                  <p class="font-medium text-amber-800">Session-based permissions</p>
-                  <p class="text-amber-700 mt-1">When you click "Always Allow" on a permission request, that permission is granted for the rest of the chat session. Start a new chat to reset permissions.</p>
+            <div class="border border-gray-200 rounded-lg p-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h4 class="font-medium text-sm text-gray-900">Always Allow for this Project</h4>
+                  <p class="text-xs text-gray-500 mt-1">Skip permission prompts for all chats in this project</p>
                 </div>
+                <button
+                  onclick={async () => {
+                    if (showProjectPermissions) {
+                      const newValue = !showProjectPermissions.auto_accept_all;
+                      await api.projects.setAutoAcceptAll(showProjectPermissions.id, newValue);
+                      showProjectPermissions = { ...showProjectPermissions, auto_accept_all: newValue ? 1 : 0 };
+                      const idx = sidebarProjects.findIndex(p => p.id === showProjectPermissions?.id);
+                      if (idx >= 0) {
+                        sidebarProjects[idx] = { ...sidebarProjects[idx], auto_accept_all: newValue ? 1 : 0 };
+                      }
+                    }
+                  }}
+                  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {showProjectPermissions?.auto_accept_all ? 'bg-purple-600' : 'bg-gray-300'}"
+                >
+                  <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {showProjectPermissions?.auto_accept_all ? 'translate-x-6' : 'translate-x-1'}"></span>
+                </button>
               </div>
+            </div>
+
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <h4 class="font-medium text-sm text-gray-900 mb-2">How Permissions Work</h4>
+              <ul class="text-xs text-gray-600 space-y-1.5">
+                <li class="flex items-start gap-2">
+                  <span class="text-gray-400">•</span>
+                  <span><strong>Allow</strong> - Allows that single action</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="text-gray-400">•</span>
+                  <span><strong>Always Allow</strong> - Allows all actions for the rest of the chat (persists)</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="text-gray-400">•</span>
+                  <span><strong>Project toggle above</strong> - Skips all prompts for this project</span>
+                </li>
+              </ul>
             </div>
             
             <div class="border border-gray-200 rounded-lg p-4">
               <h4 class="font-medium text-sm text-gray-900 mb-2">Global Settings</h4>
-              <p class="text-xs text-gray-500 mb-3">These settings apply to all projects. Edit in Settings → Permissions.</p>
+              <p class="text-xs text-gray-500 mb-3">These settings apply to all projects.</p>
               {#if globalPermissionSettings}
                 <div class="space-y-2 text-sm">
                   <div class="flex items-center justify-between py-1">
-                    <span class="text-gray-600">Auto-accept all</span>
+                    <span class="text-gray-600">Auto-accept all (global)</span>
                     <span class={globalPermissionSettings.autoAcceptAll ? "text-amber-600 font-medium" : "text-gray-400"}>
                       {globalPermissionSettings.autoAcceptAll ? "Enabled" : "Disabled"}
                     </span>

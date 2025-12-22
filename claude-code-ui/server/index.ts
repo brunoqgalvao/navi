@@ -32,6 +32,13 @@ async function migrateEnvKeys() {
 
 await migrateEnvKeys();
 
+const stats = searchIndex.getStats();
+if (stats.total === 0) {
+  console.log("Building search index...");
+  searchIndex.reindexAll();
+  console.log("Search index built:", searchIndex.getStats());
+}
+
 const PORT = 3001;
 
 const corsHeaders = {
@@ -141,6 +148,7 @@ const server = Bun.serve({
         const id = crypto.randomUUID();
         const now = Date.now();
         projects.create(id, body.name, body.path, body.description || null, now, now);
+        searchIndex.indexProject(id);
         return json(projects.get(id), 201);
       }
     }
@@ -164,9 +172,11 @@ const server = Bun.serve({
           return json({ error: "Directory does not exist" }, 400);
         }
         projects.update(body.name, body.path, body.description || null, body.context_window || 200000, Date.now(), id);
+        searchIndex.indexProject(id);
         return json(projects.get(id));
       }
       if (method === "DELETE") {
+        searchIndex.removeProject(id);
         projects.delete(id);
         return json({ success: true });
       }
@@ -213,6 +223,7 @@ const server = Bun.serve({
         const id = crypto.randomUUID();
         const now = Date.now();
         sessions.create(id, projectId, body.title || "New conversation", now, now);
+        searchIndex.indexSession(id);
         return json(sessions.get(id), 201);
       }
     }
@@ -228,10 +239,12 @@ const server = Bun.serve({
         const body = await req.json();
         if (body.title) {
           sessions.updateTitle(body.title, Date.now(), id);
+          searchIndex.indexSession(id);
         }
         return json(sessions.get(id));
       }
       if (method === "DELETE") {
+        searchIndex.removeSession(id);
         sessions.delete(id);
         return json({ success: true });
       }
@@ -1185,6 +1198,7 @@ const server = Bun.serve({
           if (pending) {
             if (data.approveAll && pending.sessionId) {
               sessionApprovedAll.add(pending.sessionId);
+              sessions.setAutoAcceptAll(pending.sessionId, true);
             }
             const active = activeProcesses.get(pending.sessionId);
             if (active && active.process.stdin) {

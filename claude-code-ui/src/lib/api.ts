@@ -10,6 +10,7 @@ export interface Project {
   pinned?: number;
   sort_order?: number;
   context_window?: number;
+  auto_accept_all?: number;
   created_at: number;
   updated_at: number;
   session_count?: number;
@@ -28,6 +29,7 @@ export interface Session {
   output_tokens: number;
   pinned?: number;
   sort_order?: number;
+  auto_accept_all?: number;
   created_at: number;
   updated_at: number;
   project_name?: string;
@@ -86,6 +88,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ order }),
       }),
+    setAutoAcceptAll: (id: string, autoAcceptAll: boolean) =>
+      request<Project>(`/projects/${id}/auto-accept`, {
+        method: "POST",
+        body: JSON.stringify({ autoAcceptAll }),
+      }),
   },
 
   sessions: {
@@ -124,6 +131,11 @@ export const api = {
       if (projectId) params.set("projectId", projectId);
       return request<Session[]>(`/search?${params}`);
     },
+    setAutoAcceptAll: (id: string, autoAcceptAll: boolean) =>
+      request<Session>(`/sessions/${id}/auto-accept`, {
+        method: "POST",
+        body: JSON.stringify({ autoAcceptAll }),
+      }),
   },
 
   messages: {

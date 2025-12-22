@@ -288,14 +288,6 @@
             {/each}
           </nav>
 
-          <div class="mt-6 pt-6 border-t border-gray-200">
-            <div class="px-3 space-y-2 text-xs text-gray-500">
-              <div class="flex justify-between">
-                <span>Config</span>
-                <code class="bg-gray-200 px-1 rounded font-mono">~/.claude-code-ui/</code>
-              </div>
-            </div>
-          </div>
         </div>
 
         <div class="flex-1 overflow-y-auto p-6">

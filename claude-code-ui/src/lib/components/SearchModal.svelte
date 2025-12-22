@@ -1,11 +1,8 @@
 <script lang="ts">
   import { api, type SearchResult } from "../api";
-  import { createEventDispatcher, onMount, onDestroy } from "svelte";
 
-  let { isOpen = $bindable(false), projectId = null as string | null, onNavigate = (sessionId: string, projectId: string) => {} } = $props();
+  let { isOpen = $bindable(false), projectId = null as string | null, onNavigate = (sessionId: string, projectId: string) => {}, onNavigateProject = (projectId: string) => {} } = $props();
 
-  const dispatch = createEventDispatcher();
-  
   let searchQuery = $state("");
   let results = $state<SearchResult[]>([]);
   let isLoading = $state(false);
@@ -13,19 +10,35 @@
   let inputRef: HTMLInputElement | null = $state(null);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  let groupedResults = $derived(() => {
+    const projects = results.filter(r => r.entity_type === 'project');
+    const sessions = results.filter(r => r.entity_type === 'session');
+    const messages = results.filter(r => r.entity_type === 'message');
+    return { projects, sessions, messages };
+  });
+
+  let flatResults = $derived(() => {
+    const { projects, sessions, messages } = groupedResults();
+    return [...projects, ...sessions, ...messages];
+  });
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
       e.stopPropagation();
       isOpen = false;
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      selectedIndex = Math.min(selectedIndex + 1, results.length - 1);
+      const flat = flatResults();
+      selectedIndex = Math.min(selectedIndex + 1, flat.length - 1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       selectedIndex = Math.max(selectedIndex - 1, 0);
-    } else if (e.key === "Enter" && results[selectedIndex]) {
+    } else if (e.key === "Enter") {
       e.preventDefault();
-      selectResult(results[selectedIndex]);
+      const flat = flatResults();
+      if (flat[selectedIndex]) {
+        selectResult(flat[selectedIndex]);
+      }
     }
   }
 
@@ -37,7 +50,7 @@
 
     isLoading = true;
     try {
-      results = await api.search.query(query, { projectId: projectId || undefined, limit: 20 });
+      results = await api.search.query(query, { projectId: projectId || undefined, limit: 30 });
       selectedIndex = 0;
     } catch (e) {
       console.error("Search failed:", e);
@@ -56,7 +69,10 @@
   }
 
   function selectResult(result: SearchResult) {
-    if (result.session_id && result.project_id) {
+    if (result.entity_type === 'project' && result.project_id) {
+      onNavigateProject(result.project_id);
+      isOpen = false;
+    } else if (result.session_id && result.project_id) {
       onNavigate(result.session_id, result.project_id);
       isOpen = false;
     }
@@ -77,24 +93,23 @@
     return date.toLocaleDateString();
   }
 
-  function getResultIcon(type: string): string {
-    switch (type) {
-      case "project": return "📁";
-      case "session": return "💬";
-      case "message": return "📝";
-      default: return "📄";
-    }
-  }
-
   function highlightMatch(text: string, query: string): string {
-    if (!query.trim()) return text;
-    const terms = query.toLowerCase().split(/\s+/);
+    if (!query.trim() || !text) return text || "";
+    const escapedTerms = query.toLowerCase().split(/\s+/).map(t => 
+      t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    );
     let result = text;
-    for (const term of terms) {
-      const regex = new RegExp(`(${term})`, "gi");
-      result = result.replace(regex, '<mark class="bg-accent-100 text-accent-700">$1</mark>');
+    for (const term of escapedTerms) {
+      if (term) {
+        const regex = new RegExp(`(${term})`, "gi");
+        result = result.replace(regex, '<mark class="bg-amber-100 text-amber-800 rounded px-0.5">$1</mark>');
+      }
     }
     return result;
+  }
+
+  function getGlobalIndex(result: SearchResult): number {
+    return flatResults().indexOf(result);
   }
 
   $effect(() => {
@@ -114,7 +129,7 @@
 
 {#if isOpen}
   <div 
-    class="fixed inset-0 bg-black/60 z-50 flex items-start justify-center pt-[15vh]"
+    class="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-[12vh]"
     onclick={() => isOpen = false}
     onkeydown={handleKeydown}
     role="dialog"
@@ -135,7 +150,7 @@
             type="text"
             value={searchQuery}
             oninput={handleInput}
-            placeholder={projectId ? "Search in project..." : "Search all chats..."}
+            placeholder={projectId ? "Search in project..." : "Search projects and chats..."}
             class="flex-1 bg-transparent text-gray-900 text-lg outline-none placeholder-gray-400"
           />
           {#if isLoading}
@@ -153,41 +168,99 @@
         </div>
       </div>
 
-      <div class="max-h-[50vh] overflow-y-auto">
+      <div class="max-h-[55vh] overflow-y-auto">
         {#if results.length > 0}
-          {#each results as result, i}
-            <button
-              class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3 border-b border-gray-100 last:border-0 transition-colors {selectedIndex === i ? 'bg-gray-50' : ''}"
-              onclick={() => selectResult(result)}
-              onmouseenter={() => selectedIndex = i}
-            >
-              <span class="text-xl mt-0.5">{getResultIcon(result.entity_type)}</span>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-gray-900 font-medium truncate">
-                    {result.session_title || "Untitled"}
-                  </span>
-                  <span class="text-xs text-gray-400">{formatTime(result.updated_at)}</span>
+          {@const grouped = groupedResults()}
+          
+          {#if grouped.projects.length > 0}
+            <div class="px-4 py-2 bg-gray-50 border-b border-gray-100">
+              <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Projects</span>
+            </div>
+            {#each grouped.projects as result}
+              {@const globalIdx = getGlobalIndex(result)}
+              <button
+                class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3 border-b border-gray-100 transition-colors {selectedIndex === globalIdx ? 'bg-blue-50' : ''}"
+                onclick={() => selectResult(result)}
+                onmouseenter={() => selectedIndex = globalIdx}
+              >
+                <span class="text-lg mt-0.5">📁</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-900 font-medium">
+                      {@html highlightMatch(result.preview || result.project_name || "Untitled", searchQuery)}
+                    </span>
+                    <span class="text-xs text-gray-400">{formatTime(result.updated_at)}</span>
+                  </div>
                 </div>
-                {#if result.preview}
-                  <p class="text-sm text-gray-500 truncate mt-1">
-                    {@html highlightMatch(result.preview.slice(0, 100), searchQuery)}
-                  </p>
-                {/if}
-                {#if result.project_name}
-                  <span class="text-xs text-gray-400 mt-1 inline-block">{result.project_name}</span>
-                {/if}
-              </div>
-              <span class="text-xs text-gray-400 uppercase">{result.entity_type}</span>
-            </button>
-          {/each}
+              </button>
+            {/each}
+          {/if}
+
+          {#if grouped.sessions.length > 0}
+            <div class="px-4 py-2 bg-gray-50 border-b border-gray-100">
+              <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Chats</span>
+            </div>
+            {#each grouped.sessions as result}
+              {@const globalIdx = getGlobalIndex(result)}
+              <button
+                class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3 border-b border-gray-100 transition-colors {selectedIndex === globalIdx ? 'bg-blue-50' : ''}"
+                onclick={() => selectResult(result)}
+                onmouseenter={() => selectedIndex = globalIdx}
+              >
+                <span class="text-lg mt-0.5">💬</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-900 font-medium truncate">
+                      {@html highlightMatch(result.session_title || "Untitled", searchQuery)}
+                    </span>
+                    <span class="text-xs text-gray-400">{formatTime(result.updated_at)}</span>
+                  </div>
+                  {#if result.project_name}
+                    <span class="text-xs text-gray-400 mt-0.5 inline-block">
+                      {@html highlightMatch(result.project_name, searchQuery)}
+                    </span>
+                  {/if}
+                </div>
+              </button>
+            {/each}
+          {/if}
+
+          {#if grouped.messages.length > 0}
+            <div class="px-4 py-2 bg-gray-50 border-b border-gray-100">
+              <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Messages</span>
+            </div>
+            {#each grouped.messages as result}
+              {@const globalIdx = getGlobalIndex(result)}
+              <button
+                class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3 border-b border-gray-100 transition-colors {selectedIndex === globalIdx ? 'bg-blue-50' : ''}"
+                onclick={() => selectResult(result)}
+                onmouseenter={() => selectedIndex = globalIdx}
+              >
+                <span class="text-lg mt-0.5">📝</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-700 font-medium truncate">{result.session_title || "Untitled"}</span>
+                    <span class="text-xs text-gray-400">{formatTime(result.updated_at)}</span>
+                  </div>
+                  {#if result.preview}
+                    <p class="text-sm text-gray-500 truncate mt-0.5">
+                      {@html highlightMatch(result.preview.slice(0, 120), searchQuery)}
+                    </p>
+                  {/if}
+                  {#if result.project_name}
+                    <span class="text-xs text-gray-400 mt-0.5 inline-block">{result.project_name}</span>
+                  {/if}
+                </div>
+              </button>
+            {/each}
+          {/if}
         {:else if searchQuery && !isLoading}
           <div class="px-4 py-8 text-center text-gray-500">
             No results found for "{searchQuery}"
           </div>
         {:else if !searchQuery}
           <div class="px-4 py-8 text-center text-gray-400">
-            <p class="text-sm">Start typing to search your chats</p>
+            <p class="text-sm">Start typing to search your projects and chats</p>
             <p class="text-xs mt-2 text-gray-400">Tip: Use Cmd+K to open search anytime</p>
           </div>
         {/if}
