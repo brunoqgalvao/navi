@@ -9,6 +9,7 @@
 | 03 | [Extension Framework PRD](./03_extension_framework_prd.md) | Framework architecture and APIs |
 | 04 | [Implementation Plan](./04_implementation_plan.md) | Phased development approach |
 | 05 | [Iteration Notes](./05_iteration_notes.md) | Cross-reference analysis and refinements |
+| 06 | [Google Maps Extension PRD](./06_google_maps_extension_prd.md) | Interactive map embeds for locations/routes |
 
 ## Quick Summary
 
@@ -18,6 +19,7 @@ A lightweight extension framework that enables modular features to be developed 
 ### First Extensions
 1. **Git** - Repository status, changes, commits, branches
 2. **Google Calendar** - OAuth integration, today's events, meeting notifications
+3. **Google Maps** - Interactive map embeds, routes, location pins
 
 ### Key Architecture Decisions
 - Build-time extension bundling (not runtime loading)
@@ -42,3 +44,4 @@ A lightweight extension framework that enables modular features to be developed 
 2. Any other extensions to consider? (Kanban, Notes, etc.)
 3. Do we need external calendar sync (Google Calendar) in v1?
 4. Should AI-generated commit messages be a feature?
+5. Should Claude output structured location data for better map detection?
