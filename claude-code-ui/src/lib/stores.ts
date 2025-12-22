@@ -608,3 +608,26 @@ function createTourStore() {
 }
 
 export const tour = createTourStore();
+
+export interface AttachedFile {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+}
+
+function createAttachedFilesStore() {
+  const { subscribe, set, update } = writable<AttachedFile[]>([]);
+
+  return {
+    subscribe,
+    add: (file: AttachedFile) => update(files => {
+      if (files.some(f => f.path === file.path)) return files;
+      return [...files, file];
+    }),
+    remove: (path: string) => update(files => files.filter(f => f.path !== path)),
+    clear: () => set([]),
+    set,
+  };
+}
+
+export const attachedFiles = createAttachedFilesStore();

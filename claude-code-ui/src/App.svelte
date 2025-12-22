@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, type ChatMessage, type TodoItem, type TourStep } from "./lib/stores";
+  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, attachedFiles, type ChatMessage, type TodoItem, type TourStep, type AttachedFile } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, type Project, type Session } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -61,6 +61,9 @@
   import CopyButton from "./lib/components/CopyButton.svelte";
   import WelcomeScreen from "./lib/components/WelcomeScreenLogo.svelte";
   import TourOverlay from "./lib/components/TourOverlay.svelte";
+  import ChatInput from "./lib/components/ChatInput.svelte";
+  import UserMessage from "./lib/components/UserMessage.svelte";
+  import AssistantMessage from "./lib/components/AssistantMessage.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings } from "./lib/api";
 
@@ -1093,6 +1096,13 @@ Respond in this exact JSON format only, no other text:
               sessionStatus.setIdle(doneSessionId, $session.projectId);
             }
           }
+          if (doneSessionId === $session.sessionId && !$tour.completedTours.includes("chat")) {
+            const msgs = $sessionMessages.get(doneSessionId) || [];
+            const userMsgs = msgs.filter(m => m.role === "user");
+            if (userMsgs.length === 1) {
+              setTimeout(() => tour.start("chat"), 800);
+            }
+          }
         }
         if (doneSessionId === $session.sessionId) {
           activeSubagents = new Map();
@@ -1230,7 +1240,9 @@ Respond in this exact JSON format only, no other text:
     }
 
     const currentInput = inputText;
+    const currentAttachedFiles = get(attachedFiles);
     inputText = "";
+    attachedFiles.clear();
     
     const currentTodos = get(todos);
     if (currentTodos.length > 0 && currentTodos.every(t => t.status === "completed")) {
@@ -1242,10 +1254,16 @@ Respond in this exact JSON format only, no other text:
       showConfetti = true;
     }
 
+    let messageContent = currentInput;
+    if (currentAttachedFiles.length > 0) {
+      const fileRefs = currentAttachedFiles.map(f => `[File: ${f.path}]`).join("\n");
+      messageContent = `${fileRefs}\n\n${currentInput}`;
+    }
+
     sessionMessages.addMessage(currentSessionId, {
       id: crypto.randomUUID(),
       role: "user",
-      content: currentInput,
+      content: messageContent,
       timestamp: new Date(),
     });
 
@@ -1255,7 +1273,7 @@ Respond in this exact JSON format only, no other text:
     const historyCtx = $sessionHistoryContext.get(currentSessionId);
     
     client.query({
-      prompt: currentInput,
+      prompt: messageContent,
       projectId: $session.projectId || undefined,
       sessionId: currentSessionId,
       claudeSessionId: $session.claudeSessionId || undefined,
@@ -1294,7 +1312,8 @@ Respond in this exact JSON format only, no other text:
         }
         return "";
       })
-      .join("\n");
+      .filter(text => text)
+      .join(" ");
   }
 
   function getToolCalls(content: ContentBlock[] | string): ToolUseBlock[] {
@@ -1768,6 +1787,7 @@ Respond in this exact JSON format only, no other text:
                                     <button 
                                         onclick={(e) => { e.stopPropagation(); projectMenuId = projectMenuId === proj.id ? null : proj.id; }}
                                         class="p-1 text-gray-400 hover:text-gray-600 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                        data-tour="project-menu"
                                     >
                                         <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
                                     </button>
@@ -2291,58 +2311,18 @@ Respond in this exact JSON format only, no other text:
                    <!-- User Message -->
 
                    {#if msg.role === 'user'}
-
-                        <div class="relative max-w-[85%]">
-                          {#if editingMessageId === msg.id}
-                            <div class="bg-gray-50 border border-gray-300 rounded-2xl rounded-tr-sm p-3">
-                              <textarea
-                                bind:value={editingMessageContent}
-                                class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-[15px] text-gray-900 focus:border-gray-400 focus:outline-none resize-none min-h-[60px]"
-                                rows="3"
-                              ></textarea>
-                              <div class="flex justify-end gap-2 mt-2">
-                                <button onclick={cancelEditMessage} class="px-3 py-1 text-xs text-gray-600 hover:text-gray-800 transition-colors">Cancel</button>
-                                <button onclick={saveEditedMessage} class="px-3 py-1 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">Save</button>
-                              </div>
-                            </div>
-                          {:else}
-                            <div class="bg-gray-100 text-gray-900 px-5 py-3 rounded-2xl rounded-tr-sm text-[15px] leading-relaxed">
-                              <div class="whitespace-pre-wrap break-words">{formatContent(msg.content)}</div>
-                            </div>
-                            <div class="absolute -top-8 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5">
-                              <CopyButton text={getMessageText(msg.id)} />
-                              <div class="relative">
-                                <button onclick={(e) => { e.stopPropagation(); messageMenuId = messageMenuId === msg.id ? null : msg.id; }} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="More actions">
-                                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path></svg>
-                                </button>
-                                {#if messageMenuId === msg.id}
-                                  <div class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
-                                    <button onclick={() => { startEditMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                      <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                                      Edit
-                                    </button>
-                                    <button onclick={() => { rollbackToMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                      <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
-                                      Rollback to here
-                                    </button>
-                                    <button onclick={() => { forkFromMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                      <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
-                                      Fork from here
-                                    </button>
-                                  </div>
-                                {/if}
-                              </div>
-                            </div>
-                          {/if}
-                        </div>
-
-                        <span class="text-[10px] text-gray-400 mt-1.5 mr-1 opacity-0 group-hover:opacity-100 transition-opacity">
-
-                            {msg.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-
-                        </span>
-
-                   
+                        <UserMessage
+                          content={formatContent(msg.content)}
+                          timestamp={msg.timestamp}
+                          isEditing={editingMessageId === msg.id}
+                          bind:editContent={editingMessageContent}
+                          onEdit={() => startEditMessage(msg.id)}
+                          onSaveEdit={saveEditedMessage}
+                          onCancelEdit={cancelEditMessage}
+                          onRollback={() => rollbackToMessage(msg.id)}
+                          onFork={() => forkFromMessage(msg.id)}
+                          onPreview={openPreview}
+                        />
 
                    <!-- System Message -->
 
@@ -2357,138 +2337,18 @@ Respond in this exact JSON format only, no other text:
                    <!-- Assistant Message -->
 
                    {:else}
-
-                        <div class="flex gap-4 w-full pr-4 md:pr-0 relative">
-
-                             <div class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex-shrink-0 flex items-center justify-center shadow-sm text-gray-900 font-bold text-xs select-none">C</div>
-
-                             <!-- svelte-ignore a11y_click_events_have_key_events -->
-                             <!-- svelte-ignore a11y_no_static_element_interactions -->
-                             <div class="flex-1 min-w-0 space-y-2 relative" onclick={handleMessageClick}>
-                                 
-                                 <div class="absolute -top-6 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5">
-                                   <CopyButton text={getMessageText(msg.id)} />
-                                   <div class="relative">
-                                     <button onclick={(e) => { e.stopPropagation(); messageMenuId = messageMenuId === msg.id ? null : msg.id; }} class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" title="More actions">
-                                       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path></svg>
-                                     </button>
-                                     {#if messageMenuId === msg.id}
-                                       <div class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
-                                         <button onclick={() => { rollbackToMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                           <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
-                                           Rollback to here
-                                         </button>
-                                         <button onclick={() => { forkFromMessage(msg.id); messageMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                           <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
-                                           Fork from here
-                                         </button>
-                                       </div>
-                                     {/if}
-                                   </div>
-                                 </div>
-
-                                 <div class="text-[15px] leading-7 text-gray-800 markdown-body">
-
-                                    {@html renderMarkdown(formatContent(msg.content))}
-
-                                 </div>
-
-                                 
-
-                                 <!-- Tool History (Collapsible) - only in advanced mode -->
-                                 {#if $advancedMode && msg.contentHistory && getHistoryToolCalls(msg.contentHistory).length > 0}
-                                    <div class="mt-3">
-                                      <button
-                                        onclick={() => {
-                                          const newSet = new Set(expandedHistories);
-                                          if (newSet.has(msg.id)) {
-                                            newSet.delete(msg.id);
-                                          } else {
-                                            newSet.add(msg.id);
-                                          }
-                                          expandedHistories = newSet;
-                                        }}
-                                        class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
-                                      >
-                                        <svg class={`w-3 h-3 transition-transform ${expandedHistories.has(msg.id) ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                                        <span>{getHistoryToolCalls(msg.contentHistory).length} previous tool {getHistoryToolCalls(msg.contentHistory).length === 1 ? 'call' : 'calls'}</span>
-                                      </button>
-                                      {#if expandedHistories.has(msg.id)}
-                                        <div class="mt-2 space-y-1 pl-4 border-l-2 border-gray-200 opacity-70">
-                                          {#each getHistoryToolCalls(msg.contentHistory) as histTool, idx}
-                                            <ToolRenderer tool={histTool} compact={true} index={idx} onPreview={openPreview} />
-                                          {/each}
-                                        </div>
-                                      {/if}
-                                    </div>
-                                 {/if}
-
-                                 <!-- Tool Calls -->
-                                 {#if getToolCalls(msg.content).length > 0}
-                                    {#if $advancedMode}
-                                      <!-- Advanced mode: collapsible tool calls -->
-                                      <div class="mt-3">
-                                        <button
-                                          onclick={() => {
-                                            const newSet = new Set(expandedToolCalls);
-                                            if (newSet.has(msg.id)) {
-                                              newSet.delete(msg.id);
-                                            } else {
-                                              newSet.add(msg.id);
-                                            }
-                                            expandedToolCalls = newSet;
-                                          }}
-                                          class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
-                                        >
-                                          <svg class={`w-3 h-3 transition-transform ${expandedToolCalls.has(msg.id) ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                                          <span>{getToolCalls(msg.content).length} tool {getToolCalls(msg.content).length === 1 ? 'call' : 'calls'}</span>
-                                        </button>
-                                        {#if expandedToolCalls.has(msg.id)}
-                                          <div class="mt-2 space-y-1">
-                                            {#each getToolCalls(msg.content) as tool}
-                                              {#if isTaskTool(tool)}
-                                                <SubagentBlock
-                                                  toolUseId={tool.id}
-                                                  description={tool.input.description || tool.input.prompt?.slice(0, 100) || "Subagent task"}
-                                                  subagentType={tool.input.subagent_type || "general-purpose"}
-                                                  messages={getSubagentMessages(tool.id)}
-                                                  isActive={activeSubagents.has(tool.id)}
-                                                  elapsedTime={activeSubagents.get(tool.id)?.elapsed}
-                                                  {renderMarkdown}
-                                                  onMessageClick={handleMessageClick}
-                                                />
-                                              {:else}
-                                                <ToolRenderer {tool} onPreview={openPreview} />
-                                              {/if}
-                                            {/each}
-                                          </div>
-                                        {/if}
-                                      </div>
-                                    {:else}
-                                      <!-- Normal mode: show all tool calls -->
-                                      {#each getToolCalls(msg.content) as tool}
-                                        {#if isTaskTool(tool)}
-                                          <SubagentBlock
-                                            toolUseId={tool.id}
-                                            description={tool.input.description || tool.input.prompt?.slice(0, 100) || "Subagent task"}
-                                            subagentType={tool.input.subagent_type || "general-purpose"}
-                                            messages={getSubagentMessages(tool.id)}
-                                            isActive={activeSubagents.has(tool.id)}
-                                            elapsedTime={activeSubagents.get(tool.id)?.elapsed}
-                                            {renderMarkdown}
-                                            onMessageClick={handleMessageClick}
-                                          />
-                                        {:else}
-                                          <ToolRenderer {tool} onPreview={openPreview} />
-                                        {/if}
-                                      {/each}
-                                    {/if}
-                                 {/if}
-
-                             </div>
-
-                        </div>
-
+                        <AssistantMessage
+                          content={msg.content}
+                          contentHistory={msg.contentHistory}
+                          advancedMode={$advancedMode}
+                          subagentMessages={currentMessages.filter(m => m.parentToolUseId)}
+                          {activeSubagents}
+                          onRollback={() => rollbackToMessage(msg.id)}
+                          onFork={() => forkFromMessage(msg.id)}
+                          onPreview={openPreview}
+                          onMessageClick={handleMessageClick}
+                          {renderMarkdown}
+                        />
                    {/if}
 
                 </div>
@@ -2562,60 +2422,22 @@ Respond in this exact JSON format only, no other text:
 
 
         <!-- Input Area (hidden on project home via CSS) -->
-        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}">
+        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}" data-tour="chat-input">
 
             <div class="w-full max-w-3xl pointer-events-auto">
-
-                <div class="relative group bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-200 transition-shadow focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] focus-within:border-gray-300" data-tour="chat-input">
-
-                    <textarea
-                        bind:this={inputRef}
-                        bind:value={inputText}
-                        onkeydown={handleKeydown}
-                        placeholder={currentSessionLoading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : "Type a message to Claude..."}
-                        disabled={!$isConnected}
-                        class="w-full bg-transparent text-gray-900 placeholder-gray-400 border-none rounded-xl pl-4 pr-24 py-3.5 focus:outline-none focus:ring-0 resize-none max-h-48 min-h-[56px] text-[15px] disabled:opacity-50"
-                        rows="1"
-                    ></textarea>
-                    
-                    <div class="absolute right-2 bottom-2 flex items-center gap-1">
-                      <AudioRecorder 
-                        bind:this={audioRecorderRef}
-                        onTranscript={(text) => { inputText = inputText ? inputText + " " + text : text; }}
-                        disabled={!$isConnected}
-                      />
-                      {#if currentSessionLoading}
-                        {#if queuedCount > 0}
-                          <span class="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg font-medium">
-                            {queuedCount} queued
-                          </span>
-                        {/if}
-                        <button
-                            onclick={stopGeneration}
-                            class="p-1.5 text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-all"
-                            title="Stop generation"
-                        >
-                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
-                        </button>
-                      {:else}
-                        <button
-                            onclick={sendMessage}
-                            disabled={!$isConnected || !inputText.trim()}
-                            class="p-1.5 text-gray-400 bg-transparent rounded-lg hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-                        >
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
-                        </button>
-                      {/if}
-                    </div>
-
-                </div>
+                <ChatInput
+                    bind:value={inputText}
+                    disabled={!$isConnected}
+                    loading={currentSessionLoading || false}
+                    {queuedCount}
+                    projectPath={currentProject?.path}
+                    onSubmit={sendMessage}
+                    onStop={stopGeneration}
+                />
 
                 <div class="text-center mt-2">
-
                     <span class="text-[10px] text-gray-400">Claude can make mistakes. Please verify important information.</span>
-
                 </div>
-
             </div>
 
         </div>

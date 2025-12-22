@@ -774,7 +774,7 @@
                       <p class="text-sm text-gray-500">Take a guided tour of the app's features</p>
                     </div>
                     <button
-                      onclick={() => { onClose(); setTimeout(() => { tour.reset(); tour.start(); }, 100); }}
+                      onclick={() => { onClose(); setTimeout(() => { tour.reset(); tour.start("main"); }, 100); }}
                       class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
                     >
                       Start Tour

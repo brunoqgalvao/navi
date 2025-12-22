@@ -321,6 +321,76 @@ const server = Bun.serve({
         messages.create(crypto.randomUUID(), newSessionId, msg.role, msg.content, msg.timestamp);
       }
 
+      let newClaudeSessionId: string | null = null;
+      if (sourceSession.claude_session_id) {
+        try {
+          const { homedir } = await import("os");
+          const { join } = await import("path");
+          const fs = await import("fs/promises");
+          
+          const project = projects.get(sourceSession.project_id);
+          if (project) {
+            const projectDirName = project.path.replace(/\//g, "-");
+            const claudeProjectDir = join(homedir(), ".claude", "projects", projectDirName);
+            const sourceFile = join(claudeProjectDir, `${sourceSession.claude_session_id}.jsonl`);
+            
+            try {
+              const content = await fs.readFile(sourceFile, "utf-8");
+              const lines = content.trim().split("\n");
+              
+              const forkMsg = messagesToCopy.length > 0 ? messagesToCopy[messagesToCopy.length - 1] : null;
+              const forkTimestamp = forkMsg?.timestamp;
+              
+              let linesToKeep: string[] = [];
+              let foundForkPoint = !forkTimestamp;
+              
+              for (const line of lines) {
+                if (foundForkPoint) {
+                  break;
+                }
+                try {
+                  const entry = JSON.parse(line);
+                  linesToKeep.push(line);
+                  
+                  if (forkTimestamp && entry.timestamp && entry.timestamp >= forkTimestamp) {
+                    if (entry.type === "assistant") {
+                      foundForkPoint = true;
+                    }
+                  }
+                } catch {
+                  linesToKeep.push(line);
+                }
+              }
+              
+              if (linesToKeep.length > 0) {
+                newClaudeSessionId = newSessionId;
+                const newSessionFile = join(claudeProjectDir, `${newClaudeSessionId}.jsonl`);
+                
+                const updatedLines = linesToKeep.map(line => {
+                  try {
+                    const entry = JSON.parse(line);
+                    if (entry.sessionId === sourceSession.claude_session_id) {
+                      entry.sessionId = newClaudeSessionId;
+                    }
+                    return JSON.stringify(entry);
+                  } catch {
+                    return line;
+                  }
+                });
+                
+                await fs.writeFile(newSessionFile, updatedLines.join("\n") + "\n");
+                sessions.updateClaudeSession(newClaudeSessionId, sourceSession.model, 0, 0, 0, 0, now, newSessionId);
+                console.log(`Forked Claude session: ${sourceSession.claude_session_id} -> ${newClaudeSessionId} (${linesToKeep.length} lines)`);
+              }
+            } catch (e) {
+              console.error("Failed to copy Claude session file:", e);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to fork Claude internal session:", e);
+        }
+      }
+
       return json(sessions.get(newSessionId), 201);
     }
 
@@ -559,6 +629,55 @@ const server = Bun.serve({
         return json({ success: true, path: dirPath });
       } catch (e) {
         return json({ error: "Failed to create directory" }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/fs/reveal" && method === "POST") {
+      const body = await req.json();
+      const filePath = body.path;
+      if (!filePath) {
+        return json({ error: "Path required" }, 400);
+      }
+      try {
+        const { exec } = await import("child_process");
+        const { promisify } = await import("util");
+        const execAsync = promisify(exec);
+        const platform = process.platform;
+        
+        if (platform === "darwin") {
+          await execAsync(`open -R "${filePath}"`);
+        } else if (platform === "win32") {
+          await execAsync(`explorer /select,"${filePath}"`);
+        } else {
+          await execAsync(`xdg-open "${filePath.split("/").slice(0, -1).join("/")}"`);
+        }
+        return json({ success: true });
+      } catch (e) {
+        return json({ error: "Failed to reveal file" }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/fs/upload" && method === "POST") {
+      try {
+        const formData = await req.formData();
+        const file = formData.get("file") as File;
+        const targetDir = formData.get("targetDir") as string;
+        
+        if (!file || !targetDir) {
+          return json({ error: "File and targetDir required" }, 400);
+        }
+
+        const fs = await import("fs/promises");
+        const { join } = await import("path");
+        
+        const filePath = join(targetDir, file.name);
+        const buffer = await file.arrayBuffer();
+        await fs.writeFile(filePath, Buffer.from(buffer));
+        
+        return json({ success: true, path: filePath, name: file.name });
+      } catch (e) {
+        console.error("Upload error:", e);
+        return json({ error: "Failed to upload file" }, 500);
       }
     }
 
