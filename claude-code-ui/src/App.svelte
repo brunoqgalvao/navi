@@ -473,6 +473,10 @@
     indexProjectFiles(project.path);
     loadProjectContext(project);
     loadClaudeMd(project.path);
+    
+    if (!$tour.completedTours.includes("project")) {
+      setTimeout(() => tour.start("project"), 500);
+    }
   }
 
   async function loadClaudeMd(projectPath: string) {
