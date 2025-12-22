@@ -15,6 +15,7 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
+      e.stopPropagation();
       isOpen = false;
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -91,7 +92,7 @@
     let result = text;
     for (const term of terms) {
       const regex = new RegExp(`(${term})`, "gi");
-      result = result.replace(regex, '<mark class="bg-yellow-300/50 text-yellow-100">$1</mark>');
+      result = result.replace(regex, '<mark class="bg-accent-100 text-accent-700">$1</mark>');
     }
     return result;
   }
@@ -120,13 +121,13 @@
     aria-modal="true"
   >
     <div 
-      class="bg-zinc-900 rounded-xl shadow-2xl w-full max-w-2xl border border-zinc-700 overflow-hidden"
+      class="bg-white rounded-xl shadow-2xl w-full max-w-2xl border border-gray-200 overflow-hidden"
       onclick={(e) => e.stopPropagation()}
       role="presentation"
     >
-      <div class="p-4 border-b border-zinc-700">
+      <div class="p-4 border-b border-gray-200">
         <div class="flex items-center gap-3">
-          <svg class="w-5 h-5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
@@ -135,14 +136,14 @@
             value={searchQuery}
             oninput={handleInput}
             placeholder={projectId ? "Search in project..." : "Search all chats..."}
-            class="flex-1 bg-transparent text-white text-lg outline-none placeholder-zinc-500"
+            class="flex-1 bg-transparent text-gray-900 text-lg outline-none placeholder-gray-400"
           />
           {#if isLoading}
-            <div class="w-5 h-5 border-2 border-zinc-500 border-t-white rounded-full animate-spin"></div>
+            <div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
           {:else if searchQuery}
             <button 
               onclick={() => { searchQuery = ""; results = []; }}
-              class="text-zinc-400 hover:text-white"
+              class="text-gray-400 hover:text-gray-600"
             >
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -156,47 +157,47 @@
         {#if results.length > 0}
           {#each results as result, i}
             <button
-              class="w-full text-left px-4 py-3 hover:bg-zinc-800 flex items-start gap-3 border-b border-zinc-800 last:border-0 transition-colors {selectedIndex === i ? 'bg-zinc-800' : ''}"
+              class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3 border-b border-gray-100 last:border-0 transition-colors {selectedIndex === i ? 'bg-gray-50' : ''}"
               onclick={() => selectResult(result)}
               onmouseenter={() => selectedIndex = i}
             >
               <span class="text-xl mt-0.5">{getResultIcon(result.entity_type)}</span>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
-                  <span class="text-white font-medium truncate">
+                  <span class="text-gray-900 font-medium truncate">
                     {result.session_title || "Untitled"}
                   </span>
-                  <span class="text-xs text-zinc-500">{formatTime(result.updated_at)}</span>
+                  <span class="text-xs text-gray-400">{formatTime(result.updated_at)}</span>
                 </div>
                 {#if result.preview}
-                  <p class="text-sm text-zinc-400 truncate mt-1">
+                  <p class="text-sm text-gray-500 truncate mt-1">
                     {@html highlightMatch(result.preview.slice(0, 100), searchQuery)}
                   </p>
                 {/if}
                 {#if result.project_name}
-                  <span class="text-xs text-zinc-500 mt-1 inline-block">{result.project_name}</span>
+                  <span class="text-xs text-gray-400 mt-1 inline-block">{result.project_name}</span>
                 {/if}
               </div>
-              <span class="text-xs text-zinc-600 uppercase">{result.entity_type}</span>
+              <span class="text-xs text-gray-400 uppercase">{result.entity_type}</span>
             </button>
           {/each}
         {:else if searchQuery && !isLoading}
-          <div class="px-4 py-8 text-center text-zinc-500">
+          <div class="px-4 py-8 text-center text-gray-500">
             No results found for "{searchQuery}"
           </div>
         {:else if !searchQuery}
-          <div class="px-4 py-8 text-center text-zinc-500">
+          <div class="px-4 py-8 text-center text-gray-400">
             <p class="text-sm">Start typing to search your chats</p>
-            <p class="text-xs mt-2 text-zinc-600">Tip: Use Cmd+K to open search anytime</p>
+            <p class="text-xs mt-2 text-gray-400">Tip: Use Cmd+K to open search anytime</p>
           </div>
         {/if}
       </div>
 
-      <div class="px-4 py-2 border-t border-zinc-700 flex items-center justify-between text-xs text-zinc-500">
+      <div class="px-4 py-2 border-t border-gray-200 flex items-center justify-between text-xs text-gray-500">
         <div class="flex gap-4">
-          <span><kbd class="bg-zinc-800 px-1.5 py-0.5 rounded">↑↓</kbd> navigate</span>
-          <span><kbd class="bg-zinc-800 px-1.5 py-0.5 rounded">↵</kbd> select</span>
-          <span><kbd class="bg-zinc-800 px-1.5 py-0.5 rounded">esc</kbd> close</span>
+          <span><kbd class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">↑↓</kbd> navigate</span>
+          <span><kbd class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">↵</kbd> select</span>
+          <span><kbd class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">esc</kbd> close</span>
         </div>
         {#if results.length > 0}
           <span>{results.length} result{results.length !== 1 ? 's' : ''}</span>

@@ -91,6 +91,12 @@ export async function initDb() {
   try {
     db.run("ALTER TABLE projects ADD COLUMN context_window INTEGER DEFAULT 200000");
   } catch {}
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN auto_accept_all INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN auto_accept_all INTEGER DEFAULT 0");
+  } catch {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS search_index (
@@ -131,6 +137,7 @@ export interface Project {
   pinned: number;
   sort_order: number;
   context_window: number;
+  auto_accept_all: number;
   created_at: number;
   updated_at: number;
 }
@@ -147,6 +154,7 @@ export interface Session {
   output_tokens: number;
   pinned: number;
   sort_order: number;
+  auto_accept_all: number;
   created_at: number;
   updated_at: number;
 }
@@ -216,6 +224,8 @@ export const projects = {
     run("UPDATE projects SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
   updateOrder: (id: string, sortOrder: number) =>
     run("UPDATE projects SET sort_order = ? WHERE id = ?", [sortOrder, id]),
+  setAutoAcceptAll: (id: string, autoAcceptAll: boolean) =>
+    run("UPDATE projects SET auto_accept_all = ?, updated_at = ? WHERE id = ?", [autoAcceptAll ? 1 : 0, Date.now(), id]),
 };
 
 export interface SessionWithProject extends Session {
@@ -262,6 +272,8 @@ export const sessions = {
       WHERE s.title LIKE ? OR m.content LIKE ?
       ORDER BY s.updated_at DESC
     `, [`%${query}%`, `%${query}%`]),
+  setAutoAcceptAll: (id: string, autoAcceptAll: boolean) =>
+    run("UPDATE sessions SET auto_accept_all = ?, updated_at = ? WHERE id = ?", [autoAcceptAll ? 1 : 0, Date.now(), id]),
 };
 
 export const messages = {
@@ -401,8 +413,8 @@ export const searchIndex = {
     }
     
     for (const term of terms) {
-      sql += " AND si.searchable_text LIKE ?";
-      params.push(`%${term}%`);
+      sql += " AND (si.searchable_text LIKE ? OR LOWER(p.name) LIKE ?)";
+      params.push(`%${term}%`, `%${term}%`);
     }
     
     sql += " ORDER BY si.updated_at DESC LIMIT ?";

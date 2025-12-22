@@ -16,6 +16,7 @@
   let hasOpenAIKey = $state(false);
   let openAIKeyPreview: string | null = $state(null);
   let hasAnthropicKey = $state(false);
+  let anthropicKeyPreview: string | null = $state(null);
   let authMethod: "oauth" | "api_key" | null = $state(null);
   let claudeInstalled = $state(false);
   let hasOAuth = $state(false);
@@ -33,6 +34,9 @@
   let anthropicKeyInput = $state("");
   let anthropicError: string | null = $state(null);
   let savingAnthropic = $state(false);
+
+  let showOAuthSetup = $state(false);
+  let checkingOAuth = $state(false);
 
   let permissionSettings = $state<PermissionSettings | null>(null);
   let defaultTools = $state<string[]>([]);
@@ -73,6 +77,7 @@
       openAIKeyPreview = config.openAIKeyPreview;
       autoTitleEnabled = config.autoTitleEnabled;
       hasAnthropicKey = auth.hasApiKey;
+      anthropicKeyPreview = auth.apiKeyPreview;
       authMethod = auth.authMethod;
       claudeInstalled = auth.claudeInstalled;
       hasOAuth = auth.hasOAuth;
@@ -190,6 +195,21 @@
     }
   }
 
+  async function checkOAuthStatus() {
+    checkingOAuth = true;
+    try {
+      const auth = await api.auth.status();
+      hasOAuth = auth.hasOAuth;
+      authMethod = auth.authMethod;
+      claudeInstalled = auth.claudeInstalled;
+      if (auth.hasOAuth) {
+        showOAuthSetup = false;
+      }
+    } finally {
+      checkingOAuth = false;
+    }
+  }
+
   async function toggleAutoTitle() {
     const newValue = !autoTitleEnabled;
     autoTitleEnabled = newValue;
@@ -303,7 +323,11 @@
                           <h5 class="font-medium text-gray-900">Claude (Anthropic)</h5>
                           <p class="text-sm text-gray-500">Required for AI conversations</p>
                         </div>
-                        {#if authMethod === "oauth"}
+                        {#if hasOAuth && hasAnthropicKey}
+                          <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">
+                            Using {authMethod === "oauth" ? "OAuth" : "API Key"}
+                          </span>
+                        {:else if authMethod === "oauth"}
                           <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">OAuth Connected</span>
                         {:else if authMethod === "api_key"}
                           <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">API Key Set</span>
@@ -320,6 +344,72 @@
                           <span class="text-gray-400">Not Found</span>
                         {/if}
                       </div>
+
+                      <div class="space-y-3 pt-2">
+                        <div class="text-xs font-medium text-gray-500 uppercase tracking-wide">OAuth</div>
+                        {#if hasOAuth && !showOAuthSetup}
+                          <div class="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2.5">
+                            <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <span class="text-sm text-gray-600">Connected via Claude CLI</span>
+                          </div>
+                          <button
+                            onclick={() => showOAuthSetup = true}
+                            class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                          >
+                            Re-authenticate
+                          </button>
+                        {:else if showOAuthSetup}
+                          <div class="bg-gray-900 rounded-lg p-3 font-mono text-sm">
+                            <div class="flex items-center justify-between">
+                              <code class="text-emerald-400">claude login</code>
+                              <button
+                                onclick={() => navigator.clipboard.writeText("claude login")}
+                                class="text-gray-500 hover:text-white transition-colors p-1"
+                                title="Copy to clipboard"
+                              >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          <p class="text-xs text-gray-500">Run this command in your terminal, then click "I've logged in"</p>
+                          <div class="flex gap-2">
+                            <button
+                              onclick={() => showOAuthSetup = false}
+                              class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg px-4 py-2 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onclick={checkOAuthStatus}
+                              disabled={checkingOAuth}
+                              class="text-sm font-medium bg-gray-900 text-white rounded-lg px-4 py-2 hover:bg-black transition-colors disabled:opacity-50"
+                            >
+                              {checkingOAuth ? "Checking..." : "I've logged in"}
+                            </button>
+                          </div>
+                        {:else}
+                          <button
+                            onclick={() => showOAuthSetup = true}
+                            disabled={!claudeInstalled}
+                            class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {claudeInstalled ? "Setup OAuth" : "Install Claude CLI first"}
+                          </button>
+                        {/if}
+                      </div>
+
+                      <div class="space-y-3 pt-2">
+                        <div class="text-xs font-medium text-gray-500 uppercase tracking-wide">API Key</div>
+                        {#if hasAnthropicKey && anthropicKeyPreview && !showAnthropicInput}
+                        <div class="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2.5">
+                          <code class="text-sm font-mono text-gray-600">{anthropicKeyPreview}</code>
+                          <span class="text-xs text-gray-400">stored</span>
+                        </div>
+                      {/if}
 
                       {#if !showAnthropicInput}
                         <button
@@ -358,9 +448,10 @@
                         </div>
                       {/if}
 
-                      <p class="text-xs text-gray-500">
-                        Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" class="text-blue-600 hover:underline">console.anthropic.com</a>
-                      </p>
+                        <p class="text-xs text-gray-500">
+                          Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" class="text-blue-600 hover:underline">console.anthropic.com</a>
+                        </p>
+                      </div>
 
                       {#if hasOAuth && hasAnthropicKey}
                         <div class="mt-4 pt-4 border-t border-gray-200">

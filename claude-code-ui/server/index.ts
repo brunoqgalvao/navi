@@ -9,6 +9,29 @@ const __dirname = dirname(__filename);
 
 await initDb();
 
+async function migrateEnvKeys() {
+  const { homedir } = await import("os");
+  const { join } = await import("path");
+  const fs = await import("fs/promises");
+  
+  const envPath = join(homedir(), ".claude-code-ui", ".env");
+  try {
+    const content = await fs.readFile(envPath, "utf-8");
+    
+    const anthropicMatch = content.match(/ANTHROPIC_API_KEY=(.+)/);
+    if (anthropicMatch && !globalSettings.get("anthropicApiKey")) {
+      const key = anthropicMatch[1].trim();
+      if (key.startsWith("sk-ant-")) {
+        globalSettings.set("anthropicApiKey", key);
+        globalSettings.set("preferredAuth", "api_key");
+        console.log("Migrated ANTHROPIC_API_KEY from .env to database");
+      }
+    }
+  } catch {}
+}
+
+await migrateEnvKeys();
+
 const PORT = 3001;
 
 const corsHeaders = {
@@ -157,6 +180,14 @@ const server = Bun.serve({
       return json(projects.get(id));
     }
 
+    const projectAutoAcceptMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/auto-accept$/);
+    if (projectAutoAcceptMatch && method === "POST") {
+      const id = projectAutoAcceptMatch[1];
+      const body = await req.json();
+      projects.setAutoAcceptAll(id, body.autoAcceptAll);
+      return json(projects.get(id));
+    }
+
     const projectsReorderMatch = url.pathname === "/api/projects/reorder";
     if (projectsReorderMatch && method === "POST") {
       const body = await req.json();
@@ -211,6 +242,19 @@ const server = Bun.serve({
       const id = sessionPinMatch[1];
       const body = await req.json();
       sessions.togglePin(id, body.pinned);
+      return json(sessions.get(id));
+    }
+
+    const sessionAutoAcceptMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/auto-accept$/);
+    if (sessionAutoAcceptMatch && method === "POST") {
+      const id = sessionAutoAcceptMatch[1];
+      const body = await req.json();
+      sessions.setAutoAcceptAll(id, body.autoAcceptAll);
+      if (body.autoAcceptAll) {
+        sessionApprovedAll.add(id);
+      } else {
+        sessionApprovedAll.delete(id);
+      }
       return json(sessions.get(id));
     }
 
@@ -693,6 +737,8 @@ const server = Bun.serve({
           authenticated: false,
           authMethod: null,
           hasApiKey: false,
+          hasOAuth: false,
+          preferredAuth: null,
         });
       }
       
@@ -719,10 +765,18 @@ const server = Bun.serve({
         } catch {}
       }
 
-      let authenticated = false;
-      let authMethod: "oauth" | "api_key" | null = null;
+      const storedApiKey = globalSettings.get("anthropicApiKey") || process.env.ANTHROPIC_API_KEY;
+      const hasApiKey = !!storedApiKey;
       
+      if (storedApiKey && !globalSettings.get("anthropicApiKey")) {
+        globalSettings.set("anthropicApiKey", storedApiKey);
+      }
+      
+      let hasOAuth = false;
       try {
+        const originalKey = process.env.ANTHROPIC_API_KEY;
+        delete process.env.ANTHROPIC_API_KEY;
+        
         const q = query({
           prompt: "",
           options: { cwd: process.cwd() },
@@ -731,24 +785,32 @@ const server = Bun.serve({
         await q.interrupt();
         
         if (models && models.length > 0) {
-          authenticated = true;
-          authMethod = process.env.ANTHROPIC_API_KEY ? "api_key" : "oauth";
+          hasOAuth = true;
           claudeInstalled = true;
         }
-      } catch (e: any) {
-        authenticated = false;
-        if (process.env.ANTHROPIC_API_KEY) {
-          authMethod = "api_key";
+        
+        if (originalKey) {
+          process.env.ANTHROPIC_API_KEY = originalKey;
         }
+      } catch (e: any) {
+        hasOAuth = false;
       }
 
       const preferredAuth = globalSettings.get("preferredAuth") as "oauth" | "api_key" | null;
-      const hasOAuth = authenticated && !process.env.ANTHROPIC_API_KEY;
-      const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+      const authenticated = hasOAuth || hasApiKey;
       
-      if (hasOAuth && hasApiKey && preferredAuth) {
-        authMethod = preferredAuth;
+      let authMethod: "oauth" | "api_key" | null = null;
+      if (hasOAuth && hasApiKey) {
+        authMethod = preferredAuth || "oauth";
+      } else if (hasApiKey) {
+        authMethod = "api_key";
+      } else if (hasOAuth) {
+        authMethod = "oauth";
       }
+
+      const apiKeyPreview = storedApiKey 
+        ? `${storedApiKey.slice(0, 10)}...${storedApiKey.slice(-4)}`
+        : null;
 
       return json({
         claudeInstalled,
@@ -756,7 +818,8 @@ const server = Bun.serve({
         authenticated,
         authMethod,
         hasApiKey,
-        hasOAuth: authenticated,
+        apiKeyPreview,
+        hasOAuth,
         preferredAuth,
       });
     }
@@ -790,28 +853,12 @@ const server = Bun.serve({
         return json({ error: "Invalid Anthropic API key format. Key should start with 'sk-ant-'" }, 400);
       }
 
-      process.env.ANTHROPIC_API_KEY = apiKey;
-
-      const { homedir } = await import("os");
-      const { join } = await import("path");
-      const fs = await import("fs/promises");
+      globalSettings.set("anthropicApiKey", apiKey);
       
-      const configDir = join(homedir(), ".claude-code-ui");
-      await fs.mkdir(configDir, { recursive: true });
-      
-      const envPath = join(configDir, ".env");
-      let envContent = "";
-      try {
-        envContent = await fs.readFile(envPath, "utf-8");
-      } catch {}
-      
-      if (envContent.includes("ANTHROPIC_API_KEY=")) {
-        envContent = envContent.replace(/ANTHROPIC_API_KEY=.*/g, `ANTHROPIC_API_KEY=${apiKey}`);
-      } else {
-        envContent += `ANTHROPIC_API_KEY=${apiKey}\n`;
+      const preferredAuth = globalSettings.get("preferredAuth");
+      if (!preferredAuth) {
+        globalSettings.set("preferredAuth", "api_key");
       }
-      
-      await fs.writeFile(envPath, envContent);
       
       return json({ success: true });
     }
@@ -989,14 +1036,15 @@ const server = Bun.serve({
             output_tokens: data.usage?.completion_tokens || 0,
           };
           costUsd = (usage.input_tokens * 0.00015 + usage.output_tokens * 0.0006) / 1000;
-        } else if (process.env.ANTHROPIC_API_KEY && !useTools) {
+        } else if (globalSettings.get("anthropicApiKey") && !useTools) {
+          const storedApiKey = globalSettings.get("anthropicApiKey")!;
           const anthropicModel = model.includes("haiku") ? "claude-3-haiku-20240307" : "claude-3-haiku-20240307";
           
           const res = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "x-api-key": process.env.ANTHROPIC_API_KEY,
+              "x-api-key": storedApiKey,
               "anthropic-version": "2023-06-01",
             },
             body: JSON.stringify({
@@ -1192,7 +1240,8 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
     : prompt;
 
   const workerPath = join(__dirname, "query-worker.ts");
-  const isSessionApprovedAll = sessionId ? sessionApprovedAll.has(sessionId) : false;
+  const isSessionApprovedAll = sessionId ? (sessionApprovedAll.has(sessionId) || session?.auto_accept_all === 1) : false;
+  const isProjectApprovedAll = project?.auto_accept_all === 1;
   const inputJson = JSON.stringify({
     prompt: effectivePrompt,
     cwd: workingDirectory,
@@ -1201,15 +1250,28 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
     allowedTools: allowedTools || permissionSettings.allowedTools,
     sessionId,
     permissionSettings: {
-      autoAcceptAll: permissionSettings.autoAcceptAll || isSessionApprovedAll,
+      autoAcceptAll: permissionSettings.autoAcceptAll || isSessionApprovedAll || isProjectApprovedAll,
       requireConfirmation: permissionSettings.requireConfirmation,
     },
   });
 
+  const preferredAuth = globalSettings.get("preferredAuth") as "oauth" | "api_key" | null;
+  const storedApiKey = globalSettings.get("anthropicApiKey") || process.env.ANTHROPIC_API_KEY;
+  
+  const workerEnv = { ...process.env };
+  delete workerEnv.ANTHROPIC_API_KEY;
+  
+  if (preferredAuth === "api_key" && storedApiKey) {
+    workerEnv.ANTHROPIC_API_KEY = storedApiKey;
+    console.log(`[${sessionId}] Using API key auth`);
+  } else {
+    console.log(`[${sessionId}] Using OAuth auth`);
+  }
+
   const child = spawn("bun", ["run", workerPath, inputJson], {
     cwd: workingDirectory,
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env },
+    env: workerEnv,
   });
 
   if (sessionId) {
@@ -1456,25 +1518,28 @@ async function generateChatTitle(userPrompt: string, assistantContent: any[], se
         const data = await res.json();
         title = data.choices?.[0]?.message?.content?.trim() || "";
       }
-    } else if (process.env.ANTHROPIC_API_KEY) {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
-          max_tokens: 20,
-          system: systemPrompt,
-          messages: [{ role: "user", content: userContent }],
-        }),
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        title = data.content?.[0]?.text?.trim() || "";
+    } else {
+      const storedApiKey = globalSettings.get("anthropicApiKey");
+      if (storedApiKey) {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": storedApiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-3-haiku-20240307",
+            max_tokens: 20,
+            system: systemPrompt,
+            messages: [{ role: "user", content: userContent }],
+          }),
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          title = data.content?.[0]?.text?.trim() || "";
+        }
       }
     }
 

@@ -44,7 +44,10 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") closeModal();
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeModal();
+    }
   }
 </script>
 

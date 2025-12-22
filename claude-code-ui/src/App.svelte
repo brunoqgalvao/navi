@@ -48,6 +48,7 @@
   import AudioRecorder from "./lib/components/AudioRecorder.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Settings from "./lib/components/Settings.svelte";
+  import ProjectSettings from "./lib/components/ProjectSettings.svelte";
   import ToolRenderer from "./lib/components/ToolRenderer.svelte";
   import ToolConfirmDialog from "./lib/components/ToolConfirmDialog.svelte";
   import SearchModal from "./lib/components/SearchModal.svelte";
@@ -104,6 +105,7 @@
   let modelSelection = $state("");
   let lastSessionModel = $state("");
   let showSettings = $state(false);
+  let showProjectSettings = $state(false);
   let sidebarCollapsed = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
@@ -178,8 +180,10 @@
         showHotkeysHelp = false;
       } else if (showSettings) {
         showSettings = false;
-      } else {
+      } else if (showPreview || showFileBrowser) {
         closeRightPanel();
+      } else if (currentSessionLoading) {
+        stopGeneration();
       }
       return;
     }
@@ -282,7 +286,7 @@
   let currentProject = $derived(sidebarProjects.find(p => p.id === $session.projectId));
   let currentSessionLoading = $derived($session.sessionId && $loadingSessions.has($session.sessionId));
   let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.startsWith($session.sessionId + ':')).length : 0);
-  let showOnboarding = $state(!$onboardingComplete);
+  let showOnboarding = $derived(!$onboardingComplete);
 
   $effect(() => {
     if ($session.selectedModel !== lastSessionModel) {
@@ -293,7 +297,6 @@
 
   function handleOnboardingComplete() {
     onboardingComplete.complete();
-    showOnboarding = false;
   }
 
   onMount(async () => {
@@ -1575,7 +1578,7 @@ Respond in this exact JSON format only, no other text:
         {:else}
           <div class="flex items-center gap-2.5 px-2">
               <img src="/logo.png" alt="Logo" class="w-6 h-6" />
-              <span class="font-medium text-sm tracking-tight text-gray-900">Claude Code</span>
+              <span class="font-medium text-sm tracking-tight text-gray-900">Navi</span>
           </div>
 
           <div class="flex items-center gap-0.5">
@@ -1606,7 +1609,7 @@ Respond in this exact JSON format only, no other text:
             <button 
               onclick={() => sidebarCollapsed = false}
               class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all"
-              title="Projects"
+              title="Workspaces"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
             </button>
@@ -1625,7 +1628,7 @@ Respond in this exact JSON format only, no other text:
              <div class="px-3">
 
                  <div class="flex items-center justify-between mb-2 mt-2 px-2">
-                   <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Projects</h3>
+                   <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Workspaces</h3>
                    <button onclick={() => showNewProjectModal = true} class="text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-0.5 rounded transition-colors border border-gray-200">
                       + New
                    </button>
@@ -1633,7 +1636,7 @@ Respond in this exact JSON format only, no other text:
 
                  {#if sidebarProjects.length === 0}
 
-                    <div class="text-xs text-gray-400 italic text-center py-4">No projects yet</div>
+                    <div class="text-xs text-gray-400 italic text-center py-4">No workspaces yet</div>
 
                  {:else}
 
@@ -1726,20 +1729,16 @@ Respond in this exact JSON format only, no other text:
                  {/if}
 
                  {#if recentChats.length > 0}
-                   <div class="mt-6">
-                     <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2">Recent Chats</h3>
-                     <div class="space-y-0.5">
+                   <div class="mt-4">
+                     <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1 px-2">Recent Chats</h3>
+                     <div class="space-y-0">
                        {#each recentChats.slice(0, 5) as chat}
                          <button
                            onclick={() => goToChat(chat)}
-                           class="w-full text-left px-2.5 py-2 rounded-md text-gray-600 hover:bg-gray-200/50 hover:text-gray-900 transition-colors"
+                           class="w-full text-left px-2 py-1 rounded text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors flex items-center gap-1.5"
                          >
-                           <div class="text-[13px] font-medium truncate">{chat.title}</div>
-                           <div class="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400">
-                             <span class="truncate">{chat.project_name}</span>
-                             <span class="text-gray-300">·</span>
-                             <span>{relativeTime(chat.updated_at)}</span>
-                           </div>
+                           <svg class="w-2.5 h-2.5 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                           <span class="text-[11px] truncate">{chat.title}</span>
                          </button>
                        {/each}
                      </div>
@@ -1758,7 +1757,7 @@ Respond in this exact JSON format only, no other text:
 
                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7"></path></svg>
 
-                     Back to Projects
+                     Back to Workspaces
 
                  </button>
 
@@ -1772,7 +1771,7 @@ Respond in this exact JSON format only, no other text:
                      </h2>
                      <p class="text-[11px] text-gray-400 truncate mt-0.5 pl-6 max-w-full" title={currentProject.path}>{currentProject.path}</p>
                    </button>
-                   <button onclick={() => showSettings = true} class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors mt-0.5" title="Settings">
+                   <button onclick={() => showProjectSettings = true} class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors mt-0.5" title="Project Settings">
                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                    </button>
                  </div>
@@ -2034,8 +2033,8 @@ Respond in this exact JSON format only, no other text:
                     <img src="/logo.png" alt="Logo" class="w-10 h-10" />
                 </div>
 
-                <h1 class="text-3xl font-serif text-gray-900 mb-3 tracking-tight">Claude Code</h1>
-                <p class="text-base text-gray-500 mb-10 max-w-md text-center font-light">Select a project to start coding or continue where you left off</p>
+                <h1 class="text-3xl font-serif text-gray-900 mb-3 tracking-tight">Navi</h1>
+                <p class="text-base text-gray-500 mb-10 max-w-md text-center font-light">Select a workspace to get started. Already on it.</p>
 
                 <button 
                     onclick={() => showNewProjectModal = true} 
@@ -2044,14 +2043,14 @@ Respond in this exact JSON format only, no other text:
                     <svg class="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                     </svg>
-                    Create New Project
+                    Create New Workspace
                 </button>
 
                 <div class="w-full grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 px-4">
                   {#if sidebarProjects.length > 0}
                     <div class="flex flex-col gap-4">
                       <div class="flex items-center gap-3 pb-2 border-b border-gray-100">
-                          <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-widest">Projects</h3>
+                          <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-widest">Workspaces</h3>
                       </div>
                       <div class="space-y-2">
                         {#each sidebarProjects.slice(0, 5) as proj}
@@ -2074,24 +2073,21 @@ Respond in this exact JSON format only, no other text:
                   {/if}
 
                   {#if recentChats.length > 0}
-                    <div class="flex flex-col gap-4">
-                      <div class="flex items-center gap-3 pb-2 border-b border-gray-100">
-                          <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-widest">Recent Chats</h3>
+                    <div class="flex flex-col gap-2">
+                      <div class="flex items-center gap-3 pb-1.5 border-b border-gray-100">
+                          <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Recent Chats</h3>
                       </div>
-                      <div class="space-y-2">
+                      <div class="space-y-0.5">
                         {#each recentChats.slice(0, 5) as chat}
                           <button 
                             onclick={() => goToChat(chat)}
-                            class="group flex items-center w-full p-3 -mx-3 text-left rounded-lg transition-colors duration-200 hover:bg-gray-50"
+                            class="group flex items-center w-full py-1.5 px-2 -mx-2 text-left rounded-md transition-colors duration-200 hover:bg-gray-50"
                           >
-                            <div class="flex items-center justify-center w-8 h-8 mr-3 text-gray-400 bg-white border border-gray-200 rounded-md shadow-sm group-hover:border-gray-300 group-hover:text-gray-600 transition-all">
-                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-                            </div>
+                            <svg class="w-3 h-3 mr-2 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                             <div class="flex-1 min-w-0">
-                              <h4 class="text-[15px] font-medium text-gray-900 truncate group-hover:text-gray-900">{chat.title}</h4>
-                              <p class="text-xs text-gray-500 mt-0.5 truncate">{chat.project_name} · {relativeTime(chat.updated_at)}</p>
+                              <h4 class="text-[12px] text-gray-600 truncate group-hover:text-gray-900">{chat.title}</h4>
+                              <p class="text-[10px] text-gray-400 truncate">{chat.project_name} · {relativeTime(chat.updated_at)}</p>
                             </div>
-                            <svg class="w-4 h-4 text-gray-300 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
                           </button>
                         {/each}
                       </div>
@@ -2589,7 +2585,7 @@ Respond in this exact JSON format only, no other text:
 
             <div class="px-6 py-5 border-b border-gray-100">
 
-                <h3 class="font-serif text-2xl text-gray-900">Create New Project</h3>
+                <h3 class="font-serif text-2xl text-gray-900">Create New Workspace</h3>
 
             </div>
 
@@ -2613,7 +2609,7 @@ Respond in this exact JSON format only, no other text:
 
                 {#if projectCreationMode === "quick"}
                     <div class="space-y-1.5">
-                        <label class="text-xs font-medium text-gray-700">Project Name</label>
+                        <label class="text-xs font-medium text-gray-700">Workspace Name</label>
                         <!-- svelte-ignore a11y_autofocus -->
                         <input 
                             type="text" 
@@ -2630,7 +2626,7 @@ Respond in this exact JSON format only, no other text:
                 {:else}
                     <div class="space-y-1.5">
 
-                        <label class="text-xs font-medium text-gray-700">Project Directory</label>
+                        <label class="text-xs font-medium text-gray-700">Workspace Directory</label>
 
                         <div class="flex gap-2">
 
@@ -2681,7 +2677,7 @@ Respond in this exact JSON format only, no other text:
 
                 <button onclick={() => showNewProjectModal = false} class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">Cancel</button>
 
-                <button onclick={createProject} class="px-4 py-2 text-sm font-medium bg-gray-900 hover:bg-black text-white rounded-lg shadow-sm transition-all active:scale-95">Create Project</button>
+                <button onclick={createProject} class="px-4 py-2 text-sm font-medium bg-gray-900 hover:bg-black text-white rounded-lg shadow-sm transition-all active:scale-95">Create Workspace</button>
 
             </div>
 
@@ -2691,11 +2687,11 @@ Respond in this exact JSON format only, no other text:
 
   {/if}
 
-  <Modal open={!!editingProject} onClose={() => editingProject = null} title="Edit Project">
+  <Modal open={!!editingProject} onClose={() => editingProject = null} title="Edit Workspace">
     {#snippet children()}
       <div class="space-y-5">
         <div class="space-y-1.5">
-          <label class="text-xs font-medium text-gray-700">Project Name</label>
+          <label class="text-xs font-medium text-gray-700">Workspace Name</label>
           <input 
             type="text" 
             bind:value={editProjectName}
@@ -2703,7 +2699,7 @@ Respond in this exact JSON format only, no other text:
           />
         </div>
         <div class="space-y-1.5">
-          <label class="text-xs font-medium text-gray-700">Project Path</label>
+          <label class="text-xs font-medium text-gray-700">Workspace Path</label>
           <div class="flex gap-2">
             <input 
               type="text" 
@@ -2723,7 +2719,7 @@ Respond in this exact JSON format only, no other text:
     {/snippet}
   </Modal>
 
-  <Modal open={showDeleteConfirm} onClose={() => { showDeleteConfirm = false; projectToDelete = null; }} title="Delete Project">
+  <Modal open={showDeleteConfirm} onClose={() => { showDeleteConfirm = false; projectToDelete = null; }} title="Delete Workspace">
     {#snippet children()}
       <p class="text-sm text-gray-600">
         Are you sure you want to delete <span class="font-semibold text-gray-900">{projectToDelete?.name}</span>? This will also delete all associated chats and messages. This action cannot be undone.
@@ -2731,7 +2727,7 @@ Respond in this exact JSON format only, no other text:
     {/snippet}
     {#snippet footer()}
       <button onclick={() => { showDeleteConfirm = false; projectToDelete = null; }} class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">Cancel</button>
-      <button onclick={deleteProject} class="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-sm transition-all active:scale-95">Delete Project</button>
+      <button onclick={deleteProject} class="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-sm transition-all active:scale-95">Delete Workspace</button>
     {/snippet}
   </Modal>
 
@@ -2754,6 +2750,10 @@ Respond in this exact JSON format only, no other text:
   </Modal>
 
   <Settings open={showSettings} onClose={() => showSettings = false} />
+
+  {#if showProjectSettings && currentProject}
+    <ProjectSettings project={currentProject} onClose={() => showProjectSettings = false} />
+  {/if}
 
   <SearchModal 
     bind:isOpen={showSearchModal} 

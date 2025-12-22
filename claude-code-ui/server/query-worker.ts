@@ -82,6 +82,12 @@ let sessionApprovedAll = false;
 
 async function runQuery(input: WorkerInput) {
   const { prompt, cwd, resume, model, allowedTools, sessionId, permissionSettings } = input;
+  
+  const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+  console.error(`[Worker] Auth method: ${hasApiKey ? "API_KEY" : "OAuth"}`);
+  if (hasApiKey) {
+    console.error(`[Worker] API Key prefix: ${process.env.ANTHROPIC_API_KEY?.slice(0, 10)}...`);
+  }
 
   const canUseTool = async (
     toolName: string,

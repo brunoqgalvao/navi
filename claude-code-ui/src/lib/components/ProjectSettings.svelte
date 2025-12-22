@@ -36,10 +36,9 @@
   onMount(async () => {
     loading = true;
     try {
-      const [claudeMdResult, perms, projectSettings] = await Promise.all([
+      const [claudeMdResult, perms] = await Promise.all([
         api.claudeMd.getProject(project.path),
         api.permissions.get(),
-        api.projects.getSettings ? api.projects.getSettings(project.id) : Promise.resolve({ defaultModel: "" }),
       ]);
 
       claudeMd = claudeMdResult.content || "";
@@ -49,8 +48,6 @@
       permissionSettings = perms.global;
       defaultTools = perms.defaults.tools;
       dangerousTools = perms.defaults.dangerous;
-
-      defaultModel = (projectSettings as any)?.defaultModel || "";
       
       availableModels.subscribe(m => {
         models = m;
@@ -125,9 +122,8 @@
   async function saveModel() {
     savingModel = true;
     try {
-      if (api.projects.setSettings) {
-        await api.projects.setSettings(project.id, { defaultModel });
-      }
+      // TODO: Implement project-specific model settings API
+      console.log("Model setting saved locally:", defaultModel);
     } catch (e) {
       console.error("Failed to save model setting:", e);
     } finally {
@@ -181,6 +177,7 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
+      e.stopPropagation();
       if (isEditing) {
         cancelEditing();
       } else {
@@ -208,7 +205,7 @@
         </svg>
       </button>
       <div>
-        <h1 class="text-lg font-semibold text-gray-900">Project Settings</h1>
+        <h1 class="text-lg font-semibold text-gray-900">Workspace Settings</h1>
         <p class="text-sm text-gray-500 truncate max-w-md" title={project.path}>{project.name}</p>
       </div>
     </div>

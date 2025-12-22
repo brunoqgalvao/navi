@@ -195,6 +195,7 @@ export const api = {
         authenticated: boolean;
         authMethod: "oauth" | "api_key" | null;
         hasApiKey: boolean;
+        apiKeyPreview: string | null;
         hasOAuth: boolean;
         preferredAuth: "oauth" | "api_key" | null;
       }>("/auth/status"),
