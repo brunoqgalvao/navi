@@ -17,6 +17,7 @@ import {
   getSkillBody,
   getProjectSkillsDir,
   scanSkillDirectory,
+  scanGlobalClaudeSkills,
   getSkillFiles,
   getSkillFilePath,
   EXAMPLE_SKILLS,
@@ -286,6 +287,14 @@ const server = Bun.serve({
       return json(sessions.get(id));
     }
 
+    const sessionFavoriteMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/favorite$/);
+    if (sessionFavoriteMatch && method === "POST") {
+      const id = sessionFavoriteMatch[1];
+      const body = await req.json();
+      sessions.toggleFavorite(id, body.favorite);
+      return json(sessions.get(id));
+    }
+
     const sessionAutoAcceptMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/auto-accept$/);
     if (sessionAutoAcceptMatch && method === "POST") {
       const id = sessionAutoAcceptMatch[1];
@@ -482,6 +491,9 @@ const server = Bun.serve({
       
       messages.deleteAfter(sessionId, msg.timestamp);
       
+      // Reset token counts to 0 after rollback
+      sessions.resetTokenCounts(sessionId, 0, 0);
+      
       sessions.updateClaudeSession(
         null,
         session.model,
@@ -513,6 +525,17 @@ const server = Bun.serve({
         sessionReset: true,
         historyContext 
       });
+    }
+
+    const resetTokensMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/reset-tokens$/);
+    if (resetTokensMatch && method === "POST") {
+      const sessionId = resetTokensMatch[1];
+      try {
+        sessions.resetTokenCounts(sessionId, 0, 0);
+        return json({ success: true });
+      } catch (error) {
+        return json({ error: "Failed to reset tokens" }, 500);
+      }
     }
 
     const exportMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/export$/);
@@ -1615,6 +1638,78 @@ const server = Bun.serve({
         }, 201);
       } catch (e: any) {
         return json({ error: e.message || "Import failed" }, 400);
+      }
+    }
+
+    if (url.pathname === "/api/skills/sync-global" && method === "POST") {
+      try {
+        const globalSkills = scanGlobalClaudeSkills();
+        const synced: string[] = [];
+        const skipped: string[] = [];
+        const errors: string[] = [];
+
+        for (const { slug, path, parsed } of globalSkills) {
+          try {
+            const existing = skillsDb.getBySlug(slug);
+            if (existing) {
+              skipped.push(slug);
+              continue;
+            }
+
+            const skillDir = safeJoin(SKILL_LIBRARY_PATH, slug);
+            copyDirRecursive(path, skillDir);
+
+            const contentHash = calculateSkillHash(skillDir);
+            const now = Date.now();
+            const skillId = crypto.randomUUID();
+
+            const skill = {
+              id: skillId,
+              slug,
+              name: parsed.frontmatter.name || slug,
+              description: parsed.frontmatter.description || "",
+              version: parsed.frontmatter.version || "1.0.0",
+              allowed_tools: parsed.frontmatter["allowed-tools"] ? JSON.stringify(parsed.frontmatter["allowed-tools"]) : null,
+              license: parsed.frontmatter.license || null,
+              category: null,
+              tags: null,
+              content_hash: contentHash,
+              source_type: "import" as const,
+              source_url: path,
+              source_version: null,
+              created_at: now,
+              updated_at: now,
+            };
+
+            skillsDb.create(skill);
+            synced.push(slug);
+          } catch (e: any) {
+            errors.push(`${slug}: ${e.message}`);
+          }
+        }
+
+        return json({
+          synced,
+          skipped,
+          errors,
+          total_global: globalSkills.length,
+        });
+      } catch (e: any) {
+        return json({ error: e.message || "Sync failed" }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/skills/global" && method === "GET") {
+      try {
+        const globalSkills = scanGlobalClaudeSkills();
+        return json(globalSkills.map(s => ({
+          slug: s.slug,
+          name: s.parsed.frontmatter.name || s.slug,
+          description: s.parsed.frontmatter.description || "",
+          path: s.path,
+        })));
+      } catch (e: any) {
+        return json({ error: e.message }, 500);
       }
     }
 

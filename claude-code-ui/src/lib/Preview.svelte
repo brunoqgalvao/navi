@@ -2,8 +2,10 @@
   import { onMount } from "svelte";
   import { marked } from "marked";
   import hljs from "highlight.js";
+  import MermaidRenderer from "./components/MermaidRenderer.svelte";
+  import JsonTreeViewer from "./components/JsonTreeViewer.svelte";
 
-  type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "none";
+  type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "json" | "none";
 
   interface Props {
     source: string;
@@ -31,7 +33,8 @@
   const audioExtensions = ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma"];
   const videoExtensions = ["mp4", "webm", "mov", "avi", "mkv", "m4v", "ogv"];
   const csvExtensions = ["csv", "tsv"];
-  const codeExtensions = ["js", "ts", "jsx", "tsx", "svelte", "vue", "py", "rs", "go", "java", "c", "cpp", "h", "css", "scss", "sass", "less", "html", "xml", "json", "yaml", "yml", "toml", "sh", "bash", "zsh", "sql", "graphql", "prisma"];
+  const codeExtensions = ["js", "ts", "jsx", "tsx", "svelte", "vue", "py", "rs", "go", "java", "c", "cpp", "h", "css", "scss", "sass", "less", "html", "xml", "yaml", "yml", "toml", "sh", "bash", "zsh", "sql", "graphql", "prisma"];
+  const jsonExtensions = ["json"];
   const markdownExtensions = ["md", "mdx", "markdown"];
   const pdfExtensions = ["pdf"];
 
@@ -50,6 +53,7 @@
     if (csvExtensions.includes(ext)) return "csv";
     if (pdfExtensions.includes(ext)) return "pdf";
     if (markdownExtensions.includes(ext)) return "markdown";
+    if (jsonExtensions.includes(ext)) return "json";
     if (codeExtensions.includes(ext)) return "code";
     
     return "file";
@@ -72,17 +76,63 @@
     loading = true;
     error = "";
     try {
-      const res = await fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(path)}`);
+      // Extract line number from fragment if present
+      const [filePath, fragment] = path.split('#');
+      const lineNumber = fragment?.startsWith('line') ? parseInt(fragment.slice(4), 10) : null;
+      
+      const res = await fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(filePath)}`);
       const data = await res.json();
       if (data.error) {
         error = data.error;
       } else {
         content = data.content;
+        // Scroll to line after content is rendered
+        if (lineNumber) {
+          setTimeout(() => scrollToLine(lineNumber), 100);
+        }
       }
     } catch (e) {
       error = "Failed to load file";
     } finally {
       loading = false;
+    }
+  }
+
+  function scrollToLine(lineNumber: number) {
+    try {
+      // Find the preview container
+      const previewElement = document.querySelector('.preview-content pre');
+      if (!previewElement) return;
+
+      // Calculate the approximate line height and scroll position
+      const lineHeight = 24; // Approximate line height in pixels
+      const scrollPosition = (lineNumber - 1) * lineHeight;
+
+      // Scroll to the line
+      previewElement.scrollTo({
+        top: scrollPosition,
+        behavior: 'smooth'
+      });
+
+      // Optionally, try to find and highlight the specific line
+      const codeElement = previewElement.querySelector('code');
+      if (codeElement) {
+        const lines = codeElement.textContent?.split('\n') || [];
+        if (lineNumber <= lines.length) {
+          // Add a temporary highlight class to make the line visible
+          setTimeout(() => {
+            const lineElements = previewElement.querySelectorAll('.hljs-ln-line');
+            if (lineElements[lineNumber - 1]) {
+              (lineElements[lineNumber - 1] as HTMLElement).style.backgroundColor = '#fef3c7';
+              setTimeout(() => {
+                (lineElements[lineNumber - 1] as HTMLElement).style.backgroundColor = '';
+              }, 2000);
+            }
+          }, 200);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to scroll to line:', e);
     }
   }
 
@@ -230,7 +280,7 @@
           .catch(() => { error = "Failed to load file"; })
           .finally(() => { loading = false; });
       }
-    } else if (detectedType === "markdown" || detectedType === "code" || detectedType === "file") {
+    } else if (detectedType === "markdown" || detectedType === "code" || detectedType === "json" || detectedType === "file") {
       if (source !== lastSource) {
         lastSource = source;
         loadFile(source);
@@ -470,11 +520,23 @@
         {/if}
       </div>
     {:else if detectedType === "markdown"}
-      <article class="prose prose-gray max-w-none p-6 prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:text-pink-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
-        {@html renderMarkdown(content)}
+      <article class="preview-content prose prose-gray max-w-none p-6 prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:text-pink-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
+        <MermaidRenderer {content} {renderMarkdown} />
       </article>
+    {:else if detectedType === "json"}
+      <div class="h-full overflow-auto p-4">
+        {#if content}
+          {@const jsonData = (() => { try { return JSON.parse(content); } catch { return null; } })()}
+          {#if jsonData !== null}
+            <JsonTreeViewer value={jsonData} maxHeight="100%" showButtons={true} />
+          {:else}
+            <div class="text-red-500 text-sm mb-4">Invalid JSON</div>
+            <pre class="p-4 text-sm font-mono leading-relaxed bg-gray-50 rounded-lg"><code class="hljs">{@html highlightCode(content, "json")}</code></pre>
+          {/if}
+        {/if}
+      </div>
     {:else}
-      <div class="h-full overflow-auto">
+      <div class="preview-content h-full overflow-auto">
         <pre class="p-4 text-sm font-mono leading-relaxed"><code class="hljs">{@html highlightCode(content, source.split(".").pop() || "")}</code></pre>
       </div>
     {/if}

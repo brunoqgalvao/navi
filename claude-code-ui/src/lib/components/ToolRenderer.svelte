@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ToolUseBlock } from "../claude";
+  import JsonTreeViewer from "./JsonTreeViewer.svelte";
 
   interface Props {
     tool: ToolUseBlock;
@@ -106,6 +107,12 @@
       default:
         return "";
     }
+  }
+
+  function shouldUseJsonTree(input: any): boolean {
+    if (!input || typeof input !== 'object') return false;
+    if (Array.isArray(input)) return input.length > 0;
+    return Object.keys(input).length > 0;
   }
 </script>
 
@@ -278,7 +285,11 @@
       </div>
 
     {:else}
-      <pre class="font-mono text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(tool.input, null, 2)}</pre>
+      {#if shouldUseJsonTree(tool.input)}
+        <JsonTreeViewer value={tool.input} maxHeight="300px" />
+      {:else}
+        <pre class="font-mono text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(tool.input, null, 2)}</pre>
+      {/if}
     {/if}
   </div>
 </div>

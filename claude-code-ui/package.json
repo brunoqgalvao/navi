@@ -17,6 +17,7 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.75",
+    "@friendofsvelte/mermaid": "^0.0.4",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "~2",
     "@tauri-apps/plugin-opener": "^2",
@@ -26,7 +27,8 @@
     "archiver": "^7.0.1",
     "highlight.js": "^11.11.1",
     "marked": "^17.0.1",
-    "sql.js": "^1.13.0"
+    "sql.js": "^1.13.0",
+    "svelte-json-tree": "^2.2.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

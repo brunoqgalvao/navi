@@ -30,6 +30,7 @@ export interface Session {
   pinned?: number;
   sort_order?: number;
   auto_accept_all?: number;
+  favorite?: number;
   created_at: number;
   updated_at: number;
   project_name?: string;
@@ -121,6 +122,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ pinned }),
       }),
+    toggleFavorite: (id: string, favorite: boolean) =>
+      request<Session>(`/sessions/${id}/favorite`, {
+        method: "POST",
+        body: JSON.stringify({ favorite }),
+      }),
     reorder: (projectId: string, order: string[]) =>
       request<{ success: boolean }>(`/projects/${projectId}/sessions/reorder`, {
         method: "POST",
@@ -135,6 +141,10 @@ export const api = {
       request<Session>(`/sessions/${id}/auto-accept`, {
         method: "POST",
         body: JSON.stringify({ autoAcceptAll }),
+      }),
+    resetTokens: (id: string) =>
+      request<{ success: boolean }>(`/sessions/${id}/reset-tokens`, {
+        method: "POST",
       }),
   },
 

@@ -23,6 +23,31 @@
   let skillContents = $state<Map<string, SkillData>>(new Map());
   let loadingSkills = $state(false);
   let injectedPrompt = $state<string>("");
+  
+  const UI_INSTRUCTIONS = `<ui-instructions>
+## Preview Feature
+
+This UI has a built-in preview panel that can display:
+- **URLs**: Any localhost URL (e.g., \`http://localhost:3000\`)
+- **Files**: Code files with syntax highlighting
+- **Markdown**: Rendered markdown documents
+- **Images**: PNG, JPG, GIF, SVG, etc.
+
+### How to Suggest Previews
+
+When you create or modify files that the user might want to see, suggest they preview it:
+
+1. For web apps: "You can preview this at http://localhost:3000 using the preview panel"
+2. For files: "You can preview this file using the Files panel on the right"
+3. For markdown: "Open the preview panel to see the rendered markdown"
+
+### File Browser
+
+The Files panel shows the project directory structure. Users can:
+- Navigate directories by clicking folders
+- Click files to preview them
+- Use the tabs to switch between Files and Preview
+</ui-instructions>`;
 
   const debug = $derived(sessionId ? $sessionDebugInfo.get(sessionId) : null);
   const currentMessages = $derived(sessionId ? ($sessionMessages.get(sessionId) || []) : []);
@@ -77,7 +102,12 @@ IMPORTANT SKILL INSTRUCTIONS:
 [Built-in Claude Code system prompt with tool descriptions, behavioral guidelines, etc.]
 ~15,000 tokens - not shown here
 
-## 2. CLAUDE.md Files (via settingSources: ['user', 'project', 'local'])
+## 2. UI Instructions (always appended)
+\`\`\`
+${UI_INSTRUCTIONS}
+\`\`\`
+
+## 3. CLAUDE.md Files (via settingSources: ['user', 'project', 'local'])
 `;
     
     if (claudeMdContent) {
@@ -86,7 +116,7 @@ IMPORTANT SKILL INSTRUCTIONS:
       prompt += `\n[No CLAUDE.md found]\n`;
     }
     
-    prompt += `\n## 3. Skills Metadata (appended via systemPrompt.append)\n`;
+    prompt += `\n## 4. Skills Metadata (appended via systemPrompt.append)\n`;
     
     if (injectedPrompt) {
       prompt += `\`\`\`\n${injectedPrompt}\n\`\`\``;
@@ -214,6 +244,15 @@ IMPORTANT SKILL INSTRUCTIONS:
           </div>
         </div>
         {/if}
+
+        <!-- UI Instructions -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="font-bold text-gray-700">UI Instructions (always appended)</span>
+            <button onclick={() => navigator.clipboard.writeText(UI_INSTRUCTIONS)} class="text-blue-600 hover:underline">copy</button>
+          </div>
+          <pre class="bg-blue-50 p-3 rounded overflow-x-auto max-h-40 whitespace-pre-wrap">{UI_INSTRUCTIONS}</pre>
+        </div>
 
         <!-- CLAUDE.md -->
         <div>

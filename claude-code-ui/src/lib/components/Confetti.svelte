@@ -53,12 +53,12 @@
         class="confetti-piece rounded-sm"
         style="
           left: {piece.x}%;
-          top: 40%;
+          top: -20px;
           background-color: {piece.color};
           width: {piece.size}px;
           height: {piece.size}px;
           animation-delay: {piece.delay}s;
-          animation-duration: {1 + Math.random() * 0.5}s;
+          animation-duration: {1.5 + Math.random() * 0.5}s;
         "
       ></div>
     {/each}

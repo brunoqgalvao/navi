@@ -1,4 +1,5 @@
 <script lang="ts">
+  import MermaidRenderer from "./MermaidRenderer.svelte";
   import type { ChatMessage } from "../stores";
   import type { ContentBlock, TextBlock, ToolUseBlock } from "../claude";
 
@@ -105,7 +106,7 @@
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="text-sm leading-relaxed text-gray-700 markdown-body pl-2 border-l-2 border-indigo-200" onclick={onMessageClick}>
-            {@html renderMarkdown(formatContent(msg.content))}
+            <MermaidRenderer content={formatContent(msg.content)} {renderMarkdown} />
           </div>
 
           {#each getToolCalls(msg.content) as tool}
@@ -208,7 +209,7 @@
                   <!-- svelte-ignore a11y_no_static_element_interactions -->
                   <div class="flex-1 min-w-0 space-y-3" onclick={onMessageClick}>
                     <div class="text-[15px] leading-7 text-gray-800 markdown-body">
-                      {@html renderMarkdown(formatContent(msg.content))}
+                      <MermaidRenderer content={formatContent(msg.content)} {renderMarkdown} />
                     </div>
 
                     {#each getToolCalls(msg.content) as tool}

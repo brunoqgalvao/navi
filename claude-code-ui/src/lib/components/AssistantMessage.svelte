@@ -2,8 +2,11 @@
   import CopyButton from "./CopyButton.svelte";
   import ToolRenderer from "./ToolRenderer.svelte";
   import SubagentBlock from "./SubagentBlock.svelte";
+  import GenerativeUI from "./experimental/GenerativeUI.svelte";
+  import MermaidRenderer from "./MermaidRenderer.svelte";
   import type { ToolUseBlock, ContentBlock, TextBlock } from "../claude";
   import type { ChatMessage } from "../stores";
+  import { processGenerativeUIContent } from "../generative-ui";
 
   interface Props {
     content: ContentBlock[] | string;
@@ -16,6 +19,7 @@
     onPreview?: (path: string) => void;
     onMessageClick?: (e: MouseEvent) => void;
     renderMarkdown: (content: string) => string;
+    jsonBlocksMap?: Map<string, any>;
   }
 
   let { 
@@ -28,12 +32,14 @@
     onFork,
     onPreview,
     onMessageClick,
-    renderMarkdown
+    renderMarkdown,
+    jsonBlocksMap = new Map()
   }: Props = $props();
 
   let showMenu = $state(false);
   let expandedHistory = $state(false);
   let expandedTools = $state(false);
+  let contentElement: HTMLElement;
 
   function formatContent(c: ContentBlock[] | string): string {
     if (typeof c === "string") return c;
@@ -67,9 +73,32 @@
     return subagentMessages.filter(m => m.parentToolUseId === toolUseId);
   }
 
+
   const toolCalls = $derived(getToolCalls(content));
   const historyToolCalls = $derived(getHistoryToolCalls(contentHistory));
   const formattedContent = $derived(formatContent(content));
+
+  // Process generative UI content - simplified approach
+  const genuiResult = $derived(processGenerativeUIContent(formattedContent));
+  const processedContent = $derived(genuiResult.processedContent);
+  const blocks = $derived(genuiResult.blocks);
+
+  function handleGenerativeUIInteraction(event: CustomEvent) {
+    const { type, target, data } = event.detail;
+    console.log('Generative UI Interaction:', { type, target, data });
+    
+    // Handle different interaction types
+    if (type === 'form_submit') {
+      console.log('Form submitted:', data);
+    } else if (type === 'click') {
+      console.log('Element clicked:', target);
+    }
+  }
+
+  function handleGenerativeUIError(event: CustomEvent) {
+    console.error('Generative UI Error:', event.detail);
+  }
+
 </script>
 
 <svelte:window onclick={() => showMenu = false} />
@@ -113,8 +142,20 @@
       </div>
     </div>
 
-    <div class="text-[15px] leading-7 text-gray-800 markdown-body">
-      {@html renderMarkdown(formattedContent)}
+    <div bind:this={contentElement} class="text-[15px] leading-7 text-gray-800 markdown-body">
+      <MermaidRenderer content={processedContent} {renderMarkdown} {jsonBlocksMap} />
+      
+      <!-- Render generative UI components inline -->
+      {#each blocks as block (block.id)}
+        <div class="my-4">
+          <GenerativeUI 
+            html={block.html} 
+            id={block.id}
+            oninteraction={handleGenerativeUIInteraction}
+            onerror={handleGenerativeUIError}
+          />
+        </div>
+      {/each}
     </div>
 
     {#if advancedMode && historyToolCalls.length > 0}

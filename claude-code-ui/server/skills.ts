@@ -320,6 +320,34 @@ export function getSkillFilePath(slug: string): string {
   return safeJoin(SKILL_LIBRARY_PATH, slug);
 }
 
+export function scanGlobalClaudeSkills(): { slug: string; path: string; parsed: SkillMdParsed }[] {
+  if (!existsSync(CLAUDE_GLOBAL_SKILLS)) return [];
+
+  const results: { slug: string; path: string; parsed: SkillMdParsed }[] = [];
+
+  for (const entry of readdirSync(CLAUDE_GLOBAL_SKILLS, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const skillPath = join(CLAUDE_GLOBAL_SKILLS, entry.name);
+    const skillMdPath = join(skillPath, "SKILL.md");
+
+    if (existsSync(skillMdPath)) {
+      try {
+        const content = readFileSync(skillMdPath, "utf-8");
+        const parsed = parseSkillMd(content);
+        results.push({
+          slug: entry.name,
+          path: skillPath,
+          parsed,
+        });
+      } catch (e) {
+        console.error(`Failed to parse skill at ${skillPath}:`, e);
+      }
+    }
+  }
+
+  return results;
+}
+
 export const EXAMPLE_SKILLS = [
   {
     slug: "concise-coder",

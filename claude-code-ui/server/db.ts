@@ -97,6 +97,9 @@ export async function initDb() {
   try {
     db.run("ALTER TABLE sessions ADD COLUMN auto_accept_all INTEGER DEFAULT 0");
   } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN favorite INTEGER DEFAULT 0");
+  } catch {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS skills (
@@ -207,6 +210,7 @@ export interface Session {
   pinned: number;
   sort_order: number;
   auto_accept_all: number;
+  favorite: number;
   created_at: number;
   updated_at: number;
 }
@@ -260,7 +264,7 @@ export const projects = {
       (SELECT COUNT(*) FROM sessions WHERE project_id = p.id) as session_count,
       (SELECT MAX(updated_at) FROM sessions WHERE project_id = p.id) as last_activity
     FROM projects p 
-    ORDER BY p.pinned DESC, p.sort_order ASC, COALESCE((SELECT MAX(updated_at) FROM sessions WHERE project_id = p.id), p.updated_at) DESC
+    ORDER BY p.pinned DESC, p.sort_order ASC
   `),
   get: (id: string) => queryOne<Project>("SELECT * FROM projects WHERE id = ?", [id]),
   create: (id: string, name: string, path: string, description: string | null, created_at: number, updated_at: number) =>
@@ -286,7 +290,7 @@ export interface SessionWithProject extends Session {
 
 export const sessions = {
   listByProject: (projectId: string) => 
-    queryAll<Session>("SELECT * FROM sessions WHERE project_id = ? ORDER BY pinned DESC, sort_order ASC, updated_at DESC", [projectId]),
+    queryAll<Session>("SELECT * FROM sessions WHERE project_id = ? ORDER BY pinned DESC, favorite DESC, sort_order ASC, updated_at DESC", [projectId]),
   listRecent: (limit: number = 10) =>
     queryAll<SessionWithProject>(`
       SELECT s.*, p.name as project_name 
@@ -307,6 +311,8 @@ export const sessions = {
   delete: (id: string) => run("DELETE FROM sessions WHERE id = ?", [id]),
   togglePin: (id: string, pinned: boolean) =>
     run("UPDATE sessions SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
+  toggleFavorite: (id: string, favorite: boolean) =>
+    run("UPDATE sessions SET favorite = ?, updated_at = ? WHERE id = ?", [favorite ? 1 : 0, Date.now(), id]),
   updateOrder: (id: string, sortOrder: number) =>
     run("UPDATE sessions SET sort_order = ? WHERE id = ?", [sortOrder, id]),
   search: (projectId: string, query: string) =>
@@ -326,6 +332,9 @@ export const sessions = {
     `, [`%${query}%`, `%${query}%`]),
   setAutoAcceptAll: (id: string, autoAcceptAll: boolean) =>
     run("UPDATE sessions SET auto_accept_all = ?, updated_at = ? WHERE id = ?", [autoAcceptAll ? 1 : 0, Date.now(), id]),
+  resetTokenCounts: (sessionId: string, inputTokens: number, outputTokens: number) =>
+    run("UPDATE sessions SET input_tokens = ?, output_tokens = ? WHERE id = ?",
+        [inputTokens, outputTokens, sessionId]),
 };
 
 export const messages = {

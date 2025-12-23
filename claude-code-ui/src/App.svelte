@@ -7,6 +7,7 @@
   import { api, skillsApi, type Project, type Session, type Skill } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
+  import hljs from "highlight.js";
 
   const renderer = new marked.Renderer();
   renderer.link = ({ href, title, text }: Tokens.Link) => {
@@ -28,9 +29,44 @@
     return `<a href="${url}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
   };
   
+  let jsonBlocksMap = new Map<string, any>();
+  let jsonBlockCounter = 0;
+
   renderer.code = ({ text, lang }: Tokens.Code) => {
-    const langClass = lang ? ` class="language-${lang}"` : "";
-    return `<pre><code${langClass}>${escapeHtml(text)}</code></pre>`;
+    const language = lang || '';
+    const shellLanguages = ['bash', 'sh', 'shell', 'zsh', 'console', 'terminal'];
+    
+    // Use terminal style for shell/bash output
+    if (shellLanguages.includes(language.toLowerCase())) {
+      const escapedText = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return `<div class="terminal-block"><div class="terminal-header"><span class="terminal-dot red"></span><span class="terminal-dot yellow"></span><span class="terminal-dot green"></span><span class="terminal-title">${language}</span></div><pre class="terminal-content">${escapedText}</pre></div>`;
+    }
+    
+    // Use interactive JSON tree for JSON
+    if (language.toLowerCase() === 'json') {
+      try {
+        const parsed = JSON.parse(text);
+        const id = `json-tree-${jsonBlockCounter++}`;
+        jsonBlocksMap.set(id, parsed);
+        return `<div class="json-block-placeholder" data-json-id="${id}"></div>`;
+      } catch {
+        // If JSON is invalid, fall through to regular highlighting
+      }
+    }
+    
+    // Use syntax highlighting for other languages
+    let highlighted: string;
+    if (language && hljs.getLanguage(language)) {
+      highlighted = hljs.highlight(text, { language }).value;
+    } else {
+      highlighted = hljs.highlightAuto(text).value;
+    }
+    
+    const langLabel = language ? `<span class="code-language">${language}</span>` : '';
+    return `<div class="code-block-wrapper"><div class="code-header">${langLabel}</div><pre class="hljs"><code>${highlighted}</code></pre></div>`;
   };
   
   marked.setOptions({ renderer });
@@ -47,6 +83,7 @@
   import Modal from "./lib/components/Modal.svelte";
   import SubagentBlock from "./lib/components/SubagentBlock.svelte";
   import AudioRecorder from "./lib/components/AudioRecorder.svelte";
+  import InteractiveCodeBlock from "./lib/components/InteractiveCodeBlock.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import ProjectSettings from "./lib/components/ProjectSettings.svelte";
@@ -65,6 +102,9 @@
   import UserMessage from "./lib/components/UserMessage.svelte";
   import SessionDebug from "./lib/components/SessionDebug.svelte";
   import AssistantMessage from "./lib/components/AssistantMessage.svelte";
+  import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
+  import WorkspaceCard from "./lib/components/WorkspaceCard.svelte";
+  import StarButton from "./lib/components/StarButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings } from "./lib/api";
 
@@ -138,6 +178,7 @@
   let rightPanelMode = $state<"preview" | "files" | "browser">("preview");
   let projectFileIndex = $state<Map<string, string>>(new Map());
   let activeSubagents = $state<Map<string, { elapsed: number }>>(new Map());
+  let codeBlocksMap = $state<Map<string, { code: string; language: string }>>(new Map());
   
   let rightPanelWidth = $state(600);
   let isResizingRight = $state(false);
@@ -158,6 +199,7 @@
 
   let showConfetti = $state(false);
   let showWelcome = $state(false);
+  let titleSuggestionRef: TitleSuggestion | null = $state(null);
 
   const TOUR_STEPS: Record<string, TourStep[]> = {
     main: [
@@ -566,16 +608,23 @@ Respond in this exact JSON format only, no other text:
       maxTokens: 500,
     }).then(response => {
       try {
+        if (!response.result) {
+          projectContext = { summary: "New project ready for development.", suggestions: ["Create a package.json or project configuration", "Add source code files", "Set up version control with git"] };
+          return;
+        }
         const jsonMatch = response.result.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           projectContext = JSON.parse(jsonMatch[0]);
           api.projects.generateSummary(project.id).catch(() => {});
+        } else {
+          projectContext = { summary: response.result.slice(0, 500), suggestions: [] };
         }
       } catch {
-        projectContext = { summary: response.result.slice(0, 500), suggestions: [] };
+        projectContext = { summary: response.result?.slice(0, 500) || "Project loaded.", suggestions: [] };
       }
     }).catch(e => {
       console.error("Project context error:", e);
+      projectContext = { summary: "Project ready.", suggestions: ["Start coding", "Add dependencies", "Create project structure"] };
     });
   }
 
@@ -832,11 +881,30 @@ Respond in this exact JSON format only, no other text:
         s.id === sess.id ? { ...s, pinned: newPinned ? 1 : 0 } : s
       ).sort((a, b) => {
         if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+        if ((b.favorite || 0) !== (a.favorite || 0)) return (b.favorite || 0) - (a.favorite || 0);
         if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
         return b.updated_at - a.updated_at;
       });
     } catch (e) {
       console.error("Failed to toggle session pin:", e);
+    }
+  }
+
+  async function toggleSessionFavorite(sess: Session, e: Event) {
+    e.stopPropagation();
+    const newFavorite = !sess.favorite;
+    try {
+      await api.sessions.toggleFavorite(sess.id, newFavorite);
+      sidebarSessions = sidebarSessions.map(s => 
+        s.id === sess.id ? { ...s, favorite: newFavorite ? 1 : 0 } : s
+      ).sort((a, b) => {
+        if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+        if ((b.favorite || 0) !== (a.favorite || 0)) return (b.favorite || 0) - (a.favorite || 0);
+        if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
+        return b.updated_at - a.updated_at;
+      });
+    } catch (e) {
+      console.error("Failed to toggle session favorite:", e);
     }
   }
 
@@ -1340,6 +1408,14 @@ Respond in this exact JSON format only, no other text:
       .join(" ");
   }
 
+  async function handleTitleSuggestionApply(title: string) {
+    if ($session.sessionId) {
+      await api.sessions.update($session.sessionId, { title });
+      const idx = sidebarSessions.findIndex(s => s.id === $session.sessionId);
+      if (idx !== -1) sidebarSessions[idx].title = title;
+    }
+  }
+
   function getToolCalls(content: ContentBlock[] | string): ToolUseBlock[] {
     if (typeof content === "string") return [];
     return content.filter((b): b is ToolUseBlock => b.type === "tool_use" && b.name !== "TodoWrite");
@@ -1370,12 +1446,14 @@ Respond in this exact JSON format only, no other text:
   let expandedHistories = $state<Set<string>>(new Set());
   let expandedToolCalls = $state<Set<string>>(new Set());
 
-  function openPreview(source: string) {
+  function openPreview(source: string, line?: number) {
     const isUrl = source.startsWith("http://") || source.startsWith("https://") || source.startsWith("localhost") || source.match(/^:\d+/);
     if (isUrl) {
       openBrowser(source);
     } else {
-      previewSource = source;
+      // If line number is provided, append it as a fragment identifier
+      const sourceWithLine = line ? `${source}#line${line}` : source;
+      previewSource = sourceWithLine;
       showPreview = true;
       rightPanelMode = "preview";
     }
@@ -1421,7 +1499,15 @@ Respond in this exact JSON format only, no other text:
 
   function renderMarkdown(content: string): string {
     const html = marked.parse(content) as string;
-    return linkifyUrls(linkifyFilenames(linkifyCodePaths(html, currentProject?.path)));
+    return linkifyUrls(linkifyFilenames(linkifyFileLineReferences(linkifyCodePaths(html, currentProject?.path), currentProject?.path)));
+  }
+
+  function handleCodeRun(code: string, language: string) {
+    // For now, just log the code. In a real implementation, you'd execute it
+    console.log('Running code:', { code, language });
+    
+    // You could emit an event or call an API here to execute the code
+    // This depends on your backend implementation for code execution
   }
 
   function linkifyUrls(html: string): string {
@@ -1469,6 +1555,32 @@ Respond in this exact JSON format only, no other text:
     });
   }
 
+  function linkifyFileLineReferences(html: string, projectPath: string | undefined): string {
+    // Pattern to match file:line and file:line-line patterns
+    // Supports both backtick-wrapped and plain text patterns
+    const fileLinePattern = /(?:^|(?<=\s|>|^))(`?)([^\s<>`]+\.(ts|js|tsx|jsx|svelte|vue|py|rs|go|md|json|css|scss|html|yml|yaml|toml|sql|sh|txt|env|lock|pdf|csv|xml|log)):(\d+)(?:-(\d+))?\1(?=\s|<|$|[.,;!?])/gm;
+    
+    return html.replace(fileLinePattern, (match, backtick, filePath, extension, startLine, endLine) => {
+      // Resolve file path
+      let fullPath = filePath;
+      
+      // First check if it's in the project file index
+      const indexedPath = projectFileIndex.get(filePath) || 
+                          projectFileIndex.get(filePath.split('/').pop() || '');
+      
+      if (indexedPath) {
+        fullPath = indexedPath;
+      } else if (!filePath.startsWith("/") && projectPath) {
+        fullPath = `${projectPath}/${filePath.replace(/^\.\//,"")}`;
+      }
+
+      const lineInfo = endLine ? `${startLine}-${endLine}` : startLine;
+      const displayText = backtick ? `\`${filePath}:${lineInfo}\`` : `${filePath}:${lineInfo}`;
+      
+      return `<span class="file-line-link" data-path="${escapeHtml(fullPath)}" data-line="${escapeHtml(startLine)}" data-end-line="${escapeHtml(endLine || '')}">${displayText}</span>`;
+    });
+  }
+
   function handleMessageClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (target.classList.contains("file-link")) {
@@ -1476,6 +1588,13 @@ Respond in this exact JSON format only, no other text:
       const path = target.dataset.path;
       if (path) {
         openPreview(path);
+      }
+    } else if (target.classList.contains("file-line-link")) {
+      e.preventDefault();
+      const path = target.dataset.path;
+      const line = target.dataset.line;
+      if (path && line) {
+        openPreview(path, parseInt(line, 10));
       }
     } else if (target.classList.contains("preview-link")) {
       e.preventDefault();
@@ -1788,11 +1907,7 @@ Respond in this exact JSON format only, no other text:
                                 class="w-full text-left px-2.5 py-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
                             >
                                 <div class="flex items-center gap-2">
-                                    {#if proj.pinned}
-                                        <svg class="w-3.5 h-3.5 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
-                                    {:else}
-                                        <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                                    {/if}
+                                    <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                                     <span class="text-[13px] font-medium truncate">{proj.name}</span>
                                     {#if $projectStatus.get(proj.id) === "attention"}
                                         <span class="shrink-0 w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Needs attention"></span>
@@ -1800,13 +1915,13 @@ Respond in this exact JSON format only, no other text:
                                         <span class="shrink-0 w-1.5 h-1.5 bg-blue-400 rounded-full" title="Active"></span>
                                     {/if}
                                 </div>
-                                <div class="flex items-center gap-2 mt-0.5 pl-5.5 text-[10px] text-gray-400">
-                                    <span>{proj.session_count || 0} chats</span>
-                                    <span class="text-gray-300">·</span>
-                                    <span>{relativeTime(proj.last_activity || proj.updated_at)}</span>
-                                </div>
                             </button>
-                            <div class="absolute right-1 top-1/2 -translate-y-1/2 z-20">
+                            <div class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
+                                <StarButton 
+                                    active={!!proj.pinned}
+                                    onclick={(e) => toggleProjectPin(proj, e)}
+                                    size="sm"
+                                />
                                 <div class="relative">
                                     <button 
                                         onclick={(e) => { e.stopPropagation(); projectMenuId = projectMenuId === proj.id ? null : proj.id; }}
@@ -1817,13 +1932,6 @@ Respond in this exact JSON format only, no other text:
                                     </button>
                                     {#if projectMenuId === proj.id}
                                         <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[160px] z-50">
-                                            <button 
-                                                onclick={(e) => { toggleProjectPin(proj, e); projectMenuId = null; }}
-                                                class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                            >
-                                                <svg class="w-4 h-4" fill={proj.pinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
-                                                {proj.pinned ? "Unpin" : "Pin"}
-                                            </button>
                                             <button 
                                                 onclick={(e) => { openEditProject(proj, e); projectMenuId = null; }}
                                                 class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
@@ -1959,6 +2067,7 @@ Respond in this exact JSON format only, no other text:
                         {#each filteredSidebarSessions as sess}
 
                             <div 
+                                data-session-item={sess.id}
                                 class="group relative {dragOverSessionId === sess.id && !sess.pinned ? 'border-t-2 border-blue-500' : ''} {draggedSessionId === sess.id ? 'opacity-50' : ''}"
                                 role="listitem"
                                 draggable={!sess.pinned}
@@ -1977,11 +2086,17 @@ Respond in this exact JSON format only, no other text:
 
                                 >
 
-                                    <div class="truncate pr-14 font-medium flex items-center gap-1.5">
-                                        {#if sess.pinned}
-                                            <svg class="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
-                                        {/if}
+                                    <div class="truncate pr-20 font-medium flex items-center gap-1.5">
                                         <span class="truncate">{sess.title}</span>
+                                        {#if $session.sessionId === sess.id}
+                                            <TitleSuggestion
+                                                bind:this={titleSuggestionRef}
+                                                sessionId={$session.sessionId}
+                                                currentTitle={sess.title}
+                                                messages={currentMessages}
+                                                onApply={handleTitleSuggestionApply}
+                                            />
+                                        {/if}
                                     </div>
 
                                     <div class="text-[10px] opacity-60 mt-0.5 flex justify-between">
@@ -1998,6 +2113,12 @@ Respond in this exact JSON format only, no other text:
                                     {:else if $sessionStatus.get(sess.id)?.status === "unread"}
                                         <span class="w-2 h-2 bg-gray-400 rounded-full" title="New results"></span>
                                     {/if}
+                                    
+                                    <StarButton 
+                                        active={!!sess.favorite}
+                                        onclick={(e) => toggleSessionFavorite(sess, e)}
+                                    />
+
                                     <div class="relative">
                                         <button 
                                             onclick={(e) => { e.stopPropagation(); sessionMenuId = sessionMenuId === sess.id ? null : sess.id; }}
@@ -2006,14 +2127,7 @@ Respond in this exact JSON format only, no other text:
                                             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
                                         </button>
                                         {#if sessionMenuId === sess.id}
-                                            <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px] z-50">
-                                                <button 
-                                                    onclick={(e) => { toggleSessionPin(sess, e); sessionMenuId = null; }}
-                                                    class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                                >
-                                                    <svg class="w-4 h-4" fill={sess.pinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path></svg>
-                                                    {sess.pinned ? "Unpin" : "Pin"}
-                                                </button>
+                                            <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px] z-[60]">
                                                 <button 
                                                     onclick={(e) => { openEditSession(sess, e); sessionMenuId = null; }}
                                                     class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
@@ -2021,6 +2135,15 @@ Respond in this exact JSON format only, no other text:
                                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                                                     Rename
                                                 </button>
+                                                {#if $session.sessionId === sess.id}
+                                                <button 
+                                                    onclick={(e) => { e.stopPropagation(); sessionMenuId = null; titleSuggestionRef?.triggerSuggestion(); }}
+                                                    class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                                >
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                                                    Suggest title
+                                                </button>
+                                                {/if}
                                                 <button 
                                                     onclick={(e) => { deleteSession(e, sess.id); sessionMenuId = null; }}
                                                     class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
@@ -2165,15 +2288,15 @@ Respond in this exact JSON format only, no other text:
 
     {#if !currentProject}
 
-        <div class="flex-1 flex flex-col items-center justify-center p-8 bg-white min-h-full">
+        <div class="flex-1 overflow-y-auto p-8 bg-white">
 
-            <div class="w-full max-w-4xl mx-auto flex flex-col items-center">
+            <div class="w-full max-w-4xl mx-auto flex flex-col items-center pt-12">
                 <div class="w-16 h-16 bg-white rounded-xl flex items-center justify-center shadow-sm border border-gray-200 mb-6">
                     <img src="/logo.png" alt="Logo" class="w-10 h-10" />
                 </div>
 
                 <h1 class="text-3xl font-serif text-gray-900 mb-3 tracking-tight">Navi</h1>
-                <p class="text-base text-gray-500 mb-10 max-w-md text-center font-light">Select a workspace to get started. Already on it.</p>
+                <p class="text-base text-gray-500 mb-8 max-w-md text-center font-light">Select a workspace to get started. Already on it.</p>
 
                 <button 
                     onclick={() => showNewProjectModal = true} 
@@ -2185,54 +2308,24 @@ Respond in this exact JSON format only, no other text:
                     Create New Workspace
                 </button>
 
-                <div class="w-full grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 px-4">
-                  {#if sidebarProjects.length > 0}
-                    <div class="flex flex-col gap-4">
-                      <div class="flex items-center gap-3 pb-2 border-b border-gray-100">
-                          <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-widest">Workspaces</h3>
-                      </div>
-                      <div class="space-y-2">
-                        {#each sidebarProjects.slice(0, 5) as proj}
-                          <button 
+                {#if sidebarProjects.length > 0}
+                <div class="w-full">
+                    <div class="flex items-center justify-between mb-5">
+                        <h3 class="text-sm font-semibold text-gray-700">Your Workspaces</h3>
+                        <span class="text-xs text-gray-400">{sidebarProjects.length} workspace{sidebarProjects.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {#each sidebarProjects as proj}
+                          <WorkspaceCard 
+                            project={proj}
                             onclick={() => selectProject(proj)}
-                            class="group flex items-center w-full p-3 -mx-3 text-left rounded-lg transition-colors duration-200 hover:bg-gray-50"
-                          >
-                            <div class="flex items-center justify-center w-8 h-8 mr-3 text-gray-400 bg-white border border-gray-200 rounded-md shadow-sm group-hover:border-gray-300 group-hover:text-gray-600 transition-all">
-                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                              <h4 class="text-[15px] font-medium text-gray-900 truncate group-hover:text-gray-900">{proj.name}</h4>
-                              <p class="text-xs text-gray-500 mt-0.5">{relativeTime(proj.last_activity || proj.updated_at)}</p>
-                            </div>
-                            <svg class="w-4 h-4 text-gray-300 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"></path></svg>
-                          </button>
+                            onTogglePin={(e) => toggleProjectPin(proj, e)}
+                            {relativeTime}
+                          />
                         {/each}
-                      </div>
                     </div>
-                  {/if}
-
-                  {#if recentChats.length > 0}
-                    <div class="flex flex-col gap-2">
-                      <div class="flex items-center gap-3 pb-1.5 border-b border-gray-100">
-                          <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Recent Chats</h3>
-                      </div>
-                      <div class="space-y-0.5">
-                        {#each recentChats.slice(0, 5) as chat}
-                          <button 
-                            onclick={() => goToChat(chat)}
-                            class="group flex items-center w-full py-1.5 px-2 -mx-2 text-left rounded-md transition-colors duration-200 hover:bg-gray-50"
-                          >
-                            <svg class="w-3 h-3 mr-2 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-                            <div class="flex-1 min-w-0">
-                              <h4 class="text-[12px] text-gray-600 truncate group-hover:text-gray-900">{chat.title}</h4>
-                              <p class="text-[10px] text-gray-400 truncate">{chat.project_name} · {relativeTime(chat.updated_at)}</p>
-                            </div>
-                          </button>
-                        {/each}
-                      </div>
-                    </div>
-                  {/if}
                 </div>
+                {/if}
             </div>
 
         </div>
@@ -2275,6 +2368,7 @@ Respond in this exact JSON format only, no other text:
         {/if}
 
         <div class="max-w-3xl mx-auto w-full md:pt-10 space-y-8 pb-64">
+
 
             {#if currentMessages.length === 0 && !$session.sessionId}
 
@@ -2381,6 +2475,7 @@ Respond in this exact JSON format only, no other text:
                           onPreview={openPreview}
                           onMessageClick={handleMessageClick}
                           {renderMarkdown}
+                          {jsonBlocksMap}
                         />
                    {/if}
 
@@ -2736,7 +2831,10 @@ Respond in this exact JSON format only, no other text:
     onNavigate={async (sessionId, projectId) => {
       session.setProject(projectId);
       await loadSessions(projectId);
-      selectSession(sessionId);
+      const targetSession = sidebarSessions.find(s => s.id === sessionId);
+      if (targetSession) {
+        selectSession(targetSession);
+      }
     }}
     onNavigateProject={async (projectId) => {
       session.setProject(projectId);
@@ -3091,6 +3189,29 @@ Respond in this exact JSON format only, no other text:
 
   :global(.file-link::before) {
     content: "📄 ";
+    font-size: 0.85em;
+  }
+
+  :global(.file-line-link) {
+    color: #7c3aed;
+    cursor: pointer;
+    background-color: #f3f4f6;
+    padding: 0.15em 0.4em;
+    border-radius: 0.25em;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+    transition: all 0.15s;
+    border: 1px solid transparent;
+  }
+
+  :global(.file-line-link:hover) {
+    background-color: #ede9fe;
+    border-color: #c4b5fd;
+    color: #5b21b6;
+  }
+
+  :global(.file-line-link::before) {
+    content: "📍 ";
     font-size: 0.85em;
   }
 

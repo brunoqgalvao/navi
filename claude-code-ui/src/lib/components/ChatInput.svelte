@@ -48,17 +48,19 @@
     audioRecorderRef?.toggleRecording();
   }
 
-  async function loadProjectFiles(rootPath: string, currentPath: string = rootPath) {
+  async function loadProjectFiles(rootPath: string, currentPath: string = rootPath, depth: number = 0) {
+    if (depth > 4 || availableFiles.length > 500) return;
     try {
       const res = await fetch(`http://localhost:3001/api/fs/list?path=${encodeURIComponent(currentPath)}`);
       const data = await res.json();
       if (data.entries) {
         for (const entry of data.entries) {
+          if (availableFiles.length > 500) break;
           if (entry.type === "file") {
             availableFiles.push({ name: entry.name, path: entry.path, type: "file" });
           } else if (entry.type === "directory" && !entry.name.startsWith(".") && 
-                     !["node_modules", "target", "dist", "build", ".git", "__pycache__", "venv"].includes(entry.name)) {
-            await loadProjectFiles(rootPath, entry.path);
+                     !["node_modules", "target", "dist", "build", ".git", "__pycache__", "venv", ".next", "coverage", ".svelte-kit"].includes(entry.name)) {
+            await loadProjectFiles(rootPath, entry.path, depth + 1);
           }
         }
         availableFiles = [...availableFiles];
@@ -248,7 +250,7 @@
       rows="1"
     ></textarea>
 
-    {#if showFilePicker && filteredFiles.length > 0}
+    {#if showFilePicker}
       <div class="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
         <div class="px-3 py-2 border-b border-gray-100 text-xs text-gray-500 font-medium">
           Files in project
@@ -268,7 +270,9 @@
           </button>
         {/each}
         {#if filteredFiles.length === 0}
-          <div class="px-3 py-4 text-sm text-gray-500 text-center">No files found</div>
+          <div class="px-3 py-4 text-sm text-gray-500 text-center">
+            {availableFiles.length === 0 ? "Loading files..." : "No matching files"}
+          </div>
         {/if}
       </div>
     {/if}

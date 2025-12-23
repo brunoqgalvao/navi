@@ -77,8 +77,77 @@ function loadAllSkills(cwd: string): SkillInfo[] {
   return allSkills;
 }
 
+const UI_INSTRUCTIONS = `
+<ui-instructions>
+## Rich Content Features
+
+This UI supports rich content rendering in your responses. Use these features to enhance your explanations:
+
+### Mermaid Diagrams
+
+Use mermaid code blocks to create flowcharts, sequence diagrams, and more:
+
+\`\`\`mermaid
+graph TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Action]
+    B -->|No| D[End]
+\`\`\`
+
+Supported diagram types: flowchart, sequence, class, state, entity-relationship, gantt, pie, and more.
+
+### Interactive UI Components
+
+Use \`genui\` code blocks to create interactive HTML elements that render inline:
+
+\`\`\`genui
+<div style="padding: 16px; background: #f0f9ff; border-radius: 8px;">
+  <h3>Interactive Component</h3>
+  <button>Click me</button>
+  <form>
+    <input type="text" name="query" placeholder="Enter value...">
+    <button type="submit">Submit</button>
+  </form>
+</div>
+\`\`\`
+
+The genui blocks are sandboxed and support:
+- Buttons and forms
+- Input fields (text, checkbox, radio, select)
+- Basic styling with inline CSS
+- Click and form submit events are captured
+
+### JSON Tree Display
+
+When outputting complex JSON data, the UI will render it as an interactive collapsible tree with expand/collapse controls.
+
+## Preview Panel
+
+The UI has a built-in preview panel that can display:
+- **URLs**: Any localhost URL (e.g., \`http://localhost:3000\`)
+- **Files**: Code files with syntax highlighting
+- **Markdown**: Rendered markdown documents
+- **Images**: PNG, JPG, GIF, SVG, etc.
+
+### How to Suggest Previews
+
+When you create or modify files that the user might want to see, suggest they preview it:
+
+1. For web apps: "You can preview this at http://localhost:3000 using the preview panel"
+2. For files: "You can preview this file using the Files panel on the right"
+3. For markdown: "Open the preview panel to see the rendered markdown"
+
+### File Browser
+
+The Files panel shows the project directory structure. Users can:
+- Navigate directories by clicking folders
+- Click files to preview them
+- Use the tabs to switch between Files and Preview
+</ui-instructions>
+`;
+
 function buildSkillsMetadataPrompt(skills: SkillInfo[]): string {
-  if (skills.length === 0) return '';
+  if (skills.length === 0) return UI_INSTRUCTIONS;
   
   let prompt = `\n<skills>
 You have access to the following skills. When a user's request matches a skill's purpose, you MUST read the skill's SKILL.md file to get detailed instructions before proceeding.
@@ -103,6 +172,14 @@ IMPORTANT SKILL INSTRUCTIONS:
 </skills>`;
   
   return prompt;
+}
+
+function buildSystemPromptAppend(skills: SkillInfo[]): string {
+  const skillsPrompt = buildSkillsMetadataPrompt(skills);
+  if (skills.length === 0) {
+    return UI_INSTRUCTIONS;
+  }
+  return UI_INSTRUCTIONS + '\n' + skillsPrompt;
 }
 
 interface WorkerInput {
@@ -250,10 +327,8 @@ async function runQuery(input: WorkerInput) {
     const skills = loadAllSkills(cwd);
     console.error(`[Worker] Loaded ${skills.length} skills:`, skills.map(s => s.name));
     
-    const skillsMetadata = buildSkillsMetadataPrompt(skills);
-    if (skillsMetadata) {
-      console.error(`[Worker] Skills metadata prompt (${skillsMetadata.length} chars)`);
-    }
+    const systemPromptAppend = buildSystemPromptAppend(skills);
+    console.error(`[Worker] System prompt append (${systemPromptAppend.length} chars)`);
     
     const allTools = allowedTools || [
       "Read",
@@ -285,9 +360,7 @@ async function runQuery(input: WorkerInput) {
         permissionMode: "default",
         canUseTool,
         settingSources: ['user', 'project', 'local'] as const,
-        systemPrompt: skillsMetadata 
-          ? { type: 'preset', preset: 'claude_code', append: skillsMetadata }
-          : { type: 'preset', preset: 'claude_code' },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
       },
     });
 
