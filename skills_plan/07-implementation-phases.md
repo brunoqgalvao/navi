@@ -20,10 +20,13 @@
 - [ ] **1.2 Filesystem Utilities**
   - `SKILL_LIBRARY_PATH` constant
   - `CLAUDE_GLOBAL_SKILLS` constant
-  - `parseSkillMd()` - parse SKILL.md frontmatter
-  - `generateSkillMd()` - generate SKILL.md from data
-  - `calculateSkillHash()` - content hash
-  - `copyDirRecursive()` - copy skill directory
+  - `validateSlug()` - **SECURITY**: validate slug is safe for filesystem
+  - `assertPathWithinBase()` - **SECURITY**: prevent path traversal
+  - `safeJoin()` - **SECURITY**: path join with validation
+  - `parseSkillMd()` - parse SKILL.md frontmatter (preserves unknown fields)
+  - `serializeSkillMd()` - generate SKILL.md from parsed data
+  - `calculateSkillHash()` - content hash of entire directory
+  - `copyDirRecursive()` - copy skill directory (preserves file permissions)
   - `scanSkillDirectory()` - list skills in directory
 
 - [ ] **1.3 Core API Endpoints**
@@ -211,6 +214,8 @@
 - [ ] **6.1 Import API**
   - `POST /api/skills/import` - from file upload
   - `POST /api/skills/import-url` - from URL
+  - **SECURITY**: Validate slug from imported skill
+  - **SECURITY**: Safe archive extraction (zip-slip prevention)
   - Validate SKILL.md format
   - Handle skill directory structure
 
@@ -312,13 +317,19 @@
   - Large skill directories
   - Special characters in names
 
-- [ ] **8.3 Performance**
+- [ ] **8.3 Security Tests**
+  - Path traversal via slug (`../../../etc/passwd`)
+  - Zip-slip attacks in import
+  - Slug validation edge cases (`.`, `..`, reserved names)
+  - Permission preservation for executable scripts
+
+- [ ] **8.4 Performance**
   - Lazy loading skill content
   - Debounce hash calculations
   - Cache marketplace results
   - Batch filesystem operations
 
-- [ ] **8.4 Documentation**
+- [ ] **8.5 Documentation**
   - User guide for skills
   - Skill authoring guide
   - API documentation

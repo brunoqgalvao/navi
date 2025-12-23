@@ -354,3 +354,133 @@ export interface SearchResult {
   updated_at: number;
   project_name?: string;
 }
+
+export interface Skill {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  version: string;
+  allowed_tools: string[] | null;
+  license: string | null;
+  category: string | null;
+  tags: string[] | null;
+  content_hash: string;
+  source_type: 'local' | 'marketplace' | 'import';
+  source_url: string | null;
+  source_version: string | null;
+  created_at: number;
+  updated_at: number;
+  enabled_globally: boolean;
+  enabled_projects: string[];
+  needs_sync?: boolean;
+  body?: string;
+}
+
+export interface CreateSkillInput {
+  slug?: string;
+  name: string;
+  description: string;
+  body: string;
+  allowed_tools?: string[];
+  license?: string;
+  category?: string;
+  tags?: string[];
+}
+
+export interface UpdateSkillInput {
+  name?: string;
+  description?: string;
+  body?: string;
+  allowed_tools?: string[];
+  license?: string;
+  category?: string;
+  tags?: string[];
+  version?: string;
+}
+
+export const skillsApi = {
+  list: () => request<Skill[]>("/skills"),
+  get: (id: string) => request<Skill>(`/skills/${id}`),
+  create: (data: CreateSkillInput) =>
+    request<Skill>("/skills", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: UpdateSkillInput) =>
+    request<Skill>(`/skills/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    request<{ success: boolean }>(`/skills/${id}`, { method: "DELETE" }),
+  enableGlobal: (id: string) =>
+    request<{ success: boolean; path: string }>(`/skills/${id}/enable`, { method: "POST" }),
+  disableGlobal: (id: string) =>
+    request<{ success: boolean }>(`/skills/${id}/enable`, { method: "DELETE" }),
+  enableForProject: (projectId: string, skillId: string) =>
+    request<{ success: boolean; path: string }>(`/projects/${projectId}/skills/${skillId}/enable`, {
+      method: "POST",
+    }),
+  disableForProject: (projectId: string, skillId: string) =>
+    request<{ success: boolean }>(`/projects/${projectId}/skills/${skillId}/enable`, {
+      method: "DELETE",
+    }),
+  listEnabled: () => request<Skill[]>("/skills/enabled"),
+  listProjectSkills: (projectId: string) => request<Skill[]>(`/projects/${projectId}/skills`),
+  scan: () => request<{ success: boolean; results: any }>("/skills/scan", { method: "POST" }),
+  createExamples: () =>
+    request<{ success: boolean; created: string[] }>("/skills/examples", { method: "POST" }),
+  async importFile(file: File, useAi: boolean = false): Promise<Skill> {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("useAi", String(useAi));
+    const res = await fetch(`${API_BASE}/skills/import`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Import failed: ${res.status}`);
+    }
+    return res.json();
+  },
+  importUrl: (url: string, useAi: boolean = false) =>
+    request<Skill>("/skills/import-url", {
+      method: "POST",
+      body: JSON.stringify({ url, useAi }),
+    }),
+  async exportZip(id: string, slug: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/skills/${id}/export`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Export failed: ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slug}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  sync: (id: string, scope: "global" | "project", projectId?: string) =>
+    request<{ success: boolean; hash: string }>(`/skills/${id}/sync`, {
+      method: "POST",
+      body: JSON.stringify({ scope, projectId }),
+    }),
+  getFiles: (id: string) =>
+    request<{ path: string; files: SkillFileInfo[] }>(`/skills/${id}/files`),
+  openInEditor: (id: string, editor: "code" | "cursor" | "zed" | "finder" = "code") =>
+    request<{ success: boolean; path: string; editor: string }>(`/skills/${id}/open`, {
+      method: "POST",
+      body: JSON.stringify({ editor }),
+    }),
+};
+
+export interface SkillFileInfo {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size?: number;
+}

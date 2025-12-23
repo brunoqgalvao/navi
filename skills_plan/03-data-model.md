@@ -17,7 +17,7 @@ CREATE TABLE skills (
   -- Our metadata (not in SKILL.md)
   category TEXT,                        -- user-defined category
   tags TEXT,                            -- JSON array
-  content_hash TEXT NOT NULL,           -- SHA256 of SKILL.md for change detection
+  content_hash TEXT NOT NULL,           -- SHA256 of entire skill directory (all files)
   
   -- Marketplace tracking
   source_type TEXT,                     -- 'local' | 'marketplace' | 'import'
@@ -53,7 +53,8 @@ CREATE TABLE enabled_skills (
   
   FOREIGN KEY (skill_id) REFERENCES skills(id),
   FOREIGN KEY (project_id) REFERENCES projects(id),
-  UNIQUE(skill_id, scope, project_id)
+  -- Note: SQLite treats NULL as distinct, so we use COALESCE for uniqueness
+  UNIQUE(skill_id, COALESCE(project_id, '__GLOBAL__'))
 );
 
 CREATE INDEX idx_enabled_skills_scope ON enabled_skills(scope, project_id);
@@ -183,24 +184,43 @@ interface SkillWithStatus extends Skill {
 
 ## Content Hash Calculation
 
+The content hash covers the **entire skill directory** (all files recursively), not just SKILL.md.
+This ensures any change to scripts, assets, or the skill definition triggers change detection.
+
 ```typescript
 import { createHash } from 'crypto';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
+/**
+ * Calculate SHA256 hash of entire skill directory.
+ * 
+ * Hash includes:
+ * - All file names (for detecting renames/additions/deletions)
+ * - All file contents
+ * - Sorted for deterministic ordering
+ * 
+ * Does NOT include:
+ * - File permissions (handled separately during copy)
+ * - Timestamps
+ */
 function calculateSkillHash(skillPath: string): string {
   const hash = createHash('sha256');
   
-  // Hash all files in skill directory recursively
-  function hashDir(dir: string) {
-    const entries = readdirSync(dir);
-    for (const entry of entries.sort()) {
+  function hashDir(dir: string, prefix: string = '') {
+    const entries = readdirSync(dir).sort();
+    for (const entry of entries) {
       const fullPath = join(dir, entry);
+      const relativePath = prefix ? `${prefix}/${entry}` : entry;
       const stat = statSync(fullPath);
+      
       if (stat.isDirectory()) {
-        hashDir(fullPath);
+        // Include directory marker for empty dir detection
+        hash.update(`DIR:${relativePath}\n`);
+        hashDir(fullPath, relativePath);
       } else {
-        hash.update(entry);
+        // Include relative path and content
+        hash.update(`FILE:${relativePath}\n`);
         hash.update(readFileSync(fullPath));
       }
     }

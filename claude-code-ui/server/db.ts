@@ -99,6 +99,58 @@ export async function initDb() {
   } catch {}
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS skills (
+      id TEXT PRIMARY KEY,
+      slug TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      version TEXT DEFAULT '1.0.0',
+      allowed_tools TEXT,
+      license TEXT,
+      category TEXT,
+      tags TEXT,
+      content_hash TEXT NOT NULL,
+      source_type TEXT DEFAULT 'local',
+      source_url TEXT,
+      source_version TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_skills_slug ON skills(slug);
+    CREATE INDEX IF NOT EXISTS idx_skills_category ON skills(category);
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS enabled_skills (
+      id TEXT PRIMARY KEY,
+      skill_id TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      project_id TEXT,
+      library_version TEXT NOT NULL,
+      local_hash TEXT NOT NULL,
+      has_local_changes INTEGER DEFAULT 0,
+      enabled_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (skill_id) REFERENCES skills(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_enabled_skills_scope ON enabled_skills(scope, project_id);
+    CREATE INDEX IF NOT EXISTS idx_enabled_skills_skill ON enabled_skills(skill_id);
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS skill_versions (
+      id TEXT PRIMARY KEY,
+      skill_id TEXT NOT NULL,
+      version TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      changelog TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (skill_id) REFERENCES skills(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_skill_versions_skill ON skill_versions(skill_id);
+  `);
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS search_index (
       id TEXT PRIMARY KEY,
       entity_type TEXT NOT NULL,
@@ -510,5 +562,159 @@ export const globalSettings = {
   },
   setPermissions: (settings: PermissionSettings) => {
     globalSettings.set("permissions", JSON.stringify(settings));
+  },
+};
+
+export interface Skill {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  version: string;
+  allowed_tools: string | null;
+  license: string | null;
+  category: string | null;
+  tags: string | null;
+  content_hash: string;
+  source_type: string;
+  source_url: string | null;
+  source_version: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface EnabledSkill {
+  id: string;
+  skill_id: string;
+  scope: string;
+  project_id: string | null;
+  library_version: string;
+  local_hash: string;
+  has_local_changes: number;
+  enabled_at: number;
+  updated_at: number;
+}
+
+export interface SkillVersion {
+  id: string;
+  skill_id: string;
+  version: string;
+  content_hash: string;
+  changelog: string | null;
+  created_at: number;
+}
+
+export const skills = {
+  list: () => queryAll<Skill>("SELECT * FROM skills ORDER BY updated_at DESC"),
+  get: (id: string) => queryOne<Skill>("SELECT * FROM skills WHERE id = ?", [id]),
+  getBySlug: (slug: string) => queryOne<Skill>("SELECT * FROM skills WHERE slug = ?", [slug]),
+  create: (skill: Skill) => {
+    run(
+      `INSERT INTO skills (id, slug, name, description, version, allowed_tools, license, category, tags, content_hash, source_type, source_url, source_version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        skill.id,
+        skill.slug,
+        skill.name,
+        skill.description,
+        skill.version,
+        skill.allowed_tools,
+        skill.license,
+        skill.category,
+        skill.tags,
+        skill.content_hash,
+        skill.source_type,
+        skill.source_url,
+        skill.source_version,
+        skill.created_at,
+        skill.updated_at,
+      ]
+    );
+  },
+  update: (id: string, updates: Partial<Skill>) => {
+    const fields: string[] = [];
+    const values: any[] = [];
+    for (const [key, value] of Object.entries(updates)) {
+      if (key !== "id") {
+        fields.push(`${key} = ?`);
+        values.push(value);
+      }
+    }
+    if (fields.length === 0) return;
+    values.push(id);
+    run(`UPDATE skills SET ${fields.join(", ")} WHERE id = ?`, values);
+  },
+  delete: (id: string) => run("DELETE FROM skills WHERE id = ?", [id]),
+};
+
+export const enabledSkills = {
+  list: () => queryAll<EnabledSkill>("SELECT * FROM enabled_skills"),
+  listGlobal: () => queryAll<EnabledSkill>("SELECT * FROM enabled_skills WHERE scope = 'global'"),
+  listByProject: (projectId: string) =>
+    queryAll<EnabledSkill>("SELECT * FROM enabled_skills WHERE scope = 'project' AND project_id = ?", [projectId]),
+  get: (skillId: string, scope: string, projectId?: string | null) => {
+    if (scope === "global") {
+      return queryOne<EnabledSkill>(
+        "SELECT * FROM enabled_skills WHERE skill_id = ? AND scope = 'global'",
+        [skillId]
+      );
+    }
+    return queryOne<EnabledSkill>(
+      "SELECT * FROM enabled_skills WHERE skill_id = ? AND scope = 'project' AND project_id = ?",
+      [skillId, projectId]
+    );
+  },
+  create: (enabled: EnabledSkill) => {
+    run(
+      `INSERT INTO enabled_skills (id, skill_id, scope, project_id, library_version, local_hash, has_local_changes, enabled_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        enabled.id,
+        enabled.skill_id,
+        enabled.scope,
+        enabled.project_id,
+        enabled.library_version,
+        enabled.local_hash,
+        enabled.has_local_changes,
+        enabled.enabled_at,
+        enabled.updated_at,
+      ]
+    );
+  },
+  update: (id: string, updates: Partial<EnabledSkill>) => {
+    const fields: string[] = [];
+    const values: any[] = [];
+    for (const [key, value] of Object.entries(updates)) {
+      if (key !== "id") {
+        fields.push(`${key} = ?`);
+        values.push(value);
+      }
+    }
+    if (fields.length === 0) return;
+    values.push(id);
+    run(`UPDATE enabled_skills SET ${fields.join(", ")} WHERE id = ?`, values);
+  },
+  delete: (skillId: string, scope: string, projectId?: string | null) => {
+    if (scope === "global") {
+      run("DELETE FROM enabled_skills WHERE skill_id = ? AND scope = 'global'", [skillId]);
+    } else {
+      run("DELETE FROM enabled_skills WHERE skill_id = ? AND scope = 'project' AND project_id = ?", [
+        skillId,
+        projectId,
+      ]);
+    }
+  },
+  deleteById: (id: string) => run("DELETE FROM enabled_skills WHERE id = ?", [id]),
+};
+
+export const skillVersions = {
+  list: (skillId: string) =>
+    queryAll<SkillVersion>("SELECT * FROM skill_versions WHERE skill_id = ? ORDER BY created_at DESC", [skillId]),
+  create: (version: SkillVersion) => {
+    run(
+      `INSERT INTO skill_versions (id, skill_id, version, content_hash, changelog, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [version.id, version.skill_id, version.version, version.content_hash, version.changelog, version.created_at]
+    );
   },
 };

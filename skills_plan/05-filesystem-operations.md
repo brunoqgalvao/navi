@@ -38,8 +38,12 @@
 
 ```typescript
 async function createSkill(data: CreateSkillInput): Promise<Skill> {
-  const slug = data.name; // name is already slug-formatted
-  const skillDir = join(SKILL_LIBRARY_PATH, slug);
+  const slug = data.slug || slugify(data.name);
+  
+  // SECURITY: Validate slug before any filesystem operations
+  validateSlug(slug);
+  
+  const skillDir = safeJoin(SKILL_LIBRARY_PATH, slug);
   
   // 1. Validate slug doesn't exist
   if (existsSync(skillDir)) {
@@ -306,8 +310,13 @@ async function scanAndReconcile(): Promise<ScanResults> {
       const skill = await importSkillFromDisk(fs.path);
       results.library.added.push(fs.slug);
     } else if (fs.hash !== existing.content_hash) {
-      // Skill changed on disk
+      // Skill changed on disk - re-parse SKILL.md to update ALL metadata
+      const parsed = parseSkillMd(join(fs.path, 'SKILL.md'));
       db.skills.update(existing.id, {
+        name: parsed.name,
+        description: parsed.description,
+        allowed_tools: parsed.allowed_tools,
+        license: parsed.license,
         content_hash: fs.hash,
         updated_at: Date.now()
       });
@@ -359,15 +368,84 @@ async function scanAndReconcile(): Promise<ScanResults> {
 const SKILL_LIBRARY_PATH = join(homedir(), '.claude-code-ui', 'skill-library');
 const CLAUDE_GLOBAL_SKILLS = join(homedir(), '.claude', 'skills');
 
-function copyDirRecursive(src: string, dest: string) {
+// =============================================================================
+// SECURITY: Path Validation
+// =============================================================================
+
+/**
+ * Validate that a slug is safe for filesystem use.
+ * Prevents path traversal attacks (e.g., "../../../etc/passwd").
+ */
+function validateSlug(slug: string): void {
+  // Must be non-empty
+  if (!slug || slug.trim().length === 0) {
+    throw new Error('Slug cannot be empty');
+  }
+  
+  // Allowlist: only alphanumeric, hyphens, underscores
+  if (!/^[a-zA-Z0-9_-]+$/.test(slug)) {
+    throw new Error(`Invalid slug "${slug}": only alphanumeric, hyphens, and underscores allowed`);
+  }
+  
+  // Deny reserved names
+  const reserved = ['.', '..', 'con', 'prn', 'aux', 'nul'];
+  if (reserved.includes(slug.toLowerCase())) {
+    throw new Error(`Invalid slug "${slug}": reserved name`);
+  }
+  
+  // Length limit
+  if (slug.length > 100) {
+    throw new Error('Slug too long (max 100 characters)');
+  }
+}
+
+/**
+ * Ensure a resolved path is within the expected base directory.
+ * Prevents zip-slip and path traversal attacks.
+ */
+function assertPathWithinBase(targetPath: string, basePath: string): void {
+  const resolvedTarget = resolve(targetPath);
+  const resolvedBase = resolve(basePath);
+  
+  if (!resolvedTarget.startsWith(resolvedBase + sep) && resolvedTarget !== resolvedBase) {
+    throw new Error(`Path traversal detected: ${targetPath} is outside ${basePath}`);
+  }
+}
+
+/**
+ * Safe path join that validates the result stays within base.
+ */
+function safeJoin(basePath: string, ...parts: string[]): string {
+  const joined = join(basePath, ...parts);
+  assertPathWithinBase(joined, basePath);
+  return joined;
+}
+
+/**
+ * Copy directory recursively, preserving file permissions.
+ * 
+ * IMPORTANT: Preserves executable bits for scripts.
+ */
+function copyDirRecursive(src: string, dest: string, baseDest?: string) {
+  const effectiveBaseDest = baseDest || dest;
   mkdirSync(dest, { recursive: true });
+  
   for (const entry of readdirSync(src, { withFileTypes: true })) {
     const srcPath = join(src, entry.name);
     const destPath = join(dest, entry.name);
+    
+    // Validate destination stays within base (zip-slip protection)
+    assertPathWithinBase(destPath, effectiveBaseDest);
+    
     if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath);
+      copyDirRecursive(srcPath, destPath, effectiveBaseDest);
     } else {
+      // Copy file content
       copyFileSync(srcPath, destPath);
+      
+      // Preserve file mode (permissions including executable bit)
+      const stat = statSync(srcPath);
+      chmodSync(destPath, stat.mode);
     }
   }
 }

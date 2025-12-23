@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { availableModels, type ModelInfo } from "../stores";
   import { marked } from "marked";
+  import SkillLibrary from "./SkillLibrary.svelte";
 
   interface Props {
     project: Project;
@@ -11,7 +12,7 @@
 
   let { project, onClose }: Props = $props();
 
-  type Tab = "instructions" | "model" | "permissions";
+  type Tab = "instructions" | "model" | "permissions" | "skills";
   let activeTab: Tab = $state("instructions");
 
   let claudeMd = $state("");
@@ -258,6 +259,15 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
           Permissions
+        </button>
+        <button
+          onclick={() => activeTab = "skills"}
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors {activeTab === 'skills' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'}"
+        >
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Skills
         </button>
       </div>
 
@@ -532,6 +542,15 @@ Write instructions for Claude here. This file tells Claude:
               </div>
             {/if}
           </div>
+        </div>
+      {:else if activeTab === "skills"}
+        <div class="space-y-6">
+          <div>
+            <h4 class="text-lg font-semibold text-gray-900 mb-1">Project Skills</h4>
+            <p class="text-sm text-gray-500">Enable skills for this project. Skills are copied to <code class="bg-gray-200 px-1 rounded text-xs">.claude/skills/</code> in your project.</p>
+          </div>
+
+          <SkillLibrary projectId={project.id} showProjectToggle={true} />
         </div>
       {/if}
     </main>

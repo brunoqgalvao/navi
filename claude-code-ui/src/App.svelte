@@ -2,9 +2,9 @@
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, attachedFiles, type ChatMessage, type TodoItem, type TourStep, type AttachedFile } from "./lib/stores";
+  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, attachedFiles, sessionDebugInfo, type ChatMessage, type TodoItem, type TourStep, type AttachedFile } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
-  import { api, type Project, type Session } from "./lib/api";
+  import { api, skillsApi, type Project, type Session, type Skill } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
 
@@ -63,6 +63,7 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
   import UserMessage from "./lib/components/UserMessage.svelte";
+  import SessionDebug from "./lib/components/SessionDebug.svelte";
   import AssistantMessage from "./lib/components/AssistantMessage.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings } from "./lib/api";
@@ -114,6 +115,7 @@
   let lastSessionModel = $state("");
   let showSettings = $state(false);
   let showProjectSettings = $state(false);
+  let showDebugInfo = $state(false);
   let sidebarCollapsed = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
@@ -349,6 +351,7 @@
   let currentSessionLoading = $derived($session.sessionId && $loadingSessions.has($session.sessionId));
   let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.startsWith($session.sessionId + ':')).length : 0);
   let showOnboarding = $derived(!$onboardingComplete);
+  let activeSkills = $state<Skill[]>([]);
 
   $effect(() => {
     if ($session.selectedModel !== lastSessionModel) {
@@ -398,6 +401,20 @@
 
   onDestroy(() => {
     client?.disconnect();
+  });
+
+  $effect(() => {
+    const projectId = $session.projectId;
+    if (projectId) {
+      skillsApi.listProjectSkills(projectId).then(skills => {
+        activeSkills = skills;
+      }).catch(e => {
+        console.error("Failed to load project skills:", e);
+        activeSkills = [];
+      });
+    } else {
+      activeSkills = [];
+    }
   });
 
   async function loadProjects() {
@@ -977,6 +994,13 @@ Respond in this exact JSON format only, no other text:
         if (msg.subtype === "init" && uiSessionId && uiSessionId === $session.sessionId) {
           session.setClaudeSession(claudeSessionId);
           if ((msg as any).model) session.setModel((msg as any).model);
+          sessionDebugInfo.setForSession(uiSessionId, {
+            cwd: (msg as any).cwd || "",
+            model: (msg as any).model || "",
+            tools: (msg as any).tools || [],
+            skills: (msg as any).skills || [],
+            timestamp: new Date(),
+          });
         }
         break;
 
@@ -2113,6 +2137,15 @@ Respond in this exact JSON format only, no other text:
     <!-- Toolbar Buttons -->
     {#if currentProject}
     <div class="absolute top-3 right-3 z-20 flex gap-1">
+      {#if $advancedMode}
+      <button 
+        onclick={() => showDebugInfo = true}
+        class={`p-2 border rounded-lg shadow-sm transition-all group ${showDebugInfo ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
+        title="Session Debug Info"
+      >
+        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+      </button>
+      {/if}
       <button 
         onclick={toggleFileBrowser}
         class={`p-2 border rounded-lg shadow-sm transition-all group ${showFileBrowser && rightPanelMode === 'files' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
@@ -2425,6 +2458,23 @@ Respond in this exact JSON format only, no other text:
         <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}" data-tour="chat-input">
 
             <div class="w-full max-w-3xl pointer-events-auto">
+                {#if activeSkills.length > 0}
+                    <div class="flex items-center gap-1 mb-2 justify-center">
+                        <div class="group relative flex items-center gap-1 px-2 py-1 bg-purple-50 rounded-full border border-purple-200">
+                            <svg class="w-3 h-3 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            <span class="text-[11px] text-purple-600 font-medium">{activeSkills.length} skill{activeSkills.length > 1 ? 's' : ''}</span>
+                            <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50 shadow-lg">
+                                <div class="font-medium mb-1">Active Skills:</div>
+                                {#each activeSkills as skill}
+                                    <div class="text-gray-300">{skill.name}</div>
+                                {/each}
+                                <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                            </div>
+                        </div>
+                    </div>
+                {/if}
                 <ChatInput
                     bind:value={inputText}
                     disabled={!$isConnected}
@@ -2766,6 +2816,14 @@ Respond in this exact JSON format only, no other text:
       </div>
     </div>
   {/if}
+
+  <SessionDebug 
+    open={showDebugInfo} 
+    onClose={() => showDebugInfo = false} 
+    sessionId={$session.sessionId} 
+    claudeMdContent={claudeMdContent}
+    projectPath={currentProject?.path || null}
+  />
 
   {#if showProjectPermissions}
     <div 

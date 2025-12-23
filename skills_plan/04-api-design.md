@@ -31,6 +31,100 @@
 | POST | `/api/skills/import` | Import from file/URL |
 | GET | `/api/skills/:id/export` | Export skill as zip |
 
+## SKILL.md Round-Tripping Contract
+
+**CRITICAL**: The API and filesystem operations must agree on how SKILL.md is handled.
+
+### Principle
+
+The API **never** accepts or returns raw SKILL.md strings. Instead:
+- **Frontmatter fields** are structured data (name, description, version, allowed-tools, license, etc.)
+- **Body content** is the markdown instructions after the frontmatter
+
+### Create/Update Flow
+
+```
+UI Form → API Request → Filesystem
+───────────────────────────────────
+{
+  name: "my-skill",
+  description: "Does X",
+  allowed_tools: ["Read", "Grep"],
+  license: "MIT",
+  body: "# Instructions\n\nDo this..."
+}
+       ↓
+   API validates fields
+       ↓
+   serializeSkillMd() combines into:
+   ---
+   name: my-skill
+   description: Does X
+   allowed-tools: Read, Grep
+   license: MIT
+   ---
+   # Instructions
+   
+   Do this...
+```
+
+### Read Flow
+
+```
+Filesystem → API Response → UI
+──────────────────────────────
+SKILL.md file
+       ↓
+   parseSkillMd() extracts:
+       ↓
+{
+  frontmatter: {
+    name: "my-skill",
+    description: "Does X",
+    allowed_tools: ["Read", "Grep"],
+    license: "MIT"
+  },
+  body: "# Instructions\n\nDo this..."
+}
+```
+
+### Supported Frontmatter Fields
+
+Per Claude's skill spec, these fields MUST be preserved:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Skill identifier (required) |
+| `description` | string | What the skill does (required) |
+| `version` | string | Semver version |
+| `allowed-tools` | string[] | Tool restrictions |
+| `license` | string | License type |
+| `disable-model-invocation` | boolean | Prevents model use |
+
+Any unrecognized fields should be **preserved** during round-trips.
+
+### Implementation
+
+```typescript
+interface SkillMdParsed {
+  frontmatter: {
+    name: string;
+    description: string;
+    version?: string;
+    'allowed-tools'?: string[];
+    license?: string;
+    'disable-model-invocation'?: boolean;
+    [key: string]: unknown;  // preserve unknown fields
+  };
+  body: string;
+}
+
+function parseSkillMd(content: string): SkillMdParsed { /* ... */ }
+function serializeSkillMd(parsed: SkillMdParsed): string { /* ... */ }
+```
+
+---
+
 ## Request/Response Examples
 
 ### List Library Skills
@@ -67,9 +161,12 @@ POST /api/skills
 Content-Type: application/json
 
 {
-  "name": "my-new-skill",
+  "slug": "my-new-skill",
+  "name": "My New Skill",
   "description": "What this skill does",
-  "content": "# Full SKILL.md content here...",
+  "body": "# Instructions\n\nDetailed skill instructions go here...",
+  "allowed_tools": ["Read", "Grep", "Glob"],
+  "license": "MIT",
   "category": "productivity",
   "tags": ["workflow", "automation"]
 }

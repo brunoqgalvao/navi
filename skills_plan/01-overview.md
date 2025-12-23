@@ -52,7 +52,17 @@ Integrate Claude Code's native Agent Skills as a core feature of the UI, providi
 Your personal collection of skills. All skills live here first, whether created locally or imported from marketplace.
 
 ### 2. Enabled Skills
-Copies of library skills placed where Claude can discover them. Editable independently - can diverge from library version.
+Copies of library skills placed where Claude can discover them.
+
+**Design Decision (MVP)**: Enabled copies are **read-only deployments**. All edits must be made in the library, then synced to enabled locations. This avoids:
+- Divergence headaches between library and enabled copies
+- Confusion about which version is "canonical"
+- Complex merge/conflict resolution
+
+Users who want to experiment can:
+1. Duplicate the skill in the library
+2. Edit the duplicate
+3. Enable the new version
 
 ### 3. Versioning
 - Library skills are versioned (semver)

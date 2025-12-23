@@ -1,5 +1,109 @@
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as readline from "readline";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+
+interface SkillInfo {
+  name: string;
+  description: string;
+  content: string;
+  basePath: string;
+}
+
+function parseSkillFrontmatter(content: string): { name?: string; description?: string; body: string } {
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!frontmatterMatch) {
+    return { body: content };
+  }
+  
+  const [, frontmatter, body] = frontmatterMatch;
+  const result: { name?: string; description?: string; body: string } = { body };
+  
+  for (const line of frontmatter.split('\n')) {
+    const nameMatch = line.match(/^name:\s*(.+)$/);
+    if (nameMatch) result.name = nameMatch[1].trim().replace(/^["']|["']$/g, '');
+    
+    const descMatch = line.match(/^description:\s*(.+)$/);
+    if (descMatch) result.description = descMatch[1].trim().replace(/^["']|["']$/g, '');
+  }
+  
+  return result;
+}
+
+function loadSkillsFromDir(skillsDir: string): SkillInfo[] {
+  const skills: SkillInfo[] = [];
+  
+  if (!fs.existsSync(skillsDir)) return skills;
+  
+  try {
+    const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const skillMdPath = path.join(skillsDir, entry.name, 'SKILL.md');
+        if (fs.existsSync(skillMdPath)) {
+          const content = fs.readFileSync(skillMdPath, 'utf-8');
+          const parsed = parseSkillFrontmatter(content);
+          skills.push({
+            name: parsed.name || entry.name,
+            description: parsed.description || '',
+            content: content,
+            basePath: path.join(skillsDir, entry.name),
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`[Worker] Error loading skills from ${skillsDir}:`, e);
+  }
+  
+  return skills;
+}
+
+function loadAllSkills(cwd: string): SkillInfo[] {
+  const projectSkillsDir = path.join(cwd, '.claude', 'skills');
+  const globalSkillsDir = path.join(os.homedir(), '.claude', 'skills');
+  
+  const projectSkills = loadSkillsFromDir(projectSkillsDir);
+  const globalSkills = loadSkillsFromDir(globalSkillsDir);
+  
+  const allSkills = [...projectSkills];
+  for (const gs of globalSkills) {
+    if (!allSkills.find(s => s.name === gs.name)) {
+      allSkills.push(gs);
+    }
+  }
+  
+  return allSkills;
+}
+
+function buildSkillsMetadataPrompt(skills: SkillInfo[]): string {
+  if (skills.length === 0) return '';
+  
+  let prompt = `\n<skills>
+You have access to the following skills. When a user's request matches a skill's purpose, you MUST read the skill's SKILL.md file to get detailed instructions before proceeding.
+
+<available_skills>
+`;
+  
+  for (const skill of skills) {
+    prompt += `<skill name="${skill.name}" path="${skill.basePath}/SKILL.md">
+${skill.description}
+</skill>
+`;
+  }
+  
+  prompt += `</available_skills>
+
+IMPORTANT SKILL INSTRUCTIONS:
+- When a task matches a skill's description, IMMEDIATELY use the Read tool to read the skill's SKILL.md file
+- Follow the instructions in the skill file precisely
+- Skills may reference additional files in their directory - read those as needed
+- If the user asks to "use skill X" or mentions a skill name, invoke that skill
+</skills>`;
+  
+  return prompt;
+}
 
 interface WorkerInput {
   prompt: string;
@@ -32,6 +136,7 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
           cwd: (msg as any).cwd,
           model: (msg as any).model,
           tools: (msg as any).tools,
+          skills: (msg as any).skills,
         }),
       };
 
@@ -142,6 +247,14 @@ async function runQuery(input: WorkerInput) {
     console.error(`[Worker] Starting query with cwd: ${cwd}`);
     console.error(`[Worker] permissionSettings:`, permissionSettings);
     
+    const skills = loadAllSkills(cwd);
+    console.error(`[Worker] Loaded ${skills.length} skills:`, skills.map(s => s.name));
+    
+    const skillsMetadata = buildSkillsMetadataPrompt(skills);
+    if (skillsMetadata) {
+      console.error(`[Worker] Skills metadata prompt (${skillsMetadata.length} chars)`);
+    }
+    
     const allTools = allowedTools || [
       "Read",
       "Write",
@@ -171,7 +284,10 @@ async function runQuery(input: WorkerInput) {
         allowedTools: permissionSettings?.autoAcceptAll ? allTools : autoAllowedTools,
         permissionMode: "default",
         canUseTool,
-        settingSources: ['project'] as const,
+        settingSources: ['user', 'project', 'local'] as const,
+        systemPrompt: skillsMetadata 
+          ? { type: 'preset', preset: 'claude_code', append: skillsMetadata }
+          : { type: 'preset', preset: 'claude_code' },
       },
     });
 
@@ -181,6 +297,10 @@ async function runQuery(input: WorkerInput) {
     for await (const msg of q) {
       const formatted = formatMessage(msg, sessionId);
       send({ type: "message", data: formatted });
+
+      if (msg.type === "system" && (msg as any).subtype === "init") {
+        console.error(`[Worker] Skills loaded:`, (msg as any).skills);
+      }
 
       if (msg.type === "assistant") {
         lastAssistantContent = msg.message.content;

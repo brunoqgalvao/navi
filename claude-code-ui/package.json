@@ -1,6 +1,6 @@
 {
   "name": "claude-code-ui",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "",
   "type": "module",
   "scripts": {
@@ -20,6 +20,10 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "~2",
     "@tauri-apps/plugin-opener": "^2",
+    "@types/adm-zip": "^0.5.7",
+    "@types/archiver": "^7.0.0",
+    "adm-zip": "^0.5.16",
+    "archiver": "^7.0.1",
     "highlight.js": "^11.11.1",
     "marked": "^17.0.1",
     "sql.js": "^1.13.0"

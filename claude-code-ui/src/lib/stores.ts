@@ -1,6 +1,6 @@
 import { writable, derived } from "svelte/store";
 import type { ContentBlock } from "./claude";
-import type { Project, Session } from "./api";
+import type { Project, Session, Skill } from "./api";
 
 export interface ChatMessage {
   id: string;
@@ -631,3 +631,51 @@ function createAttachedFilesStore() {
 }
 
 export const attachedFiles = createAttachedFilesStore();
+
+export interface SessionDebugInfo {
+  cwd: string;
+  model: string;
+  tools: string[];
+  skills: string[];
+  timestamp: Date;
+}
+
+function createSessionDebugStore() {
+  const { subscribe, set, update } = writable<Map<string, SessionDebugInfo>>(new Map());
+
+  return {
+    subscribe,
+    setForSession: (sessionId: string, info: SessionDebugInfo) =>
+      update((map) => {
+        map.set(sessionId, info);
+        return new Map(map);
+      }),
+    getForSession: (sessionId: string, map: Map<string, SessionDebugInfo>) => map.get(sessionId),
+    clear: () => set(new Map()),
+  };
+}
+
+export const sessionDebugInfo = createSessionDebugStore();
+
+function createSkillsStore() {
+  const { subscribe, set, update } = writable<Skill[]>([]);
+
+  return {
+    subscribe,
+    set,
+    add: (skill: Skill) => update((s) => [skill, ...s]),
+    remove: (id: string) => update((s) => s.filter((x) => x.id !== id)),
+    update: (skill: Skill) =>
+      update((s) => s.map((x) => (x.id === skill.id ? skill : x))),
+    updateEnableStatus: (id: string, globally: boolean, projectIds: string[]) =>
+      update((s) =>
+        s.map((x) =>
+          x.id === id
+            ? { ...x, enabled_globally: globally, enabled_projects: projectIds }
+            : x
+        )
+      ),
+  };
+}
+
+export const skillLibrary = createSkillsStore();
