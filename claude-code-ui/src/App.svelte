@@ -131,6 +131,9 @@
 
   let client: ClaudeClient;
   let inputText = $state("");
+  let lastAttachedSessionId = $state<string | null>(null);
+  let activeSessionsPoll: ReturnType<typeof setInterval> | null = null;
+  let lastActiveSessions = new Map<string, string>();
   
   let currentMessages = $derived($session.sessionId ? ($sessionMessages.get($session.sessionId) || []) : []);
   let currentTodos = $derived($session.sessionId ? ($sessionTodos.get($session.sessionId) || []) : []);
@@ -484,6 +487,8 @@
     } catch (e) {
       console.error("Failed to connect:", e);
     }
+    loadActiveSessions();
+    activeSessionsPoll = setInterval(loadActiveSessions, 5000);
 
     client.onMessage((msg) => {
       messageHandler.handleMessage(msg);
@@ -501,6 +506,29 @@
 
   onDestroy(() => {
     client?.disconnect();
+    if (activeSessionsPoll) {
+      clearInterval(activeSessionsPoll);
+    }
+  });
+
+  function attachSession(sessionId: string | null, connected: boolean) {
+    if (!sessionId) {
+      lastAttachedSessionId = null;
+      return;
+    }
+    if (!connected || !client?.isConnected) return;
+    if (lastAttachedSessionId === sessionId) return;
+
+    try {
+      client.attachSession(sessionId);
+      lastAttachedSessionId = sessionId;
+    } catch (e) {
+      console.error("Failed to attach session:", e);
+    }
+  }
+
+  $effect(() => {
+    attachSession($session.sessionId, $isConnected);
   });
 
   $effect(() => {
@@ -599,6 +627,35 @@
       recentChats = await api.sessions.listRecent(10, $showArchivedWorkspaces);
     } catch (e) {
       console.error("Failed to load recent chats:", e);
+    }
+  }
+
+  async function loadActiveSessions() {
+    try {
+      const active = await api.sessions.active();
+      const nextActive = new Map(active.map((item) => [item.sessionId, item.projectId]));
+
+      for (const item of active) {
+        if (item.status === "permission") {
+          sessionStatus.setPermissionRequired(item.sessionId, item.projectId);
+        } else {
+          sessionStatus.setRunning(item.sessionId, item.projectId);
+        }
+      }
+
+      for (const [sessionId, projectId] of lastActiveSessions.entries()) {
+        if (!nextActive.has(sessionId)) {
+          if (sessionId === $session.sessionId) {
+            sessionStatus.setIdle(sessionId, projectId);
+          } else {
+            sessionStatus.setUnread(sessionId, projectId);
+          }
+        }
+      }
+
+      lastActiveSessions = nextActive;
+    } catch (e) {
+      console.error("Failed to load active sessions:", e);
     }
   }
   
@@ -1027,6 +1084,7 @@ Respond in this exact JSON format only, no other text:
             timestamp: new Date(m.timestamp),
             parentToolUseId: m.parent_tool_use_id ?? undefined,
             isSynthetic: !!m.is_synthetic,
+            isFinal: !!m.is_final,
           };
         });
         sessionMessages.setMessages(s.id, loadedMsgs);
@@ -2035,6 +2093,7 @@ Respond in this exact JSON format only, no other text:
           timestamp: new Date(m.timestamp),
           parentToolUseId: m.parent_tool_use_id ?? undefined,
           isSynthetic: !!m.is_synthetic,
+          isFinal: !!m.is_final,
         };
       });
       sessionMessages.setMessages($session.sessionId, loadedMsgs);
@@ -2145,6 +2204,7 @@ Respond in this exact JSON format only, no other text:
           role: m.role as any,
           content: m.content,
           timestamp: new Date(m.timestamp),
+          isFinal: !!(m as any).is_final,
         }));
         sessionMessages.setMessages($session.sessionId!, loadedMsgs);
         

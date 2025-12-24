@@ -86,6 +86,115 @@ function isToolResultContent(content: unknown): boolean {
   return content.some((block) => block && (block as any).type === "tool_result");
 }
 
+type StreamCaptureState = {
+  blocks: any[];
+  partialText: string;
+  partialThinking: string;
+  partialJson: string;
+  lastCompleteBlocks: any[] | null;
+};
+
+function ensureStreamState(sessionId: string) {
+  const existing = streamCaptures.get(sessionId);
+  if (existing) return existing;
+  const created: StreamCaptureState = {
+    blocks: [],
+    partialText: "",
+    partialThinking: "",
+    partialJson: "",
+    lastCompleteBlocks: null,
+  };
+  streamCaptures.set(sessionId, created);
+  return created;
+}
+
+function finalizeStreamBlock(state: StreamCaptureState) {
+  const lastBlock = state.blocks[state.blocks.length - 1];
+  if (!lastBlock) return;
+
+  if (lastBlock.type === "text" && state.partialText) {
+    lastBlock.text = state.partialText;
+  } else if (lastBlock.type === "thinking" && state.partialThinking) {
+    lastBlock.thinking = state.partialThinking;
+  } else if (lastBlock.type === "tool_use" && state.partialJson) {
+    try {
+      lastBlock.input = JSON.parse(state.partialJson);
+    } catch {}
+  }
+
+  state.partialText = "";
+  state.partialThinking = "";
+  state.partialJson = "";
+}
+
+function captureStreamEvent(sessionId: string, event: any) {
+  const state = ensureStreamState(sessionId);
+
+  switch (event?.type) {
+    case "message_start":
+      state.blocks = [];
+      state.partialText = "";
+      state.partialThinking = "";
+      state.partialJson = "";
+      state.lastCompleteBlocks = null;
+      break;
+    case "content_block_start":
+      if (event.content_block) {
+        state.blocks.push(event.content_block);
+        state.partialText = "";
+        state.partialThinking = "";
+        state.partialJson = "";
+      }
+      break;
+    case "content_block_delta":
+      if (event.delta?.text) state.partialText += event.delta.text;
+      if (event.delta?.thinking) state.partialThinking += event.delta.thinking;
+      if (event.delta?.partial_json) state.partialJson += event.delta.partial_json;
+      break;
+    case "content_block_stop":
+      finalizeStreamBlock(state);
+      break;
+    case "message_delta":
+      finalizeStreamBlock(state);
+      break;
+    case "message_stop":
+      finalizeStreamBlock(state);
+      state.lastCompleteBlocks = state.blocks.length ? [...state.blocks] : null;
+      state.blocks = [];
+      break;
+  }
+}
+
+function mergeThinkingBlocks(sessionId: string, assistantContent: any[]): any[] {
+  const state = streamCaptures.get(sessionId);
+  const streamBlocks = state?.lastCompleteBlocks;
+  state?.lastCompleteBlocks && (state.lastCompleteBlocks = null);
+
+  if (!streamBlocks || streamBlocks.length === 0) return assistantContent;
+  if (assistantContent.some((b) => b?.type === "thinking")) return assistantContent;
+  if (!streamBlocks.some((b) => b?.type === "thinking")) return assistantContent;
+
+  const nonThinking = streamBlocks.filter((b) => b?.type !== "thinking");
+  if (nonThinking.length !== assistantContent.length) return assistantContent;
+
+  const merged: any[] = [];
+  let assistantIndex = 0;
+  for (const block of streamBlocks) {
+    if (block?.type === "thinking") {
+      merged.push(block);
+      continue;
+    }
+    const next = assistantContent[assistantIndex];
+    if (!next || next.type !== block?.type) {
+      return assistantContent;
+    }
+    merged.push(next);
+    assistantIndex += 1;
+  }
+
+  return merged;
+}
+
 function shouldPersistUserMessage(data: any): boolean {
   if (!data || data.type !== "user") {
     console.log(`[Persist] Skipping non-user message: type=${data?.type}`);
@@ -114,8 +223,26 @@ function shouldPersistUserMessage(data: any): boolean {
   return result;
 }
 
+function safeSend(ws: any, payload: unknown) {
+  if (!ws) return;
+  try {
+    ws.send(JSON.stringify(payload));
+  } catch {}
+}
+
+function sendToSession(sessionId: string | undefined, payload: unknown, fallbackWs?: any) {
+  if (sessionId) {
+    const active = activeProcesses.get(sessionId);
+    if (active?.ws) {
+      safeSend(active.ws, payload);
+      return;
+    }
+  }
+  safeSend(fallbackWs, payload);
+}
+
 interface ClientMessage {
-  type: "query" | "cancel" | "abort" | "permission_response";
+  type: "query" | "cancel" | "abort" | "permission_response" | "attach";
   prompt?: string;
   projectId?: string;
   sessionId?: string;
@@ -130,13 +257,14 @@ interface ClientMessage {
 
 interface ActiveProcess {
   process: ChildProcess;
-  ws: any;
+  ws: any | null;
   sessionId: string;
 }
 
 const activeProcesses = new Map<string, ActiveProcess>();
-const pendingPermissions = new Map<string, { sessionId: string }>();
+const pendingPermissions = new Map<string, { sessionId: string; payload: any }>();
 const sessionApprovedAll = new Set<string>();
+const streamCaptures = new Map<string, StreamCaptureState>();
 
 const server = Bun.serve({
   port: PORT,
@@ -346,6 +474,22 @@ const server = Bun.serve({
       const limit = parseInt(url.searchParams.get("limit") || "10");
       const includeArchived = url.searchParams.get("includeArchived") === "true";
       return json(sessions.listRecent(limit, includeArchived));
+    }
+
+    if (url.pathname === "/api/sessions/active" && method === "GET") {
+      const permissionSessions = new Set(
+        Array.from(pendingPermissions.values()).map((pending) => pending.sessionId)
+      );
+      const active = Array.from(activeProcesses.keys()).map((sessionId) => {
+        const session = sessions.get(sessionId);
+        if (!session) return null;
+        return {
+          sessionId,
+          projectId: session.project_id,
+          status: permissionSessions.has(sessionId) ? "permission" : "running",
+        };
+      }).filter(Boolean);
+      return json(active);
     }
 
     const sessionsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions$/);
@@ -2611,7 +2755,7 @@ ${content.slice(0, 8000)}`;
   websocket: {
     open(ws) {
       console.log("Client connected");
-      ws.send(JSON.stringify({ type: "connected" }));
+      safeSend(ws, { type: "connected" });
     },
 
     async message(ws, message) {
@@ -2627,7 +2771,33 @@ ${content.slice(0, 8000)}`;
             console.log(`Aborting query for session ${data.sessionId}`);
             active.process.kill("SIGTERM");
             activeProcesses.delete(data.sessionId);
-            ws.send(JSON.stringify({ type: "aborted", uiSessionId: data.sessionId }));
+            safeSend(ws, { type: "aborted", uiSessionId: data.sessionId });
+          }
+        } else if (data.type === "attach" && data.sessionId) {
+          const active = activeProcesses.get(data.sessionId);
+          if (active) {
+            const wasSameWs = active.ws === ws;
+            active.ws = ws;
+            activeProcesses.set(data.sessionId, active);
+            if (!wasSameWs) {
+              sendToSession(
+                data.sessionId,
+                {
+                  type: "stream_event",
+                  uiSessionId: data.sessionId,
+                  event: { type: "message_start" },
+                  parentToolUseId: null,
+                  uuid: crypto.randomUUID(),
+                  timestamp: Date.now(),
+                },
+                ws
+              );
+              for (const pending of pendingPermissions.values()) {
+                if (pending.sessionId === data.sessionId) {
+                  sendToSession(data.sessionId, pending.payload, ws);
+                }
+              }
+            }
           }
         } else if (data.type === "permission_response" && data.permissionRequestId) {
           const pending = pendingPermissions.get(data.permissionRequestId);
@@ -2650,17 +2820,20 @@ ${content.slice(0, 8000)}`;
           }
         }
       } catch (error) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            error: error instanceof Error ? error.message : "Unknown error",
-          })
-        );
+        safeSend(ws, {
+          type: "error",
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
       }
     },
 
     close(ws) {
       console.log("Client disconnected");
+      for (const [sessionId, active] of activeProcesses.entries()) {
+        if (active.ws === ws) {
+          activeProcesses.set(sessionId, { ...active, ws: null });
+        }
+      }
     },
   },
 });
@@ -2729,6 +2902,7 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
   }
 
   let buffer = "";
+  let lastMainAssistantMsgId: string | null = null;
   
   child.stdout?.on("data", (chunk) => {
     buffer += chunk.toString();
@@ -2743,6 +2917,15 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
         if (msg.type === "message") {
           const data = msg.data;
           const now = Date.now();
+          if (sessionId && data.type === "stream_event") {
+            captureStreamEvent(sessionId, data.event);
+          }
+          if (sessionId && data.type === "assistant" && Array.isArray(data.content)) {
+            const merged = mergeThinkingBlocks(sessionId, data.content);
+            if (merged !== data.content) {
+              data.content = merged;
+            }
+          }
           if (sessionId && data.type === "assistant" && hasMessageContent(data.content)) {
             const msgId = data.uuid || crypto.randomUUID();
             const timestamp = typeof data.timestamp === "number" ? data.timestamp : now;
@@ -2767,6 +2950,9 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
               data.parentToolUseId ?? null,
               0
             );
+            if (!data.parentToolUseId) {
+              lastMainAssistantMsgId = msgId;
+            }
           }
           if (sessionId && shouldPersistUserMessage(data)) {
             const msgId = data.uuid || crypto.randomUUID();
@@ -2790,19 +2976,23 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
               data.isSynthetic ? 1 : 0
             );
           }
-          ws.send(JSON.stringify(data));
+          sendToSession(sessionId, data, ws);
         } else if (msg.type === "permission_request") {
-          if (sessionId) {
-            pendingPermissions.set(msg.requestId, { sessionId });
-          }
-          ws.send(JSON.stringify({
+          const payload = {
             type: "permission_request",
             requestId: msg.requestId,
             tools: [msg.toolName],
             toolInput: msg.toolInput,
             message: msg.message,
-          }));
+          };
+          if (sessionId) {
+            pendingPermissions.set(msg.requestId, { sessionId, payload });
+          }
+          sendToSession(sessionId, payload, ws);
         } else if (msg.type === "complete") {
+          if (lastMainAssistantMsgId) {
+            messages.markFinal(lastMainAssistantMsgId);
+          }
           if (sessionId && msg.lastAssistantContent?.length > 0) {
             searchIndex.indexMessage(crypto.randomUUID(), sessionId, JSON.stringify(msg.lastAssistantContent), Date.now());
             
@@ -2846,15 +3036,25 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
             }
           }
 
-          ws.send(JSON.stringify({ type: "done", uiSessionId: sessionId }));
-          if (sessionId) activeProcesses.delete(sessionId);
+          sendToSession(sessionId, { type: "done", uiSessionId: sessionId, finalMessageId: lastMainAssistantMsgId }, ws);
+          if (sessionId) {
+            activeProcesses.delete(sessionId);
+            streamCaptures.delete(sessionId);
+          }
         } else if (msg.type === "error") {
-          ws.send(JSON.stringify({ 
-            type: "error", 
-            uiSessionId: sessionId,
-            error: msg.error 
-          }));
-          if (sessionId) activeProcesses.delete(sessionId);
+          sendToSession(
+            sessionId,
+            {
+              type: "error",
+              uiSessionId: sessionId,
+              error: msg.error,
+            },
+            ws
+          );
+          if (sessionId) {
+            activeProcesses.delete(sessionId);
+            streamCaptures.delete(sessionId);
+          }
         }
       } catch (e) {
         console.log(`[${sessionId}] Non-JSON stdout:`, line);
@@ -2868,12 +3068,19 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
   child.on("error", (error) => {
     console.error(`[${sessionId}] Process error:`, error);
-    ws.send(JSON.stringify({ 
-      type: "error", 
-      uiSessionId: sessionId,
-      error: error.message 
-    }));
-    if (sessionId) activeProcesses.delete(sessionId);
+    sendToSession(
+      sessionId,
+      {
+        type: "error",
+        uiSessionId: sessionId,
+        error: error.message,
+      },
+      ws
+    );
+    if (sessionId) {
+      activeProcesses.delete(sessionId);
+      streamCaptures.delete(sessionId);
+    }
   });
 
   child.on("exit", (code) => {
@@ -2882,11 +3089,14 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
       try {
         const msg = JSON.parse(buffer);
         if (msg.type === "complete") {
-          ws.send(JSON.stringify({ type: "done", uiSessionId: sessionId }));
+          sendToSession(sessionId, { type: "done", uiSessionId: sessionId }, ws);
         }
       } catch {}
     }
-    if (sessionId) activeProcesses.delete(sessionId);
+    if (sessionId) {
+      activeProcesses.delete(sessionId);
+      streamCaptures.delete(sessionId);
+    }
   });
 }
 
@@ -2939,6 +3149,7 @@ async function handleQuery(ws: any, data: ClientMessage) {
     let resultData: any = null;
     let wasAborted = false;
     let persistedAssistant = false;
+    let lastMainAssistantMsgId: string | null = null;
 
     for await (const msg of q) {
       console.log(`[${sessionId}] Got message type: ${msg.type}`);
@@ -2947,7 +3158,7 @@ async function handleQuery(ws: any, data: ClientMessage) {
         break;
       }
       const formatted = formatMessage(msg, sessionId);
-      ws.send(JSON.stringify(formatted));
+      sendToSession(sessionId, formatted, ws);
       if (sessionId) {
         if (formatted.type === "assistant" && hasMessageContent(formatted.content)) {
           const msgId = formatted.uuid || crypto.randomUUID();
@@ -2962,6 +3173,9 @@ async function handleQuery(ws: any, data: ClientMessage) {
             0
           );
           persistedAssistant = true;
+          if (!formatted.parentToolUseId) {
+            lastMainAssistantMsgId = msgId;
+          }
         }
         if (shouldPersistUserMessage(formatted)) {
           const msgId = formatted.uuid || crypto.randomUUID();
@@ -2997,9 +3211,13 @@ async function handleQuery(ws: any, data: ClientMessage) {
       return;
     }
 
+    if (lastMainAssistantMsgId) {
+      messages.markFinal(lastMainAssistantMsgId);
+    }
+
     if (sessionId && lastAssistantContent.length > 0 && !persistedAssistant) {
       const msgId = crypto.randomUUID();
-      messages.create(msgId, sessionId, "assistant", JSON.stringify(lastAssistantContent), Date.now());
+      messages.create(msgId, sessionId, "assistant", JSON.stringify(lastAssistantContent), Date.now(), null, 0, 1);
       
       if (needsAutoTitle && prompt) {
         generateChatTitle(prompt, lastAssistantContent, sessionId);
@@ -3039,13 +3257,15 @@ async function handleQuery(ws: any, data: ClientMessage) {
       }
     }
 
-    ws.send(JSON.stringify({ type: "done", sessionId }));
+    sendToSession(sessionId, { type: "done", sessionId }, ws);
   } catch (error) {
-    ws.send(
-      JSON.stringify({
+    sendToSession(
+      sessionId,
+      {
         type: "error",
         error: error instanceof Error ? error.message : "Query failed",
-      })
+      },
+      ws
     );
   }
 }

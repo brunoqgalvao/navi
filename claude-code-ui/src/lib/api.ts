@@ -48,6 +48,12 @@ export interface Session {
   project_name?: string;
 }
 
+export interface ActiveSessionStatus {
+  sessionId: string;
+  projectId: string;
+  status: "running" | "permission";
+}
+
 export interface Message {
   id: string;
   session_id: string;
@@ -152,6 +158,7 @@ export const api = {
     list: (projectId: string) => request<Session[]>(`/projects/${projectId}/sessions`),
     listRecent: (limit: number = 10, includeArchived: boolean = false) => 
       request<Session[]>(`/sessions/recent?limit=${limit}${includeArchived ? '&includeArchived=true' : ''}`),
+    active: () => request<ActiveSessionStatus[]>("/sessions/active"),
     get: (id: string) => request<Session>(`/sessions/${id}`),
     create: (projectId: string, data: { title?: string }) =>
       request<Session>(`/projects/${projectId}/sessions`, {

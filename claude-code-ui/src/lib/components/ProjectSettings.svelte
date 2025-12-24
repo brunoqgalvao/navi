@@ -335,15 +335,17 @@ Write instructions for Claude here. This file tells Claude:
               </div>
               
               {#if showPreview}
-                <div class="flex-1 overflow-y-auto p-6 bg-gray-50 prose prose-sm max-w-none">
-                  {@html previewHtml}
+                <div class="flex-1 overflow-y-auto p-6 bg-white">
+                  <div class="prose prose-sm prose-gray max-w-none prose-headings:font-semibold prose-headings:text-gray-900 prose-p:text-gray-700 prose-a:text-blue-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-normal prose-code:before:content-none prose-code:after:content-none prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-li:text-gray-700 prose-strong:text-gray-900 prose-blockquote:border-l-gray-300 prose-blockquote:text-gray-600">
+                    {@html previewHtml}
+                  </div>
                 </div>
               {/if}
             </div>
 
           {:else}
             <div class="h-full overflow-y-auto">
-              <div class="max-w-3xl mx-auto p-8">
+              <div class="px-8 py-6">
                 <div class="flex items-center justify-between mb-6">
                   <div>
                     <h2 class="text-xl font-semibold text-gray-900">CLAUDE.md</h2>
@@ -374,8 +376,10 @@ Write instructions for Claude here. This file tells Claude:
                       <code class="text-xs text-gray-500 font-mono">{project.path}/CLAUDE.md</code>
                       <span class="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">Active</span>
                     </div>
-                    <div class="p-6 prose prose-sm max-w-none">
-                      {@html marked(claudeMd)}
+                    <div class="p-6">
+                      <div class="prose prose-sm prose-gray max-w-none prose-headings:font-semibold prose-headings:text-gray-900 prose-p:text-gray-700 prose-a:text-blue-600 prose-code:bg-gray-100 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-normal prose-code:before:content-none prose-code:after:content-none prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-li:text-gray-700 prose-strong:text-gray-900 prose-blockquote:border-l-gray-300 prose-blockquote:text-gray-600 prose-ul:list-disc prose-ol:list-decimal">
+                        {@html marked(claudeMd)}
+                      </div>
                     </div>
                   </div>
                 {:else}
@@ -405,18 +409,7 @@ Write instructions for Claude here. This file tells Claude:
                   </div>
                 {/if}
 
-                <div class="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <h4 class="text-sm font-medium text-blue-900 mb-2">What to include in CLAUDE.md</h4>
-                  <ul class="text-sm text-blue-700 space-y-1">
-                    <li>- Project overview and goals</li>
-                    <li>- Tech stack and architecture decisions</li>
-                    <li>- Coding conventions and style guides</li>
-                    <li>- Important directories and files</li>
-                    <li>- Build, test, and deploy commands</li>
-                    <li>- Common gotchas or edge cases</li>
-                  </ul>
-                </div>
-              </div>
+                              </div>
             </div>
           {/if}
         </div>

@@ -10,6 +10,7 @@ export interface ChatMessage {
   timestamp: Date;
   parentToolUseId?: string | null;
   isSynthetic?: boolean;
+  isFinal?: boolean;
 }
 
 function createProjectsStore() {
@@ -82,6 +83,13 @@ function createSessionMessagesStore() {
         return new Map(map);
       }),
     getMessages: (sessionId: string, map: Map<string, ChatMessage[]>) => map.get(sessionId) || [],
+    markFinal: (sessionId: string, messageId: string) =>
+      update((map) => {
+        const msgs = map.get(sessionId) || [];
+        const updated = msgs.map(m => m.id === messageId ? { ...m, isFinal: true } : m);
+        map.set(sessionId, updated);
+        return new Map(map);
+      }),
   };
 }
 

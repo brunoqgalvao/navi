@@ -37,6 +37,10 @@ export function createMessageHandler(config: MessageHandlerConfig) {
 
       case "stream_event":
         if (uiSessionId) {
+          const eventType = (msg as StreamEventMessage).event?.type;
+          if (eventType === "message_start") {
+            callbacks.onStreamingStart?.(uiSessionId);
+          }
           handleStreamEvent(uiSessionId, msg as StreamEventMessage);
           callbacks.onMessageUpdate?.(uiSessionId);
           if (uiSessionId === currentSessionId) {
@@ -49,10 +53,11 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         if (!uiSessionId) break;
         const parentId = (msg as any).parentToolUseId || null;
         const content = (msg as any).content as ContentBlock[];
+        const msgUuid = (msg as any).uuid || crypto.randomUUID();
         
         if (content && content.length > 0) {
           sessionMessages.addMessage(uiSessionId, {
-            id: crypto.randomUUID(),
+            id: msgUuid,
             role: "assistant",
             content,
             timestamp: new Date(),
@@ -131,6 +136,10 @@ export function createMessageHandler(config: MessageHandlerConfig) {
 
       case "done":
         if (uiSessionId) {
+          const finalMessageId = (msg as any).finalMessageId;
+          if (finalMessageId) {
+            sessionMessages.markFinal(uiSessionId, finalMessageId);
+          }
           callbacks.onStreamingEnd?.(uiSessionId);
         }
         break;

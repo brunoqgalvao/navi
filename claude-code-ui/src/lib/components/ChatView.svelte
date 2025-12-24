@@ -4,6 +4,7 @@
   import PermissionRequest from "./PermissionRequest.svelte";
   import TodoProgress from "./TodoProgress.svelte";
   import StreamingPreview from "./StreamingPreview.svelte";
+  import WorkingIndicator from "./WorkingIndicator.svelte";
   import { streamingStore, type StreamingState } from "../handlers";
   import { sessionMessages, loadingSessions, sessionTodos, type ChatMessage } from "../stores";
   import type { ContentBlock } from "../claude";
@@ -68,9 +69,22 @@
   const isStreaming = $derived(streamingState?.isStreaming ?? false);
 
   function getMainMessages(): ChatMessage[] {
-    return messages
+    const main = messages
       .filter(m => !m.parentToolUseId)
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    console.log("[ChatView] messages with isFinal:", main.map(m => ({ id: m.id, role: m.role, isFinal: m.isFinal })));
+    return main;
+  }
+
+  function getVisibleMessages(): ChatMessage[] {
+    return getMainMessages().filter(m => !isToolResultMessage(m));
+  }
+
+  function isFirstInGroup(msg: ChatMessage, visibleMsgs: ChatMessage[], idx: number): boolean {
+    if (idx === 0) return true;
+    const prevMsg = visibleMsgs[idx - 1];
+    if (!prevMsg) return true;
+    return prevMsg.role !== msg.role;
   }
 
   function getSubagentMessages(): ChatMessage[] {
@@ -85,6 +99,22 @@
     const hasOtherBlocks = blocks.some((b) => b.type !== "tool_result");
     return hasToolResult && !hasOtherBlocks;
   }
+
+  function getAllToolResults(): Map<string, ContentBlock> {
+    const results = new Map<string, ContentBlock>();
+    for (const msg of messages) {
+      if (msg.role === "user" && Array.isArray(msg.content)) {
+        for (const block of msg.content as ContentBlock[]) {
+          if (block.type === "tool_result") {
+            results.set((block as any).tool_use_id, block);
+          }
+        }
+      }
+    }
+    return results;
+  }
+
+  const allToolResults = $derived(getAllToolResults());
 
   function formatUserContent(content: ContentBlock[] | string): string {
     if (typeof content === "string") return content;
@@ -116,38 +146,24 @@
       </div>
     {/if}
 
-    {#each getMainMessages() as msg (msg.id)}
-      {@const isToolResult = isToolResultMessage(msg)}
-      <div class="group flex flex-col {msg.role === 'user' && !isToolResult ? 'items-end' : 'items-start'}">
+    {#each getVisibleMessages() as msg, idx (msg.id)}
+      {@const visibleMsgs = getVisibleMessages()}
+      {@const showAvatar = isFirstInGroup(msg, visibleMsgs, idx) || msg.isFinal}
+      <div class="group flex flex-col {msg.role === 'user' ? 'items-end' : 'items-start'}">
         {#if msg.role === 'user'}
-          {#if isToolResult}
-            <AssistantMessage
-              content={msg.content as ContentBlock[]}
-              subagentUpdates={getSubagentMessages()}
-              {activeSubagents}
-              basePath={projectPath}
-              onRollback={() => onRollback?.(msg.id)}
-              onFork={() => onFork?.(msg.id)}
-              {onPreview}
-              {onMessageClick}
-              {renderMarkdown}
-              {jsonBlocksMap}
-            />
-          {:else}
-            <UserMessage
-              content={formatUserContent(msg.content)}
-              timestamp={msg.timestamp}
-              isEditing={editingMessageId === msg.id}
-              bind:editContent={editingMessageContent}
-              basePath={projectPath}
-              onEdit={() => onEditMessage?.(msg.id)}
-              {onSaveEdit}
-              onCancelEdit={() => onCancelEdit?.()}
-              onRollback={() => onRollback?.(msg.id)}
-              onFork={() => onFork?.(msg.id)}
-              {onPreview}
-            />
-          {/if}
+          <UserMessage
+            content={formatUserContent(msg.content)}
+            timestamp={msg.timestamp}
+            isEditing={editingMessageId === msg.id}
+            bind:editContent={editingMessageContent}
+            basePath={projectPath}
+            onEdit={() => onEditMessage?.(msg.id)}
+            {onSaveEdit}
+            onCancelEdit={() => onCancelEdit?.()}
+            onRollback={() => onRollback?.(msg.id)}
+            onFork={() => onFork?.(msg.id)}
+            {onPreview}
+          />
         {:else if msg.role === 'system'}
           {@const content = typeof msg.content === 'string' ? msg.content : ''}
           {@const isError = content.startsWith('Error:')}
@@ -160,12 +176,15 @@
             subagentUpdates={getSubagentMessages()}
             {activeSubagents}
             basePath={projectPath}
+            toolResults={allToolResults}
             onRollback={() => onRollback?.(msg.id)}
             onFork={() => onFork?.(msg.id)}
             {onPreview}
             {onMessageClick}
             {renderMarkdown}
             {jsonBlocksMap}
+            isFinal={msg.isFinal}
+            {showAvatar}
           />
         {/if}
       </div>
@@ -194,8 +213,12 @@
       />
     {/if}
 
-    {#if isLoading || isStreaming}
-      <TodoProgress {todos} showWhenEmpty={true} />
+    {#if todos.length > 0}
+      <TodoProgress {todos} showWhenEmpty={false} />
+    {:else if isLoading && !isStreaming}
+    <div class="h-8 flex items-center">
+      <WorkingIndicator variant="dots" size="xs" color="gray" label="Thinking..." />
+    </div>
     {/if}
     
     <div style="overflow-anchor: auto; height: 1px;"></div>

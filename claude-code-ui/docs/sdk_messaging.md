@@ -1,6 +1,6 @@
 # SDK Messaging Architecture
 
-> **Last Updated:** 2024-12-24 - Tool call persistence now working
+> **Last Updated:** 2025-12-24 - Tool + tool_result persistence with subagent linkage
 
 ## Overview
 
@@ -8,9 +8,9 @@ This document describes how messages flow from the Claude Agent SDK through the 
 
 ---
 
-## 1. SDK Source → Server (query-worker.ts)
+## 1. SDK Source → Worker (server/query-worker.ts)
 
-The Claude Agent SDK emits `SDKMessage` events which are processed by `query-worker.ts`:
+The Claude Agent SDK emits `SDKMessage` events which are processed by `query-worker.ts` (default path). A direct in-process path exists in `server/index.ts` (`handleQuery`) but is not used by the WebSocket entrypoint.
 
 ```
 SDK query() → async iterator → formatMessage() → send() → stdout
@@ -22,21 +22,22 @@ SDK query() → async iterator → formatMessage() → send() → stdout
 |------|-------------|
 | `system` | Init, status, compact_boundary, hook_response |
 | `assistant` | Contains `content: ContentBlock[]` |
-| `user` | Tool results |
+| `user` | Tool results / synthetic user messages |
 | `result` | Completion with costs/usage |
 | `tool_progress` | Subagent updates |
 | `stream_event` | Real-time streaming deltas |
 
-### formatMessage() (query-worker.ts:253)
+### formatMessage() (query-worker.ts)
 
 Transforms SDK messages, adding:
 - `uiSessionId` - maps to UI session
 - `timestamp`, `uuid`
 - `parentToolUseId` - for subagent nesting
+- `isSynthetic`, `toolUseResult`, `isReplay` (user-only flags)
 
 ---
 
-## 2. Server → WebSocket (server/index.ts:2686-2771)
+## 2. Worker → WebSocket (server/index.ts)
 
 The server spawns `query-worker.ts` as a child process and reads stdout line-by-line:
 
@@ -48,16 +49,30 @@ child.stdout → buffer → JSON.parse → ws.send()
 
 | Message Type | Action |
 |-------------|--------|
-| `message` | Forwards `msg.data` to WebSocket |
+| `message` | Forwards `msg.data` to WebSocket and upserts assistant + tool_result user messages |
 | `permission_request` | Stores in `pendingPermissions` Map, sends to WS |
-| `complete` | Saves to DB, generates title, sends `done` |
+| `complete` | Finalizes cost/title, sends `done` |
 | `error` | Forwards error |
+
+Persistence uses the SDK-provided `uuid` when available and skips replayed user messages (`isReplay`).
+
+When the SDK’s final `assistant` message omits `thinking` blocks, the server merges `thinking` captured from `stream_event` before persistence and forwarding. This preserves reasoning content in the transcript.
+
+### Session Attach (Reconnect)
+
+If the frontend reloads while a session is still generating, it can rebind to the active worker:
+
+```
+{ type: "attach", sessionId }
+```
+
+The server updates the active WebSocket for that session, emits a **synthetic** `stream_event: message_start` to restore streaming state, and re-sends any pending `permission_request` messages for that session. If the same WS is already attached, the server skips the synthetic replay to avoid duplicate streaming resets.
 
 ---
 
 ## 3. WebSocket → Frontend Stores
 
-### Entry Point: useMessageHandler.ts:162
+### Entry Point: useMessageHandler.ts
 
 ```typescript
 handleMessage(msg) → logEvent() + handler.handle()
@@ -70,6 +85,7 @@ handleMessage(msg) → logEvent() + handler.handle()
 | `system` (init) | Stores debug info in `sessionDebugInfo` |
 | `stream_event` | Calls `handleStreamEvent()` |
 | `assistant` | Adds to `sessionMessages` store |
+| `user` (tool_result) | Adds tool result messages to `sessionMessages` store |
 | `tool_progress` | Updates `activeSubagents` |
 | `result` | Updates cost, calls `onComplete` |
 | `permission_request` | Shows notification |
@@ -100,7 +116,7 @@ content_block_stop  → finishBlock()       // Finalize block content
 message_stop        → stop()              // Clear streaming state
 ```
 
-### Throttling (line 20-64)
+### Throttling (streamingStore.ts)
 
 Deltas are batched every 1500ms to reduce re-renders.
 
@@ -117,8 +133,9 @@ const streamingState = $derived(sessionId ? streamingMap.get(sessionId) : undefi
 
 ### Rendering Logic
 
-1. **Completed messages:** `{#each getMainMessages() as msg}` → `AssistantMessage` component
-2. **Active streaming:** `{#if isStreaming && streamingState}` → `StreamingPreview` component
+1. **Completed messages:** `{#each getMainMessages() as msg}` → `UserMessage` or `AssistantMessage`
+2. **Tool result messages:** user messages containing only `tool_result` blocks render via `AssistantMessage`
+3. **Active streaming:** `{#if isStreaming && streamingState}` → `StreamingPreview` component
 
 ---
 
@@ -170,31 +187,52 @@ CREATE TABLE messages (
 );
 ```
 
+`parent_tool_use_id` is used by the UI to group subagent updates under the originating tool call.
+
 ### What Gets Persisted
 
 | SDK Message Type | Persisted? | Notes |
 |-----------------|------------|-------|
 | `SDKAssistantMessage` | ✅ Yes | Full content including tool_use blocks |
-| `SDKUserMessage` (prompt) | ✅ Yes | Initial user prompt |
-| `SDKUserMessage` (tool result) | ✅ Yes | Tool results with `is_synthetic=1` |
+| `SDKUserMessage` (prompt) | ✅ Yes | Persisted when query starts (server writes prompt) |
+| `SDKUserMessage` (tool result / synthetic) | ✅ Yes | Persisted when `shouldPersistUserMessage()` is true |
+| `SDKUserMessage` (replay) | ❌ No | Skipped when `isReplay` is true |
 | `SDKPartialAssistantMessage` | ❌ No | Streaming deltas (transient) |
 | `SDKToolProgressMessage` | ❌ No | Progress updates (transient) |
 | `SDKSystemMessage` | ❌ No | Init/status info |
 | `SDKResultMessage` | ⚠️ Partial | Cost saved to session, not as message |
 
-### Server Persistence Logic (index.ts:2715-2744)
+### Server Persistence Logic (server/index.ts)
 
 ```typescript
 // Assistant messages - includes tool_use blocks
-if (data.type === "assistant" && hasMessageContent(data.content)) {
-  messages.upsert(msgId, sessionId, "assistant", JSON.stringify(data.content), 
-    timestamp, data.parentToolUseId, 0);
+if (sessionId && data.type === "assistant" && hasMessageContent(data.content)) {
+  const msgId = data.uuid || crypto.randomUUID();
+  const timestamp = typeof data.timestamp === "number" ? data.timestamp : Date.now();
+  messages.upsert(
+    msgId,
+    sessionId,
+    "assistant",
+    JSON.stringify(data.content),
+    timestamp,
+    data.parentToolUseId ?? null,
+    0
+  );
 }
 
-// User messages with tool results
-if (shouldPersistUserMessage(data)) {
-  messages.upsert(msgId, sessionId, "user", JSON.stringify(content),
-    timestamp, data.parentToolUseId, data.isSynthetic ? 1 : 0);
+// User messages with tool results / synthetic content
+if (sessionId && shouldPersistUserMessage(data)) {
+  const msgId = data.uuid || crypto.randomUUID();
+  const timestamp = typeof data.timestamp === "number" ? data.timestamp : Date.now();
+  messages.upsert(
+    msgId,
+    sessionId,
+    "user",
+    JSON.stringify(data.content ?? []),
+    timestamp,
+    data.parentToolUseId ?? null,
+    data.isSynthetic ? 1 : 0
+  );
 }
 ```
 
@@ -224,18 +262,6 @@ messages.upsert(
 );
 ```
 
-### Debug Logging
-
-The server logs persistence decisions:
-
-```
-[Persist] Assistant message: { uuid, blockTypes, toolUseCount, toolNames }
-[Persist] User message check: { uuid, isSynthetic, hasToolUseResult, hasToolResultContent, willPersist }
-[Persist] Saving user message: { uuid, parentToolUseId, contentPreview }
-```
-
----
-
 ## Data Flow Diagram
 
 ```
@@ -255,7 +281,8 @@ The server logs persistence decisions:
 ┌─────────────────────────────────────────────────────────────────┐
 │                   server/index.ts                                │
 │  child.stdout → parse lines → ws.send(JSON)                     │
-│  Also: saves assistant messages to DB                           │
+│  Also: upserts assistant + tool_result user messages            │
+│  Query start: saves user prompt                                 │
 └──────────────────────────┬──────────────────────────────────────┘
                            │ WebSocket
                            ▼
@@ -269,7 +296,7 @@ The server logs persistence decisions:
 ┌─────────────────────┐  ┌─────────────────────┐  ┌──────────────┐
 │   streamHandler.ts  │  │  messageHandler.ts  │  │ sessionEvents│
 │                     │  │                     │  │  (logging)   │
-│  stream_event →     │  │  assistant →        │  └──────────────┘
+│  stream_event →     │  │  assistant/user →   │  └──────────────┘
 │  streamingStore     │  │  sessionMessages    │
 │   .start()          │  │   .addMessage()     │
 │   .addBlock()       │  │                     │
@@ -292,8 +319,8 @@ The server logs persistence decisions:
 │  $derived(messagesMap.get(sessionId))                           │
 │                                                                 │
 │  ┌─────────────────────┐  ┌─────────────────────┐              │
-│  │  AssistantMessage   │  │  StreamingPreview   │              │
-│  │  (completed msgs)   │  │  (live streaming)   │              │
+│  │  AssistantMessage    │  │  StreamingPreview   │              │
+│  │ (completed/toolres)  │  │  (live streaming)   │              │
 │  └─────────────────────┘  └─────────────────────┘              │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -317,7 +344,7 @@ The server logs persistence decisions:
 
 ---
 
-## Changes Summary (2024-12-24)
+## Changes Summary (2025-12-24)
 
 ### Database (db.ts)
 - Added `parent_tool_use_id TEXT` column to messages
@@ -329,8 +356,8 @@ The server logs persistence decisions:
 - `shouldPersistUserMessage()` - Determines if user message should be saved
 - `isToolResultContent()` - Checks for tool_result blocks in content
 - Now persists both assistant AND user messages with tool data
-- Uses SDK's `uuid` instead of generating new ones
-- Debug logging for persistence decisions
+- Uses SDK's `uuid` + `timestamp` for message identity
+- `formatMessage()` includes `isSynthetic`, `toolUseResult`, `isReplay`
 
 ### Frontend (messageHandler.ts)
 - Now handles `case "user"` messages

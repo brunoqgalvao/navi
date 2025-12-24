@@ -339,6 +339,19 @@ export class ClaudeClient {
     );
   }
 
+  attachSession(sessionId: string) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error("Not connected to server");
+    }
+
+    this.ws.send(
+      JSON.stringify({
+        type: "attach",
+        sessionId,
+      })
+    );
+  }
+
   respondToPermission(requestId: string, approved: boolean, approveAll?: boolean) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected to server");

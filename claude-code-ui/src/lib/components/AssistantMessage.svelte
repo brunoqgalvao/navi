@@ -15,12 +15,15 @@
     subagentUpdates?: ChatMessage[];
     activeSubagents?: Map<string, { elapsed: number }>;
     basePath?: string;
+    toolResults?: Map<string, ContentBlock>;
     onRollback?: () => void;
     onFork?: () => void;
     onPreview?: (path: string) => void;
     onMessageClick?: (e: MouseEvent) => void;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
+    isFinal?: boolean;
+    showAvatar?: boolean;
   }
 
   let { 
@@ -28,12 +31,15 @@
     subagentUpdates = [],
     activeSubagents = new Map(),
     basePath = '',
+    toolResults = new Map(),
     onRollback, 
     onFork,
     onPreview,
     onMessageClick,
     renderMarkdown,
-    jsonBlocksMap = new Map()
+    jsonBlocksMap = new Map(),
+    isFinal = false,
+    showAvatar = true
   }: Props = $props();
 
   let showMenu = $state(false);
@@ -118,14 +124,52 @@
   }
 
   const copyText = $derived(getCopyText());
+
+  interface GroupedBlock {
+    toolUse: ToolUseBlock;
+    toolResult?: ToolResultBlock;
+    originalIndex: number;
+  }
+
+  function groupToolBlocks(blocks: ContentBlock[], externalResults: Map<string, ContentBlock>): (ContentBlock | GroupedBlock)[] {
+    const grouped: (ContentBlock | GroupedBlock)[] = [];
+
+    blocks.forEach((block, idx) => {
+      if (block.type === "tool_use") {
+        const toolUse = block as ToolUseBlock;
+        const result = externalResults.get(toolUse.id) as ToolResultBlock | undefined;
+        grouped.push({
+          toolUse,
+          toolResult: result,
+          originalIndex: idx,
+        });
+      } else if (block.type === "tool_result") {
+        // Skip tool_result blocks in the content array - they're handled via externalResults
+      } else {
+        grouped.push(block);
+      }
+    });
+
+    return grouped;
+  }
+
+  function isGroupedBlock(item: ContentBlock | GroupedBlock): item is GroupedBlock {
+    return 'toolUse' in item && 'originalIndex' in item;
+  }
+
+  const groupedContent = $derived(groupToolBlocks(content, toolResults));
 </script>
 
 <svelte:window onclick={() => showMenu = false} />
 
 <div class="flex gap-4 w-full pr-4 md:pr-0 relative group">
-  <div class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex-shrink-0 flex items-center justify-center shadow-sm text-gray-900 font-bold text-xs select-none">
-    C
-  </div>
+  {#if showAvatar}
+    <div class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex-shrink-0 flex items-center justify-center shadow-sm text-gray-900 font-bold text-xs select-none">
+      C
+    </div>
+  {:else}
+    <div class="w-8 flex-shrink-0"></div>
+  {/if}
 
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -161,61 +205,12 @@
       </div>
     </div>
 
-    {#each content as block, idx (idx)}
-      {#if block.type === "text"}
-        {@const text = (block as TextBlock).text}
-        {@const rendered = renderTextContent(text)}
-        <div class="text-[15px] leading-7 text-gray-800 markdown-body">
-          <MermaidRenderer content={rendered.genuiResult.processedContent} {renderMarkdown} {jsonBlocksMap} />
-          {#if rendered.mediaResult.items.length > 0}
-            <div class="my-4">
-              <MediaDisplay items={rendered.mediaResult.items} layout={rendered.mediaResult.items.length === 1 ? 'single' : 'grid'} {basePath} />
-            </div>
-          {/if}
-          {#each rendered.genuiResult.blocks as genuiBlock (genuiBlock.id)}
-            <div class="my-4">
-              <GenerativeUI html={genuiBlock.html} id={genuiBlock.id} />
-            </div>
-          {/each}
-        </div>
-
-      {:else if block.type === "thinking"}
-        {@const thinking = (block as ThinkingBlock).thinking}
-        {@const expanded = expandedBlocks.has(idx)}
-        <div class="rounded-xl border border-purple-200 bg-purple-50/30 shadow-sm overflow-hidden">
-          <button
-            onclick={() => toggleBlock(idx)}
-            class="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-purple-50 transition-colors"
-          >
-            <div class="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
-              <span class="text-sm">💭</span>
-            </div>
-            <div class="flex-1 min-w-0">
-              <span class="text-sm font-medium text-purple-800">Thinking</span>
-              <span class="ml-2 text-xs text-purple-500 truncate">
-                {thinking.slice(0, 60)}{thinking.length > 60 ? "..." : ""}
-              </span>
-            </div>
-            <svg
-              class="w-4 h-4 text-purple-400 transition-transform flex-shrink-0 {expanded ? 'rotate-90' : ''}"
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-          {#if expanded}
-            <div class="px-4 pb-3 pt-1 border-t border-purple-100 relative">
-              <div class="absolute top-2 right-4">
-                <CopyButton text={thinking} />
-              </div>
-              <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono bg-purple-50 rounded-lg p-3 pr-10 max-h-64 overflow-y-auto">{thinking}</pre>
-            </div>
-          {/if}
-        </div>
-
-      {:else if block.type === "tool_use"}
-        {@const tool = block as ToolUseBlock}
-        {#if isTaskTool(block)}
+    {#each groupedContent as item, idx (idx)}
+      {#if isGroupedBlock(item)}
+        {@const tool = item.toolUse}
+        {@const result = item.toolResult}
+        {@const originalIdx = item.originalIndex}
+        {#if isTaskTool({ type: "tool_use", ...tool })}
           <SubagentBlock
             toolUseId={tool.id}
             description={tool.input?.description || tool.input?.prompt?.slice(0, 100) || "Subagent task"}
@@ -226,13 +221,13 @@
             {renderMarkdown}
             {onMessageClick}
           />
-        {:else if isTodoWrite(block)}
-          {@const expanded = expandedBlocks.has(idx)}
+        {:else if isTodoWrite({ type: "tool_use", ...tool })}
+          {@const expanded = expandedBlocks.has(originalIdx)}
           {@const todos = tool.input?.todos || []}
           {@const completedCount = todos.filter((t: any) => t.status === "completed").length}
           <div class="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
             <button
-              onclick={() => toggleBlock(idx)}
+              onclick={() => toggleBlock(originalIdx)}
               class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-100 transition-colors"
             >
               <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -272,11 +267,11 @@
             {/if}
           </div>
         {:else}
-          {@const expanded = expandedBlocks.has(idx)}
+          {@const expanded = expandedBlocks.has(originalIdx)}
           {@const summary = getToolSummary(tool)}
           <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
             <button
-              onclick={() => toggleBlock(idx)}
+              onclick={() => toggleBlock(originalIdx)}
               class="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50 transition-colors"
             >
               <div class="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
@@ -290,6 +285,13 @@
                   {/if}
                 </div>
               </div>
+              {#if result}
+                <div class="w-5 h-5 rounded-full {result.is_error ? 'bg-red-100' : 'bg-teal-100'} flex items-center justify-center flex-shrink-0">
+                  <span class="text-xs">{result.is_error ? '!' : '✓'}</span>
+                </div>
+              {:else}
+                <div class="w-4 h-4 rounded-full border-2 border-gray-300 border-t-transparent animate-spin flex-shrink-0"></div>
+              {/if}
               <svg
                 class="w-4 h-4 text-gray-400 transition-transform flex-shrink-0 {expanded ? 'rotate-90' : ''}"
                 fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -298,48 +300,73 @@
               </svg>
             </button>
             {#if expanded}
-              <div class="px-4 pb-3 pt-2 border-t border-gray-100">
+              <div class="px-4 pb-3 pt-2 border-t border-gray-100 space-y-3">
                 <ToolRenderer {tool} {onPreview} hideHeader={true} />
+                {#if result}
+                  <div class="pt-2 border-t border-gray-100">
+                    <div class="flex items-center gap-2 mb-2">
+                      <span class="text-xs font-medium {result.is_error ? 'text-red-600' : 'text-teal-600'}">
+                        {result.is_error ? 'Error' : 'Result'}
+                      </span>
+                    </div>
+                    <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50' : 'text-gray-700 bg-gray-50'} rounded-lg p-3 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto">{result.content}</pre>
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>
         {/if}
+      {:else if item.type === "text"}
+        {@const text = (item as TextBlock).text}
+        {@const rendered = renderTextContent(text)}
+        <div class="text-[15px] leading-7 text-gray-800 markdown-body">
+          <MermaidRenderer content={rendered.genuiResult.processedContent} {renderMarkdown} {jsonBlocksMap} />
+          {#if rendered.mediaResult.items.length > 0}
+            <div class="my-4">
+              <MediaDisplay items={rendered.mediaResult.items} layout={rendered.mediaResult.items.length === 1 ? 'single' : 'grid'} {basePath} />
+            </div>
+          {/if}
+          {#each rendered.genuiResult.blocks as genuiBlock (genuiBlock.id)}
+            <div class="my-4">
+              <GenerativeUI html={genuiBlock.html} id={genuiBlock.id} />
+            </div>
+          {/each}
+        </div>
 
-      {:else if block.type === "tool_result"}
-        {@const result = block as ToolResultBlock}
+      {:else if item.type === "thinking"}
+        {@const thinking = (item as ThinkingBlock).thinking}
         {@const expanded = expandedBlocks.has(idx)}
-        {@const resultPreview = typeof result.content === 'string' ? result.content.slice(0, 60) : ''}
-        <div class="rounded-xl border {result.is_error ? 'border-red-200 bg-red-50/30' : 'border-gray-200 bg-white'} shadow-sm overflow-hidden">
+        <div class="rounded-xl border border-purple-200 bg-purple-50/30 shadow-sm overflow-hidden">
           <button
             onclick={() => toggleBlock(idx)}
-            class="w-full flex items-center gap-3 px-4 py-2.5 text-left {result.is_error ? 'hover:bg-red-50' : 'hover:bg-gray-50'} transition-colors"
+            class="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-purple-50 transition-colors"
           >
-            <div class="w-7 h-7 rounded-lg {result.is_error ? 'bg-red-100' : 'bg-teal-100'} flex items-center justify-center flex-shrink-0">
-              <span class="text-sm">{result.is_error ? '❌' : '✓'}</span>
+            <div class="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
+              <span class="text-sm">💭</span>
             </div>
             <div class="flex-1 min-w-0">
-              <span class="text-sm font-medium {result.is_error ? 'text-red-700' : 'text-gray-900'}">
-                {result.is_error ? 'Error' : 'Result'}
+              <span class="text-sm font-medium text-purple-800">Thinking</span>
+              <span class="ml-2 text-xs text-purple-500 truncate">
+                {thinking.slice(0, 60)}{thinking.length > 60 ? "..." : ""}
               </span>
-              {#if resultPreview && !result.is_error}
-                <span class="ml-2 text-xs text-gray-400 truncate font-mono">
-                  {resultPreview}{result.content.length > 60 ? '...' : ''}
-                </span>
-              {/if}
             </div>
             <svg
-              class="w-4 h-4 text-gray-400 transition-transform flex-shrink-0 {expanded ? 'rotate-90' : ''}"
+              class="w-4 h-4 text-purple-400 transition-transform flex-shrink-0 {expanded ? 'rotate-90' : ''}"
               fill="none" stroke="currentColor" viewBox="0 0 24 24"
             >
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
             </svg>
           </button>
           {#if expanded}
-            <div class="px-4 pb-3 pt-1 border-t {result.is_error ? 'border-red-100' : 'border-gray-100'}">
-              <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50' : 'text-gray-700 bg-gray-50'} rounded-lg p-3 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto">{result.content}</pre>
+            <div class="px-4 pb-3 pt-1 border-t border-purple-100 relative">
+              <div class="absolute top-2 right-4">
+                <CopyButton text={thinking} />
+              </div>
+              <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono bg-purple-50 rounded-lg p-3 pr-10 max-h-64 overflow-y-auto">{thinking}</pre>
             </div>
           {/if}
         </div>
+
       {/if}
     {/each}
   </div>

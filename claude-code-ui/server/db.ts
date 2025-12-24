@@ -114,6 +114,9 @@ export async function initDb() {
   try {
     db.run("ALTER TABLE messages ADD COLUMN is_synthetic INTEGER DEFAULT 0");
   } catch {}
+  try {
+    db.run("ALTER TABLE messages ADD COLUMN is_final INTEGER DEFAULT 0");
+  } catch {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS cost_entries (
@@ -270,6 +273,7 @@ export interface Message {
   timestamp: number;
   parent_tool_use_id?: string | null;
   is_synthetic?: number;
+  is_final?: number;
 }
 
 function queryAll<T>(sql: string, params: any[] = []): T[] {
@@ -443,11 +447,12 @@ export const messages = {
     content: string,
     timestamp: number,
     parent_tool_use_id: string | null = null,
-    is_synthetic: number = 0
+    is_synthetic: number = 0,
+    is_final: number = 0
   ) =>
     run(
-      "INSERT INTO messages (id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic]
+      "INSERT INTO messages (id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic, is_final) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic, is_final]
     ),
   upsert: (
     id: string,
@@ -456,19 +461,23 @@ export const messages = {
     content: string,
     timestamp: number,
     parent_tool_use_id: string | null = null,
-    is_synthetic: number = 0
+    is_synthetic: number = 0,
+    is_final: number = 0
   ) =>
     run(
-      `INSERT INTO messages (id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO messages (id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic, is_final)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          role = excluded.role,
          content = excluded.content,
          timestamp = excluded.timestamp,
          parent_tool_use_id = excluded.parent_tool_use_id,
-         is_synthetic = excluded.is_synthetic`,
-      [id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic]
+         is_synthetic = excluded.is_synthetic,
+         is_final = excluded.is_final`,
+      [id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic, is_final]
     ),
+  markFinal: (id: string) =>
+    run("UPDATE messages SET is_final = 1 WHERE id = ?", [id]),
   update: (id: string, content: string) =>
     run("UPDATE messages SET content = ? WHERE id = ?", [content, id]),
   delete: (id: string) => run("DELETE FROM messages WHERE id = ?", [id]),
