@@ -1,5 +1,5 @@
 import type { StreamEventMessage } from "../claude";
-import { chatStore } from "./messageStore";
+import { streamingStore } from "./streamingStore";
 
 export function handleStreamEvent(sessionId: string, msg: StreamEventMessage): void {
   const event = msg.event;
@@ -7,28 +7,28 @@ export function handleStreamEvent(sessionId: string, msg: StreamEventMessage): v
   
   switch (event.type) {
     case "message_start":
-      chatStore.startStreaming(sessionId);
+      streamingStore.start(sessionId);
       break;
     
     case "content_block_start":
       if (event.content_block) {
-        chatStore.addStreamingBlock(sessionId, event.content_block);
+        streamingStore.addBlock(sessionId, event.content_block);
       }
       break;
     
     case "content_block_delta":
       if (event.delta) {
-        chatStore.appendStreamingDelta(sessionId, event.delta);
+        streamingStore.appendDelta(sessionId, event.delta);
       }
       break;
     
     case "content_block_stop":
-      chatStore.finishStreamingBlock(sessionId);
+      streamingStore.finishBlock(sessionId);
       break;
     
     case "message_stop":
     case "message_delta":
-      chatStore.stopStreaming(sessionId);
+      streamingStore.stop(sessionId);
       break;
   }
 }

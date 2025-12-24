@@ -8,9 +8,10 @@
     onPreview?: (path: string) => void;
     compact?: boolean;
     index?: number;
+    hideHeader?: boolean;
   }
 
-  let { tool, onPreview, compact = false, index }: Props = $props();
+  let { tool, onPreview, compact = false, index, hideHeader = false }: Props = $props();
   
   const input = $derived(tool.input || {});
 
@@ -131,7 +132,8 @@
     <span class="text-gray-400 truncate">{getCompactSummary()}</span>
   </div>
 {:else}
-<div class="mt-3 rounded-lg border border-gray-200 bg-gray-50/50 overflow-hidden">
+<div class="{hideHeader ? '' : 'mt-3 rounded-lg border border-gray-200 bg-gray-50/50 overflow-hidden'}">
+  {#if !hideHeader}
   <div class="px-3 py-2 bg-gray-100/50 border-b border-gray-200 flex items-center gap-2">
     <div class="p-1 bg-white border border-gray-200 rounded shadow-sm">
       <svg class={`w-3 h-3 ${getColor(tool.name)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -140,8 +142,9 @@
     </div>
     <span class="text-xs font-medium text-gray-600 font-mono tracking-tight">{tool.name}</span>
   </div>
+  {/if}
 
-  <div class="px-3 py-2 bg-gray-50">
+  <div class="{hideHeader ? '' : 'px-3 py-2 bg-gray-50'}">
     {#if tool.name === "Read" && isSkillRead()}
       <div class="flex items-center gap-2">
         <span class="text-xs text-gray-500">Using skill:</span>

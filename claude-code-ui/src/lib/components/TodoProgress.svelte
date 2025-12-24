@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { TodoItem } from "../stores";
+  import WorkingIndicator from "./WorkingIndicator.svelte";
 
   interface Props {
     todos: TodoItem[];
@@ -18,7 +19,7 @@
 {#if shouldShow}
   <div class="flex gap-4 w-full">
     <div class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex-shrink-0 flex items-center justify-center shadow-sm">
-      <div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+      <WorkingIndicator variant="pulse" size="sm" color="gray" />
     </div>
     <div class="flex-1">
       {#if todos.length > 0}
@@ -40,7 +41,7 @@
                       </svg>
                     </div>
                   {:else if todo.status === "in_progress"}
-                    <div class="w-4 h-4 rounded-full border-2 border-gray-400 border-t-transparent animate-spin"></div>
+                    <WorkingIndicator variant="spin" size="lg" color="gray" />
                   {:else}
                     <div class="w-4 h-4 rounded-full border-2 border-gray-300"></div>
                   {/if}
@@ -53,11 +54,7 @@
           </div>
         </div>
       {:else}
-        <div class="flex items-center gap-1.5 pt-2">
-          <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
-          <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
-          <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
-        </div>
+        <WorkingIndicator variant="dots" size="xs" color="gray" class="pt-2" />
       {/if}
     </div>
   </div>

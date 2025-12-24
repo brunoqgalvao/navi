@@ -327,6 +327,7 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         timestamp,
         isSynthetic: (msg as any).isSynthetic,
         toolUseResult: (msg as any).tool_use_result,
+        isReplay: (msg as any).isReplay,
       };
 
     case "result": {

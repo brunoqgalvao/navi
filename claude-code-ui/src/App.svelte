@@ -104,7 +104,7 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
-  import { useMessageHandler, chatStore } from "./lib/handlers";
+  import { useMessageHandler } from "./lib/handlers";
   import SessionDebug from "./lib/components/SessionDebug.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
@@ -1025,6 +1025,8 @@ Respond in this exact JSON format only, no other text:
             role: m.role as any,
             content: content,
             timestamp: new Date(m.timestamp),
+            parentToolUseId: m.parent_tool_use_id ?? undefined,
+            isSynthetic: !!m.is_synthetic,
           };
         });
         sessionMessages.setMessages(s.id, loadedMsgs);
@@ -1632,7 +1634,12 @@ Respond in this exact JSON format only, no other text:
     
     const prompt = first.substring(sessionId.length + 1);
     
-    chatStore.addUserMessage(sessionId, prompt);
+    sessionMessages.addMessage(sessionId, {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: prompt,
+      timestamp: new Date(),
+    });
 
     loadingSessions.update(s => { s.add(sessionId); return new Set(s); });
     if ($session.projectId) {
@@ -1661,7 +1668,12 @@ Respond in this exact JSON format only, no other text:
     } catch (e) {
       console.error("Failed to abort:", e);
       loadingSessions.update(s => { s.delete(sessionId); return new Set(s); });
-      chatStore.addSystemMessage(sessionId, "Request stopped");
+      sessionMessages.addMessage(sessionId, {
+        id: crypto.randomUUID(),
+        role: "system",
+        content: "Request stopped",
+        timestamp: new Date(),
+      });
     }
   }
 
@@ -1710,7 +1722,12 @@ Respond in this exact JSON format only, no other text:
       messageContent = `${fileRefs}\n\n${currentInput}`;
     }
 
-    chatStore.addUserMessage(currentSessionId, messageContent);
+    sessionMessages.addMessage(currentSessionId, {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: messageContent,
+      timestamp: new Date(),
+    });
 
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
@@ -2016,6 +2033,8 @@ Respond in this exact JSON format only, no other text:
           role: m.role as any,
           content: content,
           timestamp: new Date(m.timestamp),
+          parentToolUseId: m.parent_tool_use_id ?? undefined,
+          isSynthetic: !!m.is_synthetic,
         };
       });
       sessionMessages.setMessages($session.sessionId, loadedMsgs);
@@ -2052,13 +2071,12 @@ Respond in this exact JSON format only, no other text:
     try {
       const result = await api.messages.update(editingMessageId, editingMessageContent);
       
-      sessionMessages.setMessages($session.sessionId, 
-        currentMessages.map(m => 
-          m.id === editingMessageId 
-            ? { ...m, content: editingMessageContent }
-            : m
-        )
+      const updatedMsgs = currentMessages.map(m => 
+        m.id === editingMessageId 
+          ? { ...m, content: editingMessageContent }
+          : m
       );
+      sessionMessages.setMessages($session.sessionId, updatedMsgs);
       
       if (result.sessionReset) {
         session.setSession($session.sessionId, null);

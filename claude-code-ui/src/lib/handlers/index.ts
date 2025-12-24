@@ -1,4 +1,4 @@
-export { chatStore, type AgentUpdate, type StreamingState } from "./messageStore";
+export { streamingStore, type StreamingState } from "./streamingStore";
 export { handleStreamEvent } from "./streamHandler";
 export { createMessageHandler, type MessageHandlerConfig } from "./messageHandler";
 export { useMessageHandler, type UseMessageHandlerOptions } from "./useMessageHandler";

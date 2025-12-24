@@ -1,13 +1,14 @@
 <script lang="ts">
   import MermaidRenderer from "./MermaidRenderer.svelte";
-  import type { AgentUpdate } from "../handlers";
+  import WorkingIndicator from "./WorkingIndicator.svelte";
+  import type { ChatMessage } from "../stores";
   import type { ContentBlock, TextBlock, ToolUseBlock } from "../claude";
 
   interface Props {
     toolUseId: string;
     description: string;
     subagentType: string;
-    updates: AgentUpdate[];
+    updates: ChatMessage[];
     isActive: boolean;
     elapsedTime?: number;
     renderMarkdown: (content: string) => string;
@@ -19,9 +20,9 @@
   let expanded = $state(true);
   let showFullModal = $state(false);
 
-  function formatContent(update: AgentUpdate): string {
-    if (update.type !== "assistant") return "";
-    const content = update.content as ContentBlock[];
+  function formatContent(msg: ChatMessage): string {
+    if (msg.role !== "assistant") return "";
+    const content = msg.content as ContentBlock[];
     return content
       .filter((b): b is TextBlock => b.type === "text")
       .map(b => b.text)
@@ -29,9 +30,9 @@
       .join("\n");
   }
 
-  function getToolCalls(update: AgentUpdate): ToolUseBlock[] {
-    if (update.type !== "assistant") return [];
-    const content = update.content as ContentBlock[];
+  function getToolCalls(msg: ChatMessage): ToolUseBlock[] {
+    if (msg.role !== "assistant") return [];
+    const content = msg.content as ContentBlock[];
     return content.filter((b): b is ToolUseBlock => b.type === "tool_use");
   }
 
@@ -65,10 +66,7 @@
       Subagent: {subagentType}
     </span>
     {#if isActive}
-      <span class="flex items-center gap-1 text-[10px] text-indigo-500">
-        <span class="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></span>
-        Working{elapsedTime ? ` (${elapsedTime}s)` : "..."}
-      </span>
+      <WorkingIndicator variant="pulse" size="xs" color="indigo" label="Working{elapsedTime ? ` (${elapsedTime}s)` : '...'}" class="text-[10px]" />
     {:else}
       <span class="text-[10px] text-indigo-400">
         {updates.length} update{updates.length !== 1 ? "s" : ""}
@@ -95,7 +93,7 @@
       </div>
       
       {#each updates as update (update.id)}
-        {#if update.type === "assistant"}
+        {#if update.role === "assistant"}
           {@const textContent = formatContent(update)}
           {@const tools = getToolCalls(update)}
           
@@ -114,10 +112,7 @@
       {/each}
 
       {#if isActive}
-        <div class="flex items-center gap-2 py-2 text-xs text-indigo-500">
-          <div class="w-3 h-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
-          Processing...
-        </div>
+        <WorkingIndicator variant="spin" size="md" color="indigo" label="Processing..." class="py-2" />
       {/if}
     </div>
   {/if}

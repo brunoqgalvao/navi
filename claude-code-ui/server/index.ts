@@ -75,6 +75,45 @@ function json(data: any, status = 200) {
   });
 }
 
+function hasMessageContent(content: unknown): boolean {
+  if (Array.isArray(content)) return content.length > 0;
+  if (typeof content === "string") return content.trim().length > 0;
+  return false;
+}
+
+function isToolResultContent(content: unknown): boolean {
+  if (!Array.isArray(content)) return false;
+  return content.some((block) => block && (block as any).type === "tool_result");
+}
+
+function shouldPersistUserMessage(data: any): boolean {
+  if (!data || data.type !== "user") {
+    console.log(`[Persist] Skipping non-user message: type=${data?.type}`);
+    return false;
+  }
+  if (data.isReplay) {
+    console.log(`[Persist] Skipping replay message: uuid=${data.uuid}`);
+    return false;
+  }
+  
+  const hasToolResult = isToolResultContent(data.content);
+  const result = data.isSynthetic || data.toolUseResult || hasToolResult;
+  
+  console.log(`[Persist] User message check:`, {
+    uuid: data.uuid,
+    isSynthetic: !!data.isSynthetic,
+    hasToolUseResult: !!data.toolUseResult,
+    hasToolResultContent: hasToolResult,
+    contentType: Array.isArray(data.content) ? 'array' : typeof data.content,
+    contentLength: Array.isArray(data.content) ? data.content.length : 0,
+    contentBlockTypes: Array.isArray(data.content) ? data.content.map((b: any) => b?.type) : [],
+    parentToolUseId: data.parentToolUseId,
+    willPersist: result,
+  });
+  
+  return result;
+}
+
 interface ClientMessage {
   type: "query" | "cancel" | "abort" | "permission_response";
   prompt?: string;
@@ -415,7 +454,15 @@ const server = Bun.serve({
       sessions.create(newSessionId, sourceSession.project_id, title, now, now);
 
       for (const msg of messagesToCopy) {
-        messages.create(crypto.randomUUID(), newSessionId, msg.role, msg.content, msg.timestamp);
+        messages.create(
+          crypto.randomUUID(),
+          newSessionId,
+          msg.role,
+          msg.content,
+          msg.timestamp,
+          msg.parent_tool_use_id ?? null,
+          msg.is_synthetic ?? 0
+        );
       }
 
       let newClaudeSessionId: string | null = null;
@@ -2694,7 +2741,56 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
         const msg = JSON.parse(line);
         
         if (msg.type === "message") {
-          ws.send(JSON.stringify(msg.data));
+          const data = msg.data;
+          const now = Date.now();
+          if (sessionId && data.type === "assistant" && hasMessageContent(data.content)) {
+            const msgId = data.uuid || crypto.randomUUID();
+            const timestamp = typeof data.timestamp === "number" ? data.timestamp : now;
+            
+            const toolUseBlocks = Array.isArray(data.content) 
+              ? data.content.filter((b: any) => b?.type === "tool_use")
+              : [];
+            console.log(`[Persist] Assistant message:`, {
+              uuid: msgId,
+              parentToolUseId: data.parentToolUseId,
+              blockTypes: Array.isArray(data.content) ? data.content.map((b: any) => b?.type) : [],
+              toolUseCount: toolUseBlocks.length,
+              toolNames: toolUseBlocks.map((b: any) => b?.name),
+            });
+            
+            messages.upsert(
+              msgId,
+              sessionId,
+              "assistant",
+              JSON.stringify(data.content),
+              timestamp,
+              data.parentToolUseId ?? null,
+              0
+            );
+          }
+          if (sessionId && shouldPersistUserMessage(data)) {
+            const msgId = data.uuid || crypto.randomUUID();
+            const timestamp = typeof data.timestamp === "number" ? data.timestamp : now;
+            const content = data.content ?? [];
+            
+            console.log(`[Persist] Saving user message:`, {
+              uuid: msgId,
+              parentToolUseId: data.parentToolUseId,
+              isSynthetic: data.isSynthetic,
+              contentPreview: JSON.stringify(content).slice(0, 200),
+            });
+            
+            messages.upsert(
+              msgId,
+              sessionId,
+              "user",
+              JSON.stringify(content),
+              timestamp,
+              data.parentToolUseId ?? null,
+              data.isSynthetic ? 1 : 0
+            );
+          }
+          ws.send(JSON.stringify(data));
         } else if (msg.type === "permission_request") {
           if (sessionId) {
             pendingPermissions.set(msg.requestId, { sessionId });
@@ -2708,10 +2804,7 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
           }));
         } else if (msg.type === "complete") {
           if (sessionId && msg.lastAssistantContent?.length > 0) {
-            const msgId = crypto.randomUUID();
-            const now = Date.now();
-            messages.create(msgId, sessionId, "assistant", JSON.stringify(msg.lastAssistantContent), now);
-            searchIndex.indexMessage(msgId, sessionId, JSON.stringify(msg.lastAssistantContent), now);
+            searchIndex.indexMessage(crypto.randomUUID(), sessionId, JSON.stringify(msg.lastAssistantContent), Date.now());
             
             if (needsAutoTitle && prompt) {
               generateChatTitle(prompt, msg.lastAssistantContent, sessionId);
@@ -2845,6 +2938,7 @@ async function handleQuery(ws: any, data: ClientMessage) {
     let lastAssistantUsage: any = null;
     let resultData: any = null;
     let wasAborted = false;
+    let persistedAssistant = false;
 
     for await (const msg of q) {
       console.log(`[${sessionId}] Got message type: ${msg.type}`);
@@ -2854,6 +2948,36 @@ async function handleQuery(ws: any, data: ClientMessage) {
       }
       const formatted = formatMessage(msg, sessionId);
       ws.send(JSON.stringify(formatted));
+      if (sessionId) {
+        if (formatted.type === "assistant" && hasMessageContent(formatted.content)) {
+          const msgId = formatted.uuid || crypto.randomUUID();
+          const timestamp = typeof formatted.timestamp === "number" ? formatted.timestamp : Date.now();
+          messages.upsert(
+            msgId,
+            sessionId,
+            "assistant",
+            JSON.stringify(formatted.content),
+            timestamp,
+            formatted.parentToolUseId ?? null,
+            0
+          );
+          persistedAssistant = true;
+        }
+        if (shouldPersistUserMessage(formatted)) {
+          const msgId = formatted.uuid || crypto.randomUUID();
+          const timestamp = typeof formatted.timestamp === "number" ? formatted.timestamp : Date.now();
+          const content = formatted.content ?? [];
+          messages.upsert(
+            msgId,
+            sessionId,
+            "user",
+            JSON.stringify(content),
+            timestamp,
+            formatted.parentToolUseId ?? null,
+            formatted.isSynthetic ? 1 : 0
+          );
+        }
+      }
 
       if (msg.type === "assistant") {
         lastAssistantContent = msg.message.content;
@@ -2873,7 +2997,7 @@ async function handleQuery(ws: any, data: ClientMessage) {
       return;
     }
 
-    if (sessionId && lastAssistantContent.length > 0) {
+    if (sessionId && lastAssistantContent.length > 0 && !persistedAssistant) {
       const msgId = crypto.randomUUID();
       messages.create(msgId, sessionId, "assistant", JSON.stringify(lastAssistantContent), Date.now());
       
@@ -3009,6 +3133,9 @@ async function generateChatTitle(userPrompt: string, assistantContent: any[], se
 }
 
 function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
+  const timestamp = Date.now();
+  const uuid = (msg as any).uuid || crypto.randomUUID();
+
   switch (msg.type) {
     case "system":
       return {
@@ -3016,6 +3143,8 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         uiSessionId,
         claudeSessionId: msg.session_id,
         subtype: msg.subtype,
+        uuid,
+        timestamp,
         ...(msg.subtype === "init" && {
           cwd: (msg as any).cwd,
           model: (msg as any).model,
@@ -3031,6 +3160,9 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         content: msg.message.content,
         parentToolUseId: msg.parent_tool_use_id || null,
         usage: (msg as any).message?.usage,
+        uuid,
+        timestamp,
+        error: (msg as any).error,
       };
 
     case "user":
@@ -3039,6 +3171,11 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         uiSessionId,
         content: msg.message.content,
         parentToolUseId: msg.parent_tool_use_id || null,
+        uuid,
+        timestamp,
+        isSynthetic: (msg as any).isSynthetic,
+        toolUseResult: (msg as any).tool_use_result,
+        isReplay: (msg as any).isReplay,
       };
 
     case "result":
@@ -3050,6 +3187,8 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         durationMs: msg.duration_ms,
         numTurns: msg.num_turns,
         usage: msg.usage,
+        uuid,
+        timestamp,
       };
 
     case "tool_progress":
@@ -3060,10 +3199,12 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         toolName: msg.tool_name,
         parentToolUseId: msg.parent_tool_use_id || null,
         elapsedTimeSeconds: msg.elapsed_time_seconds,
+        uuid,
+        timestamp,
       };
 
     default:
-      return { type: "unknown", uiSessionId, raw: msg };
+      return { type: "unknown", uiSessionId, raw: msg, uuid, timestamp };
   }
 }
 

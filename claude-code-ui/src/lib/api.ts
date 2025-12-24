@@ -54,6 +54,8 @@ export interface Message {
   role: string;
   content: any;
   timestamp: number;
+  parent_tool_use_id?: string | null;
+  is_synthetic?: number;
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

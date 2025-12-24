@@ -51,7 +51,9 @@ export async function initDb() {
       session_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
-      timestamp INTEGER NOT NULL
+      timestamp INTEGER NOT NULL,
+      parent_tool_use_id TEXT,
+      is_synthetic INTEGER DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
@@ -105,6 +107,12 @@ export async function initDb() {
   } catch {}
   try {
     db.run("ALTER TABLE sessions ADD COLUMN archived INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE messages ADD COLUMN parent_tool_use_id TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE messages ADD COLUMN is_synthetic INTEGER DEFAULT 0");
   } catch {}
 
   db.run(`
@@ -260,6 +268,8 @@ export interface Message {
   role: string;
   content: string;
   timestamp: number;
+  parent_tool_use_id?: string | null;
+  is_synthetic?: number;
 }
 
 function queryAll<T>(sql: string, params: any[] = []): T[] {
@@ -426,9 +436,39 @@ export const messages = {
   listBySession: (sessionId: string) =>
     queryAll<Message>("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC", [sessionId]),
   get: (id: string) => queryOne<Message>("SELECT * FROM messages WHERE id = ?", [id]),
-  create: (id: string, session_id: string, role: string, content: string, timestamp: number) =>
-    run("INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)",
-        [id, session_id, role, content, timestamp]),
+  create: (
+    id: string,
+    session_id: string,
+    role: string,
+    content: string,
+    timestamp: number,
+    parent_tool_use_id: string | null = null,
+    is_synthetic: number = 0
+  ) =>
+    run(
+      "INSERT INTO messages (id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic]
+    ),
+  upsert: (
+    id: string,
+    session_id: string,
+    role: string,
+    content: string,
+    timestamp: number,
+    parent_tool_use_id: string | null = null,
+    is_synthetic: number = 0
+  ) =>
+    run(
+      `INSERT INTO messages (id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         role = excluded.role,
+         content = excluded.content,
+         timestamp = excluded.timestamp,
+         parent_tool_use_id = excluded.parent_tool_use_id,
+         is_synthetic = excluded.is_synthetic`,
+      [id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic]
+    ),
   update: (id: string, content: string) =>
     run("UPDATE messages SET content = ? WHERE id = ?", [content, id]),
   delete: (id: string) => run("DELETE FROM messages WHERE id = ?", [id]),

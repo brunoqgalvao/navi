@@ -1,6 +1,6 @@
 import type { ClaudeMessage, StreamEventMessage, ToolProgressMessage, PermissionRequestMessage, ContentBlock, ToolUseBlock } from "../claude";
 import type { HandlerCallbacks } from "./types";
-import { chatStore } from "./messageStore";
+import { sessionMessages } from "../stores";
 import { handleStreamEvent } from "./streamHandler";
 
 export interface MessageHandlerConfig {
@@ -50,7 +50,15 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         const parentId = (msg as any).parentToolUseId || null;
         const content = (msg as any).content as ContentBlock[];
         
-        chatStore.addAssistantMessage(uiSessionId, content, parentId);
+        if (content && content.length > 0) {
+          sessionMessages.addMessage(uiSessionId, {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content,
+            timestamp: new Date(),
+            parentToolUseId: parentId,
+          });
+        }
         
         const todos = extractTodos(content);
         if (todos) {
@@ -65,6 +73,29 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         callbacks.onMessageUpdate?.(uiSessionId);
         if (uiSessionId === currentSessionId) {
           callbacks.scrollToBottom?.();
+        }
+        break;
+
+      case "user":
+        if (!uiSessionId) break;
+        const userContent = (msg as any).content as ContentBlock[] | string;
+        const isSynthetic = !!(msg as any).isSynthetic;
+        const hasToolResult = Array.isArray(userContent)
+          ? userContent.some((block) => block.type === "tool_result")
+          : false;
+        if (isSynthetic || hasToolResult) {
+          sessionMessages.addMessage(uiSessionId, {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: userContent,
+            timestamp: new Date(),
+            parentToolUseId: (msg as any).parentToolUseId ?? undefined,
+            isSynthetic,
+          });
+          callbacks.onMessageUpdate?.(uiSessionId);
+          if (uiSessionId === currentSessionId) {
+            callbacks.scrollToBottom?.();
+          }
         }
         break;
 
@@ -87,7 +118,12 @@ export function createMessageHandler(config: MessageHandlerConfig) {
 
       case "error":
         if (uiSessionId) {
-          chatStore.addSystemMessage(uiSessionId, `Error: ${(msg as any).error}`);
+          sessionMessages.addMessage(uiSessionId, {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: `Error: ${(msg as any).error}`,
+            timestamp: new Date(),
+          });
           callbacks.onError?.(uiSessionId, (msg as any).error);
           callbacks.onStreamingEnd?.(uiSessionId);
         }
@@ -101,7 +137,12 @@ export function createMessageHandler(config: MessageHandlerConfig) {
 
       case "aborted":
         if (uiSessionId) {
-          chatStore.addSystemMessage(uiSessionId, "Request stopped");
+          sessionMessages.addMessage(uiSessionId, {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: "Request stopped",
+            timestamp: new Date(),
+          });
           callbacks.onStreamingEnd?.(uiSessionId);
         }
         break;

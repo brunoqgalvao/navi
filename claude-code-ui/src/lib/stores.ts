@@ -9,6 +9,7 @@ export interface ChatMessage {
   contentHistory?: (ContentBlock[] | string)[];
   timestamp: Date;
   parentToolUseId?: string | null;
+  isSynthetic?: boolean;
 }
 
 function createProjectsStore() {
@@ -55,16 +56,20 @@ function createSessionMessagesStore() {
         for (let i = msgs.length - 1; i >= 0; i--) {
           const msg = msgs[i];
           if (msg.role === "assistant" && msg.parentToolUseId === parentToolUseId) {
-            const prevContent = msg.content;
-            const history = msg.contentHistory || [];
-            const hasToolUse = Array.isArray(prevContent) && prevContent.some(b => b.type === "tool_use");
-            const newHistory = hasToolUse ? [...history, prevContent] : history;
-            const updated = [...msgs.slice(0, i), { ...msg, content, contentHistory: newHistory }, ...msgs.slice(i + 1)];
+            const updated = [...msgs.slice(0, i), { ...msg, content }, ...msgs.slice(i + 1)];
             map.set(sessionId, updated);
             return new Map(map);
           }
         }
-        return map;
+        const newMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content,
+          timestamp: new Date(),
+          parentToolUseId: parentToolUseId ?? undefined,
+        };
+        map.set(sessionId, [...msgs, newMsg]);
+        return new Map(map);
       }),
     setMessages: (sessionId: string, msgs: ChatMessage[]) =>
       update((map) => {

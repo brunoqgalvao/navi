@@ -1,7 +1,7 @@
 import type { ClaudeMessage } from "../claude";
-import { chatStore } from "./messageStore";
 import { createMessageHandler, type MessageHandlerConfig } from "./messageHandler";
 import { 
+  sessionMessages,
   loadingSessions, 
   sessionStatus, 
   sessionTodos, 
@@ -10,7 +10,6 @@ import {
   type SDKEvent,
   type SDKEventType,
 } from "../stores";
-import { get } from "svelte/store";
 
 export interface UseMessageHandlerOptions {
   getCurrentSessionId: () => string | null;
@@ -171,7 +170,12 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
   }
 
   function addUserMessage(sessionId: string, content: string) {
-    chatStore.addUserMessage(sessionId, content);
+    sessionMessages.addMessage(sessionId, {
+      id: crypto.randomUUID(),
+      role: "user",
+      content,
+      timestamp: new Date(),
+    });
     loadingSessions.update(s => { s.add(sessionId); return new Set(s); });
     const projectId = getProjectId();
     if (projectId) {
@@ -187,6 +191,5 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     handleMessage,
     addUserMessage,
     getActiveSubagents,
-    chatStore,
   };
 }

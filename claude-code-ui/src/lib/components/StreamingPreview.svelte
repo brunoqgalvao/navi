@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ContentBlock, ToolUseBlock, TextBlock, ThinkingBlock } from "../claude";
   import MermaidRenderer from "./MermaidRenderer.svelte";
+  import WorkingIndicator from "./WorkingIndicator.svelte";
   import { fade } from "svelte/transition";
 
   interface Props {
@@ -58,7 +59,7 @@
 
 <div class="flex gap-4 w-full pr-4 md:pr-0" in:fade={{ duration: 150 }}>
   <div class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex-shrink-0 flex items-center justify-center shadow-sm">
-    <div class="w-3 h-3 border-2 border-gray-300 border-t-gray-700 rounded-full animate-spin"></div>
+    <WorkingIndicator variant="spin" size="md" color="gray" />
   </div>
 
   <div class="flex-1 min-w-0 space-y-3">
@@ -72,25 +73,26 @@
             {/if}
           </div>
         {:else if block.type === "thinking"}
-          <div class="rounded-lg border-l-2 border-l-purple-400 bg-purple-50/50 p-3 transition-all duration-200">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="text-sm">💭</span>
-              <span class="text-xs text-purple-600 font-medium">Thinking...</span>
-              <span class="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></span>
+          <div class="rounded-xl border border-purple-200 bg-purple-50/30 shadow-sm p-4 transition-all duration-200">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
+                <span class="text-sm">💭</span>
+              </div>
+              <span class="text-sm font-medium text-purple-800">Thinking</span>
+              <WorkingIndicator variant="pulse" size="sm" color="purple" />
             </div>
-            <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto streaming-text">{streamingContent || (block as ThinkingBlock).thinking || ""}</pre>
+            <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto streaming-text pl-10">{streamingContent || (block as ThinkingBlock).thinking || ""}</pre>
           </div>
         {:else if block.type === "tool_use"}
           {@const tool = block as ToolUseBlock}
-          <div class="rounded-lg border-l-2 border-l-orange-400 bg-orange-50/30 p-3 transition-all duration-200">
-            <div class="flex items-center gap-2">
-              <span class="text-sm">🔧</span>
-              <span class="text-sm text-gray-700 font-medium">{tool.name}</span>
-              <div class="flex gap-0.5">
-                <span class="w-1.5 h-1.5 bg-orange-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-                <span class="w-1.5 h-1.5 bg-orange-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-                <span class="w-1.5 h-1.5 bg-orange-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+          {@const toolIcons: Record<string, string> = { Read: "📄", Write: "✏️", Edit: "🔧", MultiEdit: "🔧", Bash: "⚡", Glob: "🔍", Grep: "🔎", WebFetch: "🌐", WebSearch: "🔍" }}
+          <div class="rounded-xl border border-gray-200 bg-white shadow-sm p-4 transition-all duration-200">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                <span class="text-sm">{toolIcons[tool.name] || "⚙️"}</span>
               </div>
+              <span class="text-sm font-medium text-gray-900">{tool.name}</span>
+              <WorkingIndicator variant="dots" size="xs" color="gray" />
             </div>
           </div>
         {/if}
@@ -98,13 +100,8 @@
     {/each}
     
     {#if blocks.length === 0}
-      <div class="flex items-center gap-2 text-sm text-gray-400">
-        <div class="flex gap-0.5">
-          <span class="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-          <span class="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-          <span class="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
-        </div>
-        <span>Thinking...</span>
+      <div class="h-8 flex items-center">
+        <WorkingIndicator variant="dots" size="xs" color="gray" label="Thinking..." />
       </div>
     {/if}
   </div>
