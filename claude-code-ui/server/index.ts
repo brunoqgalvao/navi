@@ -233,6 +233,7 @@ const server = Bun.serve({
       const id = projectArchiveMatch[1];
       const body = await req.json();
       projects.setArchived(id, body.archived);
+      sessions.setArchivedByProject(id, body.archived);
       return json(projects.get(id));
     }
 

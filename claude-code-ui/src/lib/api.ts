@@ -32,6 +32,7 @@ export interface Session {
   sort_order?: number;
   auto_accept_all?: number;
   favorite?: number;
+  archived?: number;
   created_at: number;
   updated_at: number;
   project_name?: string;
