@@ -331,7 +331,7 @@ export const sessions = {
       SELECT s.*, p.name as project_name 
       FROM sessions s 
       LEFT JOIN projects p ON s.project_id = p.id
-      ${includeArchived ? '' : 'WHERE (p.archived = 0 OR p.archived IS NULL)'}
+      ${includeArchived ? '' : 'WHERE (p.archived = 0 OR p.archived IS NULL) AND (s.archived = 0 OR s.archived IS NULL)'}
       ORDER BY s.updated_at DESC 
       LIMIT ?
     `, [limit]),
@@ -371,6 +371,8 @@ export const sessions = {
   resetTokenCounts: (sessionId: string, inputTokens: number, outputTokens: number) =>
     run("UPDATE sessions SET input_tokens = ?, output_tokens = ? WHERE id = ?",
         [inputTokens, outputTokens, sessionId]),
+  setArchivedByProject: (projectId: string, archived: boolean) =>
+    run("UPDATE sessions SET archived = ?, updated_at = ? WHERE project_id = ?", [archived ? 1 : 0, Date.now(), projectId]),
 };
 
 export const messages = {
