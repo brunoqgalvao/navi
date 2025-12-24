@@ -105,8 +105,9 @@
   import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
   import WorkspaceCard from "./lib/components/WorkspaceCard.svelte";
   import StarButton from "./lib/components/StarButton.svelte";
+  import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
-  import type { PermissionSettings } from "./lib/api";
+  import type { PermissionSettings, WorkspaceFolder } from "./lib/api";
 
   function relativeTime(timestamp: number | null | undefined): string {
     if (!timestamp) return "Never";
@@ -131,12 +132,8 @@
   
   let sidebarProjects = $state<Project[]>([]);
   let sidebarSessions = $state<Session[]>([]);
-  let filteredSidebarSessions = $derived(
-    sidebarSearchQuery.trim()
-      ? sidebarSessions.filter(s => s.title.toLowerCase().includes(sidebarSearchQuery.toLowerCase()))
-      : sidebarSessions
-  );
   let recentChats = $state<Session[]>([]);
+  let workspaceFolders = $state<WorkspaceFolder[]>([]);
   let showNewProjectModal = $state(false);
   let newProjectName = $state("");
   let newProjectPath = $state("");
@@ -196,7 +193,6 @@
   let showHotkeysHelp = $state(false);
   let inputRef: HTMLTextAreaElement | null = $state(null);
   let showSearchModal = $state(false);
-  let sidebarSearchQuery = $state("");
 
   let showConfetti = $state(false);
   let showWelcome = $state(false);
@@ -418,6 +414,7 @@
     
     loadProjects();
     loadRecentChats();
+    loadFolders();
     loadConfig();
     loadModels();
     loadPermissions();
@@ -468,6 +465,47 @@
     } catch (e) {
       console.error("Failed to load projects:", e);
     }
+  }
+
+  async function loadFolders() {
+    try {
+      workspaceFolders = await api.folders.list();
+    } catch (e) {
+      console.error("Failed to load folders:", e);
+    }
+  }
+
+  async function createFolder(name: string): Promise<WorkspaceFolder> {
+    const folder = await api.folders.create(name);
+    workspaceFolders = [...workspaceFolders, folder];
+    return folder;
+  }
+
+  async function updateFolder(id: string, name: string) {
+    await api.folders.update(id, name);
+    workspaceFolders = workspaceFolders.map(f => f.id === id ? { ...f, name } : f);
+  }
+
+  async function deleteFolder(id: string) {
+    await api.folders.delete(id);
+    workspaceFolders = workspaceFolders.filter(f => f.id !== id);
+    sidebarProjects = sidebarProjects.map(p => p.folder_id === id ? { ...p, folder_id: null } : p);
+  }
+
+  async function toggleFolderCollapse(id: string, collapsed: boolean) {
+    await api.folders.toggleCollapse(id, collapsed);
+    workspaceFolders = workspaceFolders.map(f => f.id === id ? { ...f, collapsed: collapsed ? 1 : 0 } : f);
+  }
+
+  async function setProjectFolder(projectId: string, folderId: string | null) {
+    await api.projects.setFolder(projectId, folderId);
+    sidebarProjects = sidebarProjects.map(p => p.id === projectId ? { ...p, folder_id: folderId } : p);
+  }
+
+  async function reorderFolders(order: string[]) {
+    await api.folders.reorder(order);
+    const orderMap = new Map(order.map((id, i) => [id, i]));
+    workspaceFolders = [...workspaceFolders].sort((a, b) => (orderMap.get(a.id) || 0) - (orderMap.get(b.id) || 0));
   }
   
   $effect(() => {
@@ -1880,476 +1918,58 @@ Respond in this exact JSON format only, no other text:
 <div class="flex h-screen bg-white text-gray-900 font-sans overflow-hidden selection:bg-blue-100 selection:text-blue-900">
 
   <!-- Sidebar -->
-
-  <aside style={sidebarCollapsed ? 'width: 56px' : `width: ${sidebarWidth}px`} class="bg-gray-50/50 border-r border-gray-200 flex flex-col hidden md:flex shrink-0 relative">
-    {#if !sidebarCollapsed}
-      <div 
-        class="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400/50 transition-colors z-10"
-        onmousedown={startResizingLeft}
-      ></div>
-    {/if}
-
-    <!-- Header -->
-
-    <div class="h-14 px-2 border-b border-gray-100 flex items-center justify-between">
-
-        {#if sidebarCollapsed}
-          <button onclick={() => sidebarCollapsed = false} class="w-10 h-10 mx-auto flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all" title="Expand sidebar">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
-          </button>
-        {:else}
-          <button onclick={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; }} class="flex items-center gap-2.5 px-2 hover:opacity-70 transition-opacity">
-              <img src="/logo.png" alt="Logo" class="w-6 h-6" />
-              <span class="font-medium text-sm tracking-tight text-gray-900">Navi</span>
-          </button>
-
-          <div class="flex items-center gap-0.5">
-            {#if currentProject}
-            <button onclick={createNewChat} class="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all duration-200" title="New Chat">
-
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"></path></svg>
-
-            </button>
-            {/if}
-            <button onclick={() => sidebarCollapsed = true} class="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all duration-200" title="Collapse sidebar">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
-            </button>
-          </div>
-        {/if}
-
-    </div>
-
-    
-
-    <!-- Projects List -->
-
-    <div class="flex-1 overflow-y-auto min-h-0 flex flex-col py-2">
-
-        {#if sidebarCollapsed}
-          <!-- Collapsed view: minimal icons -->
-          <div class="flex flex-col items-center gap-1 px-2">
-            <button 
-              onclick={() => sidebarCollapsed = false}
-              class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all"
-              title="Workspaces"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-            </button>
-            {#if currentProject}
-              <button 
-                onclick={createNewChat}
-                class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all"
-                title="New chat"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"></path></svg>
-              </button>
-            {/if}
-          </div>
-        {:else if !currentProject}
-
-             <div class="px-3" data-tour="workspaces">
-
-                 <div class="flex items-center justify-between mb-2 mt-2 px-2">
-                   <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Workspaces</h3>
-                   <button onclick={() => showNewProjectModal = true} class="text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-0.5 rounded transition-colors border border-gray-200" data-tour="new-workspace">
-                      + New
-                   </button>
-                 </div>
-
-                 {#if sidebarProjects.length === 0}
-
-                    <div class="text-xs text-gray-400 italic text-center py-4">No workspaces yet</div>
-
-                 {:else}
-
-                    <div class="space-y-0.5">
-
-                        {#each sidebarProjects as proj}
-
-                            <div 
-                                class="group relative {dragOverProjectId === proj.id && !proj.pinned ? 'border-t-2 border-blue-500' : ''} {draggedProjectId === proj.id ? 'opacity-50' : ''}"
-                                role="listitem"
-                                draggable={!proj.pinned}
-                                ondragstart={(e) => !proj.pinned && handleProjectDragStart(e, proj)}
-                                ondragover={(e) => !proj.pinned && handleProjectDragOver(e, proj.id)}
-                                ondragleave={handleProjectDragLeave}
-                                ondrop={(e) => !proj.pinned && handleProjectDrop(e, proj)}
-                                ondragend={handleProjectDragEnd}
-                            >
-                            <button 
-                                onclick={() => selectProject(proj)}
-                                class="w-full text-left px-2.5 py-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
-                            >
-                                <div class="flex items-center gap-2">
-                                    <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                                    <span class="text-[13px] font-medium truncate {proj.archived ? 'text-gray-400' : ''}">{proj.name}</span>
-                                    {#if proj.archived}
-                                        <span class="shrink-0 text-[9px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded" title="Archived">Archived</span>
-                                    {:else if $projectStatus.get(proj.id) === "attention"}
-                                        <span class="shrink-0 w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Needs attention"></span>
-                                    {:else if $projectStatus.get(proj.id) === "active"}
-                                        <span class="shrink-0 w-1.5 h-1.5 bg-blue-400 rounded-full" title="Active"></span>
-                                    {/if}
-                                </div>
-                            </button>
-                            <div class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
-                                <StarButton 
-                                    active={!!proj.pinned}
-                                    onclick={(e) => toggleProjectPin(proj, e)}
-                                    size="sm"
-                                />
-                                <div class="relative">
-                                    <button 
-                                        onclick={(e) => { e.stopPropagation(); projectMenuId = projectMenuId === proj.id ? null : proj.id; }}
-                                        class="p-1 text-gray-400 hover:text-gray-600 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                                        data-tour="project-menu"
-                                    >
-                                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
-                                    </button>
-                                    {#if projectMenuId === proj.id}
-                                        <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[160px] z-50">
-                                            <button 
-                                                onclick={(e) => { openEditProject(proj, e); projectMenuId = null; }}
-                                                class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                            >
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                                                Rename
-                                            </button>
-                                            <button 
-                                                onclick={(e) => { e.stopPropagation(); showProjectPermissions = proj; projectMenuId = null; }}
-                                                class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                            >
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                                                Permissions
-                                            </button>
-                                            <button 
-                                                onclick={(e) => { toggleProjectArchive(proj, e); projectMenuId = null; }}
-                                                class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                            >
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
-                                                {proj.archived ? 'Unarchive' : 'Archive'}
-                                            </button>
-                                            <div class="border-t border-gray-100 my-1"></div>
-                                            <button 
-                                                onclick={(e) => { openDeleteConfirm(proj, e); projectMenuId = null; }}
-                                                class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                            >
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                                Delete
-                                            </button>
-                                        </div>
-                                    {/if}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/each}
-
-                    </div>
-
-                 {/if}
-
-                 {#if recentChats.length > 0}
-                   <div class="mt-4">
-                     <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1 px-2">Recent Chats</h3>
-                     <div class="space-y-0">
-                       {#each recentChats.slice(0, 5) as chat}
-                         <button
-                           onclick={() => goToChat(chat)}
-                           class="w-full text-left px-2 py-1 rounded text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors flex items-center gap-1.5"
-                         >
-                           <svg class="w-2.5 h-2.5 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-                           <span class="text-[11px] truncate">{chat.title}</span>
-                         </button>
-                       {/each}
-                     </div>
-                   </div>
-                 {/if}
-
-             </div>
-
-        {:else}
-
-            <!-- Selected Project View -->
-
-             <div class="px-3 flex-1 flex flex-col min-h-0 overflow-hidden">
-
-                 <button onclick={() => { session.setProject(null); sidebarSessions = []; }} class="flex items-center gap-1.5 text-[11px] font-medium text-gray-500 hover:text-gray-800 mb-4 px-1 py-1 -ml-1 transition-colors">
-
-                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7"></path></svg>
-
-                     Back to Workspaces
-
-                 </button>
-
-                 
-
-                 <div class="mb-6 flex items-start gap-2 min-w-0">
-                   <button onclick={() => { session.setSession(null); }} class="flex-1 min-w-0 px-1 text-left hover:bg-gray-100 rounded-lg py-2 -my-2 transition-colors group">
-                     <h2 class="text-sm font-semibold text-gray-900 truncate flex items-center gap-2 group-hover:text-gray-700">
-                        <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                        <span class="truncate">{currentProject.name}</span>
-                     </h2>
-                     <p class="text-[11px] text-gray-400 truncate mt-0.5 pl-6 max-w-full" title={currentProject.path}>{currentProject.path}</p>
-                   </button>
-                   <button onclick={() => showProjectSettings = true} class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors mt-0.5" title="Project Settings">
-                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                   </button>
-                 </div>
-
-
-
-                 <div class="flex items-center justify-between mb-2 px-1">
-
-                     <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Chats</h3>
-
-                     <button onclick={createNewChat} class="text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-0.5 rounded transition-colors border border-gray-200">
-
-                        + New
-
-                     </button>
-
-                 </div>
-
-                 <div class="mb-2 px-1">
-                   <div class="relative">
-                     <svg class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                     </svg>
-                     <input 
-                       type="text" 
-                       bind:value={sidebarSearchQuery}
-                       placeholder="Filter chats..."
-                       class="w-full text-xs pl-7 pr-2 py-1.5 bg-gray-100 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 placeholder-gray-400"
-                     />
-                     {#if sidebarSearchQuery}
-                       <button 
-                         onclick={() => sidebarSearchQuery = ""}
-                         class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                       >
-                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                         </svg>
-                       </button>
-                     {/if}
-                   </div>
-                 </div>
-
-                 <div class="flex-1 overflow-y-auto space-y-0.5">
-
-                     {#if sidebarSessions.length === 0}
-
-                        <div class="text-xs text-gray-400 italic text-center py-8">No chats yet</div>
-
-                     {:else if filteredSidebarSessions.length === 0}
-
-                        <div class="text-xs text-gray-400 italic text-center py-4">No matching chats</div>
-
-                     {:else}
-
-                        {#each filteredSidebarSessions as sess}
-
-                            <div 
-                                data-session-item={sess.id}
-                                class="group relative {dragOverSessionId === sess.id && !sess.pinned ? 'border-t-2 border-blue-500' : ''} {draggedSessionId === sess.id ? 'opacity-50' : ''}"
-                                role="listitem"
-                                draggable={!sess.pinned}
-                                ondragstart={(e) => !sess.pinned && handleSessionDragStart(e, sess)}
-                                ondragover={(e) => !sess.pinned && handleSessionDragOver(e, sess.id)}
-                                ondragleave={handleSessionDragLeave}
-                                ondrop={(e) => !sess.pinned && handleSessionDrop(e, sess)}
-                                ondragend={handleSessionDragEnd}
-                            >
-
-                                <button 
-
-                                    onclick={() => selectSession(sess)}
-
-                                    class={`w-full text-left px-2.5 py-2 rounded-lg text-[13px] transition-all border sidebar-item-glow ${sess.pinned ? '' : 'cursor-grab active:cursor-grabbing'} ${$session.sessionId === sess.id ? 'bg-white border-gray-200 shadow-sm text-gray-900 z-10 relative' : 'border-transparent text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
-
-                                >
-
-                                    <div class="truncate pr-20 font-medium flex items-center gap-1.5">
-                                        <span class="truncate">{sess.title}</span>
-                                        {#if $session.sessionId === sess.id}
-                                            <TitleSuggestion
-                                                bind:this={titleSuggestionRef}
-                                                sessionId={$session.sessionId}
-                                                currentTitle={sess.title}
-                                                messages={currentMessages}
-                                                onApply={handleTitleSuggestionApply}
-                                            />
-                                        {/if}
-                                    </div>
-
-                                    <div class="text-[10px] opacity-60 mt-0.5 flex justify-between">
-                                        <span>{new Date(sess.updated_at).toLocaleDateString()}</span>
-                                    </div>
-
-                                </button>
-
-                                <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 {sessionMenuId === sess.id ? 'z-[70]' : 'z-20'}">
-                                    {#if $sessionStatus.get(sess.id)?.status === "running"}
-                                        <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                                    {:else if $sessionStatus.get(sess.id)?.status === "permission"}
-                                        <span class="w-2.5 h-2.5 bg-[#D97706] rounded-full animate-pulse" title="Permission required"></span>
-                                    {:else if $sessionStatus.get(sess.id)?.status === "unread"}
-                                        <span class="w-2 h-2 bg-gray-400 rounded-full" title="New results"></span>
-                                    {/if}
-                                    
-                                    <StarButton 
-                                        active={!!sess.favorite}
-                                        onclick={(e) => toggleSessionFavorite(sess, e)}
-                                    />
-
-                                    <div class="relative">
-                                        <button 
-                                            onclick={(e) => { e.stopPropagation(); sessionMenuId = sessionMenuId === sess.id ? null : sess.id; }}
-                                            class="p-1 text-gray-400 hover:text-gray-600 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                                        >
-                                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
-                                        </button>
-                                        {#if sessionMenuId === sess.id}
-                                            <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px] z-[60]">
-                                                <button 
-                                                    onclick={(e) => { openEditSession(sess, e); sessionMenuId = null; }}
-                                                    class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                                >
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                                                    Rename
-                                                </button>
-                                                {#if $session.sessionId === sess.id}
-                                                <button 
-                                                    onclick={(e) => { e.stopPropagation(); sessionMenuId = null; titleSuggestionRef?.triggerSuggestion(); }}
-                                                    class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                                >
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
-                                                    Suggest title
-                                                </button>
-                                                {/if}
-                                                <button 
-                                                    onclick={(e) => { deleteSession(e, sess.id); sessionMenuId = null; }}
-                                                    class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                                >
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                                    Delete
-                                                </button>
-                                            </div>
-                                        {/if}
-                                    </div>
-                                </div>
-
-                            </div>
-
-                        {/each}
-
-                     {/if}
-
-                 </div>
-
-             </div>
-
-        {/if}
-
-    </div>
-
-
-
-    <!-- Footer Stats -->
-
-    <div class={`${sidebarCollapsed ? 'px-2' : 'px-4'} py-3 border-t border-gray-200 bg-gray-50/50 space-y-2`}>
-
-      <!-- Model Selector -->
-      {#if $session.sessionId && !sidebarCollapsed}
-        <ModelSelector 
-          models={$availableModels} 
-          bind:selectedModel={modelSelection}
-          onSelect={handleModelSelect}
-        />
-      {/if}
-
-      <!-- Context Usage -->
-      {#if $session.inputTokens > 0 && !sidebarCollapsed}
-        {@const contextWindow = currentProject?.context_window || 200000}
-        {@const usagePercent = Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100))}
-        <div class="space-y-1">
-          <div class="flex items-center justify-between text-[10px] text-gray-500">
-            <span>Context</span>
-            <span>{usagePercent}% ({($session.inputTokens / 1000).toFixed(1)}k / {(contextWindow / 1000).toFixed(0)}k)</span>
-          </div>
-          <div class="h-1 bg-gray-200 rounded-full overflow-hidden">
-            <div 
-              class={`h-full rounded-full transition-all ${usagePercent > 80 ? 'bg-red-500' : usagePercent > 60 ? 'bg-yellow-500' : 'bg-emerald-500'}`}
-              style={`width: ${usagePercent}%`}
-            ></div>
-          </div>
-        </div>
-      {/if}
-
-      {#if sidebarCollapsed}
-        <div class="flex flex-col items-center gap-2">
-          <span class={`w-2 h-2 rounded-full ${$isConnected ? "bg-emerald-500" : "bg-red-400"}`} title={$isConnected ? "Online" : "Offline"}></span>
-          <button onclick={() => showSearchModal = true} class="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Search (Cmd+K)">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-          </button>
-          <button onclick={() => showHotkeysHelp = true} class="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Keyboard shortcuts (?)">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-          </button>
-          <button onclick={() => showSettings = true} class="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Settings">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-          </button>
-        </div>
-      {:else}
-      <div class="flex items-center justify-between text-[11px]">
-
-        <div class="flex items-center gap-1.5 text-gray-500">
-
-            <span class={`w-1.5 h-1.5 rounded-full ${$isConnected ? "bg-emerald-500" : "bg-red-400"}`}></span>
-
-            <span>{$isConnected ? "Online" : "Offline"}</span>
-
-        </div>
-
-        <div class="flex items-center gap-2">
-          {#if $session.sessionId && $session.costUsd > 0}
-              <span class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200" title="Session cost">${$session.costUsd.toFixed(4)}</span>
-          {:else if $session.projectId}
-              {@const projectCost = $costStore.projectCosts.get($session.projectId)}
-              {#if projectCost}
-                <button 
-                  onclick={() => costStore.setViewMode($costStore.viewMode === 'ever' ? 'today' : 'ever')}
-                  class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200 hover:bg-gray-300/50 transition-colors"
-                  title="Project cost ({$costStore.viewMode === 'ever' ? 'all time' : 'today'}) - click to toggle"
-                >
-                  ${($costStore.viewMode === 'ever' ? projectCost.ever : projectCost.today).toFixed(4)}
-                </button>
-              {/if}
-          {:else if $costStore.totalEver > 0}
-              <button 
-                onclick={() => costStore.setViewMode($costStore.viewMode === 'ever' ? 'today' : 'ever')}
-                class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200 hover:bg-gray-300/50 transition-colors"
-                title="Total cost ({$costStore.viewMode === 'ever' ? 'all time' : 'today'}) - click to toggle"
-              >
-                ${($costStore.viewMode === 'ever' ? $costStore.totalEver : $costStore.totalToday).toFixed(4)}
-              </button>
-          {/if}
-          <button onclick={() => showSearchModal = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Search (Cmd+K)">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-          </button>
-          <button onclick={() => showHotkeysHelp = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Keyboard shortcuts (?)">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-          </button>
-          <button onclick={() => showSettings = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Settings" data-tour="settings">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-          </button>
-        </div>
-
-      </div>
-      {/if}
-
-    </div>
-
-  </aside>
+  <Sidebar
+    projects={sidebarProjects}
+    sessions={sidebarSessions}
+    {recentChats}
+    {currentProject}
+    {currentMessages}
+    {sidebarCollapsed}
+    {sidebarWidth}
+    bind:modelSelection
+    folders={workspaceFolders}
+    onSelectProject={selectProject}
+    onSelectSession={selectSession}
+    onCreateNewChat={createNewChat}
+    onGoToChat={goToChat}
+    onNewProjectModal={() => showNewProjectModal = true}
+    onSettings={() => showSettings = true}
+    onSearchModal={() => showSearchModal = true}
+    onHotkeysHelp={() => showHotkeysHelp = true}
+    onProjectSettings={() => showProjectSettings = true}
+    onEditProject={openEditProject}
+    onDeleteProject={openDeleteConfirm}
+    onToggleProjectPin={toggleProjectPin}
+    onToggleProjectArchive={toggleProjectArchive}
+    onProjectPermissions={(p) => showProjectPermissions = p}
+    onEditSession={openEditSession}
+    onDeleteSession={deleteSession}
+    onToggleSessionFavorite={toggleSessionFavorite}
+    onProjectReorder={async (order) => { 
+      await api.projects.reorder(order); 
+      const orderMap = new Map(order.map((id, i) => [id, i]));
+      sidebarProjects = [...sidebarProjects].sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+    }}
+    onSessionReorder={async (order) => { 
+      if (currentProject) {
+        await api.sessions.reorder(currentProject.id, order);
+        const orderMap = new Map(order.map((id, i) => [id, i]));
+        sidebarSessions = [...sidebarSessions].sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+      }
+    }}
+    onModelSelect={handleModelSelect}
+    onTitleApply={handleTitleSuggestionApply}
+    onStartResizing={startResizingLeft}
+    onCollapseToggle={() => sidebarCollapsed = !sidebarCollapsed}
+    onBackToWorkspaces={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; }}
+    onFolderCreate={createFolder}
+    onFolderUpdate={updateFolder}
+    onFolderDelete={deleteFolder}
+    onFolderToggleCollapse={toggleFolderCollapse}
+    onProjectSetFolder={setProjectFolder}
+    onFolderReorder={reorderFolders}
+    bind:titleSuggestionRef
+  />
 
 
 

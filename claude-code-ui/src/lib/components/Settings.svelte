@@ -954,16 +954,27 @@
                   {#if analytics.hourlyCosts.length === 0}
                     <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
                   {:else}
-                    <div class="space-y-1 max-h-[200px] overflow-y-auto">
-                      {#each analytics.hourlyCosts as hour}
-                        <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
-                          <span class="text-sm text-gray-600">{hour.hour}</span>
-                          <div class="flex items-center gap-3">
-                            <span class="text-xs text-gray-400">{hour.entry_count} calls</span>
-                            <span class="font-mono text-sm text-gray-900">${hour.total_cost.toFixed(4)}</span>
+                    {@const sortedHourly = [...analytics.hourlyCosts].reverse()}
+                    {@const maxHourlyCost = Math.max(...sortedHourly.map(h => h.total_cost || 0), 0.0001)}
+                    <div class="h-24 flex items-end gap-px mb-2 overflow-x-auto">
+                      {#each sortedHourly as hour}
+                        {@const costHeight = ((hour.total_cost || 0) / maxHourlyCost) * 100}
+                        <div class="flex-shrink-0 w-2 flex flex-col items-center group relative">
+                          <div 
+                            class="w-full bg-emerald-400 rounded-t transition-all hover:bg-emerald-500 min-h-[2px]" 
+                            style="height: {Math.max(costHeight, 2)}%"
+                          ></div>
+                          <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg">
+                            <div class="font-medium">{hour.hour}</div>
+                            <div class="text-gray-300">${(hour.total_cost || 0).toFixed(4)}</div>
+                            <div class="text-gray-400">{hour.entry_count || 0} calls</div>
                           </div>
                         </div>
                       {/each}
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-400">
+                      <span>{sortedHourly[0]?.hour}</span>
+                      <span>{sortedHourly[sortedHourly.length - 1]?.hour}</span>
                     </div>
                   {/if}
                 </div>

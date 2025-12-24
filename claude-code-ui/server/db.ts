@@ -175,6 +175,22 @@ export async function initDb() {
   `);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS workspace_folders (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      collapsed INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_folders_order ON workspace_folders(sort_order);
+  `);
+
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN folder_id TEXT");
+  } catch {}
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS search_index (
       id TEXT PRIMARY KEY,
       entity_type TEXT NOT NULL,
@@ -282,6 +298,35 @@ export interface ProjectWithStats extends Project {
   archived: number;
 }
 
+export interface WorkspaceFolder {
+  id: string;
+  name: string;
+  sort_order: number;
+  collapsed: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export const workspaceFolders = {
+  list: () => queryAll<WorkspaceFolder>("SELECT * FROM workspace_folders ORDER BY sort_order ASC"),
+  get: (id: string) => queryOne<WorkspaceFolder>("SELECT * FROM workspace_folders WHERE id = ?", [id]),
+  create: (id: string, name: string, sortOrder: number = 0) => {
+    const now = Date.now();
+    run("INSERT INTO workspace_folders (id, name, sort_order, collapsed, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)",
+        [id, name, sortOrder, now, now]);
+  },
+  update: (id: string, name: string) =>
+    run("UPDATE workspace_folders SET name = ?, updated_at = ? WHERE id = ?", [name, Date.now(), id]),
+  delete: (id: string) => {
+    run("UPDATE projects SET folder_id = NULL WHERE folder_id = ?", [id]);
+    run("DELETE FROM workspace_folders WHERE id = ?", [id]);
+  },
+  updateOrder: (id: string, sortOrder: number) =>
+    run("UPDATE workspace_folders SET sort_order = ? WHERE id = ?", [sortOrder, id]),
+  toggleCollapsed: (id: string, collapsed: boolean) =>
+    run("UPDATE workspace_folders SET collapsed = ? WHERE id = ?", [collapsed ? 1 : 0, id]),
+};
+
 export const projects = {
   list: (includeArchived: boolean = false) => queryAll<ProjectWithStats>(`
     SELECT p.*, 
@@ -317,6 +362,8 @@ export const projects = {
     run("UPDATE projects SET auto_accept_all = ?, updated_at = ? WHERE id = ?", [autoAcceptAll ? 1 : 0, Date.now(), id]),
   setArchived: (id: string, archived: boolean) =>
     run("UPDATE projects SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
+  setFolder: (id: string, folderId: string | null) =>
+    run("UPDATE projects SET folder_id = ?, updated_at = ? WHERE id = ?", [folderId, Date.now(), id]),
 };
 
 export interface SessionWithProject extends Session {

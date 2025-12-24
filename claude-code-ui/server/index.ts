@@ -1,5 +1,5 @@
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { initDb, projects, sessions, messages, globalSettings, searchIndex, skills as skillsDb, enabledSkills as enabledSkillsDb, skillVersions, costEntries, DEFAULT_TOOLS, DANGEROUS_TOOLS, type Project, type Session, type Message } from "./db";
+import { initDb, projects, sessions, messages, globalSettings, searchIndex, skills as skillsDb, enabledSkills as enabledSkillsDb, skillVersions, costEntries, workspaceFolders, DEFAULT_TOOLS, DANGEROUS_TOOLS, type Project, type Session, type Message } from "./db";
 import { spawn, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -242,6 +242,63 @@ const server = Bun.serve({
       const body = await req.json();
       for (let i = 0; i < body.order.length; i++) {
         projects.updateOrder(body.order[i], i);
+      }
+      return json({ success: true });
+    }
+
+    const projectFolderMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/folder$/);
+    if (projectFolderMatch && method === "POST") {
+      const id = projectFolderMatch[1];
+      const body = await req.json();
+      projects.setFolder(id, body.folderId);
+      return json(projects.get(id));
+    }
+
+    if (url.pathname === "/api/folders") {
+      if (method === "GET") {
+        return json(workspaceFolders.list());
+      }
+      if (method === "POST") {
+        const body = await req.json();
+        const id = crypto.randomUUID();
+        const folders = workspaceFolders.list();
+        const maxOrder = folders.length > 0 ? Math.max(...folders.map(f => f.sort_order)) + 1 : 0;
+        workspaceFolders.create(id, body.name, maxOrder);
+        return json(workspaceFolders.get(id), 201);
+      }
+    }
+
+    const folderMatch = url.pathname.match(/^\/api\/folders\/([^/]+)$/);
+    if (folderMatch) {
+      const id = folderMatch[1];
+      if (method === "GET") {
+        const folder = workspaceFolders.get(id);
+        return folder ? json(folder) : json({ error: "Not found" }, 404);
+      }
+      if (method === "PUT") {
+        const body = await req.json();
+        workspaceFolders.update(id, body.name);
+        return json(workspaceFolders.get(id));
+      }
+      if (method === "DELETE") {
+        workspaceFolders.delete(id);
+        return json({ success: true });
+      }
+    }
+
+    const folderCollapseMatch = url.pathname.match(/^\/api\/folders\/([^/]+)\/collapse$/);
+    if (folderCollapseMatch && method === "POST") {
+      const id = folderCollapseMatch[1];
+      const body = await req.json();
+      workspaceFolders.toggleCollapsed(id, body.collapsed);
+      return json(workspaceFolders.get(id));
+    }
+
+    const foldersReorderMatch = url.pathname === "/api/folders/reorder";
+    if (foldersReorderMatch && method === "POST") {
+      const body = await req.json();
+      for (let i = 0; i < body.order.length; i++) {
+        workspaceFolders.updateOrder(body.order[i], i);
       }
       return json({ success: true });
     }
@@ -2661,13 +2718,19 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
           if (sessionId && msg.resultData) {
             const costUsd = msg.resultData.total_cost_usd || 0;
+            const usage = msg.resultData.usage || {};
+            console.log("[DEBUG] resultData.usage:", JSON.stringify(usage));
+            const totalInputTokens = (usage.input_tokens || 0) + 
+              (usage.cache_creation_input_tokens || 0) + 
+              (usage.cache_read_input_tokens || 0);
+            console.log("[DEBUG] totalInputTokens:", totalInputTokens);
             sessions.updateClaudeSession(
               msg.resultData.session_id,
               msg.resultData.model || null,
               costUsd,
               msg.resultData.num_turns || 0,
-              msg.resultData.usage?.input_tokens || 0,
-              msg.resultData.usage?.output_tokens || 0,
+              totalInputTokens,
+              usage.output_tokens || 0,
               Date.now(),
               sessionId
             );
@@ -2813,13 +2876,17 @@ async function handleQuery(ws: any, data: ClientMessage) {
 
     if (sessionId && resultData) {
       const costUsd = resultData.total_cost_usd || 0;
+      const usage = resultData.usage || {};
+      const totalInputTokens = (usage.input_tokens || 0) + 
+        (usage.cache_creation_input_tokens || 0) + 
+        (usage.cache_read_input_tokens || 0);
       sessions.updateClaudeSession(
         resultData.session_id,
         resultData.model || null,
         costUsd,
         resultData.num_turns || 0,
-        resultData.usage?.input_tokens || 0,
-        resultData.usage?.output_tokens || 0,
+        totalInputTokens,
+        usage.output_tokens || 0,
         Date.now(),
         sessionId
       );

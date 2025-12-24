@@ -1,5 +1,14 @@
 const API_BASE = "http://localhost:3001/api";
 
+export interface WorkspaceFolder {
+  id: string;
+  name: string;
+  sort_order: number;
+  collapsed: number;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -12,6 +21,7 @@ export interface Project {
   context_window?: number;
   auto_accept_all?: number;
   archived?: number;
+  folder_id?: string | null;
   created_at: number;
   updated_at: number;
   session_count?: number;
@@ -101,6 +111,38 @@ export const api = {
       request<Project>(`/projects/${id}/archive`, {
         method: "POST",
         body: JSON.stringify({ archived }),
+      }),
+    setFolder: (id: string, folderId: string | null) =>
+      request<Project>(`/projects/${id}/folder`, {
+        method: "POST",
+        body: JSON.stringify({ folderId }),
+      }),
+  },
+
+  folders: {
+    list: () => request<WorkspaceFolder[]>("/folders"),
+    get: (id: string) => request<WorkspaceFolder>(`/folders/${id}`),
+    create: (name: string) =>
+      request<WorkspaceFolder>("/folders", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    update: (id: string, name: string) =>
+      request<WorkspaceFolder>(`/folders/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name }),
+      }),
+    delete: (id: string) =>
+      request<{ success: boolean }>(`/folders/${id}`, { method: "DELETE" }),
+    toggleCollapse: (id: string, collapsed: boolean) =>
+      request<WorkspaceFolder>(`/folders/${id}/collapse`, {
+        method: "POST",
+        body: JSON.stringify({ collapsed }),
+      }),
+    reorder: (order: string[]) =>
+      request<{ success: boolean }>("/folders/reorder", {
+        method: "POST",
+        body: JSON.stringify({ order }),
       }),
   },
 
