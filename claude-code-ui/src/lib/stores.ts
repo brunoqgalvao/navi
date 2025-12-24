@@ -209,6 +209,34 @@ function createAdvancedModeStore() {
 
 export const advancedMode = createAdvancedModeStore();
 
+const SHOW_ARCHIVED_KEY = "claude-code-ui-show-archived";
+
+function createShowArchivedStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(SHOW_ARCHIVED_KEY) : null;
+  const { subscribe, set } = writable(stored === "true");
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current = false;
+      subscribe(v => current = v)();
+      const newValue = !current;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(SHOW_ARCHIVED_KEY, String(newValue));
+      }
+      set(newValue);
+    },
+    set: (value: boolean) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(SHOW_ARCHIVED_KEY, String(value));
+      }
+      set(value);
+    },
+  };
+}
+
+export const showArchivedWorkspaces = createShowArchivedStore();
+
 export interface TodoItem {
   content: string;
   status: "pending" | "in_progress" | "completed";
@@ -679,3 +707,58 @@ function createSkillsStore() {
 }
 
 export const skillLibrary = createSkillsStore();
+
+export type CostViewMode = "ever" | "today";
+
+export interface CostState {
+  viewMode: CostViewMode;
+  totalEver: number;
+  totalToday: number;
+  projectCosts: Map<string, { ever: number; today: number }>;
+  sessionCosts: Map<string, number>;
+}
+
+function createCostStore() {
+  const { subscribe, set, update } = writable<CostState>({
+    viewMode: "ever",
+    totalEver: 0,
+    totalToday: 0,
+    projectCosts: new Map(),
+    sessionCosts: new Map(),
+  });
+
+  return {
+    subscribe,
+    setViewMode: (mode: CostViewMode) => update((s) => ({ ...s, viewMode: mode })),
+    setTotals: (ever: number, today: number) => update((s) => ({ ...s, totalEver: ever, totalToday: today })),
+    setProjectCost: (projectId: string, ever: number, today: number) =>
+      update((s) => {
+        const costs = new Map(s.projectCosts);
+        costs.set(projectId, { ever, today });
+        return { ...s, projectCosts: costs };
+      }),
+    setSessionCost: (sessionId: string, cost: number) =>
+      update((s) => {
+        const costs = new Map(s.sessionCosts);
+        costs.set(sessionId, cost);
+        return { ...s, sessionCosts: costs };
+      }),
+    addSessionCost: (sessionId: string, additionalCost: number) =>
+      update((s) => {
+        const costs = new Map(s.sessionCosts);
+        const current = costs.get(sessionId) || 0;
+        costs.set(sessionId, current + additionalCost);
+        return { ...s, sessionCosts: costs };
+      }),
+    reset: () =>
+      set({
+        viewMode: "ever",
+        totalEver: 0,
+        totalToday: 0,
+        projectCosts: new Map(),
+        sessionCosts: new Map(),
+      }),
+  };
+}
+
+export const costStore = createCostStore();

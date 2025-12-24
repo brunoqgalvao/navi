@@ -4,9 +4,11 @@
   import SubagentBlock from "./SubagentBlock.svelte";
   import GenerativeUI from "./experimental/GenerativeUI.svelte";
   import MermaidRenderer from "./MermaidRenderer.svelte";
+  import MediaDisplay from "./MediaDisplay.svelte";
   import type { ToolUseBlock, ContentBlock, TextBlock } from "../claude";
   import type { ChatMessage } from "../stores";
   import { processGenerativeUIContent } from "../generative-ui";
+  import { parseMediaContent, type MediaItem } from "../media-parser";
 
   interface Props {
     content: ContentBlock[] | string;
@@ -14,6 +16,7 @@
     advancedMode?: boolean;
     subagentMessages?: ChatMessage[];
     activeSubagents?: Map<string, { elapsed: number }>;
+    basePath?: string;
     onRollback?: () => void;
     onFork?: () => void;
     onPreview?: (path: string) => void;
@@ -28,6 +31,7 @@
     advancedMode = false,
     subagentMessages = [],
     activeSubagents = new Map(),
+    basePath = '',
     onRollback, 
     onFork,
     onPreview,
@@ -78,8 +82,12 @@
   const historyToolCalls = $derived(getHistoryToolCalls(contentHistory));
   const formattedContent = $derived(formatContent(content));
 
+  // Process media content first
+  const mediaResult = $derived(parseMediaContent(formattedContent));
+  const mediaItems = $derived(mediaResult.items);
+  
   // Process generative UI content - simplified approach
-  const genuiResult = $derived(processGenerativeUIContent(formattedContent));
+  const genuiResult = $derived(processGenerativeUIContent(mediaResult.processedContent));
   const processedContent = $derived(genuiResult.processedContent);
   const blocks = $derived(genuiResult.blocks);
 
@@ -144,6 +152,13 @@
 
     <div bind:this={contentElement} class="text-[15px] leading-7 text-gray-800 markdown-body">
       <MermaidRenderer content={processedContent} {renderMarkdown} {jsonBlocksMap} />
+      
+      <!-- Render media items -->
+      {#if mediaItems.length > 0}
+        <div class="my-4">
+          <MediaDisplay items={mediaItems} layout={mediaItems.length === 1 ? 'single' : 'grid'} {basePath} />
+        </div>
+      {/if}
       
       <!-- Render generative UI components inline -->
       {#each blocks as block (block.id)}

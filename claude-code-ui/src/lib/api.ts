@@ -11,6 +11,7 @@ export interface Project {
   sort_order?: number;
   context_window?: number;
   auto_accept_all?: number;
+  archived?: number;
   created_at: number;
   updated_at: number;
   session_count?: number;
@@ -61,7 +62,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   projects: {
-    list: () => request<Project[]>("/projects"),
+    list: (includeArchived: boolean = false) => 
+      request<Project[]>(`/projects${includeArchived ? '?includeArchived=true' : ''}`),
     get: (id: string) => request<Project>(`/projects/${id}`),
     create: (data: { name: string; path: string; description?: string }) =>
       request<Project>("/projects", {
@@ -94,11 +96,17 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ autoAcceptAll }),
       }),
+    setArchived: (id: string, archived: boolean) =>
+      request<Project>(`/projects/${id}/archive`, {
+        method: "POST",
+        body: JSON.stringify({ archived }),
+      }),
   },
 
   sessions: {
     list: (projectId: string) => request<Session[]>(`/projects/${projectId}/sessions`),
-    listRecent: (limit: number = 10) => request<Session[]>(`/sessions/recent?limit=${limit}`),
+    listRecent: (limit: number = 10, includeArchived: boolean = false) => 
+      request<Session[]>(`/sessions/recent?limit=${limit}${includeArchived ? '&includeArchived=true' : ''}`),
     get: (id: string) => request<Session>(`/sessions/${id}`),
     create: (projectId: string, data: { title?: string }) =>
       request<Session>(`/projects/${projectId}/sessions`, {
@@ -439,6 +447,8 @@ export const skillsApi = {
   listEnabled: () => request<Skill[]>("/skills/enabled"),
   listProjectSkills: (projectId: string) => request<Skill[]>(`/projects/${projectId}/skills`),
   scan: () => request<{ success: boolean; results: any }>("/skills/scan", { method: "POST" }),
+  syncGlobal: () => request<{ synced: string[]; skipped: string[]; errors: string[]; total_global: number }>("/skills/sync-global", { method: "POST" }),
+  listGlobal: () => request<Array<{ slug: string; name: string; description: string; path: string }>>("/skills/global"),
   createExamples: () =>
     request<{ success: boolean; created: string[] }>("/skills/examples", { method: "POST" }),
   async importFile(file: File, useAi: boolean = false): Promise<Skill> {
@@ -494,3 +504,41 @@ export interface SkillFileInfo {
   type: "file" | "directory";
   size?: number;
 }
+
+export interface CostSummary {
+  totalEver: number;
+  totalToday: number;
+}
+
+export interface HourlyCost {
+  hour: string;
+  total_cost: number;
+  entry_count: number;
+}
+
+export interface DailyCost {
+  date: string;
+  total_cost: number;
+  entry_count: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface CostAnalytics {
+  totalEver: number;
+  totalToday: number;
+  hourlyCosts: HourlyCost[];
+  dailyCosts: DailyCost[];
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalMessages: number;
+  totalSessions: number;
+  totalCalls: number;
+}
+
+export const costsApi = {
+  getTotal: () => request<CostSummary>("/costs"),
+  getAnalytics: () => request<CostAnalytics>("/costs/analytics"),
+  getProjectCost: (projectId: string) => request<CostSummary>(`/projects/${projectId}/cost`),
+  getSessionCost: (sessionId: string) => request<{ total: number }>(`/sessions/${sessionId}/cost`),
+};

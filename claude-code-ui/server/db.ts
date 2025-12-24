@@ -100,6 +100,27 @@ export async function initDb() {
   try {
     db.run("ALTER TABLE sessions ADD COLUMN favorite INTEGER DEFAULT 0");
   } catch {}
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN archived INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN archived INTEGER DEFAULT 0");
+  } catch {}
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS cost_entries (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      cost_usd REAL NOT NULL,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      timestamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_cost_entries_session ON cost_entries(session_id);
+    CREATE INDEX IF NOT EXISTS idx_cost_entries_project ON cost_entries(project_id);
+    CREATE INDEX IF NOT EXISTS idx_cost_entries_timestamp ON cost_entries(timestamp);
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS skills (
@@ -193,6 +214,7 @@ export interface Project {
   sort_order: number;
   context_window: number;
   auto_accept_all: number;
+  archived: number;
   created_at: number;
   updated_at: number;
 }
@@ -211,6 +233,7 @@ export interface Session {
   sort_order: number;
   auto_accept_all: number;
   favorite: number;
+  archived: number;
   created_at: number;
   updated_at: number;
 }
@@ -256,15 +279,25 @@ export interface ProjectWithStats extends Project {
   summary_updated_at: number | null;
   pinned: number;
   sort_order: number;
+  archived: number;
 }
 
 export const projects = {
-  list: () => queryAll<ProjectWithStats>(`
+  list: (includeArchived: boolean = false) => queryAll<ProjectWithStats>(`
     SELECT p.*, 
       (SELECT COUNT(*) FROM sessions WHERE project_id = p.id) as session_count,
       (SELECT MAX(updated_at) FROM sessions WHERE project_id = p.id) as last_activity
     FROM projects p 
+    ${includeArchived ? '' : 'WHERE p.archived = 0'}
     ORDER BY p.pinned DESC, p.sort_order ASC
+  `),
+  listArchived: () => queryAll<ProjectWithStats>(`
+    SELECT p.*, 
+      (SELECT COUNT(*) FROM sessions WHERE project_id = p.id) as session_count,
+      (SELECT MAX(updated_at) FROM sessions WHERE project_id = p.id) as last_activity
+    FROM projects p 
+    WHERE p.archived = 1
+    ORDER BY p.updated_at DESC
   `),
   get: (id: string) => queryOne<Project>("SELECT * FROM projects WHERE id = ?", [id]),
   create: (id: string, name: string, path: string, description: string | null, created_at: number, updated_at: number) =>
@@ -282,6 +315,8 @@ export const projects = {
     run("UPDATE projects SET sort_order = ? WHERE id = ?", [sortOrder, id]),
   setAutoAcceptAll: (id: string, autoAcceptAll: boolean) =>
     run("UPDATE projects SET auto_accept_all = ?, updated_at = ? WHERE id = ?", [autoAcceptAll ? 1 : 0, Date.now(), id]),
+  setArchived: (id: string, archived: boolean) =>
+    run("UPDATE projects SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
 };
 
 export interface SessionWithProject extends Session {
@@ -291,11 +326,12 @@ export interface SessionWithProject extends Session {
 export const sessions = {
   listByProject: (projectId: string) => 
     queryAll<Session>("SELECT * FROM sessions WHERE project_id = ? ORDER BY pinned DESC, favorite DESC, sort_order ASC, updated_at DESC", [projectId]),
-  listRecent: (limit: number = 10) =>
+  listRecent: (limit: number = 10, includeArchived: boolean = false) =>
     queryAll<SessionWithProject>(`
       SELECT s.*, p.name as project_name 
       FROM sessions s 
       LEFT JOIN projects p ON s.project_id = p.id
+      ${includeArchived ? '' : 'WHERE (p.archived = 0 OR p.archived IS NULL)'}
       ORDER BY s.updated_at DESC 
       LIMIT ?
     `, [limit]),
@@ -306,7 +342,7 @@ export const sessions = {
   updateTitle: (title: string, updated_at: number, id: string) =>
     run("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", [title, updated_at, id]),
   updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, inputTokens: number, outputTokens: number, updated_at: number, id: string) =>
-    run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ?, updated_at = ? WHERE id = ?",
+    run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
         [claude_session_id, model, cost, turns, inputTokens, outputTokens, updated_at, id]),
   delete: (id: string) => run("DELETE FROM sessions WHERE id = ?", [id]),
   togglePin: (id: string, pinned: boolean) =>
@@ -725,5 +761,146 @@ export const skillVersions = {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [version.id, version.skill_id, version.version, version.content_hash, version.changelog, version.created_at]
     );
+  },
+};
+
+export interface CostEntry {
+  id: string;
+  session_id: string;
+  project_id: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  timestamp: number;
+}
+
+export interface HourlyCost {
+  hour: string;
+  total_cost: number;
+  entry_count: number;
+}
+
+function getStartOfToday(): number {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+}
+
+export const costEntries = {
+  create: (entry: CostEntry) => {
+    run(
+      `INSERT INTO cost_entries (id, session_id, project_id, cost_usd, input_tokens, output_tokens, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [entry.id, entry.session_id, entry.project_id, entry.cost_usd, entry.input_tokens, entry.output_tokens, entry.timestamp]
+    );
+  },
+
+  getTotalEver: (): number => {
+    const result = queryOne<{ total: number }>("SELECT COALESCE(SUM(cost_usd), 0) as total FROM cost_entries");
+    return result?.total || 0;
+  },
+
+  getTotalToday: (): number => {
+    const startOfDay = getStartOfToday();
+    const result = queryOne<{ total: number }>(
+      "SELECT COALESCE(SUM(cost_usd), 0) as total FROM cost_entries WHERE timestamp >= ?",
+      [startOfDay]
+    );
+    return result?.total || 0;
+  },
+
+  getProjectTotalEver: (projectId: string): number => {
+    const result = queryOne<{ total: number }>(
+      "SELECT COALESCE(SUM(cost_usd), 0) as total FROM cost_entries WHERE project_id = ?",
+      [projectId]
+    );
+    return result?.total || 0;
+  },
+
+  getProjectTotalToday: (projectId: string): number => {
+    const startOfDay = getStartOfToday();
+    const result = queryOne<{ total: number }>(
+      "SELECT COALESCE(SUM(cost_usd), 0) as total FROM cost_entries WHERE project_id = ? AND timestamp >= ?",
+      [projectId, startOfDay]
+    );
+    return result?.total || 0;
+  },
+
+  getSessionTotal: (sessionId: string): number => {
+    const result = queryOne<{ total: number }>(
+      "SELECT COALESCE(SUM(cost_usd), 0) as total FROM cost_entries WHERE session_id = ?",
+      [sessionId]
+    );
+    return result?.total || 0;
+  },
+
+  getHourlyCosts: (days: number = 7): HourlyCost[] => {
+    const startTime = Date.now() - days * 24 * 60 * 60 * 1000;
+    return queryAll<HourlyCost>(
+      `SELECT 
+        strftime('%Y-%m-%d %H:00', timestamp / 1000, 'unixepoch', 'localtime') as hour,
+        SUM(cost_usd) as total_cost,
+        COUNT(*) as entry_count
+      FROM cost_entries 
+      WHERE timestamp >= ?
+      GROUP BY hour
+      ORDER BY hour DESC`,
+      [startTime]
+    );
+  },
+
+  getDailyCosts: (days: number = 30): { date: string; total_cost: number; entry_count: number; input_tokens: number; output_tokens: number }[] => {
+    const startTime = Date.now() - days * 24 * 60 * 60 * 1000;
+    return queryAll(
+      `SELECT 
+        strftime('%Y-%m-%d', timestamp / 1000, 'unixepoch', 'localtime') as date,
+        SUM(cost_usd) as total_cost,
+        COUNT(*) as entry_count,
+        SUM(input_tokens) as input_tokens,
+        SUM(output_tokens) as output_tokens
+      FROM cost_entries 
+      WHERE timestamp >= ?
+      GROUP BY date
+      ORDER BY date ASC`,
+      [startTime]
+    );
+  },
+
+  getTotalTokens: (): { input_tokens: number; output_tokens: number } => {
+    const result = queryOne<{ input_tokens: number; output_tokens: number }>(
+      "SELECT COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens FROM cost_entries"
+    );
+    return result || { input_tokens: 0, output_tokens: 0 };
+  },
+
+  getTotalMessages: (): number => {
+    const result = queryOne<{ count: number }>("SELECT COUNT(*) as count FROM messages");
+    return result?.count || 0;
+  },
+
+  getTotalSessions: (): number => {
+    const result = queryOne<{ count: number }>("SELECT COUNT(*) as count FROM sessions");
+    return result?.count || 0;
+  },
+
+  getAnalytics: () => {
+    const totalEver = costEntries.getTotalEver();
+    const totalToday = costEntries.getTotalToday();
+    const hourlyCosts = costEntries.getHourlyCosts(7);
+    const dailyCosts = costEntries.getDailyCosts(30);
+    const tokens = costEntries.getTotalTokens();
+    const totalMessages = costEntries.getTotalMessages();
+    const totalSessions = costEntries.getTotalSessions();
+    const totalCalls = queryOne<{ count: number }>("SELECT COUNT(*) as count FROM cost_entries")?.count || 0;
+    return { 
+      totalEver, 
+      totalToday, 
+      hourlyCosts, 
+      dailyCosts,
+      totalInputTokens: tokens.input_tokens,
+      totalOutputTokens: tokens.output_tokens,
+      totalMessages,
+      totalSessions,
+      totalCalls,
+    };
   },
 };

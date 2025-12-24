@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { api, type PermissionSettings } from "../api";
+  import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, onboardingComplete, tour } from "../stores";
+  import { advancedMode, onboardingComplete, tour, showArchivedWorkspaces } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
 
   interface Props {
@@ -11,8 +11,11 @@
 
   let { open, onClose }: Props = $props();
 
-  type Tab = "api" | "permissions" | "claude-md" | "skills" | "features";
+  type Tab = "api" | "permissions" | "claude-md" | "skills" | "features" | "analytics";
   let activeTab: Tab = $state("api");
+
+  let analytics = $state<CostAnalytics | null>(null);
+  let loadingAnalytics = $state(false);
 
   let hasOpenAIKey = $state(false);
   let openAIKeyPreview: string | null = $state(null);
@@ -56,6 +59,7 @@
     { id: "claude-md", label: "CLAUDE.md", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
     { id: "skills", label: "Skills", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
     { id: "features", label: "Features", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" },
+    { id: "analytics", label: "Analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   ];
 
   onMount(() => {
@@ -65,6 +69,23 @@
   $effect(() => {
     if (open) loadStatus();
   });
+
+  $effect(() => {
+    if (activeTab === "analytics" && !analytics && !loadingAnalytics) {
+      loadAnalytics();
+    }
+  });
+
+  async function loadAnalytics() {
+    loadingAnalytics = true;
+    try {
+      analytics = await costsApi.getAnalytics();
+    } catch (e) {
+      console.error("Failed to load analytics:", e);
+    } finally {
+      loadingAnalytics = false;
+    }
+  }
 
   async function loadStatus() {
     loading = true;
@@ -767,6 +788,21 @@
                 <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
                   <div class="flex items-center justify-between">
                     <div>
+                      <h5 class="font-medium text-gray-900">Show Archived Workspaces</h5>
+                      <p class="text-sm text-gray-500">Display archived workspaces in the sidebar</p>
+                    </div>
+                    <button
+                      onclick={() => showArchivedWorkspaces.toggle()}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$showArchivedWorkspaces ? 'bg-gray-900' : 'bg-gray-300'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$showArchivedWorkspaces ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
                       <h5 class="font-medium text-gray-900">Show Onboarding</h5>
                       <p class="text-sm text-gray-500">View the welcome screen and setup wizard again</p>
                     </div>
@@ -815,6 +851,132 @@
                   </div>
                 </div>
               </div>
+            </div>
+
+          {:else if activeTab === "analytics"}
+            <div class="space-y-6">
+              <div>
+                <h4 class="text-lg font-semibold text-gray-900 mb-1">Usage Analytics</h4>
+                <p class="text-sm text-gray-500">Track your API usage, tokens, and costs over time.</p>
+              </div>
+
+              {#if loadingAnalytics}
+                <div class="flex items-center justify-center py-12">
+                  <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                </div>
+              {:else if analytics}
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
+                    <div class="text-xs text-gray-500 uppercase tracking-wide">Total Cost</div>
+                    <div class="text-xl font-semibold text-gray-900 font-mono">${(analytics.totalEver || 0).toFixed(4)}</div>
+                  </div>
+                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
+                    <div class="text-xs text-gray-500 uppercase tracking-wide">Today</div>
+                    <div class="text-xl font-semibold text-gray-900 font-mono">${(analytics.totalToday || 0).toFixed(4)}</div>
+                  </div>
+                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
+                    <div class="text-xs text-gray-500 uppercase tracking-wide">API Calls</div>
+                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalCalls || 0).toLocaleString()}</div>
+                  </div>
+                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
+                    <div class="text-xs text-gray-500 uppercase tracking-wide">Sessions</div>
+                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalSessions || 0).toLocaleString()}</div>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
+                    <div class="text-xs text-gray-500 uppercase tracking-wide">Messages</div>
+                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalMessages || 0).toLocaleString()}</div>
+                  </div>
+                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
+                    <div class="text-xs text-gray-500 uppercase tracking-wide">Input Tokens</div>
+                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalInputTokens || 0).toLocaleString()}</div>
+                  </div>
+                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
+                    <div class="text-xs text-gray-500 uppercase tracking-wide">Output Tokens</div>
+                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalOutputTokens || 0).toLocaleString()}</div>
+                  </div>
+                </div>
+
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <h5 class="font-medium text-gray-900 mb-4">Daily Cost (Last 30 Days)</h5>
+                  {#if analytics.dailyCosts.length === 0}
+                    <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                  {:else}
+                    {@const maxCost = Math.max(...analytics.dailyCosts.map(d => d.total_cost), 0.0001)}
+                    <div class="h-32 flex items-end gap-0.5 mb-2">
+                      {#each analytics.dailyCosts as day, i}
+                        {@const costHeight = (day.total_cost / maxCost) * 100}
+                        <div class="flex-1 flex flex-col items-center group relative">
+                          <div 
+                            class="w-full bg-blue-400 rounded-t transition-all hover:bg-blue-500 min-h-[2px]" 
+                            style="height: {Math.max(costHeight, 2)}%"
+                          ></div>
+                          <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg">
+                            <div class="font-medium">{day.date}</div>
+                            <div class="text-gray-300">${(day.total_cost || 0).toFixed(4)}</div>
+                            <div class="text-gray-400">{((day.input_tokens || 0) + (day.output_tokens || 0)).toLocaleString()} tokens</div>
+                            <div class="text-gray-400">{day.entry_count || 0} calls</div>
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-400">
+                      <span>{analytics.dailyCosts[0]?.date}</span>
+                      <span>{analytics.dailyCosts[analytics.dailyCosts.length - 1]?.date}</span>
+                    </div>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <h5 class="font-medium text-gray-900 mb-4">Daily Breakdown</h5>
+                  {#if analytics.dailyCosts.length === 0}
+                    <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                  {:else}
+                    <div class="space-y-1 max-h-[250px] overflow-y-auto">
+                      {#each [...analytics.dailyCosts].reverse() as day}
+                        <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                          <span class="text-sm text-gray-600">{day.date}</span>
+                          <div class="flex items-center gap-4">
+                            <span class="text-xs text-gray-400">{day.entry_count || 0} calls</span>
+                            <span class="text-xs text-blue-500">{((day.input_tokens || 0) + (day.output_tokens || 0)).toLocaleString()} tok</span>
+                            <span class="font-mono text-sm text-gray-900 w-20 text-right">${(day.total_cost || 0).toFixed(4)}</span>
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <h5 class="font-medium text-gray-900 mb-4">Hourly Activity (Last 7 Days)</h5>
+                  {#if analytics.hourlyCosts.length === 0}
+                    <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                  {:else}
+                    <div class="space-y-1 max-h-[200px] overflow-y-auto">
+                      {#each analytics.hourlyCosts as hour}
+                        <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                          <span class="text-sm text-gray-600">{hour.hour}</span>
+                          <div class="flex items-center gap-3">
+                            <span class="text-xs text-gray-400">{hour.entry_count} calls</span>
+                            <span class="font-mono text-sm text-gray-900">${hour.total_cost.toFixed(4)}</span>
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+
+                <button
+                  onclick={loadAnalytics}
+                  class="w-full py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg transition-colors"
+                >
+                  Refresh Analytics
+                </button>
+              {:else}
+                <p class="text-sm text-gray-500 text-center py-8">Failed to load analytics</p>
+              {/if}
             </div>
           {/if}
         </div>

@@ -1,12 +1,15 @@
 <script lang="ts">
   import FileAttachment from "./FileAttachment.svelte";
   import CopyButton from "./CopyButton.svelte";
+  import MediaDisplay from "./MediaDisplay.svelte";
+  import { parseUserMediaContent, type MediaItem } from "../media-parser";
 
   interface Props {
     content: string;
     timestamp: Date;
     isEditing?: boolean;
     editContent?: string;
+    basePath?: string;
     onEdit?: () => void;
     onSaveEdit?: (content: string) => void;
     onCancelEdit?: () => void;
@@ -20,6 +23,7 @@
     timestamp, 
     isEditing = false, 
     editContent = $bindable(""),
+    basePath = '',
     onEdit, 
     onSaveEdit, 
     onCancelEdit, 
@@ -33,6 +37,7 @@
   interface ParsedContent {
     files: { path: string; name: string }[];
     segments: { type: 'text' | 'mention'; value: string; path?: string }[];
+    mediaItems: MediaItem[];
   }
 
   function parseContent(text: string): ParsedContent {
@@ -46,7 +51,8 @@
       files.push({ path, name });
     }
     
-    const cleanText = text.replace(/\[File: [^\]]+\]\n*/g, "").trim();
+    const { mediaItems, textContent: afterMedia } = parseUserMediaContent(text.replace(/\[File: [^\]]+\]\n*/g, ""));
+    const cleanText = afterMedia.trim();
     
     const segments: { type: 'text' | 'mention'; value: string; path?: string }[] = [];
     const mentionPattern = /@([\w./-]+)/g;
@@ -75,7 +81,7 @@
       segments.push({ type: 'text', value: cleanText });
     }
     
-    return { files, segments };
+    return { files, segments, mediaItems };
   }
 
   const parsed = $derived(parseContent(content));
@@ -105,6 +111,11 @@
       {#if parsed.files.length > 0}
         <div class="mb-2">
           <FileAttachment files={parsed.files} onPreview={onPreview} />
+        </div>
+      {/if}
+      {#if parsed.mediaItems.length > 0}
+        <div class="mb-2">
+          <MediaDisplay items={parsed.mediaItems} layout={parsed.mediaItems.length === 1 ? 'single' : 'grid'} {basePath} />
         </div>
       {/if}
       {#if parsed.segments.length > 0}

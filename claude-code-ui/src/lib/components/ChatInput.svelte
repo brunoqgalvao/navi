@@ -9,17 +9,23 @@
     type: "file" | "directory";
   }
 
+  interface Skill {
+    name: string;
+    path: string;
+  }
+
   interface Props {
     value: string;
     disabled?: boolean;
     loading?: boolean;
     queuedCount?: number;
     projectPath?: string;
+    activeSkills?: Skill[];
     onSubmit: () => void;
     onStop?: () => void;
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, onSubmit, onStop }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], onSubmit, onStop }: Props = $props();
 
   let inputRef: HTMLTextAreaElement | null = $state(null);
   let audioRecorderRef: { toggleRecording: () => void; isRecording: () => boolean } | null = $state(null);
@@ -206,6 +212,40 @@
   function removeAttachedFile(path: string) {
     attachedFiles.remove(path);
   }
+
+  async function handlePaste(e: ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items || !projectPath) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+
+        const ext = item.type.split("/")[1] || "png";
+        const timestamp = Date.now();
+        const fileName = `pasted-image-${timestamp}.${ext}`;
+
+        const formData = new FormData();
+        formData.append("file", blob, fileName);
+        formData.append("targetDir", projectPath);
+
+        try {
+          const res = await fetch("http://localhost:3001/api/fs/upload", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await res.json();
+          if (data.success) {
+            attachedFiles.add({ path: data.path, name: data.name, type: "file" });
+          }
+        } catch (err) {
+          console.error("Failed to upload pasted image:", err);
+        }
+      }
+    }
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -244,6 +284,7 @@
       bind:value
       onkeydown={handleKeydown}
       oninput={handleInput}
+      onpaste={handlePaste}
       placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : "Message Claude... (@ to attach files)"}
       {disabled}
       class="w-full bg-transparent text-gray-900 placeholder-gray-400 border-none rounded-xl pl-4 pr-24 py-3.5 focus:outline-none focus:ring-0 resize-none max-h-48 min-h-[56px] text-[15px] disabled:opacity-50"
@@ -309,4 +350,15 @@
       </button>
     {/if}
   </div>
+
+  {#if activeSkills.length > 0}
+    <div class="absolute -bottom-6 left-3 flex items-center gap-1">
+      {#each activeSkills.slice(0, 3) as skill}
+        <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded font-medium">{skill.name}</span>
+      {/each}
+      {#if activeSkills.length > 3}
+        <span class="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">+{activeSkills.length - 3}</span>
+      {/if}
+    </div>
+  {/if}
 </div>

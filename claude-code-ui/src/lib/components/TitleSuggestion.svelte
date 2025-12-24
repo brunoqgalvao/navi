@@ -78,7 +78,8 @@
   }
 
   async function generateSuggestion() {
-    console.log("[TitleSuggestion] generateSuggestion called, currentTitle:", currentTitle);
+    const titleToCheck = currentTitle || "New Chat";
+    console.log("[TitleSuggestion] generateSuggestion called, currentTitle:", titleToCheck);
     const recentMessages = messages
       .filter(m => !m.parentToolUseId)
       .slice(-6);
@@ -89,23 +90,17 @@
     
     try {
       const response = await api.ephemeral.chat({
-        prompt: `Current title: "${currentTitle}"\n\nConversation:\n${conversationContext}`,
-        systemPrompt: `You review chat titles. Given the current title and conversation, decide if the title needs improvement.
+        prompt: `<current_title>${titleToCheck}</current_title>\n\n<conversation>\n${conversationContext}\n</conversation>`,
+        systemPrompt: `You suggest chat titles. Given a conversation, suggest a better title or confirm the current one is good.
 
-Rules:
-- If the current title is good enough, respond exactly: NO_CHANGE
-- If it needs improvement, respond with ONLY the new title
-- Use Title Case (capitalize first letter of each word)
-- Keep it short: 3-6 words
-- No quotes, no explanation, no punctuation at the end
-- Never use ALL CAPS
+IMPORTANT: Respond with ONLY one of these two options:
+1. The word NO_CHANGE (if current title is good)
+2. A new title (3-6 words, Title Case)
 
-Examples of good responses:
-NO_CHANGE
-Debug React Components
-Fix Database Connection
-Setup User Authentication
-Portuguese Chat Assistance`,
+Do NOT include any explanation, quotes, or extra text. Just the title or NO_CHANGE.
+
+Good responses: NO_CHANGE, Debug React Components, Fix Database Connection
+Bad responses: "Debug React", Current title: ..., The new title should be...`,
         model: "claude-3-haiku-20240307",
         maxTokens: 20,
         provider: "anthropic"
@@ -114,22 +109,29 @@ Portuguese Chat Assistance`,
       const result = response.result.trim();
       console.log("[TitleSuggestion] LLM response:", result);
       
-      // Extract just the title if LLM added extra text
-      let firstLine = result.split('\n')[0].trim();
+      // Extract just the title - take first line and clean it up
+      let title = result.split('\n')[0].trim();
       
-      if (firstLine && 
-          firstLine !== "NO_CHANGE" && 
-          firstLine.toLowerCase() !== "no_change" &&
-          firstLine.length < 50) {
+      // Remove common prefixes the LLM might add
+      title = title.replace(/^(new title:|suggested title:|title:)\s*/i, '');
+      title = title.replace(/^["']|["']$/g, '');
+      title = title.trim();
+      
+      if (title && 
+          title.toLowerCase() !== "no_change" && 
+          title.toLowerCase() !== "no change" &&
+          !title.toLowerCase().startsWith("current title") &&
+          title.length >= 3 &&
+          title.length < 50) {
         // Fix all caps by converting to title case
-        if (firstLine === firstLine.toUpperCase()) {
-          firstLine = toTitleCase(firstLine);
+        if (title === title.toUpperCase() && title.length > 3) {
+          title = toTitleCase(title);
         }
-        suggestedTitle = firstLine.replace(/^["']|["']$/g, '');
+        suggestedTitle = title;
         showSuggestion = true;
         console.log("[TitleSuggestion] Showing suggestion:", suggestedTitle);
       } else {
-        console.log("[TitleSuggestion] No change needed");
+        console.log("[TitleSuggestion] No change needed or invalid response");
       }
     } catch (e) {
       console.error("[TitleSuggestion] Failed to generate suggestion:", e);

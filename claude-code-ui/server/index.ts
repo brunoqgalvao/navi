@@ -1,5 +1,5 @@
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { initDb, projects, sessions, messages, globalSettings, searchIndex, skills as skillsDb, enabledSkills as enabledSkillsDb, skillVersions, DEFAULT_TOOLS, DANGEROUS_TOOLS, type Project, type Session, type Message } from "./db";
+import { initDb, projects, sessions, messages, globalSettings, searchIndex, skills as skillsDb, enabledSkills as enabledSkillsDb, skillVersions, costEntries, DEFAULT_TOOLS, DANGEROUS_TOOLS, type Project, type Session, type Message } from "./db";
 import { spawn, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -161,7 +161,8 @@ const server = Bun.serve({
 
     if (url.pathname === "/api/projects") {
       if (method === "GET") {
-        return json(projects.list());
+        const includeArchived = url.searchParams.get("includeArchived") === "true";
+        return json(projects.list(includeArchived));
       }
       if (method === "POST") {
         const body = await req.json();
@@ -227,6 +228,14 @@ const server = Bun.serve({
       return json(projects.get(id));
     }
 
+    const projectArchiveMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/archive$/);
+    if (projectArchiveMatch && method === "POST") {
+      const id = projectArchiveMatch[1];
+      const body = await req.json();
+      projects.setArchived(id, body.archived);
+      return json(projects.get(id));
+    }
+
     const projectsReorderMatch = url.pathname === "/api/projects/reorder";
     if (projectsReorderMatch && method === "POST") {
       const body = await req.json();
@@ -238,7 +247,8 @@ const server = Bun.serve({
 
     if (url.pathname === "/api/sessions/recent" && method === "GET") {
       const limit = parseInt(url.searchParams.get("limit") || "10");
-      return json(sessions.listRecent(limit));
+      const includeArchived = url.searchParams.get("includeArchived") === "true";
+      return json(sessions.listRecent(limit, includeArchived));
     }
 
     const sessionsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions$/);
@@ -1855,6 +1865,36 @@ ${content.slice(0, 8000)}`;
       }
     }
 
+    if (url.pathname === "/api/costs") {
+      if (method === "GET") {
+        return json({
+          totalEver: costEntries.getTotalEver(),
+          totalToday: costEntries.getTotalToday(),
+        });
+      }
+    }
+
+    if (url.pathname === "/api/costs/analytics" && method === "GET") {
+      return json(costEntries.getAnalytics());
+    }
+
+    const projectCostMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/cost$/);
+    if (projectCostMatch && method === "GET") {
+      const projectId = projectCostMatch[1];
+      return json({
+        totalEver: costEntries.getProjectTotalEver(projectId),
+        totalToday: costEntries.getProjectTotalToday(projectId),
+      });
+    }
+
+    const sessionCostMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/cost$/);
+    if (sessionCostMatch && method === "GET") {
+      const sessionId = sessionCostMatch[1];
+      return json({
+        total: costEntries.getSessionTotal(sessionId),
+      });
+    }
+
     if (url.pathname === "/api/permissions") {
       if (method === "GET") {
         return json({
@@ -2619,16 +2659,31 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
           }
 
           if (sessionId && msg.resultData) {
+            const costUsd = msg.resultData.total_cost_usd || 0;
             sessions.updateClaudeSession(
               msg.resultData.session_id,
               msg.resultData.model || null,
-              msg.resultData.total_cost_usd || 0,
+              costUsd,
               msg.resultData.num_turns || 0,
               msg.resultData.usage?.input_tokens || 0,
               msg.resultData.usage?.output_tokens || 0,
               Date.now(),
               sessionId
             );
+            if (costUsd > 0) {
+              const sess = sessions.get(sessionId);
+              if (sess) {
+                costEntries.create({
+                  id: crypto.randomUUID(),
+                  session_id: sessionId,
+                  project_id: sess.project_id,
+                  cost_usd: costUsd,
+                  input_tokens: msg.resultData.usage?.input_tokens || 0,
+                  output_tokens: msg.resultData.usage?.output_tokens || 0,
+                  timestamp: Date.now(),
+                });
+              }
+            }
           }
 
           ws.send(JSON.stringify({ type: "done", uiSessionId: sessionId }));
@@ -2756,16 +2811,31 @@ async function handleQuery(ws: any, data: ClientMessage) {
     }
 
     if (sessionId && resultData) {
+      const costUsd = resultData.total_cost_usd || 0;
       sessions.updateClaudeSession(
         resultData.session_id,
         resultData.model || null,
-        resultData.total_cost_usd || 0,
+        costUsd,
         resultData.num_turns || 0,
         resultData.usage?.input_tokens || 0,
         resultData.usage?.output_tokens || 0,
         Date.now(),
         sessionId
       );
+      if (costUsd > 0) {
+        const sess = sessions.get(sessionId);
+        if (sess) {
+          costEntries.create({
+            id: crypto.randomUUID(),
+            session_id: sessionId,
+            project_id: sess.project_id,
+            cost_usd: costUsd,
+            input_tokens: resultData.usage?.input_tokens || 0,
+            output_tokens: resultData.usage?.output_tokens || 0,
+            timestamp: Date.now(),
+          });
+        }
+      }
     }
 
     ws.send(JSON.stringify({ type: "done", sessionId }));

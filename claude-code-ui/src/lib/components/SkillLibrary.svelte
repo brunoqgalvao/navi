@@ -57,6 +57,7 @@
     loading = true;
     error = null;
     try {
+      await skillsApi.syncGlobal();
       const skills = await skillsApi.list();
       skillLibrary.set(skills);
       showCreateExamples = skills.length === 0;
@@ -82,6 +83,7 @@
   async function handleScan() {
     scanning = true;
     try {
+      await skillsApi.syncGlobal();
       await skillsApi.scan();
       await loadSkills();
     } catch (e: any) {

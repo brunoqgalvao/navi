@@ -2,9 +2,9 @@
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, attachedFiles, sessionDebugInfo, type ChatMessage, type TodoItem, type TourStep, type AttachedFile } from "./lib/stores";
+  import { sessionMessages, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, type ChatMessage, type TodoItem, type TourStep, type AttachedFile, type CostViewMode } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
-  import { api, skillsApi, type Project, type Session, type Skill } from "./lib/api";
+  import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
   import hljs from "highlight.js";
@@ -165,6 +165,7 @@
   let draggedSessionId = $state<string | null>(null);
   let dragOverSessionId = $state<string | null>(null);
   let sessionMenuId = $state<string | null>(null);
+  let sessionMenuPos = $state<{ top: number; left: number }>({ top: 0, left: 0 });
   let projectMenuId = $state<string | null>(null);
   let showProjectPermissions = $state<Project | null>(null);
   let globalPermissionSettings = $state<PermissionSettings | null>(null);
@@ -420,6 +421,7 @@
     loadConfig();
     loadModels();
     loadPermissions();
+    loadCosts();
 
     client = new ClaudeClient();
     try {
@@ -461,20 +463,52 @@
 
   async function loadProjects() {
     try {
-      sidebarProjects = await api.projects.list();
+      sidebarProjects = await api.projects.list($showArchivedWorkspaces);
       projects.set(sidebarProjects);
     } catch (e) {
       console.error("Failed to load projects:", e);
     }
   }
+  
+  $effect(() => {
+    const _ = $showArchivedWorkspaces;
+    loadProjects();
+  });
+
+  async function toggleProjectArchive(proj: Project, e: MouseEvent) {
+    e.stopPropagation();
+    const newArchived = !proj.archived;
+    try {
+      await api.projects.setArchived(proj.id, newArchived);
+      if (!$showArchivedWorkspaces && newArchived) {
+        sidebarProjects = sidebarProjects.filter(p => p.id !== proj.id);
+        recentChats = recentChats.filter(c => c.project_id !== proj.id);
+      } else {
+        sidebarProjects = sidebarProjects.map(p => 
+          p.id === proj.id ? { ...p, archived: newArchived ? 1 : 0 } : p
+        );
+        if (!newArchived) {
+          loadRecentChats();
+        }
+      }
+      projects.set(sidebarProjects);
+    } catch (e) {
+      console.error("Failed to toggle archive:", e);
+    }
+  }
 
   async function loadRecentChats() {
     try {
-      recentChats = await api.sessions.listRecent(10);
+      recentChats = await api.sessions.listRecent(10, $showArchivedWorkspaces);
     } catch (e) {
       console.error("Failed to load recent chats:", e);
     }
   }
+  
+  $effect(() => {
+    const _ = $showArchivedWorkspaces;
+    loadRecentChats();
+  });
 
   async function loadConfig() {
     try {
@@ -507,6 +541,24 @@
     }
   }
 
+  async function loadCosts() {
+    try {
+      const costs = await costsApi.getTotal();
+      costStore.setTotals(costs.totalEver, costs.totalToday);
+    } catch (e) {
+      console.error("Failed to load costs:", e);
+    }
+  }
+
+  async function loadProjectCost(projectId: string) {
+    try {
+      const costs = await costsApi.getProjectCost(projectId);
+      costStore.setProjectCost(projectId, costs.totalEver, costs.totalToday);
+    } catch (e) {
+      console.error("Failed to load project cost:", e);
+    }
+  }
+
   function handleModelSelect(model: string) {
     modelSelection = model;
     session.setSelectedModel(model);
@@ -535,6 +587,7 @@
     indexProjectFiles(project.path);
     loadProjectContext(project);
     loadClaudeMd(project.path);
+    loadProjectCost(project.id);
     
     if (!$tour.completedTours.includes("project")) {
       setTimeout(() => tour.start("project"), 500);
@@ -556,7 +609,15 @@
   }
 
   async function goToChat(chat: Session) {
-    const project = sidebarProjects.find(p => p.id === chat.project_id);
+    let project = sidebarProjects.find(p => p.id === chat.project_id);
+    if (!project) {
+      try {
+        project = await api.projects.get(chat.project_id);
+      } catch (e) {
+        console.error("Failed to load project:", e);
+        return;
+      }
+    }
     if (!project) return;
     
     session.setProject(chat.project_id);
@@ -814,6 +875,14 @@ Respond in this exact JSON format only, no other text:
     session.setCost(s.total_cost_usd || 0);
     session.setUsage(s.input_tokens || 0, s.output_tokens || 0);
     sessionStatus.markSeen(s.id);
+    
+    try {
+      const freshSession = await api.sessions.get(s.id);
+      if (freshSession) {
+        session.setUsage(freshSession.input_tokens || 0, freshSession.output_tokens || 0);
+        session.setCost(freshSession.total_cost_usd || 0);
+      }
+    } catch {}
     
     if (!$sessionMessages.has(s.id)) {
       try {
@@ -1131,17 +1200,22 @@ Respond in this exact JSON format only, no other text:
         break;
 
       case "result":
+        const resultCost = (msg as any).costUsd || 0;
         if (uiSessionId && uiSessionId === $session.sessionId) {
-          session.setCost($session.costUsd + ((msg as any).costUsd || 0));
+          session.setCost($session.costUsd + resultCost);
           if ((msg as any).usage) {
             const usage = (msg as any).usage;
             const totalInputTokens = (usage.input_tokens || 0) + 
               (usage.cache_creation_input_tokens || 0) + 
               (usage.cache_read_input_tokens || 0);
-            session.setUsage(
-              $session.inputTokens + totalInputTokens,
-              $session.outputTokens + (usage.output_tokens || 0)
-            );
+            session.setUsage(totalInputTokens, usage.output_tokens || 0);
+          }
+        }
+        if (uiSessionId && resultCost > 0) {
+          costStore.addSessionCost(uiSessionId, resultCost);
+          loadCosts();
+          if ($session.projectId) {
+            loadProjectCost($session.projectId);
           }
         }
         if (uiSessionId) {
@@ -1908,8 +1982,10 @@ Respond in this exact JSON format only, no other text:
                             >
                                 <div class="flex items-center gap-2">
                                     <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                                    <span class="text-[13px] font-medium truncate">{proj.name}</span>
-                                    {#if $projectStatus.get(proj.id) === "attention"}
+                                    <span class="text-[13px] font-medium truncate {proj.archived ? 'text-gray-400' : ''}">{proj.name}</span>
+                                    {#if proj.archived}
+                                        <span class="shrink-0 text-[9px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded" title="Archived">Archived</span>
+                                    {:else if $projectStatus.get(proj.id) === "attention"}
                                         <span class="shrink-0 w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Needs attention"></span>
                                     {:else if $projectStatus.get(proj.id) === "active"}
                                         <span class="shrink-0 w-1.5 h-1.5 bg-blue-400 rounded-full" title="Active"></span>
@@ -1945,6 +2021,13 @@ Respond in this exact JSON format only, no other text:
                                             >
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                                                 Permissions
+                                            </button>
+                                            <button 
+                                                onclick={(e) => { toggleProjectArchive(proj, e); projectMenuId = null; }}
+                                                class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                            >
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                                                {proj.archived ? 'Unarchive' : 'Archive'}
                                             </button>
                                             <div class="border-t border-gray-100 my-1"></div>
                                             <button 
@@ -2105,7 +2188,7 @@ Respond in this exact JSON format only, no other text:
 
                                 </button>
 
-                                <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 z-20">
+                                <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 {sessionMenuId === sess.id ? 'z-[70]' : 'z-20'}">
                                     {#if $sessionStatus.get(sess.id)?.status === "running"}
                                         <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                                     {:else if $sessionStatus.get(sess.id)?.status === "permission"}
@@ -2228,8 +2311,27 @@ Respond in this exact JSON format only, no other text:
         </div>
 
         <div class="flex items-center gap-2">
-          {#if $session.costUsd > 0}
-              <span class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200">${$session.costUsd.toFixed(4)}</span>
+          {#if $session.sessionId && $session.costUsd > 0}
+              <span class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200" title="Session cost">${$session.costUsd.toFixed(4)}</span>
+          {:else if $session.projectId}
+              {@const projectCost = $costStore.projectCosts.get($session.projectId)}
+              {#if projectCost}
+                <button 
+                  onclick={() => costStore.setViewMode($costStore.viewMode === 'ever' ? 'today' : 'ever')}
+                  class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200 hover:bg-gray-300/50 transition-colors"
+                  title="Project cost ({$costStore.viewMode === 'ever' ? 'all time' : 'today'}) - click to toggle"
+                >
+                  ${($costStore.viewMode === 'ever' ? projectCost.ever : projectCost.today).toFixed(4)}
+                </button>
+              {/if}
+          {:else if $costStore.totalEver > 0}
+              <button 
+                onclick={() => costStore.setViewMode($costStore.viewMode === 'ever' ? 'today' : 'ever')}
+                class="text-gray-600 font-mono bg-gray-200/50 px-1.5 py-0.5 rounded border border-gray-200 hover:bg-gray-300/50 transition-colors"
+                title="Total cost ({$costStore.viewMode === 'ever' ? 'all time' : 'today'}) - click to toggle"
+              >
+                ${($costStore.viewMode === 'ever' ? $costStore.totalEver : $costStore.totalToday).toFixed(4)}
+              </button>
           {/if}
           <button onclick={() => showSearchModal = true} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Search (Cmd+K)">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
@@ -2443,6 +2545,7 @@ Respond in this exact JSON format only, no other text:
                           timestamp={msg.timestamp}
                           isEditing={editingMessageId === msg.id}
                           bind:editContent={editingMessageContent}
+                          basePath={currentProject?.path || ''}
                           onEdit={() => startEditMessage(msg.id)}
                           onSaveEdit={saveEditedMessage}
                           onCancelEdit={cancelEditMessage}
@@ -2470,6 +2573,7 @@ Respond in this exact JSON format only, no other text:
                           advancedMode={$advancedMode}
                           subagentMessages={currentMessages.filter(m => m.parentToolUseId)}
                           {activeSubagents}
+                          basePath={currentProject?.path || ''}
                           onRollback={() => rollbackToMessage(msg.id)}
                           onFork={() => forkFromMessage(msg.id)}
                           onPreview={openPreview}
@@ -2553,29 +2657,13 @@ Respond in this exact JSON format only, no other text:
         <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}" data-tour="chat-input">
 
             <div class="w-full max-w-3xl pointer-events-auto">
-                {#if activeSkills.length > 0}
-                    <div class="flex items-center gap-1 mb-2 justify-center">
-                        <div class="group relative flex items-center gap-1 px-2 py-1 bg-purple-50 rounded-full border border-purple-200">
-                            <svg class="w-3 h-3 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                            </svg>
-                            <span class="text-[11px] text-purple-600 font-medium">{activeSkills.length} skill{activeSkills.length > 1 ? 's' : ''}</span>
-                            <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50 shadow-lg">
-                                <div class="font-medium mb-1">Active Skills:</div>
-                                {#each activeSkills as skill}
-                                    <div class="text-gray-300">{skill.name}</div>
-                                {/each}
-                                <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
-                            </div>
-                        </div>
-                    </div>
-                {/if}
                 <ChatInput
                     bind:value={inputText}
                     disabled={!$isConnected}
                     loading={currentSessionLoading || false}
                     {queuedCount}
                     projectPath={currentProject?.path}
+                    {activeSkills}
                     onSubmit={sendMessage}
                     onStop={stopGeneration}
                 />

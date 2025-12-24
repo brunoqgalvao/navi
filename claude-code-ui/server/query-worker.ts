@@ -83,6 +83,55 @@ const UI_INSTRUCTIONS = `
 
 This UI supports rich content rendering in your responses. Use these features to enhance your explanations:
 
+### Media Display (Images, Audio, Video)
+
+Use \`media\` code blocks to display images, audio, or video files inline in the chat:
+
+\`\`\`media
+src: /path/to/image.png
+alt: Description of the image
+caption: Optional caption text
+\`\`\`
+
+Multiple items in one block:
+
+\`\`\`media
+src: /screenshots/before.png
+caption: Before changes
+
+src: /screenshots/after.png
+caption: After changes
+\`\`\`
+
+Audio files:
+
+\`\`\`media
+type: audio
+src: /path/to/audio.mp3
+caption: Recording of the meeting
+\`\`\`
+
+Video files:
+
+\`\`\`media
+type: video
+src: /path/to/video.mp4
+caption: Demo video
+\`\`\`
+
+You can also use URLs:
+
+\`\`\`media
+src: https://example.com/image.jpg
+\`\`\`
+
+Supported formats:
+- Images: png, jpg, jpeg, gif, webp, svg, bmp, ico
+- Audio: mp3, wav, ogg, m4a, flac, aac
+- Video: mp4, webm, mov, avi, mkv, m4v
+
+The type is auto-detected from the file extension, but can be overridden with \`type: image|audio|video\`.
+
 ### Mermaid Diagrams
 
 Use mermaid code blocks to create flowcharts, sequence diagrams, and more:
