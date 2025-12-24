@@ -4,6 +4,7 @@
   import hljs from "highlight.js";
   import MermaidRenderer from "./components/MermaidRenderer.svelte";
   import JsonTreeViewer from "./components/JsonTreeViewer.svelte";
+  import { api } from "./api";
 
   type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "json" | "none";
 
@@ -365,6 +366,15 @@
       </div>
       
       <div class="flex items-center gap-1">
+        {#if source && detectedType !== "none" && detectedType !== "url"}
+          <button 
+            onclick={() => api.fs.reveal(source.split('#')[0])} 
+            class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors" 
+            title="Open in Finder"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+          </button>
+        {/if}
         {#if onClose}
           <button onclick={onClose} class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors" title="Close preview">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -520,7 +530,7 @@
         {/if}
       </div>
     {:else if detectedType === "markdown"}
-      <article class="preview-content prose prose-gray max-w-none p-6 prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:text-pink-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
+      <article class="preview-content markdown-preview p-6">
         <MermaidRenderer {content} {renderMarkdown} />
       </article>
     {:else if detectedType === "json"}
@@ -549,14 +559,174 @@
     padding: 0 !important;
   }
   
-  :global(.prose pre) {
-    margin: 1rem 0;
-    border-radius: 0.5rem;
+  :global(.markdown-preview) {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    color: #1f2937;
   }
   
-  :global(.prose pre code) {
-    background: transparent !important;
-    padding: 0 !important;
-    color: inherit !important;
+  :global(.markdown-preview h1) {
+    font-size: 2em;
+    font-weight: 700;
+    margin: 1.5em 0 0.75em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid #e5e7eb;
+    line-height: 1.3;
+  }
+  
+  :global(.markdown-preview h2) {
+    font-size: 1.5em;
+    font-weight: 600;
+    margin: 1.5em 0 0.75em;
+    padding-bottom: 0.25em;
+    border-bottom: 1px solid #e5e7eb;
+    line-height: 1.3;
+  }
+  
+  :global(.markdown-preview h3) {
+    font-size: 1.25em;
+    font-weight: 600;
+    margin: 1.25em 0 0.5em;
+    line-height: 1.4;
+  }
+  
+  :global(.markdown-preview h4) {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin: 1em 0 0.5em;
+    line-height: 1.4;
+  }
+  
+  :global(.markdown-preview h5),
+  :global(.markdown-preview h6) {
+    font-size: 1em;
+    font-weight: 600;
+    margin: 1em 0 0.5em;
+  }
+  
+  :global(.markdown-preview p) {
+    margin: 0 0 1em;
+  }
+  
+  :global(.markdown-preview ul),
+  :global(.markdown-preview ol) {
+    margin: 0 0 1em;
+    padding-left: 2em;
+  }
+  
+  :global(.markdown-preview ul) {
+    list-style-type: disc;
+  }
+  
+  :global(.markdown-preview ol) {
+    list-style-type: decimal;
+  }
+  
+  :global(.markdown-preview li) {
+    margin: 0.35em 0;
+  }
+  
+  :global(.markdown-preview li > ul),
+  :global(.markdown-preview li > ol) {
+    margin: 0.25em 0 0;
+  }
+  
+  :global(.markdown-preview strong) {
+    font-weight: 600;
+    color: #111827;
+  }
+  
+  :global(.markdown-preview em) {
+    font-style: italic;
+  }
+  
+  :global(.markdown-preview blockquote) {
+    margin: 1em 0;
+    padding: 0.5em 1em;
+    border-left: 4px solid #d1d5db;
+    background: #f9fafb;
+    color: #4b5563;
+  }
+  
+  :global(.markdown-preview blockquote p:last-child) {
+    margin-bottom: 0;
+  }
+  
+  :global(.markdown-preview code) {
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.875em;
+    background: #f3f4f6;
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    color: #be185d;
+  }
+  
+  :global(.markdown-preview pre) {
+    margin: 1em 0;
+    padding: 1em;
+    background: #1f2937;
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+  
+  :global(.markdown-preview pre code) {
+    background: none;
+    padding: 0;
+    color: #e5e7eb;
+    font-size: 0.85em;
+    line-height: 1.6;
+  }
+  
+  :global(.markdown-preview a) {
+    color: #2563eb;
+    text-decoration: none;
+  }
+  
+  :global(.markdown-preview a:hover) {
+    text-decoration: underline;
+  }
+  
+  :global(.markdown-preview hr) {
+    margin: 2em 0;
+    border: none;
+    border-top: 1px solid #e5e7eb;
+  }
+  
+  :global(.markdown-preview table) {
+    width: 100%;
+    margin: 1em 0;
+    border-collapse: collapse;
+    font-size: 0.9em;
+  }
+  
+  :global(.markdown-preview th),
+  :global(.markdown-preview td) {
+    padding: 0.75em 1em;
+    border: 1px solid #e5e7eb;
+    text-align: left;
+  }
+  
+  :global(.markdown-preview th) {
+    background: #f9fafb;
+    font-weight: 600;
+  }
+  
+  :global(.markdown-preview tr:nth-child(even)) {
+    background: #fafafa;
+  }
+  
+  :global(.markdown-preview img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  
+  :global(.markdown-preview > *:first-child) {
+    margin-top: 0;
+  }
+  
+  :global(.markdown-preview > *:last-child) {
+    margin-bottom: 0;
   }
 </style>

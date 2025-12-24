@@ -11,11 +11,11 @@
 
   let { sessionId, currentTitle, messages, onApply }: Props = $props();
 
+  // Track sessions that have already had suggestions (persists across re-renders)
+  const triggeredSessions = new Set<string>();
+
   let suggestedTitle: string | null = $state(null);
   let showSuggestion = $state(false);
-  let dismissed = $state(false);
-  let triggered = $state(false);
-  let lastSessionId: string | null = $state(null);
   let tooltipEl: HTMLElement | null = $state(null);
   let tooltipTop = $state(100);
 
@@ -23,27 +23,15 @@
     messages.filter(m => m.role === "user" && !m.parentToolUseId).length
   );
 
-  // Trigger at user message 3
+  // Trigger at user message 3 (only once per session)
   $effect(() => {
-    console.log("[TitleSuggestion] userMessageCount:", userMessageCount, "sessionId:", sessionId, "dismissed:", dismissed, "triggered:", triggered);
     if (userMessageCount === 3 && 
         sessionId && 
-        !dismissed && !showSuggestion && !triggered) {
-      console.log("[TitleSuggestion] Triggering title suggestion generation");
-      triggered = true;
+        !triggeredSessions.has(sessionId) &&
+        !showSuggestion) {
+      console.log("[TitleSuggestion] Triggering for session:", sessionId);
+      triggeredSessions.add(sessionId);
       generateSuggestion();
-    }
-  });
-
-  // Reset state only when sessionId actually changes
-  $effect(() => {
-    if (sessionId !== lastSessionId) {
-      console.log("[TitleSuggestion] Session changed from", lastSessionId, "to", sessionId, "- resetting state");
-      lastSessionId = sessionId;
-      dismissed = false;
-      showSuggestion = false;
-      triggered = false;
-      suggestedTitle = null;
     }
   });
 
@@ -150,7 +138,6 @@ Bad responses: "Debug React", Current title: ..., The new title should be...`,
   function dismiss() {
     console.log("[TitleSuggestion] Dismissed");
     showSuggestion = false;
-    dismissed = true;
     suggestedTitle = null;
   }
 
@@ -158,13 +145,12 @@ Bad responses: "Debug React", Current title: ..., The new title should be...`,
     const targetSessionId = forSessionId || sessionId;
     console.log("[TitleSuggestion] Manual trigger requested for session:", targetSessionId);
     if (!targetSessionId) return;
-    // Only trigger if it's for the current session
     if (targetSessionId !== sessionId) {
       console.log("[TitleSuggestion] Ignoring - not the current session");
       return;
     }
-    dismissed = false;
-    triggered = true;
+    // Manual trigger always works, but mark as triggered so auto-trigger won't fire again
+    triggeredSessions.add(targetSessionId);
     generateSuggestion();
   }
 </script>

@@ -882,23 +882,37 @@ export const costEntries = {
     return result?.total || 0;
   },
 
-  getHourlyCosts: (days: number = 7): HourlyCost[] => {
+  getHourlyCosts: (days: number = 7, projectIds?: string[]): HourlyCost[] => {
     const startTime = Date.now() - days * 24 * 60 * 60 * 1000;
+    const params: any[] = [startTime];
+    let whereClause = "WHERE timestamp >= ?";
+    if (projectIds && projectIds.length > 0) {
+      const placeholders = projectIds.map(() => '?').join(',');
+      whereClause += ` AND project_id IN (${placeholders})`;
+      params.push(...projectIds);
+    }
     return queryAll<HourlyCost>(
       `SELECT 
         strftime('%Y-%m-%d %H:00', timestamp / 1000, 'unixepoch', 'localtime') as hour,
         SUM(cost_usd) as total_cost,
         COUNT(*) as entry_count
       FROM cost_entries 
-      WHERE timestamp >= ?
+      ${whereClause}
       GROUP BY hour
       ORDER BY hour DESC`,
-      [startTime]
+      params
     );
   },
 
-  getDailyCosts: (days: number = 30): { date: string; total_cost: number; entry_count: number; input_tokens: number; output_tokens: number }[] => {
+  getDailyCosts: (days: number = 30, projectIds?: string[]): { date: string; total_cost: number; entry_count: number; input_tokens: number; output_tokens: number }[] => {
     const startTime = Date.now() - days * 24 * 60 * 60 * 1000;
+    const params: any[] = [startTime];
+    let whereClause = "WHERE timestamp >= ?";
+    if (projectIds && projectIds.length > 0) {
+      const placeholders = projectIds.map(() => '?').join(',');
+      whereClause += ` AND project_id IN (${placeholders})`;
+      params.push(...projectIds);
+    }
     return queryAll(
       `SELECT 
         strftime('%Y-%m-%d', timestamp / 1000, 'unixepoch', 'localtime') as date,
@@ -907,39 +921,98 @@ export const costEntries = {
         SUM(input_tokens) as input_tokens,
         SUM(output_tokens) as output_tokens
       FROM cost_entries 
-      WHERE timestamp >= ?
+      ${whereClause}
       GROUP BY date
       ORDER BY date ASC`,
-      [startTime]
+      params
     );
   },
 
-  getTotalTokens: (): { input_tokens: number; output_tokens: number } => {
+  getTotalTokens: (projectIds?: string[]): { input_tokens: number; output_tokens: number } => {
+    const params: any[] = [];
+    let whereClause = "";
+    if (projectIds && projectIds.length > 0) {
+      const placeholders = projectIds.map(() => '?').join(',');
+      whereClause = `WHERE project_id IN (${placeholders})`;
+      params.push(...projectIds);
+    }
     const result = queryOne<{ input_tokens: number; output_tokens: number }>(
-      "SELECT COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens FROM cost_entries"
+      `SELECT COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens FROM cost_entries ${whereClause}`,
+      params
     );
     return result || { input_tokens: 0, output_tokens: 0 };
   },
 
-  getTotalMessages: (): number => {
+  getTotalMessages: (projectIds?: string[]): number => {
+    if (projectIds && projectIds.length > 0) {
+      const placeholders = projectIds.map(() => '?').join(',');
+      const result = queryOne<{ count: number }>(
+        `SELECT COUNT(*) as count FROM messages m JOIN sessions s ON m.session_id = s.id WHERE s.project_id IN (${placeholders})`,
+        projectIds
+      );
+      return result?.count || 0;
+    }
     const result = queryOne<{ count: number }>("SELECT COUNT(*) as count FROM messages");
     return result?.count || 0;
   },
 
-  getTotalSessions: (): number => {
+  getTotalSessions: (projectIds?: string[]): number => {
+    if (projectIds && projectIds.length > 0) {
+      const placeholders = projectIds.map(() => '?').join(',');
+      const result = queryOne<{ count: number }>(
+        `SELECT COUNT(*) as count FROM sessions WHERE project_id IN (${placeholders})`,
+        projectIds
+      );
+      return result?.count || 0;
+    }
     const result = queryOne<{ count: number }>("SELECT COUNT(*) as count FROM sessions");
     return result?.count || 0;
   },
 
-  getAnalytics: () => {
-    const totalEver = costEntries.getTotalEver();
-    const totalToday = costEntries.getTotalToday();
-    const hourlyCosts = costEntries.getHourlyCosts(7);
-    const dailyCosts = costEntries.getDailyCosts(30);
-    const tokens = costEntries.getTotalTokens();
-    const totalMessages = costEntries.getTotalMessages();
-    const totalSessions = costEntries.getTotalSessions();
-    const totalCalls = queryOne<{ count: number }>("SELECT COUNT(*) as count FROM cost_entries")?.count || 0;
+  getTotalCalls: (projectIds?: string[]): number => {
+    if (projectIds && projectIds.length > 0) {
+      const placeholders = projectIds.map(() => '?').join(',');
+      const result = queryOne<{ count: number }>(
+        `SELECT COUNT(*) as count FROM cost_entries WHERE project_id IN (${placeholders})`,
+        projectIds
+      );
+      return result?.count || 0;
+    }
+    const result = queryOne<{ count: number }>("SELECT COUNT(*) as count FROM cost_entries");
+    return result?.count || 0;
+  },
+
+  getTotalCostForProjects: (projectIds: string[]): number => {
+    if (projectIds.length === 0) return 0;
+    const placeholders = projectIds.map(() => '?').join(',');
+    const result = queryOne<{ total: number }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) as total FROM cost_entries WHERE project_id IN (${placeholders})`,
+      projectIds
+    );
+    return result?.total || 0;
+  },
+
+  getTodayCostForProjects: (projectIds: string[]): number => {
+    if (projectIds.length === 0) return 0;
+    const startOfDay = getStartOfToday();
+    const placeholders = projectIds.map(() => '?').join(',');
+    const result = queryOne<{ total: number }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) as total FROM cost_entries WHERE project_id IN (${placeholders}) AND timestamp >= ?`,
+      [...projectIds, startOfDay]
+    );
+    return result?.total || 0;
+  },
+
+  getAnalytics: (projectIds?: string[]) => {
+    const hasFilter = projectIds && projectIds.length > 0;
+    const totalEver = hasFilter ? costEntries.getTotalCostForProjects(projectIds!) : costEntries.getTotalEver();
+    const totalToday = hasFilter ? costEntries.getTodayCostForProjects(projectIds!) : costEntries.getTotalToday();
+    const hourlyCosts = costEntries.getHourlyCosts(7, projectIds);
+    const dailyCosts = costEntries.getDailyCosts(30, projectIds);
+    const tokens = costEntries.getTotalTokens(projectIds);
+    const totalMessages = costEntries.getTotalMessages(projectIds);
+    const totalSessions = costEntries.getTotalSessions(projectIds);
+    const totalCalls = costEntries.getTotalCalls(projectIds);
     return { 
       totalEver, 
       totalToday, 

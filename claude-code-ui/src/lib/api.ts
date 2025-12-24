@@ -240,6 +240,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ path }),
       }),
+    reveal: (path: string) =>
+      request<{ success: boolean }>("/fs/reveal", {
+        method: "POST",
+        body: JSON.stringify({ path }),
+      }),
   },
 
   config: {
@@ -581,7 +586,8 @@ export interface CostAnalytics {
 
 export const costsApi = {
   getTotal: () => request<CostSummary>("/costs"),
-  getAnalytics: () => request<CostAnalytics>("/costs/analytics"),
+  getAnalytics: (projectIds?: string[]) => 
+    request<CostAnalytics>(`/costs/analytics${projectIds && projectIds.length > 0 ? `?projectIds=${projectIds.join(',')}` : ''}`),
   getProjectCost: (projectId: string) => request<CostSummary>(`/projects/${projectId}/cost`),
   getSessionCost: (sessionId: string) => request<{ total: number }>(`/sessions/${sessionId}/cost`),
 };

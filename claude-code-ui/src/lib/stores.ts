@@ -140,9 +140,33 @@ function createCurrentSessionStore() {
   };
 }
 
+function createSessionDraftsStore() {
+  const { subscribe, update } = writable<Map<string, string>>(new Map());
+
+  return {
+    subscribe,
+    setDraft: (sessionId: string, draft: string) =>
+      update((map) => {
+        if (draft.trim()) {
+          map.set(sessionId, draft);
+        } else {
+          map.delete(sessionId);
+        }
+        return new Map(map);
+      }),
+    getDraft: (sessionId: string, map: Map<string, string>) => map.get(sessionId) || "",
+    clearDraft: (sessionId: string) =>
+      update((map) => {
+        map.delete(sessionId);
+        return new Map(map);
+      }),
+  };
+}
+
 export const projects = createProjectsStore();
 export const sessions = createSessionsStore();
 export const sessionMessages = createSessionMessagesStore();
+export const sessionDrafts = createSessionDraftsStore();
 export const currentSession = createCurrentSessionStore();
 export const isConnected = writable(false);
 

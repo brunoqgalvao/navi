@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost } from "../api";
+  import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project } from "../api";
   import { onMount } from "svelte";
   import { advancedMode, onboardingComplete, tour, showArchivedWorkspaces } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
+  import MultiSelect from "./MultiSelect.svelte";
 
   interface Props {
     open: boolean;
@@ -16,6 +17,8 @@
 
   let analytics = $state<CostAnalytics | null>(null);
   let loadingAnalytics = $state(false);
+  let analyticsProjectFilter = $state<string[]>([]);
+  let projectsList = $state<Project[]>([]);
 
   let hasOpenAIKey = $state(false);
   let openAIKeyPreview: string | null = $state(null);
@@ -71,20 +74,36 @@
   });
 
   $effect(() => {
+    if (activeTab === "analytics" && !loadingAnalytics && projectsList.length === 0) {
+      loadProjectsList();
+    }
     if (activeTab === "analytics" && !analytics && !loadingAnalytics) {
       loadAnalytics();
     }
   });
 
+  async function loadProjectsList() {
+    try {
+      projectsList = await api.projects.list();
+    } catch (e) {
+      console.error("Failed to load projects:", e);
+    }
+  }
+
   async function loadAnalytics() {
     loadingAnalytics = true;
     try {
-      analytics = await costsApi.getAnalytics();
+      analytics = await costsApi.getAnalytics(analyticsProjectFilter.length > 0 ? analyticsProjectFilter : undefined);
     } catch (e) {
       console.error("Failed to load analytics:", e);
     } finally {
       loadingAnalytics = false;
     }
+  }
+
+  function handleFilterChange(selected: string[]) {
+    analyticsProjectFilter = selected;
+    loadAnalytics();
   }
 
   async function loadStatus() {
@@ -855,9 +874,19 @@
 
           {:else if activeTab === "analytics"}
             <div class="space-y-6">
-              <div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-1">Usage Analytics</h4>
-                <p class="text-sm text-gray-500">Track your API usage, tokens, and costs over time.</p>
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <h4 class="text-lg font-semibold text-gray-900 mb-1">Usage Analytics</h4>
+                  <p class="text-sm text-gray-500">Track your API usage, tokens, and costs over time.</p>
+                </div>
+                <div class="min-w-[200px]">
+                  <MultiSelect
+                    options={projectsList.map(p => ({ value: p.id, label: p.name }))}
+                    selected={analyticsProjectFilter}
+                    placeholder="All Workspaces"
+                    onChange={handleFilterChange}
+                  />
+                </div>
               </div>
 
               {#if loadingAnalytics}

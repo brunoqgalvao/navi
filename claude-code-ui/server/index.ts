@@ -1933,7 +1933,9 @@ ${content.slice(0, 8000)}`;
     }
 
     if (url.pathname === "/api/costs/analytics" && method === "GET") {
-      return json(costEntries.getAnalytics());
+      const projectIdsParam = url.searchParams.get("projectIds");
+      const projectIds = projectIdsParam ? projectIdsParam.split(",").filter(Boolean) : undefined;
+      return json(costEntries.getAnalytics(projectIds));
     }
 
     const projectCostMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/cost$/);

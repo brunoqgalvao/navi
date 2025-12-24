@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ToolUseBlock } from "../claude";
   import JsonTreeViewer from "./JsonTreeViewer.svelte";
+  import DiffViewer from "./DiffViewer.svelte";
 
   interface Props {
     tool: ToolUseBlock;
@@ -178,11 +179,16 @@
           >
             {getFileName(tool.input.file_path)}
           </button>
+          <span class="text-[10px] text-gray-400">
+            {tool.input.content?.split("\n").length || 0} lines
+          </span>
         </div>
         {#if tool.input.content}
-          <div class="text-[10px] text-gray-400">
-            {tool.input.content.split("\n").length} lines, {tool.input.content.length} chars
-          </div>
+          <DiffViewer 
+            oldText="" 
+            newText={tool.input.content} 
+            fileName={getFileName(tool.input.file_path)}
+          />
         {/if}
       </div>
 
@@ -199,12 +205,24 @@
           </button>
         </div>
         {#if tool.name === "MultiEdit" && tool.input.edits}
-          <div class="text-[10px] text-gray-400">{tool.input.edits.length} edits</div>
-        {:else if tool.input.old_string}
-          <div class="flex gap-2 text-[10px]">
-            <span class="text-red-500">-{tool.input.old_string.split("\n").length} lines</span>
-            <span class="text-green-500">+{tool.input.new_string?.split("\n").length || 0} lines</span>
+          <div class="space-y-2">
+            {#each tool.input.edits as edit, idx}
+              <div class="border border-gray-200 rounded overflow-hidden">
+                <div class="text-[10px] text-gray-500 bg-gray-100 px-2 py-1">Edit {idx + 1}</div>
+                <DiffViewer 
+                  oldText={edit.old_string || ''} 
+                  newText={edit.new_string || ''} 
+                  fileName={getFileName(tool.input.file_path)}
+                />
+              </div>
+            {/each}
           </div>
+        {:else if tool.input.old_string !== undefined}
+          <DiffViewer 
+            oldText={tool.input.old_string || ''} 
+            newText={tool.input.new_string || ''} 
+            fileName={getFileName(tool.input.file_path)}
+          />
         {/if}
       </div>
 
