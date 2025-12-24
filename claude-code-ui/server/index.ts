@@ -2721,10 +2721,11 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
           if (sessionId && msg.resultData) {
             const costUsd = msg.resultData.total_cost_usd || 0;
             const usage = msg.resultData.usage || {};
+            const contextUsage = msg.lastAssistantUsage || usage;
             console.log("[DEBUG] resultData.usage:", JSON.stringify(usage));
-            const totalInputTokens = (usage.input_tokens || 0) + 
-              (usage.cache_creation_input_tokens || 0) + 
-              (usage.cache_read_input_tokens || 0);
+            const totalInputTokens = (contextUsage.input_tokens || 0) + 
+              (contextUsage.cache_creation_input_tokens || 0) + 
+              (contextUsage.cache_read_input_tokens || 0);
             console.log("[DEBUG] totalInputTokens:", totalInputTokens);
             sessions.updateClaudeSession(
               msg.resultData.session_id,
@@ -2732,7 +2733,7 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
               costUsd,
               msg.resultData.num_turns || 0,
               totalInputTokens,
-              usage.output_tokens || 0,
+              contextUsage.output_tokens || 0,
               Date.now(),
               sessionId
             );
@@ -2841,6 +2842,7 @@ async function handleQuery(ws: any, data: ClientMessage) {
     console.log(`[${sessionId}] Query registered, starting iteration...`);
 
     let lastAssistantContent: any[] = [];
+    let lastAssistantUsage: any = null;
     let resultData: any = null;
     let wasAborted = false;
 
@@ -2855,6 +2857,10 @@ async function handleQuery(ws: any, data: ClientMessage) {
 
       if (msg.type === "assistant") {
         lastAssistantContent = msg.message.content;
+        const usage = (msg as any).message?.usage;
+        if (!msg.parent_tool_use_id && usage) {
+          lastAssistantUsage = usage;
+        }
       }
       if (msg.type === "result") {
         resultData = msg;
@@ -2879,16 +2885,17 @@ async function handleQuery(ws: any, data: ClientMessage) {
     if (sessionId && resultData) {
       const costUsd = resultData.total_cost_usd || 0;
       const usage = resultData.usage || {};
-      const totalInputTokens = (usage.input_tokens || 0) + 
-        (usage.cache_creation_input_tokens || 0) + 
-        (usage.cache_read_input_tokens || 0);
+      const contextUsage = lastAssistantUsage || usage;
+      const totalInputTokens = (contextUsage.input_tokens || 0) + 
+        (contextUsage.cache_creation_input_tokens || 0) + 
+        (contextUsage.cache_read_input_tokens || 0);
       sessions.updateClaudeSession(
         resultData.session_id,
         resultData.model || null,
         costUsd,
         resultData.num_turns || 0,
         totalInputTokens,
-        usage.output_tokens || 0,
+        contextUsage.output_tokens || 0,
         Date.now(),
         sessionId
       );
@@ -3023,6 +3030,7 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         claudeSessionId: msg.session_id,
         content: msg.message.content,
         parentToolUseId: msg.parent_tool_use_id || null,
+        usage: (msg as any).message?.usage,
       };
 
     case "user":

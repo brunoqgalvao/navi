@@ -52,10 +52,9 @@
       return content
         .map((block) => {
           if (block.type === "text") return block.text;
-          if (block.type === "tool_use") return `[Using ${block.name}]`;
           return "";
         })
-        .filter(text => text)
+        .filter(Boolean)
         .join(" ");
     }
     return "";

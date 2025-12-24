@@ -23,6 +23,7 @@
   let detectedType = $state<PreviewType>("none");
   let iframeKey = $state(0);
   let urlInput = $state("");
+  let currentUrl = $state("");
   let history = $state<string[]>([]);
   let historyIndex = $state(-1);
   let iframeRef: HTMLIFrameElement | null = $state(null);
@@ -195,11 +196,14 @@
   function navigateTo(url: string, addToHistory = true) {
     if (!url) return;
     const formatted = formatUrl(url);
-    if (addToHistory && formatted !== formatUrl(source)) {
+    if (addToHistory && formatted !== currentUrl) {
       history = [...history.slice(0, historyIndex + 1), formatted];
       historyIndex = history.length - 1;
     }
     urlInput = formatted;
+    currentUrl = formatted;
+    iframeLoading = true;
+    iframeError = "";
     onUrlChange?.(formatted);
     iframeKey++;
   }
@@ -208,6 +212,9 @@
     if (historyIndex > 0) {
       historyIndex--;
       urlInput = history[historyIndex];
+      currentUrl = history[historyIndex];
+      iframeLoading = true;
+      iframeError = "";
       iframeKey++;
     }
   }
@@ -216,6 +223,9 @@
     if (historyIndex < history.length - 1) {
       historyIndex++;
       urlInput = history[historyIndex];
+      currentUrl = history[historyIndex];
+      iframeLoading = true;
+      iframeError = "";
       iframeKey++;
     }
   }
@@ -252,6 +262,7 @@
       const formatted = formatUrl(source);
       if (formatted !== lastSource) {
         urlInput = formatted;
+        currentUrl = formatted;
         if (history.length === 0 || history[history.length - 1] !== formatted) {
           history = [...history, formatted];
           historyIndex = history.length - 1;
@@ -384,7 +395,7 @@
     </div>
   {/if}
 
-  <div class="flex-1 overflow-auto min-h-0">
+  <div class="flex-1 overflow-auto min-h-0 flex flex-col">
     {#if loading}
       <div class="flex items-center justify-center h-full">
         <div class="flex items-center gap-2 text-gray-400">
@@ -425,7 +436,7 @@
           <div><span class="text-gray-500">history:</span> {JSON.stringify(history)}</div>
         </div>
       {/if}
-      <div class="flex-1 relative min-h-0">
+      <div class="flex-1 relative min-h-0 h-full">
         {#if iframeLoading}
           <div class="absolute inset-0 flex items-center justify-center bg-white/80 z-10">
             <div class="flex items-center gap-2 text-gray-500">
@@ -449,7 +460,7 @@
         {#key iframeKey}
           <iframe
             bind:this={iframeRef}
-            src={urlInput || formatUrl(source)}
+            src={currentUrl || formatUrl(source)}
             class="w-full h-full border-0"
             title="Preview"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"

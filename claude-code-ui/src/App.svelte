@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage } from "./lib/claude";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, type ChatMessage, type TodoItem, type TourStep, type AttachedFile, type CostViewMode } from "./lib/stores";
+  import { ClaudeClient, type ClaudeMessage, type ContentBlock, type TextBlock, type ToolUseBlock, type ToolProgressMessage, type StreamEventMessage, type StreamEvent } from "./lib/claude";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, sessionEvents, streamingState, assistantTurns, type ChatMessage, type TourStep, type AttachedFile, type CostViewMode, type SDKEvent, type SDKEventType, type AssistantStep, type StepType } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
   import Preview from "./lib/Preview.svelte";
@@ -17,13 +17,20 @@
       url = "https:" + url;
     }
     const isExternal = url.startsWith("http://") || url.startsWith("https://");
+    const isLocalhost = url.includes("localhost") || url.match(/:\d+/);
     if (isExternal) {
       try {
         const domain = new URL(url).hostname;
         const favicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
-        return `<a href="${url}"${titleAttr} target="_blank" rel="noopener noreferrer" class="source-link"><img src="${favicon}" alt="" class="source-favicon" onerror="this.style.display='none'">${text}<span class="external-arrow">↗</span></a>`;
+        if (isLocalhost) {
+          return `<a href="${url}"${titleAttr} data-url="${url}" class="source-link preview-link external-link"><img src="${favicon}" alt="" class="source-favicon" onerror="this.style.display='none'">${text}<span class="external-arrow">↗</span></a>`;
+        }
+        return `<a href="${url}"${titleAttr} data-url="${url}" target="_blank" rel="noopener noreferrer" class="source-link external-link"><img src="${favicon}" alt="" class="source-favicon" onerror="this.style.display='none'">${text}<span class="external-arrow">↗</span></a>`;
       } catch {
-        return `<a href="${url}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}<span class="external-arrow">↗</span></a>`;
+        if (isLocalhost) {
+          return `<a href="${url}"${titleAttr} data-url="${url}" class="preview-link external-link">${text}<span class="external-arrow">↗</span></a>`;
+        }
+        return `<a href="${url}"${titleAttr} data-url="${url}" target="_blank" rel="noopener noreferrer" class="external-link">${text}<span class="external-arrow">↗</span></a>`;
       }
     }
     return `<a href="${url}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
@@ -81,28 +88,25 @@
   
   import FileBrowser from "./lib/FileBrowser.svelte";
   import Modal from "./lib/components/Modal.svelte";
-  import SubagentBlock from "./lib/components/SubagentBlock.svelte";
   import AudioRecorder from "./lib/components/AudioRecorder.svelte";
   import InteractiveCodeBlock from "./lib/components/InteractiveCodeBlock.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import ProjectSettings from "./lib/components/ProjectSettings.svelte";
-  import ToolRenderer from "./lib/components/ToolRenderer.svelte";
   import ToolConfirmDialog from "./lib/components/ToolConfirmDialog.svelte";
   import SearchModal from "./lib/components/SearchModal.svelte";
   import NotificationToast from "./lib/components/NotificationToast.svelte";
   import NotificationBadge from "./lib/components/NotificationBadge.svelte";
-  import PermissionRequest from "./lib/components/PermissionRequest.svelte";
   import PermissionEditor from "./lib/components/PermissionEditor.svelte";
   import Confetti from "./lib/components/Confetti.svelte";
   import CopyButton from "./lib/components/CopyButton.svelte";
   import WelcomeScreen from "./lib/components/WelcomeScreenLogo.svelte";
   import TourOverlay from "./lib/components/TourOverlay.svelte";
+  import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
-  import TodoProgress from "./lib/components/TodoProgress.svelte";
-  import UserMessage from "./lib/components/UserMessage.svelte";
+  import { useMessageHandler, chatStore } from "./lib/handlers";
   import SessionDebug from "./lib/components/SessionDebug.svelte";
-  import AssistantMessage from "./lib/components/AssistantMessage.svelte";
+  import ContextMenu from "./lib/components/ContextMenu.svelte";
   import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
   import WorkspaceCard from "./lib/components/WorkspaceCard.svelte";
   import StarButton from "./lib/components/StarButton.svelte";
@@ -157,6 +161,7 @@
   let sidebarCollapsed = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
+  let linkContextMenu = $state<{ url: string; x: number; y: number } | null>(null);
 
   let draggedProjectId = $state<string | null>(null);
   let dragOverProjectId = $state<string | null>(null);
@@ -168,6 +173,56 @@
   let showProjectPermissions = $state<Project | null>(null);
   let globalPermissionSettings = $state<PermissionSettings | null>(null);
   let permissionDefaults = $state<{ tools: string[]; dangerous: string[] }>({ tools: [], dangerous: [] });
+
+  let currentTurnId = $state<Map<string, string>>(new Map());
+  let currentStepId = $state<Map<string, string>>(new Map());
+  let streamingStepText = $state<Map<string, string>>(new Map());
+  
+  const messageHandler = useMessageHandler({
+    getCurrentSessionId: () => $session.sessionId,
+    getProjectId: () => $session.projectId,
+    onCostUpdate: (sessionId, costUsd) => {
+      if (sessionId === $session.sessionId) {
+        session.setCost($session.costUsd + costUsd);
+      }
+      costStore.addSessionCost(sessionId, costUsd);
+      loadCosts();
+      if ($session.projectId) {
+        loadProjectCost($session.projectId);
+      }
+    },
+    onUsageUpdate: (inputTokens, outputTokens) => {
+      session.setUsage(inputTokens, outputTokens);
+    },
+    onPermissionRequest: (data) => {
+      pendingPermissionRequest = {
+        requestId: data.requestId,
+        tools: data.tools,
+        toolInput: data.toolInput,
+        message: data.message,
+      };
+      notifications.add({
+        type: "permission_request",
+        title: `${data.tools[0]} Permission Required`,
+        message: data.message,
+        sessionId: $session.sessionId || undefined,
+        persistent: true,
+        data: {
+          requestId: data.requestId,
+          tools: data.tools,
+          toolInput: data.toolInput,
+        },
+      });
+    },
+    onSubagentProgress: (sessionId, toolUseId, elapsed) => {
+      activeSubagents = new Map(activeSubagents.set(toolUseId, { elapsed }));
+    },
+    scrollToBottom,
+    onClaudeSessionInit: (claudeSessionId, model) => {
+      session.setClaudeSession(claudeSessionId);
+      session.setModel(model);
+    },
+  });
 
   let showPreview = $state(false);
   let previewSource = $state("");
@@ -430,7 +485,9 @@
       console.error("Failed to connect:", e);
     }
 
-    client.onMessage(handleMessage);
+    client.onMessage((msg) => {
+      messageHandler.handleMessage(msg);
+    });
 
     const handleGlobalClick = () => {
       sessionMenuId = null;
@@ -1183,12 +1240,154 @@ Respond in this exact JSON format only, no other text:
     }
   }
 
+  function getEventType(msg: ClaudeMessage): SDKEventType {
+    switch (msg.type) {
+      case "system":
+        const subtype = (msg as any).subtype;
+        if (subtype === "init") return "system_init";
+        if (subtype === "status") return "system_status";
+        if (subtype === "compact_boundary") return "system_compact";
+        if (subtype === "hook_response") return "system_hook";
+        return "system_init";
+      case "assistant": return "assistant";
+      case "user": return "user";
+      case "result": return "result";
+      case "error": return "error";
+      case "tool_progress": return "tool_progress";
+      case "permission_request": return "permission_request";
+      case "stream_event": return "assistant_streaming";
+      case "auth_status": return "auth_status";
+      default: return "unknown";
+    }
+  }
+
+  function logEvent(sessionId: string, msg: ClaudeMessage) {
+    const event: SDKEvent = {
+      id: (msg as any).uuid || crypto.randomUUID(),
+      type: getEventType(msg),
+      timestamp: (msg as any).timestamp || Date.now(),
+      sessionId,
+      parentToolUseId: (msg as any).parentToolUseId || null,
+      data: msg,
+    };
+    sessionEvents.addEvent(sessionId, event);
+  }
+
+  function handleStreamEvent(sessionId: string, msg: StreamEventMessage) {
+    const event = msg.event;
+    if (!event) return;
+
+    let turnId = currentTurnId.get(sessionId);
+
+    switch (event.type) {
+      case "message_start":
+        turnId = crypto.randomUUID();
+        currentTurnId.set(sessionId, turnId);
+        currentTurnId = new Map(currentTurnId);
+        assistantTurns.startTurn(sessionId, turnId);
+        streamingState.startStreaming(sessionId);
+        break;
+
+      case "content_block_start":
+        if (event.content_block && turnId) {
+          const block = event.content_block;
+          let stepType: StepType = "text";
+          if (block.type === "thinking") stepType = "thinking";
+          else if (block.type === "tool_use") stepType = "tool_use";
+          else if (block.type === "tool_result") stepType = "tool_result";
+          
+          const stepId = crypto.randomUUID();
+          currentStepId.set(sessionId, stepId);
+          currentStepId = new Map(currentStepId);
+          streamingStepText.set(sessionId, "");
+          streamingStepText = new Map(streamingStepText);
+          
+          const step: AssistantStep = {
+            id: stepId,
+            type: stepType,
+            content: block,
+            isStreaming: true,
+            streamingText: "",
+            timestamp: Date.now(),
+          };
+          assistantTurns.addStep(sessionId, turnId, step);
+          streamingState.setContentBlock(sessionId, event.index || 0, block);
+        }
+        break;
+
+      case "content_block_delta":
+        if (event.delta && turnId) {
+          const stepId = currentStepId.get(sessionId);
+          if (stepId) {
+            let currentText = streamingStepText.get(sessionId) || "";
+            
+            if (event.delta.text) {
+              currentText += event.delta.text;
+              streamingStepText.set(sessionId, currentText);
+              streamingStepText = new Map(streamingStepText);
+              assistantTurns.updateStep(sessionId, turnId, stepId, { 
+                streamingText: currentText,
+                content: { type: "text", text: currentText } as ContentBlock,
+              });
+              streamingState.appendText(sessionId, event.delta.text);
+            }
+            if (event.delta.thinking) {
+              currentText += event.delta.thinking;
+              streamingStepText.set(sessionId, currentText);
+              streamingStepText = new Map(streamingStepText);
+              assistantTurns.updateStep(sessionId, turnId, stepId, { 
+                streamingText: currentText,
+                content: { type: "thinking", thinking: currentText } as ContentBlock,
+              });
+              streamingState.appendThinking(sessionId, event.delta.thinking);
+            }
+            if (event.delta.partial_json) {
+              currentText += event.delta.partial_json;
+              streamingStepText.set(sessionId, currentText);
+              streamingStepText = new Map(streamingStepText);
+              const state = $streamingState.get(sessionId);
+              if (state?.toolUseInProgress) {
+                streamingState.setToolUseInProgress(sessionId, {
+                  ...state.toolUseInProgress,
+                  partialJson: state.toolUseInProgress.partialJson + event.delta.partial_json,
+                });
+              }
+            }
+          }
+        }
+        break;
+
+      case "content_block_stop":
+        if (turnId) {
+          const stepId = currentStepId.get(sessionId);
+          if (stepId) {
+            assistantTurns.finishStep(sessionId, turnId, stepId);
+          }
+        }
+        break;
+
+      case "message_delta":
+      case "message_stop":
+        if (turnId) {
+          assistantTurns.completeTurn(sessionId, turnId);
+        }
+        streamingState.stopStreaming(sessionId);
+        currentStepId.delete(sessionId);
+        currentStepId = new Map(currentStepId);
+        break;
+    }
+  }
+
   function handleMessage(msg: ClaudeMessage) {
     const uiSessionId = (msg as any).uiSessionId;
     const claudeSessionId = (msg as any).claudeSessionId;
     
+    if (uiSessionId) {
+      logEvent(uiSessionId, msg);
+    }
+    
     if (msg.type === "result") {
-      console.log("RESULT MESSAGE:", { 
+      console.log("[SDK Result]", { 
         uiSessionId, 
         currentSessionId: $session.sessionId,
         match: uiSessionId === $session.sessionId,
@@ -1265,6 +1464,13 @@ Respond in this exact JSON format only, no other text:
             sessionTodos.setForSession(uiSessionId, todoTool.input.todos);
           }
         }
+        const usage = (msg as any).usage;
+        if (!parentId && usage && uiSessionId === $session.sessionId) {
+          const totalInputTokens = (usage.input_tokens || 0) + 
+            (usage.cache_creation_input_tokens || 0) + 
+            (usage.cache_read_input_tokens || 0);
+          session.setUsage(totalInputTokens, usage.output_tokens || 0);
+        }
         if (uiSessionId === $session.sessionId) {
           scrollToBottom();
         }
@@ -1272,9 +1478,10 @@ Respond in this exact JSON format only, no other text:
 
       case "result":
         const resultCost = (msg as any).costUsd || 0;
+        const numTurns = (msg as any).numTurns ?? 1;
         if (uiSessionId && uiSessionId === $session.sessionId) {
           session.setCost($session.costUsd + resultCost);
-          if ((msg as any).usage) {
+          if (numTurns <= 1 && (msg as any).usage) {
             const usage = (msg as any).usage;
             const totalInputTokens = (usage.input_tokens || 0) + 
               (usage.cache_creation_input_tokens || 0) + 
@@ -1390,6 +1597,20 @@ Respond in this exact JSON format only, no other text:
           },
         });
         break;
+
+      case "stream_event":
+        if (uiSessionId) {
+          handleStreamEvent(uiSessionId, msg as StreamEventMessage);
+        }
+        break;
+
+      case "auth_status":
+        console.log("Auth status:", msg);
+        break;
+
+      case "unknown":
+        console.log("Unknown SDK message:", msg);
+        break;
     }
   }
 
@@ -1411,12 +1632,7 @@ Respond in this exact JSON format only, no other text:
     
     const prompt = first.substring(sessionId.length + 1);
     
-    sessionMessages.addMessage(sessionId, {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: prompt,
-      timestamp: new Date(),
-    });
+    chatStore.addUserMessage(sessionId, prompt);
 
     loadingSessions.update(s => { s.add(sessionId); return new Set(s); });
     if ($session.projectId) {
@@ -1445,12 +1661,7 @@ Respond in this exact JSON format only, no other text:
     } catch (e) {
       console.error("Failed to abort:", e);
       loadingSessions.update(s => { s.delete(sessionId); return new Set(s); });
-      sessionMessages.addMessage(sessionId, {
-        id: crypto.randomUUID(),
-        role: "system",
-        content: "Request stopped",
-        timestamp: new Date(),
-      });
+      chatStore.addSystemMessage(sessionId, "Request stopped");
     }
   }
 
@@ -1499,12 +1710,7 @@ Respond in this exact JSON format only, no other text:
       messageContent = `${fileRefs}\n\n${currentInput}`;
     }
 
-    sessionMessages.addMessage(currentSessionId, {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: messageContent,
-      timestamp: new Date(),
-    });
+    chatStore.addUserMessage(currentSessionId, messageContent);
 
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
@@ -1562,36 +1768,6 @@ Respond in this exact JSON format only, no other text:
       if (idx !== -1) sidebarSessions[idx].title = title;
     }
   }
-
-  function getToolCalls(content: ContentBlock[] | string): ToolUseBlock[] {
-    if (typeof content === "string") return [];
-    return content.filter((b): b is ToolUseBlock => b.type === "tool_use" && b.name !== "TodoWrite");
-  }
-
-  function isTaskTool(tool: ToolUseBlock): boolean {
-    return tool.name === "Task";
-  }
-
-  function getSubagentMessages(toolUseId: string) {
-    return currentMessages.filter(m => m.parentToolUseId === toolUseId);
-  }
-
-  function getMainMessages() {
-    return currentMessages
-      .filter(m => !m.parentToolUseId)
-      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }
-
-  function getHistoryToolCalls(contentHistory: (ContentBlock[] | string)[] | undefined): ToolUseBlock[] {
-    if (!contentHistory) return [];
-    return contentHistory.flatMap(content => {
-      if (typeof content === "string") return [];
-      return content.filter((b): b is ToolUseBlock => b.type === "tool_use");
-    });
-  }
-
-  let expandedHistories = $state<Set<string>>(new Set());
-  let expandedToolCalls = $state<Set<string>>(new Set());
 
   function openPreview(source: string, line?: number) {
     const isUrl = source.startsWith("http://") || source.startsWith("https://") || source.startsWith("localhost") || source.match(/^:\d+/);
@@ -1730,6 +1906,18 @@ Respond in this exact JSON format only, no other text:
 
   function handleMessageClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
+    const link = target.closest('a.preview-link') as HTMLAnchorElement | null;
+    
+    if (link) {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = link.dataset.url || link.href;
+      if (url) {
+        openPreview(url);
+      }
+      return;
+    }
+    
     if (target.classList.contains("file-link")) {
       e.preventDefault();
       const path = target.dataset.path;
@@ -1743,13 +1931,48 @@ Respond in this exact JSON format only, no other text:
       if (path && line) {
         openPreview(path, parseInt(line, 10));
       }
-    } else if (target.classList.contains("preview-link")) {
+    }
+  }
+
+  function handleMessageContextMenu(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    const link = target.closest('a.external-link') as HTMLAnchorElement | null;
+    
+    if (link) {
       e.preventDefault();
-      const url = target.dataset.url;
+      e.stopPropagation();
+      const url = link.dataset.url || link.href;
       if (url) {
-        openPreview(url);
+        linkContextMenu = { url, x: e.clientX, y: e.clientY };
       }
     }
+  }
+
+  function getLinkContextMenuItems() {
+    if (!linkContextMenu) return [];
+    return [
+      {
+        label: "Open in Preview",
+        icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>',
+        onclick: () => {
+          if (linkContextMenu) openPreview(linkContextMenu.url);
+        }
+      },
+      {
+        label: "Open in Browser",
+        icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>',
+        onclick: () => {
+          if (linkContextMenu) window.open(linkContextMenu.url, '_blank');
+        }
+      },
+      {
+        label: "Copy URL",
+        icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>',
+        onclick: () => {
+          if (linkContextMenu) navigator.clipboard.writeText(linkContextMenu.url);
+        }
+      }
+    ];
   }
 
   function showMessageMenu(e: MouseEvent, msgId: string) {
@@ -1820,7 +2043,10 @@ Respond in this exact JSON format only, no other text:
     closeMessageMenu();
   }
 
-  async function saveEditedMessage() {
+  async function saveEditedMessage(content?: string) {
+    if (content !== undefined) {
+      editingMessageContent = content;
+    }
     if (!editingMessageId || !$session.sessionId) return;
     
     try {
@@ -1995,6 +2221,7 @@ Respond in this exact JSON format only, no other text:
     onModelSelect={handleModelSelect}
     onTitleApply={handleTitleSuggestionApply}
     onStartResizing={startResizingLeft}
+    isResizing={isResizingLeft}
     onCollapseToggle={() => sidebarCollapsed = !sidebarCollapsed}
     onBackToWorkspaces={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; }}
     onFolderCreate={createFolder}
@@ -2109,28 +2336,24 @@ Respond in this exact JSON format only, no other text:
 
         <!-- Messages -->
 
-        <div class="flex-1 overflow-y-auto p-4 md:p-0 space-y-6 scroll-smooth" bind:this={messagesContainer}>
+        <div class="flex-1 overflow-y-auto p-4 md:p-0 scroll-smooth" bind:this={messagesContainer}>
+          {#if currentMessages.length === 0 && !$session.sessionId}
+            <div class="space-y-6">
+              {#if $advancedMode && claudeMdContent}
+                <div class="max-w-3xl mx-auto w-full md:pt-4 md:px-0 px-4">
+                  <button
+                    onclick={() => showClaudeMdModal = true}
+                    class="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    <span>CLAUDE.md loaded</span>
+                    <span class="text-gray-400">({claudeMdContent.split('\n').length} lines)</span>
+                  </button>
+                </div>
+              {/if}
 
-        {#if $advancedMode && claudeMdContent}
-          <div class="max-w-3xl mx-auto w-full md:pt-4 md:px-0 px-4">
-            <button
-              onclick={() => showClaudeMdModal = true}
-              class="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-              <span>CLAUDE.md loaded</span>
-              <span class="text-gray-400">({claudeMdContent.split('\n').length} lines)</span>
-            </button>
-          </div>
-        {/if}
-
-        <div class="max-w-3xl mx-auto w-full md:pt-10 space-y-8 pb-64">
-
-
-            {#if currentMessages.length === 0 && !$session.sessionId}
-
+              <div class="max-w-3xl mx-auto w-full md:pt-10 space-y-8 pb-64">
                 <div class="flex flex-col items-center justify-center text-center min-h-[70vh] animate-in fade-in duration-500">
-
                   <h2 class="text-2xl font-serif font-medium text-gray-900 mb-1">Start a conversation</h2>
                   <p class="text-sm text-gray-500 mb-8">in <span class="font-medium text-gray-700">{currentProject.name}</span></p>
 
@@ -2174,94 +2397,33 @@ Respond in this exact JSON format only, no other text:
                     
                     <p class="text-xs text-gray-400 text-center max-w-md">{projectContext.summary}</p>
                   {/if}
-
                 </div>
-
-            {:else if currentMessages.length === 0}
-                <div class="flex flex-col items-center justify-center text-gray-400 space-y-4 min-h-[40vh] animate-in fade-in duration-500">
-                  <div class="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
-                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
-                  </div>
-                  <p class="text-sm">Continue the conversation...</p>
-                </div>
-            {/if}
-
-
-
-            {#each getMainMessages() as msg (msg.id)}
-
-                <div class={`group flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-
-                   <!-- User Message -->
-
-                   {#if msg.role === 'user'}
-                        <UserMessage
-                          content={formatContent(msg.content)}
-                          timestamp={msg.timestamp}
-                          isEditing={editingMessageId === msg.id}
-                          bind:editContent={editingMessageContent}
-                          basePath={currentProject?.path || ''}
-                          onEdit={() => startEditMessage(msg.id)}
-                          onSaveEdit={saveEditedMessage}
-                          onCancelEdit={cancelEditMessage}
-                          onRollback={() => rollbackToMessage(msg.id)}
-                          onFork={() => forkFromMessage(msg.id)}
-                          onPreview={openPreview}
-                        />
-
-                   <!-- System Message -->
-
-                   {:else if msg.role === 'system'}
-                        {@const isError = typeof msg.content === 'string' && msg.content.startsWith('Error:')}
-                        <div class="w-full {isError ? 'bg-red-50 border-red-100 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-500'} border rounded-lg px-4 py-2.5 text-xs break-all">
-                             {formatContent(msg.content)}
-                        </div>
-
-
-
-                   <!-- Assistant Message -->
-
-                   {:else}
-                        <AssistantMessage
-                          content={msg.content}
-                          contentHistory={msg.contentHistory}
-                          advancedMode={$advancedMode}
-                          subagentMessages={currentMessages.filter(m => m.parentToolUseId)}
-                          {activeSubagents}
-                          basePath={currentProject?.path || ''}
-                          onRollback={() => rollbackToMessage(msg.id)}
-                          onFork={() => forkFromMessage(msg.id)}
-                          onPreview={openPreview}
-                          onMessageClick={handleMessageClick}
-                          {renderMarkdown}
-                          {jsonBlocksMap}
-                        />
-                   {/if}
-
-                </div>
-
-            {/each}
-
-            {#if pendingPermissionRequest}
-              <PermissionRequest
-                requestId={pendingPermissionRequest.requestId}
-                toolName={pendingPermissionRequest.tools[0]}
-                toolInput={pendingPermissionRequest.toolInput}
-                message={pendingPermissionRequest.message}
-                onApprove={(approveAll) => handlePermissionApprove(approveAll)}
-                onDeny={handlePermissionDeny}
-              />
-            {/if}
-
-            {#if $session.sessionId && $loadingSessions.has($session.sessionId)}
-                <TodoProgress todos={currentTodos} showWhenEmpty={true} />
-            {/if}
+              </div>
+            </div>
+          {:else}
+            <ChatView
+              sessionId={$session.sessionId}
+              projectPath={currentProject?.path || ''}
+              activeSubagents={activeSubagents}
+              pendingPermissionRequest={pendingPermissionRequest}
+              editingMessageId={editingMessageId}
+              bind:editingMessageContent={editingMessageContent}
+              renderMarkdown={renderMarkdown}
+              jsonBlocksMap={jsonBlocksMap}
+              onEditMessage={startEditMessage}
+              onSaveEdit={saveEditedMessage}
+              onCancelEdit={cancelEditMessage}
+              onRollback={rollbackToMessage}
+              onFork={forkFromMessage}
+              onPreview={openPreview}
+              onMessageClick={handleMessageClick}
+              onPermissionApprove={handlePermissionApprove}
+              onPermissionDeny={handlePermissionDeny}
+              emptyState="continue"
+            />
+          {/if}
 
         </div>
-
-        </div>
-
-
 
         <!-- Input Area (hidden on project home via CSS) -->
         <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}" data-tour="chat-input">
@@ -2294,7 +2456,7 @@ Respond in this exact JSON format only, no other text:
     <!-- Resizer Handle -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="w-1 bg-transparent hover:bg-blue-500 cursor-col-resize z-30 transition-colors flex flex-col justify-center items-center group relative -mr-[1px]"
+      class="w-1 bg-transparent hover:bg-gray-400 cursor-col-resize z-30 transition-colors flex flex-col justify-center items-center group relative -mr-[1px] {isResizingRight ? 'bg-gray-400' : ''}"
       onmousedown={startResizingRight}
     >
       <div class="w-[1px] h-full bg-gray-200 group-hover:bg-transparent"></div>
@@ -2732,6 +2894,15 @@ Respond in this exact JSON format only, no other text:
   {/if}
 
 </div>
+
+{#if linkContextMenu}
+  <ContextMenu
+    x={linkContextMenu.x}
+    y={linkContextMenu.y}
+    items={getLinkContextMenuItems()}
+    onclose={() => linkContextMenu = null}
+  />
+{/if}
 
 <NotificationToast />
 

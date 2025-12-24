@@ -11,6 +11,8 @@
   }
 
   let { tool, onPreview, compact = false, index }: Props = $props();
+  
+  const input = $derived(tool.input || {});
 
   const toolIcons: Record<string, string> = {
     Read: "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253",
@@ -54,12 +56,12 @@
 
   function isSkillRead(): boolean {
     if (tool.name !== "Read") return false;
-    const path = tool.input.file_path || "";
+    const path = input.file_path || "";
     return path.includes("/skills/") && path.endsWith("SKILL.md");
   }
 
   function getSkillName(): string {
-    const path = tool.input.file_path || "";
+    const path = input.file_path || "";
     const match = path.match(/\/skills\/([^/]+)\/SKILL\.md$/);
     return match ? match[1] : "unknown";
   }
@@ -85,26 +87,26 @@
     switch (tool.name) {
       case "Read":
         if (isSkillRead()) return `skill: ${getSkillName()}`;
-        return getFileName(tool.input.file_path);
+        return getFileName(input.file_path || "");
       case "Write":
-        return getFileName(tool.input.file_path);
+        return getFileName(input.file_path || "");
       case "Edit":
       case "MultiEdit":
-        return getFileName(tool.input.file_path);
+        return getFileName(input.file_path || "");
       case "Bash":
-        return formatCommand(tool.input.command, 50);
+        return formatCommand(input.command || "", 50);
       case "Glob":
-        return tool.input.pattern;
+        return input.pattern || "";
       case "Grep":
-        return tool.input.pattern;
+        return input.pattern || "";
       case "WebFetch":
-        return new URL(tool.input.url).hostname;
+        try { return new URL(input.url || "").hostname; } catch { return input.url || ""; }
       case "WebSearch":
-        return tool.input.query;
+        return input.query || "";
       case "TodoWrite":
-        return `${tool.input.todos?.length || 0} items`;
+        return `${input.todos?.length || 0} items`;
       case "Skill":
-        return tool.input.skill || tool.input.command || tool.input.name || "";
+        return input.skill || input.command || input.name || "";
       default:
         return "";
     }
@@ -155,15 +157,15 @@
       <div class="flex items-center gap-2">
         <span class="text-xs text-gray-500">Reading</span>
         <button 
-          onclick={() => onPreview?.(tool.input.file_path)}
+          onclick={() => onPreview?.(input.file_path)}
           class="text-xs font-mono text-blue-600 hover:text-blue-800 hover:underline truncate max-w-md"
-          title={tool.input.file_path}
+          title={input.file_path}
         >
-          {truncatePath(tool.input.file_path)}
+          {truncatePath(input.file_path || "")}
         </button>
-        {#if tool.input.offset || tool.input.limit}
+        {#if input.offset || input.limit}
           <span class="text-[10px] text-gray-400">
-            (lines {tool.input.offset || 0}-{(tool.input.offset || 0) + (tool.input.limit || 0)})
+            (lines {input.offset || 0}-{(input.offset || 0) + (input.limit || 0)})
           </span>
         {/if}
       </div>
@@ -173,21 +175,21 @@
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500">Writing to</span>
           <button 
-            onclick={() => onPreview?.(tool.input.file_path)}
+            onclick={() => onPreview?.(input.file_path)}
             class="text-xs font-mono text-green-600 hover:text-green-800 hover:underline truncate max-w-md"
-            title={tool.input.file_path}
+            title={input.file_path}
           >
-            {getFileName(tool.input.file_path)}
+            {getFileName(input.file_path || "")}
           </button>
           <span class="text-[10px] text-gray-400">
-            {tool.input.content?.split("\n").length || 0} lines
+            {input.content?.split("\n").length || 0} lines
           </span>
         </div>
-        {#if tool.input.content}
+        {#if input.content}
           <DiffViewer 
             oldText="" 
-            newText={tool.input.content} 
-            fileName={getFileName(tool.input.file_path)}
+            newText={input.content} 
+            fileName={getFileName(input.file_path || "")}
           />
         {/if}
       </div>
@@ -197,53 +199,53 @@
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500">Editing</span>
           <button 
-            onclick={() => onPreview?.(tool.input.file_path)}
+            onclick={() => onPreview?.(input.file_path)}
             class="text-xs font-mono text-amber-600 hover:text-amber-800 hover:underline truncate max-w-md"
-            title={tool.input.file_path}
+            title={input.file_path}
           >
-            {getFileName(tool.input.file_path)}
+            {getFileName(input.file_path || "")}
           </button>
         </div>
-        {#if tool.name === "MultiEdit" && tool.input.edits}
+        {#if tool.name === "MultiEdit" && input.edits}
           <div class="space-y-2">
-            {#each tool.input.edits as edit, idx}
+            {#each input.edits as edit, idx}
               <div class="border border-gray-200 rounded overflow-hidden">
                 <div class="text-[10px] text-gray-500 bg-gray-100 px-2 py-1">Edit {idx + 1}</div>
                 <DiffViewer 
                   oldText={edit.old_string || ''} 
                   newText={edit.new_string || ''} 
-                  fileName={getFileName(tool.input.file_path)}
+                  fileName={getFileName(input.file_path || "")}
                 />
               </div>
             {/each}
           </div>
-        {:else if tool.input.old_string !== undefined}
+        {:else if input.old_string !== undefined}
           <DiffViewer 
-            oldText={tool.input.old_string || ''} 
-            newText={tool.input.new_string || ''} 
-            fileName={getFileName(tool.input.file_path)}
+            oldText={input.old_string || ''} 
+            newText={input.new_string || ''} 
+            fileName={getFileName(input.file_path || "")}
           />
         {/if}
       </div>
 
     {:else if tool.name === "Bash"}
       <div class="space-y-1">
-        {#if tool.input.description}
-          <div class="text-xs text-gray-600">{tool.input.description}</div>
+        {#if input.description}
+          <div class="text-xs text-gray-600">{input.description}</div>
         {/if}
-        <div class="font-mono text-xs text-purple-700 bg-purple-50 rounded px-2 py-1.5 overflow-x-auto whitespace-pre">$ {formatCommand(tool.input.command)}</div>
-        {#if tool.input.timeout}
-          <div class="text-[10px] text-gray-400">timeout: {tool.input.timeout}ms</div>
+        <div class="font-mono text-xs text-purple-700 bg-purple-50 rounded px-2 py-1.5 overflow-x-auto whitespace-pre">$ {formatCommand(input.command || "")}</div>
+        {#if input.timeout}
+          <div class="text-[10px] text-gray-400">timeout: {input.timeout}ms</div>
         {/if}
       </div>
 
     {:else if tool.name === "Glob"}
       <div class="flex items-center gap-2 flex-wrap">
         <span class="text-xs text-gray-500">Pattern:</span>
-        <code class="text-xs font-mono text-cyan-600 bg-cyan-50 px-1.5 py-0.5 rounded">{tool.input.pattern}</code>
-        {#if tool.input.path}
+        <code class="text-xs font-mono text-cyan-600 bg-cyan-50 px-1.5 py-0.5 rounded">{input.pattern || ""}</code>
+        {#if input.path}
           <span class="text-xs text-gray-500">in</span>
-          <code class="text-xs font-mono text-gray-600 truncate max-w-xs">{truncatePath(tool.input.path)}</code>
+          <code class="text-xs font-mono text-gray-600 truncate max-w-xs">{truncatePath(input.path)}</code>
         {/if}
       </div>
 
@@ -251,17 +253,17 @@
       <div class="space-y-1">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-xs text-gray-500">Search:</span>
-          <code class="text-xs font-mono text-cyan-600 bg-cyan-50 px-1.5 py-0.5 rounded">{tool.input.pattern}</code>
+          <code class="text-xs font-mono text-cyan-600 bg-cyan-50 px-1.5 py-0.5 rounded">{input.pattern || ""}</code>
         </div>
         <div class="flex items-center gap-2 flex-wrap text-[10px] text-gray-400">
-          {#if tool.input.path}
-            <span>in {truncatePath(tool.input.path, 40)}</span>
+          {#if input.path}
+            <span>in {truncatePath(input.path, 40)}</span>
           {/if}
-          {#if tool.input.glob}
-            <span>glob: {tool.input.glob}</span>
+          {#if input.glob}
+            <span>glob: {input.glob}</span>
           {/if}
-          {#if tool.input.type}
-            <span>type: {tool.input.type}</span>
+          {#if input.type}
+            <span>type: {input.type}</span>
           {/if}
         </div>
       </div>
@@ -270,23 +272,23 @@
       <div class="space-y-1">
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500">Fetching</span>
-          <a href={tool.input.url} target="_blank" class="text-xs font-mono text-indigo-600 hover:text-indigo-800 hover:underline truncate max-w-md">
-            {tool.input.url}
+          <a href={input.url || "#"} target="_blank" class="text-xs font-mono text-indigo-600 hover:text-indigo-800 hover:underline truncate max-w-md">
+            {input.url || ""}
           </a>
         </div>
-        {#if tool.input.prompt}
-          <div class="text-xs text-gray-500 italic truncate">"{tool.input.prompt}"</div>
+        {#if input.prompt}
+          <div class="text-xs text-gray-500 italic truncate">"{input.prompt}"</div>
         {/if}
       </div>
 
     {:else if tool.name === "WebSearch"}
       <div class="flex items-center gap-2">
         <span class="text-xs text-gray-500">Searching:</span>
-        <span class="text-xs font-medium text-indigo-600">"{tool.input.query}"</span>
+        <span class="text-xs font-medium text-indigo-600">"{input.query || ""}"</span>
       </div>
 
     {:else if tool.name === "TodoWrite"}
-      <div class="text-xs text-gray-500">Updated execution plan ({tool.input.todos?.length || 0} items)</div>
+      <div class="text-xs text-gray-500">Updated execution plan ({input.todos?.length || 0} items)</div>
 
     {:else if tool.name === "Skill"}
       <div class="flex items-center gap-2">
@@ -295,18 +297,18 @@
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
-          {tool.input.skill || tool.input.command || tool.input.name || "unknown"}
+          {input.skill || input.command || input.name || "unknown"}
         </span>
-        {#if tool.input.args}
-          <span class="text-xs text-gray-500 font-mono">{tool.input.args}</span>
+        {#if input.args}
+          <span class="text-xs text-gray-500 font-mono">{input.args}</span>
         {/if}
       </div>
 
     {:else}
-      {#if shouldUseJsonTree(tool.input)}
-        <JsonTreeViewer value={tool.input} maxHeight="300px" />
+      {#if shouldUseJsonTree(input)}
+        <JsonTreeViewer value={input} maxHeight="300px" />
       {:else}
-        <pre class="font-mono text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(tool.input, null, 2)}</pre>
+        <pre class="font-mono text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(input, null, 2)}</pre>
       {/if}
     {/if}
   </div>

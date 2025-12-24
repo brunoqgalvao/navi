@@ -38,6 +38,7 @@
     onModelSelect: (model: string) => void;
     onTitleApply: (title: string) => void;
     onStartResizing: (e: MouseEvent) => void;
+    isResizing?: boolean;
     onCollapseToggle: () => void;
     onBackToWorkspaces: () => void;
     onFolderCreate: (name: string) => Promise<WorkspaceFolder>;
@@ -81,6 +82,7 @@
     onModelSelect,
     onTitleApply,
     onStartResizing,
+    isResizing = false,
     onCollapseToggle,
     onBackToWorkspaces,
     onFolderCreate,
@@ -334,7 +336,7 @@
 <aside style={sidebarCollapsed ? 'width: 56px' : `width: ${sidebarWidth}px`} class="bg-gray-50/50 border-r border-gray-200 flex flex-col hidden md:flex shrink-0 relative">
   {#if !sidebarCollapsed}
     <div 
-      class="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400/50 transition-colors z-10"
+      class="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-gray-400/50 transition-colors z-10 {isResizing ? 'bg-gray-400' : ''}"
       onmousedown={onStartResizing}
     ></div>
   {/if}
@@ -415,7 +417,7 @@
             {#each folders as folder}
               <div class="group">
                 <div 
-                  class="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 cursor-pointer {dragOverFolderId === folder.id ? 'bg-blue-50 border border-blue-300' : ''}"
+                  class="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 cursor-pointer {dragOverFolderId === folder.id ? 'bg-gray-100 border border-gray-300' : ''}"
                   ondragover={(e) => handleFolderDragOver(e, folder.id)}
                   ondragleave={(e) => handleFolderDragLeave(e)}
                   ondrop={(e) => handleFolderDrop(e, folder.id)}
@@ -462,7 +464,7 @@
                   <div class="ml-4 space-y-0.5">
                     {#each getProjectsInFolder(folder.id) as proj}
                       <div 
-                        class="group/proj relative {dragOverProjectId === proj.id && !proj.pinned ? 'border-t-2 border-blue-500' : ''} {draggedProjectId === proj.id ? 'opacity-50' : ''}"
+                        class="group/proj relative {dragOverProjectId === proj.id && !proj.pinned ? 'border-t-2 border-gray-400' : ''} {draggedProjectId === proj.id ? 'opacity-50' : ''}"
                         role="listitem"
                         draggable={!proj.pinned}
                         ondragstart={(e) => !proj.pinned && handleProjectDragStart(e, proj)}
@@ -506,7 +508,7 @@
 
             {#if draggedProjectId && draggedProjectFolderId !== null}
               <div 
-                class="mt-2 pt-2 border-t border-gray-100 {isDraggingToRoot ? 'bg-blue-50 border-2 border-dashed border-blue-300 rounded-lg' : ''}"
+                class="mt-2 pt-2 border-t border-gray-100 {isDraggingToRoot ? 'bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg' : ''}"
                 ondragover={handleRootDragOver}
                 ondragleave={handleRootDragLeave}
                 ondrop={handleRootDrop}
@@ -518,7 +520,7 @@
             <div class="{folders.length > 0 ? 'mt-2 pt-2 border-t border-gray-100' : ''}">
               {#each getProjectsInFolder(null) as proj}
                 <div 
-                  class="group relative {dragOverProjectId === proj.id && !proj.pinned ? 'border-t-2 border-blue-500' : ''} {draggedProjectId === proj.id ? 'opacity-50' : ''}"
+                  class="group relative {dragOverProjectId === proj.id && !proj.pinned ? 'border-t-2 border-gray-400' : ''} {draggedProjectId === proj.id ? 'opacity-50' : ''}"
                   role="listitem"
                   draggable={!proj.pinned}
                   ondragstart={(e) => !proj.pinned && handleProjectDragStart(e, proj)}
@@ -662,7 +664,7 @@
             {#each filteredSessions as sess}
               <div 
                 data-session-item={sess.id}
-                class="group relative {dragOverSessionId === sess.id && !sess.pinned ? 'border-t-2 border-blue-500' : ''} {draggedSessionId === sess.id ? 'opacity-50' : ''}"
+                class="group relative {dragOverSessionId === sess.id && !sess.pinned ? 'border-t-2 border-gray-400' : ''} {draggedSessionId === sess.id ? 'opacity-50' : ''}"
                 role="listitem"
                 draggable={!sess.pinned}
                 ondragstart={(e) => !sess.pinned && handleSessionDragStart(e, sess)}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, onboardingComplete, tour, showArchivedWorkspaces } from "../stores";
+  import { advancedMode, debugMode, onboardingComplete, tour, showArchivedWorkspaces } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
 
@@ -800,6 +800,27 @@
                   {#if $advancedMode}
                     <p class="text-sm text-gray-500 mt-3 bg-gray-100 rounded-lg px-3 py-2">
                       Tool calls will be collapsible. You can view loaded CLAUDE.md and system context.
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900">Debug Mode</h5>
+                      <p class="text-sm text-gray-500">Show SDK event timeline and raw message data</p>
+                    </div>
+                    <button
+                      onclick={() => debugMode.toggle()}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$debugMode ? 'bg-gray-900' : 'bg-gray-300'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$debugMode ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+                  
+                  {#if $debugMode}
+                    <p class="text-sm text-gray-500 mt-3 bg-gray-100 rounded-lg px-3 py-2">
+                      Timeline view shows all SDK events chronologically. Useful for debugging and understanding the execution flow.
                     </p>
                   {/if}
                 </div>

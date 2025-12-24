@@ -1,5 +1,5 @@
 import { writable, derived } from "svelte/store";
-import type { ContentBlock } from "./claude";
+import type { ContentBlock, ClaudeMessage, StreamEvent } from "./claude";
 import type { Project, Session, Skill } from "./api";
 
 export interface ChatMessage {
@@ -232,6 +232,62 @@ function createAdvancedModeStore() {
 }
 
 export const advancedMode = createAdvancedModeStore();
+
+const DEBUG_MODE_KEY = "claude-code-ui-debug-mode";
+
+function createDebugModeStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(DEBUG_MODE_KEY) : null;
+  const { subscribe, set } = writable(stored === "true");
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current = false;
+      subscribe(v => current = v)();
+      const newValue = !current;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(DEBUG_MODE_KEY, String(newValue));
+      }
+      set(newValue);
+    },
+    set: (value: boolean) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(DEBUG_MODE_KEY, String(value));
+      }
+      set(value);
+    },
+  };
+}
+
+export const debugMode = createDebugModeStore();
+
+const NEW_CHAT_VIEW_KEY = "claude-code-ui-new-chat-view";
+
+function createNewChatViewStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(NEW_CHAT_VIEW_KEY) : null;
+  const { subscribe, set } = writable(stored !== "false");
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current = true;
+      subscribe(v => current = v)();
+      const newValue = !current;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(NEW_CHAT_VIEW_KEY, String(newValue));
+      }
+      set(newValue);
+    },
+    set: (value: boolean) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(NEW_CHAT_VIEW_KEY, String(value));
+      }
+      set(value);
+    },
+  };
+}
+
+export const newChatView = createNewChatViewStore();
 
 const SHOW_ARCHIVED_KEY = "claude-code-ui-show-archived";
 
@@ -786,3 +842,292 @@ function createCostStore() {
 }
 
 export const costStore = createCostStore();
+
+export type SDKEventType = 
+  | "system_init"
+  | "system_status"
+  | "system_compact"
+  | "system_hook"
+  | "assistant"
+  | "assistant_streaming"
+  | "user"
+  | "tool_progress"
+  | "tool_use"
+  | "tool_result"
+  | "result"
+  | "error"
+  | "permission_request"
+  | "auth_status"
+  | "unknown";
+
+export interface SDKEvent {
+  id: string;
+  type: SDKEventType;
+  timestamp: number;
+  sessionId: string;
+  parentToolUseId?: string | null;
+  data: ClaudeMessage | StreamEvent | Record<string, unknown>;
+  expanded?: boolean;
+}
+
+export interface StreamingState {
+  isStreaming: boolean;
+  currentText: string;
+  currentThinking: string;
+  contentBlocks: ContentBlock[];
+  toolUseInProgress?: {
+    id: string;
+    name: string;
+    partialJson: string;
+  };
+}
+
+function createSessionEventsStore() {
+  const { subscribe, set, update } = writable<Map<string, SDKEvent[]>>(new Map());
+
+  return {
+    subscribe,
+    set,
+    addEvent: (sessionId: string, event: SDKEvent) =>
+      update((map) => {
+        const events = map.get(sessionId) || [];
+        map.set(sessionId, [...events, event]);
+        return new Map(map);
+      }),
+    updateEvent: (sessionId: string, eventId: string, updates: Partial<SDKEvent>) =>
+      update((map) => {
+        const events = map.get(sessionId) || [];
+        const idx = events.findIndex(e => e.id === eventId);
+        if (idx >= 0) {
+          events[idx] = { ...events[idx], ...updates };
+          map.set(sessionId, [...events]);
+        }
+        return new Map(map);
+      }),
+    setEvents: (sessionId: string, events: SDKEvent[]) =>
+      update((map) => {
+        map.set(sessionId, events);
+        return new Map(map);
+      }),
+    clearSession: (sessionId: string) =>
+      update((map) => {
+        map.delete(sessionId);
+        return new Map(map);
+      }),
+    getEvents: (sessionId: string, map: Map<string, SDKEvent[]>) => map.get(sessionId) || [],
+  };
+}
+
+export const sessionEvents = createSessionEventsStore();
+
+function createStreamingStateStore() {
+  const { subscribe, set, update } = writable<Map<string, StreamingState>>(new Map());
+
+  return {
+    subscribe,
+    getState: (sessionId: string, map: Map<string, StreamingState>): StreamingState => 
+      map.get(sessionId) || { 
+        isStreaming: false, 
+        currentText: "", 
+        currentThinking: "",
+        contentBlocks: [] 
+      },
+    startStreaming: (sessionId: string) =>
+      update((map) => {
+        map.set(sessionId, { 
+          isStreaming: true, 
+          currentText: "", 
+          currentThinking: "",
+          contentBlocks: [] 
+        });
+        return new Map(map);
+      }),
+    appendText: (sessionId: string, text: string) =>
+      update((map) => {
+        const state = map.get(sessionId) || { isStreaming: true, currentText: "", currentThinking: "", contentBlocks: [] };
+        map.set(sessionId, { ...state, currentText: state.currentText + text });
+        return new Map(map);
+      }),
+    appendThinking: (sessionId: string, thinking: string) =>
+      update((map) => {
+        const state = map.get(sessionId) || { isStreaming: true, currentText: "", currentThinking: "", contentBlocks: [] };
+        map.set(sessionId, { ...state, currentThinking: state.currentThinking + thinking });
+        return new Map(map);
+      }),
+    setContentBlock: (sessionId: string, index: number, block: ContentBlock) =>
+      update((map) => {
+        const state = map.get(sessionId) || { isStreaming: true, currentText: "", currentThinking: "", contentBlocks: [] };
+        const blocks = [...state.contentBlocks];
+        blocks[index] = block;
+        map.set(sessionId, { ...state, contentBlocks: blocks });
+        return new Map(map);
+      }),
+    setToolUseInProgress: (sessionId: string, toolUse: { id: string; name: string; partialJson: string } | undefined) =>
+      update((map) => {
+        const state = map.get(sessionId) || { isStreaming: true, currentText: "", currentThinking: "", contentBlocks: [] };
+        map.set(sessionId, { ...state, toolUseInProgress: toolUse });
+        return new Map(map);
+      }),
+    stopStreaming: (sessionId: string) =>
+      update((map) => {
+        const state = map.get(sessionId);
+        if (state) {
+          map.set(sessionId, { ...state, isStreaming: false });
+        }
+        return new Map(map);
+      }),
+    clear: (sessionId: string) =>
+      update((map) => {
+        map.delete(sessionId);
+        return new Map(map);
+      }),
+  };
+}
+
+export const streamingState = createStreamingStateStore();
+
+export type ChatViewMode = "conversation" | "timeline";
+
+const CHAT_VIEW_MODE_KEY = "claude-code-ui-chat-view-mode";
+
+function createChatViewModeStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(CHAT_VIEW_MODE_KEY) : null;
+  const initial: ChatViewMode = stored === "timeline" ? "timeline" : "conversation";
+  const { subscribe, set } = writable<ChatViewMode>(initial);
+
+  return {
+    subscribe,
+    set: (mode: ChatViewMode) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(CHAT_VIEW_MODE_KEY, mode);
+      }
+      set(mode);
+    },
+    toggle: () => {
+      let current: ChatViewMode = "conversation";
+      subscribe(v => current = v)();
+      const newMode: ChatViewMode = current === "conversation" ? "timeline" : "conversation";
+      if (typeof window !== "undefined") {
+        localStorage.setItem(CHAT_VIEW_MODE_KEY, newMode);
+      }
+      set(newMode);
+    },
+  };
+}
+
+export const chatViewMode = createChatViewModeStore();
+
+export type StepType = "thinking" | "text" | "tool_use" | "tool_result";
+
+export interface AssistantStep {
+  id: string;
+  type: StepType;
+  content: ContentBlock;
+  isStreaming?: boolean;
+  streamingText?: string;
+  timestamp: number;
+}
+
+export interface AssistantTurn {
+  id: string;
+  steps: AssistantStep[];
+  currentStepId: string | null;
+  userExpandedSteps: Set<string>;
+  isComplete: boolean;
+}
+
+function createAssistantTurnsStore() {
+  const { subscribe, set, update } = writable<Map<string, AssistantTurn[]>>(new Map());
+
+  return {
+    subscribe,
+    startTurn: (sessionId: string, turnId: string) =>
+      update((map) => {
+        const turns = map.get(sessionId) || [];
+        turns.push({
+          id: turnId,
+          steps: [],
+          currentStepId: null,
+          userExpandedSteps: new Set(),
+          isComplete: false,
+        });
+        map.set(sessionId, turns);
+        return new Map(map);
+      }),
+    addStep: (sessionId: string, turnId: string, step: AssistantStep) =>
+      update((map) => {
+        const turns = map.get(sessionId) || [];
+        const turn = turns.find(t => t.id === turnId);
+        if (turn) {
+          turn.steps.push(step);
+          turn.currentStepId = step.id;
+        }
+        map.set(sessionId, [...turns]);
+        return new Map(map);
+      }),
+    updateStep: (sessionId: string, turnId: string, stepId: string, updates: Partial<AssistantStep>) =>
+      update((map) => {
+        const turns = map.get(sessionId) || [];
+        const turn = turns.find(t => t.id === turnId);
+        if (turn) {
+          const step = turn.steps.find(s => s.id === stepId);
+          if (step) {
+            Object.assign(step, updates);
+          }
+        }
+        map.set(sessionId, [...turns]);
+        return new Map(map);
+      }),
+    finishStep: (sessionId: string, turnId: string, stepId: string) =>
+      update((map) => {
+        const turns = map.get(sessionId) || [];
+        const turn = turns.find(t => t.id === turnId);
+        if (turn) {
+          const step = turn.steps.find(s => s.id === stepId);
+          if (step) {
+            step.isStreaming = false;
+          }
+        }
+        map.set(sessionId, [...turns]);
+        return new Map(map);
+      }),
+    completeTurn: (sessionId: string, turnId: string) =>
+      update((map) => {
+        const turns = map.get(sessionId) || [];
+        const turn = turns.find(t => t.id === turnId);
+        if (turn) {
+          turn.isComplete = true;
+          turn.currentStepId = null;
+          turn.steps.forEach(s => s.isStreaming = false);
+        }
+        map.set(sessionId, [...turns]);
+        return new Map(map);
+      }),
+    toggleUserExpanded: (sessionId: string, turnId: string, stepId: string, expanded: boolean) =>
+      update((map) => {
+        const turns = map.get(sessionId) || [];
+        const turn = turns.find(t => t.id === turnId);
+        if (turn) {
+          if (expanded) {
+            turn.userExpandedSteps.add(stepId);
+          } else {
+            turn.userExpandedSteps.delete(stepId);
+          }
+        }
+        map.set(sessionId, [...turns]);
+        return new Map(map);
+      }),
+    clearSession: (sessionId: string) =>
+      update((map) => {
+        map.delete(sessionId);
+        return new Map(map);
+      }),
+    getTurns: (sessionId: string, map: Map<string, AssistantTurn[]>) => map.get(sessionId) || [],
+    getLatestTurn: (sessionId: string, map: Map<string, AssistantTurn[]>) => {
+      const turns = map.get(sessionId) || [];
+      return turns[turns.length - 1] || null;
+    },
+  };
+}
+
+export const assistantTurns = createAssistantTurnsStore();

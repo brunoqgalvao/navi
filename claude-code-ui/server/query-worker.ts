@@ -251,20 +251,58 @@ function send(msg: any) {
 }
 
 function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
+  const timestamp = Date.now();
+  const uuid = (msg as any).uuid || crypto.randomUUID();
+  
   switch (msg.type) {
-    case "system":
-      return {
+    case "system": {
+      const systemMsg = msg as any;
+      const base = {
         type: "system",
         uiSessionId,
         claudeSessionId: msg.session_id,
-        subtype: msg.subtype,
-        ...(msg.subtype === "init" && {
-          cwd: (msg as any).cwd,
-          model: (msg as any).model,
-          tools: (msg as any).tools,
-          skills: (msg as any).skills,
-        }),
+        subtype: systemMsg.subtype,
+        uuid,
+        timestamp,
       };
+      
+      switch (systemMsg.subtype) {
+        case "init":
+          return {
+            ...base,
+            cwd: systemMsg.cwd,
+            model: systemMsg.model,
+            tools: systemMsg.tools,
+            skills: systemMsg.skills,
+            mcp_servers: systemMsg.mcp_servers,
+            permissionMode: systemMsg.permissionMode,
+            apiKeySource: systemMsg.apiKeySource,
+            betas: systemMsg.betas,
+            agents: systemMsg.agents,
+          };
+        case "compact_boundary":
+          return {
+            ...base,
+            compactMetadata: systemMsg.compact_metadata,
+          };
+        case "status":
+          return {
+            ...base,
+            status: systemMsg.status,
+          };
+        case "hook_response":
+          return {
+            ...base,
+            hookName: systemMsg.hook_name,
+            hookEvent: systemMsg.hook_event,
+            stdout: systemMsg.stdout,
+            stderr: systemMsg.stderr,
+            exitCode: systemMsg.exit_code,
+          };
+        default:
+          return base;
+      }
+    }
 
     case "assistant":
       return {
@@ -273,6 +311,10 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         claudeSessionId: msg.session_id,
         content: msg.message.content,
         parentToolUseId: msg.parent_tool_use_id || null,
+        uuid,
+        timestamp,
+        error: (msg as any).error,
+        usage: (msg as any).message?.usage,
       };
 
     case "user":
@@ -281,18 +323,34 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         uiSessionId,
         content: msg.message.content,
         parentToolUseId: msg.parent_tool_use_id || null,
+        uuid,
+        timestamp,
+        isSynthetic: (msg as any).isSynthetic,
+        toolUseResult: (msg as any).tool_use_result,
       };
 
-    case "result":
+    case "result": {
+      const resultMsg = msg as any;
       return {
         type: "result",
         uiSessionId,
         claudeSessionId: msg.session_id,
-        costUsd: msg.total_cost_usd,
-        durationMs: msg.duration_ms,
-        numTurns: msg.num_turns,
-        usage: msg.usage,
+        subtype: resultMsg.subtype,
+        costUsd: resultMsg.total_cost_usd,
+        durationMs: resultMsg.duration_ms,
+        durationApiMs: resultMsg.duration_api_ms,
+        numTurns: resultMsg.num_turns,
+        usage: resultMsg.usage,
+        modelUsage: resultMsg.modelUsage,
+        isError: resultMsg.is_error,
+        result: resultMsg.result,
+        errors: resultMsg.errors,
+        permissionDenials: resultMsg.permission_denials,
+        structuredOutput: resultMsg.structured_output,
+        uuid,
+        timestamp,
       };
+    }
 
     case "tool_progress":
       return {
@@ -302,10 +360,45 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         toolName: msg.tool_name,
         parentToolUseId: msg.parent_tool_use_id || null,
         elapsedTimeSeconds: msg.elapsed_time_seconds,
+        uuid,
+        timestamp,
       };
 
+    case "stream_event": {
+      const streamMsg = msg as any;
+      return {
+        type: "stream_event",
+        uiSessionId,
+        claudeSessionId: msg.session_id,
+        event: streamMsg.event,
+        parentToolUseId: streamMsg.parent_tool_use_id || null,
+        uuid,
+        timestamp,
+      };
+    }
+
+    case "auth_status": {
+      const authMsg = msg as any;
+      return {
+        type: "auth_status",
+        uiSessionId,
+        claudeSessionId: msg.session_id,
+        isAuthenticating: authMsg.isAuthenticating,
+        output: authMsg.output,
+        error: authMsg.error,
+        uuid,
+        timestamp,
+      };
+    }
+
     default:
-      return { type: "unknown", uiSessionId, raw: msg };
+      return { 
+        type: "unknown", 
+        uiSessionId, 
+        raw: msg,
+        uuid,
+        timestamp,
+      };
   }
 }
 
@@ -410,13 +503,17 @@ async function runQuery(input: WorkerInput) {
         canUseTool,
         settingSources: ['user', 'project', 'local'] as const,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
+        includePartialMessages: true,
       },
     });
 
     let lastAssistantContent: any[] = [];
+    let lastAssistantUsage: any = null;
     let resultData: any = null;
 
     for await (const msg of q) {
+      console.error(`[Worker] MSG type: ${msg.type}`, msg.type === "stream_event" ? (msg as any).event?.type : "");
+      
       const formatted = formatMessage(msg, sessionId);
       send({ type: "message", data: formatted });
 
@@ -426,6 +523,10 @@ async function runQuery(input: WorkerInput) {
 
       if (msg.type === "assistant") {
         lastAssistantContent = msg.message.content;
+        const usage = (msg as any).message?.usage;
+        if (!msg.parent_tool_use_id && usage) {
+          lastAssistantUsage = usage;
+        }
       }
       if (msg.type === "result") {
         resultData = msg;
@@ -436,6 +537,7 @@ async function runQuery(input: WorkerInput) {
       type: "complete",
       sessionId,
       lastAssistantContent,
+      lastAssistantUsage,
       resultData: resultData ? {
         session_id: resultData.session_id,
         model: resultData.model,

@@ -1,20 +1,18 @@
 <script lang="ts">
-  import CopyButton from "./CopyButton.svelte";
+  import type { ContentBlock, TextBlock, ToolUseBlock, ThinkingBlock, ToolResultBlock } from "../claude";
+  import type { AgentUpdate } from "../handlers";
+  import MermaidRenderer from "./MermaidRenderer.svelte";
   import ToolRenderer from "./ToolRenderer.svelte";
   import SubagentBlock from "./SubagentBlock.svelte";
-  import GenerativeUI from "./experimental/GenerativeUI.svelte";
-  import MermaidRenderer from "./MermaidRenderer.svelte";
   import MediaDisplay from "./MediaDisplay.svelte";
-  import type { ToolUseBlock, ContentBlock, TextBlock } from "../claude";
-  import type { ChatMessage } from "../stores";
+  import GenerativeUI from "./experimental/GenerativeUI.svelte";
+  import CopyButton from "./CopyButton.svelte";
   import { processGenerativeUIContent } from "../generative-ui";
-  import { parseMediaContent, type MediaItem } from "../media-parser";
+  import { parseMediaContent } from "../media-parser";
 
   interface Props {
-    content: ContentBlock[] | string;
-    contentHistory?: (ContentBlock[] | string)[];
-    advancedMode?: boolean;
-    subagentMessages?: ChatMessage[];
+    content: ContentBlock[];
+    subagentUpdates?: AgentUpdate[];
     activeSubagents?: Map<string, { elapsed: number }>;
     basePath?: string;
     onRollback?: () => void;
@@ -26,10 +24,8 @@
   }
 
   let { 
-    content, 
-    contentHistory,
-    advancedMode = false,
-    subagentMessages = [],
+    content,
+    subagentUpdates = [],
     activeSubagents = new Map(),
     basePath = '',
     onRollback, 
@@ -41,72 +37,44 @@
   }: Props = $props();
 
   let showMenu = $state(false);
-  let expandedHistory = $state(false);
-  let expandedTools = $state(false);
-  let contentElement: HTMLElement;
+  let expandedBlocks = $state<Set<number>>(new Set());
 
-  function formatContent(c: ContentBlock[] | string): string {
-    if (typeof c === "string") return c;
-    return c
-      .map((block) => {
-        if (block.type === "text") return (block as TextBlock).text;
-        if (block.type === "tool_use") return `[Using ${(block as ToolUseBlock).name}]`;
-        return "";
-      })
+  function toggleBlock(idx: number) {
+    if (expandedBlocks.has(idx)) {
+      expandedBlocks.delete(idx);
+    } else {
+      expandedBlocks.add(idx);
+    }
+    expandedBlocks = new Set(expandedBlocks);
+  }
+
+  function getCopyText(): string {
+    return content
+      .filter((b): b is TextBlock => b.type === "text")
+      .map(b => b.text)
+      .filter(Boolean)
       .join("\n");
   }
 
-  function getToolCalls(c: ContentBlock[] | string): ToolUseBlock[] {
-    if (typeof c === "string") return [];
-    return c.filter((b): b is ToolUseBlock => b.type === "tool_use" && b.name !== "TodoWrite");
+  function isTaskTool(block: ContentBlock): boolean {
+    return block.type === "tool_use" && (block as ToolUseBlock).name === "Task";
   }
 
-  function getHistoryToolCalls(history: (ContentBlock[] | string)[] | undefined): ToolUseBlock[] {
-    if (!history) return [];
-    return history.flatMap(c => {
-      if (typeof c === "string") return [];
-      return c.filter((b): b is ToolUseBlock => b.type === "tool_use");
-    });
+  function isTodoWrite(block: ContentBlock): boolean {
+    return block.type === "tool_use" && (block as ToolUseBlock).name === "TodoWrite";
   }
 
-  function isTaskTool(tool: ToolUseBlock): boolean {
-    return tool.name === "Task";
+  function getSubagentForTool(toolUseId: string): AgentUpdate[] {
+    return subagentUpdates.filter(u => u.parentToolUseId === toolUseId);
   }
 
-  function getSubagentMsgs(toolUseId: string): ChatMessage[] {
-    return subagentMessages.filter(m => m.parentToolUseId === toolUseId);
+  function renderTextContent(text: string) {
+    const mediaResult = parseMediaContent(text);
+    const genuiResult = processGenerativeUIContent(mediaResult.processedContent);
+    return { mediaResult, genuiResult };
   }
 
-
-  const toolCalls = $derived(getToolCalls(content));
-  const historyToolCalls = $derived(getHistoryToolCalls(contentHistory));
-  const formattedContent = $derived(formatContent(content));
-
-  // Process media content first
-  const mediaResult = $derived(parseMediaContent(formattedContent));
-  const mediaItems = $derived(mediaResult.items);
-  
-  // Process generative UI content - simplified approach
-  const genuiResult = $derived(processGenerativeUIContent(mediaResult.processedContent));
-  const processedContent = $derived(genuiResult.processedContent);
-  const blocks = $derived(genuiResult.blocks);
-
-  function handleGenerativeUIInteraction(event: CustomEvent) {
-    const { type, target, data } = event.detail;
-    console.log('Generative UI Interaction:', { type, target, data });
-    
-    // Handle different interaction types
-    if (type === 'form_submit') {
-      console.log('Form submitted:', data);
-    } else if (type === 'click') {
-      console.log('Element clicked:', target);
-    }
-  }
-
-  function handleGenerativeUIError(event: CustomEvent) {
-    console.error('Generative UI Error:', event.detail);
-  }
-
+  const copyText = $derived(getCopyText());
 </script>
 
 <svelte:window onclick={() => showMenu = false} />
@@ -118,9 +86,9 @@
 
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="flex-1 min-w-0 space-y-2 relative" onclick={onMessageClick}>
-    <div class="absolute -top-6 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5">
-      <CopyButton text={formattedContent} />
+  <div class="flex-1 min-w-0 relative space-y-3" onclick={onMessageClick}>
+    <div class="absolute -top-6 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5 z-20">
+      <CopyButton text={copyText} />
       <div class="relative">
         <button 
           onclick={(e) => { e.stopPropagation(); showMenu = !showMenu; }} 
@@ -150,101 +118,120 @@
       </div>
     </div>
 
-    <div bind:this={contentElement} class="text-[15px] leading-7 text-gray-800 markdown-body">
-      <MermaidRenderer content={processedContent} {renderMarkdown} {jsonBlocksMap} />
-      
-      <!-- Render media items -->
-      {#if mediaItems.length > 0}
-        <div class="my-4">
-          <MediaDisplay items={mediaItems} layout={mediaItems.length === 1 ? 'single' : 'grid'} {basePath} />
+    {#each content as block, idx (idx)}
+      {#if block.type === "text"}
+        {@const text = (block as TextBlock).text}
+        {@const rendered = renderTextContent(text)}
+        <div class="text-[15px] leading-7 text-gray-800 markdown-body">
+          <MermaidRenderer content={rendered.genuiResult.processedContent} {renderMarkdown} {jsonBlocksMap} />
+          {#if rendered.mediaResult.items.length > 0}
+            <div class="my-4">
+              <MediaDisplay items={rendered.mediaResult.items} layout={rendered.mediaResult.items.length === 1 ? 'single' : 'grid'} {basePath} />
+            </div>
+          {/if}
+          {#each rendered.genuiResult.blocks as genuiBlock (genuiBlock.id)}
+            <div class="my-4">
+              <GenerativeUI html={genuiBlock.html} id={genuiBlock.id} />
+            </div>
+          {/each}
         </div>
-      {/if}
-      
-      <!-- Render generative UI components inline -->
-      {#each blocks as block (block.id)}
-        <div class="my-4">
-          <GenerativeUI 
-            html={block.html} 
-            id={block.id}
-            oninteraction={handleGenerativeUIInteraction}
-            onerror={handleGenerativeUIError}
-          />
-        </div>
-      {/each}
-    </div>
 
-    {#if advancedMode && historyToolCalls.length > 0}
-      <div class="mt-3">
-        <button
-          onclick={() => expandedHistory = !expandedHistory}
-          class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
-        >
-          <svg class="w-3 h-3 transition-transform {expandedHistory ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-          </svg>
-          <span>{historyToolCalls.length} previous tool {historyToolCalls.length === 1 ? 'call' : 'calls'}</span>
-        </button>
-        {#if expandedHistory}
-          <div class="mt-2 space-y-1 pl-4 border-l-2 border-gray-200 opacity-70">
-            {#each historyToolCalls as histTool, idx}
-              <ToolRenderer tool={histTool} compact={true} index={idx} onPreview={onPreview} />
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-
-    {#if toolCalls.length > 0}
-      {#if advancedMode}
-        <div class="mt-3">
+      {:else if block.type === "thinking"}
+        {@const thinking = (block as ThinkingBlock).thinking}
+        {@const expanded = expandedBlocks.has(idx)}
+        <div class="rounded-lg border-l-2 border-l-purple-300 bg-gray-50/30 overflow-hidden">
           <button
-            onclick={() => expandedTools = !expandedTools}
-            class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+            onclick={() => toggleBlock(idx)}
+            class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-purple-50/50 transition-colors"
           >
-            <svg class="w-3 h-3 transition-transform {expandedTools ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            <span class="text-sm">💭</span>
+            <span class="flex-1 min-w-0 text-sm text-purple-700 truncate">
+              {thinking.slice(0, 80)}{thinking.length > 80 ? "..." : ""}
+            </span>
+            <svg
+              class="w-4 h-4 text-purple-400 transition-transform {expanded ? 'rotate-90' : ''}"
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
             </svg>
-            <span>{toolCalls.length} tool {toolCalls.length === 1 ? 'call' : 'calls'}</span>
           </button>
-          {#if expandedTools}
-            <div class="mt-2 space-y-1">
-              {#each toolCalls as tool}
-                {#if isTaskTool(tool)}
-                  <SubagentBlock
-                    toolUseId={tool.id}
-                    description={tool.input.description || tool.input.prompt?.slice(0, 100) || "Subagent task"}
-                    subagentType={tool.input.subagent_type || "general-purpose"}
-                    messages={getSubagentMsgs(tool.id)}
-                    isActive={activeSubagents.has(tool.id)}
-                    elapsedTime={activeSubagents.get(tool.id)?.elapsed}
-                    {renderMarkdown}
-                    onMessageClick={onMessageClick}
-                  />
-                {:else}
-                  <ToolRenderer {tool} onPreview={onPreview} />
-                {/if}
-              {/each}
+          {#if expanded}
+            <div class="px-3 pb-3 relative">
+              <div class="absolute top-0 right-3">
+                <CopyButton text={thinking} />
+              </div>
+              <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono bg-purple-50 rounded-lg p-3 pr-10 max-h-64 overflow-y-auto">{thinking}</pre>
             </div>
           {/if}
         </div>
-      {:else}
-        {#each toolCalls as tool}
-          {#if isTaskTool(tool)}
-            <SubagentBlock
-              toolUseId={tool.id}
-              description={tool.input.description || tool.input.prompt?.slice(0, 100) || "Subagent task"}
-              subagentType={tool.input.subagent_type || "general-purpose"}
-              messages={getSubagentMsgs(tool.id)}
-              isActive={activeSubagents.has(tool.id)}
-              elapsedTime={activeSubagents.get(tool.id)?.elapsed}
-              {renderMarkdown}
-              onMessageClick={onMessageClick}
-            />
-          {:else}
-            <ToolRenderer {tool} onPreview={onPreview} />
+
+      {:else if block.type === "tool_use"}
+        {@const tool = block as ToolUseBlock}
+        {#if isTaskTool(block)}
+          <SubagentBlock
+            toolUseId={tool.id}
+            description={tool.input?.description || tool.input?.prompt?.slice(0, 100) || "Subagent task"}
+            subagentType={tool.input?.subagent_type || "general-purpose"}
+            updates={getSubagentForTool(tool.id)}
+            isActive={activeSubagents.has(tool.id)}
+            elapsedTime={activeSubagents.get(tool.id)?.elapsed}
+            {renderMarkdown}
+            {onMessageClick}
+          />
+        {:else if !isTodoWrite(block)}
+          {@const expanded = expandedBlocks.has(idx)}
+          <div class="rounded-lg border-l-2 border-l-orange-300 bg-gray-50/30 overflow-hidden">
+            <button
+              onclick={() => toggleBlock(idx)}
+              class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-orange-50/30 transition-colors"
+            >
+              <span class="text-sm">🔧</span>
+              <span class="text-sm text-gray-700 font-medium">{tool.name}</span>
+              <svg
+                class="w-4 h-4 text-gray-400 transition-transform {expanded ? 'rotate-90' : ''}"
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            {#if expanded}
+              <div class="px-3 pb-3">
+                <ToolRenderer {tool} {onPreview} />
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+      {:else if block.type === "tool_result"}
+        {@const result = block as ToolResultBlock}
+        {@const expanded = expandedBlocks.has(idx)}
+        <div class="rounded-lg border-l-2 border-l-teal-300 bg-gray-50/30 overflow-hidden">
+          <button
+            onclick={() => toggleBlock(idx)}
+            class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-teal-50/30 transition-colors"
+          >
+            <span class="text-sm">📋</span>
+            <span class="flex-1 min-w-0 text-sm text-gray-600 truncate">
+              {#if result.is_error}
+                <span class="text-red-600">Error</span>
+              {:else}
+                Result
+              {/if}
+            </span>
+            <svg
+              class="w-4 h-4 text-gray-400 transition-transform {expanded ? 'rotate-90' : ''}"
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+          {#if expanded}
+            <div class="px-3 pb-3">
+              <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50' : 'text-gray-700 bg-gray-50'} rounded-lg p-3 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto">{result.content}</pre>
+            </div>
           {/if}
-        {/each}
+        </div>
       {/if}
-    {/if}
+    {/each}
   </div>
 </div>
