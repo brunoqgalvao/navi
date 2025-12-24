@@ -688,7 +688,7 @@
   async function loadProjectContext(project: Project) {
     const cached = project.summary || project.description;
     const cacheAge = project.summary_updated_at ? Date.now() - project.summary_updated_at : Infinity;
-    const maxAge = 7 * 24 * 60 * 60 * 1000;
+    const maxAge = 24 * 60 * 60 * 1000; // 1 day cache
     
     if (cached && cacheAge < maxAge) {
       try {
@@ -703,17 +703,28 @@
     projectContext = null;
     projectContextError = null;
     
+    // Get recent chat titles for context
+    const recentChatTitles = sidebarSessions
+      .slice(0, 5)
+      .map(s => s.title)
+      .filter(t => t && t !== "New Chat")
+      .join(", ");
+    
+    const chatContext = recentChatTitles 
+      ? `\n\nRecent conversations in this project: ${recentChatTitles}` 
+      : "";
+    
     api.ephemeral.chat({
       prompt: `Analyze this project directory and provide:
 1. A brief summary (2-3 sentences) of what this project is about and its main technologies
-2. 3-4 suggested next steps or tasks the user might want to do
+2. 3-4 suggested next steps or tasks the user might want to do based on the project state${chatContext}
 
 Respond in this exact JSON format only, no other text:
 {"summary": "...", "suggestions": ["...", "...", "..."]}`,
       projectPath: project.path,
       useTools: true,
       maxTokens: 500,
-    }).then(response => {
+    }).then(async response => {
       try {
         if (!response.result) {
           projectContext = { summary: "New project ready for development.", suggestions: ["Create a package.json or project configuration", "Add source code files", "Set up version control with git"] };
@@ -721,8 +732,15 @@ Respond in this exact JSON format only, no other text:
         }
         const jsonMatch = response.result.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          projectContext = JSON.parse(jsonMatch[0]);
-          api.projects.generateSummary(project.id).catch(() => {});
+          const parsed = JSON.parse(jsonMatch[0]);
+          projectContext = parsed;
+          // Save to DB for caching
+          try {
+            await api.projects.update(project.id, { 
+              summary: JSON.stringify(parsed),
+              summary_updated_at: Date.now()
+            });
+          } catch {}
         } else {
           projectContext = { summary: response.result.slice(0, 500), suggestions: [] };
         }
@@ -2261,7 +2279,7 @@ Respond in this exact JSON format only, no other text:
                 />
 
                 <div class="text-center mt-2">
-                    <span class="text-[10px] text-gray-400">Claude can make mistakes. Please verify important information.</span>
+                    <span class="text-[10px] text-gray-400">navi can make mistakes. Please verify important information.</span>
                 </div>
             </div>
 

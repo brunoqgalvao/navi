@@ -366,7 +366,7 @@
       </div>
       
       <div class="flex items-center gap-1">
-        {#if source && detectedType !== "none" && detectedType !== "url"}
+        {#if source && detectedType !== "none"}
           <button 
             onclick={() => api.fs.reveal(source.split('#')[0])} 
             class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors" 
