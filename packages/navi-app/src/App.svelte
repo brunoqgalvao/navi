@@ -5,6 +5,7 @@
   import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, unreadNotificationCount, sessionStatus, projectStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, sessionEvents, streamingState, assistantTurns, type ChatMessage, type TourStep, type AttachedFile, type CostViewMode, type SDKEvent, type SDKEventType, type AssistantStep, type StepType } from "./lib/stores";
   import ModelSelector from "./lib/components/ModelSelector.svelte";
   import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
+  import { parseHash, onHashChange } from "./lib/router";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
   import hljs from "highlight.js";
@@ -87,6 +88,7 @@
   }
   
   import FileBrowser from "./lib/FileBrowser.svelte";
+  import GitPanel from "./lib/components/GitPanel.svelte";
   import Modal from "./lib/components/Modal.svelte";
   import AudioRecorder from "./lib/components/AudioRecorder.svelte";
   import InteractiveCodeBlock from "./lib/components/InteractiveCodeBlock.svelte";
@@ -156,6 +158,7 @@
   let editingSession = $state<Session | null>(null);
   let editSessionTitle = $state("");
   let messagesContainer: HTMLElement;
+  let userIsNearBottom = $state(true);
   let modelSelection = $state("");
   let lastSessionModel = $state("");
   let showSettings = $state(false);
@@ -259,8 +262,9 @@
   let previewSource = $state("");
   let showFileBrowser = $state(false);
   let showBrowser = $state(false);
+  let showGitPanel = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git">("preview");
   let projectFileIndex = $state<Map<string, string>>(new Map());
   let activeSubagents = $state<Map<string, { elapsed: number }>>(new Map());
   let codeBlocksMap = $state<Map<string, { code: string; language: string }>>(new Map());
@@ -390,6 +394,9 @@
     } else if (e.key === 'b') {
       e.preventDefault();
       toggleFileBrowser();
+    } else if (e.key === 'g') {
+      e.preventDefault();
+      toggleGitPanel();
     } else if (e.key === '/') {
       e.preventDefault();
       inputRef?.focus();
@@ -499,7 +506,7 @@
     if ($onboardingComplete) {
       showWelcome = true;
     }
-    
+
     loadProjects();
     loadRecentChats();
     loadFolders();
@@ -522,13 +529,45 @@
       messageHandler.handleMessage(msg);
     });
 
+    // Restore state from URL hash on load
+    const initialRoute = parseHash();
+    if (initialRoute.projectId) {
+      session.restoreFromUrl(initialRoute.projectId, initialRoute.sessionId);
+      // Load sessions for the restored project
+      if (initialRoute.projectId) {
+        api.sessions.list(initialRoute.projectId).then(sessions => {
+          sidebarSessions = sessions;
+        }).catch(e => console.error("Failed to load sessions from URL:", e));
+      }
+    }
+
+    // Listen for back/forward navigation
+    const unsubscribeHash = onHashChange((route) => {
+      const currentProjectId = get(session).projectId;
+      const currentSessionId = get(session).sessionId;
+
+      // Only restore if actually different (avoids loops)
+      if (route.projectId !== currentProjectId || route.sessionId !== currentSessionId) {
+        session.restoreFromUrl(route.projectId, route.sessionId);
+        if (route.projectId && route.projectId !== currentProjectId) {
+          api.sessions.list(route.projectId).then(sessions => {
+            sidebarSessions = sessions;
+          }).catch(e => console.error("Failed to load sessions:", e));
+        }
+      }
+    });
+
     const handleGlobalClick = () => {
       sessionMenuId = null;
       projectMenuId = null;
       messageMenuId = null;
     };
     document.addEventListener("click", handleGlobalClick);
-    return () => document.removeEventListener("click", handleGlobalClick);
+
+    return () => {
+      document.removeEventListener("click", handleGlobalClick);
+      unsubscribeHash();
+    };
   });
 
 
@@ -1143,6 +1182,7 @@ Respond in this exact JSON format only, no other text:
       }
     }
 
+    userIsNearBottom = true; // Reset on session switch
     scrollToBottom(true);
   }
 
@@ -1759,12 +1799,23 @@ Respond in this exact JSON format only, no other text:
   }
 
   function scrollToBottom(instant = false) {
+    // Only auto-scroll if user is near the bottom, or if it's an instant scroll (session switch)
+    if (!instant && !userIsNearBottom) return;
+
     setTimeout(() => {
       messagesContainer?.scrollTo({
         top: messagesContainer.scrollHeight,
         behavior: instant ? "instant" : "smooth",
       });
+      userIsNearBottom = true;
     }, instant ? 0 : 50);
+  }
+
+  function handleMessagesScroll() {
+    if (!messagesContainer) return;
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
+    // Consider "near bottom" if within 100px of the bottom
+    userIsNearBottom = scrollHeight - scrollTop - clientHeight < 100;
   }
 
   function processMessageQueue(sessionId: string) {
@@ -1976,7 +2027,17 @@ Respond in this exact JSON format only, no other text:
     showFileBrowser = false;
     showPreview = false;
     showBrowser = false;
+    showGitPanel = false;
     previewSource = "";
+  }
+
+  function toggleGitPanel() {
+    if (showGitPanel && rightPanelMode === "git") {
+      showGitPanel = false;
+    } else {
+      showGitPanel = true;
+      rightPanelMode = "git";
+    }
   }
 
   function renderMarkdown(content: string): string {
@@ -2425,12 +2486,19 @@ Respond in this exact JSON format only, no other text:
       >
         <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
       </button>
-      <button 
+      <button
         onclick={() => { showBrowser = true; rightPanelMode = 'browser'; }}
         class={`p-2 border rounded-lg shadow-sm transition-all group ${showBrowser && rightPanelMode === 'browser' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
         title="Open Browser"
       >
         <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+      </button>
+      <button
+        onclick={toggleGitPanel}
+        class={`p-2 border rounded-lg shadow-sm transition-all group ${showGitPanel && rightPanelMode === 'git' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
+        title="Git Panel (Cmd+G)"
+      >
+        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
       </button>
     </div>
     {/if}
@@ -2501,7 +2569,7 @@ Respond in this exact JSON format only, no other text:
 
         <!-- Messages -->
 
-        <div class="flex-1 overflow-y-auto p-4 md:p-0 scroll-smooth" bind:this={messagesContainer}>
+        <div class="flex-1 overflow-y-auto p-4 md:p-0 scroll-smooth" bind:this={messagesContainer} onscroll={handleMessagesScroll}>
           {#if currentMessages.length === 0 && !$session.sessionId}
             <div class="space-y-6">
               {#if $advancedMode && claudeMdContent}
@@ -2616,8 +2684,8 @@ Respond in this exact JSON format only, no other text:
 
   </main>
 
-  <!-- Right Panel (File Browser / Preview / Browser) -->
-  {#if showFileBrowser || showPreview || showBrowser}
+  <!-- Right Panel (File Browser / Preview / Browser / Git) -->
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel}
     <!-- Resizer Handle -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
@@ -2649,6 +2717,13 @@ Respond in this exact JSON format only, no other text:
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
           Browser
         </button>
+        <button
+          onclick={() => { rightPanelMode = "git"; showGitPanel = true; }}
+          class={`px-3 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${rightPanelMode === 'git' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
+        >
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          Git
+        </button>
         <div class="flex-1"></div>
         <button onclick={closeRightPanel} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Close">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -2663,6 +2738,8 @@ Respond in this exact JSON format only, no other text:
           <Preview source={previewSource} />
         {:else if rightPanelMode === "browser"}
           <Preview source={browserUrl} type="url" onUrlChange={(url) => browserUrl = url} />
+        {:else if rightPanelMode === "git" && currentProject}
+          <GitPanel rootPath={currentProject.path} />
         {/if}
       </div>
     </div>
