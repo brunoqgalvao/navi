@@ -2593,12 +2593,36 @@ ${content.slice(0, 8000)}`;
           prompt: "",
           options: { cwd: process.cwd() },
         });
-        const models = await q.supportedModels();
+        const claudeModels = await q.supportedModels();
         await q.interrupt();
-        return json(models);
+        
+        const zaiApiKey = globalSettings.get("zaiApiKey");
+        const glmModels = zaiApiKey ? [
+          { value: "glm-4.7", displayName: "GLM-4.7", description: "Z.ai's latest coding model" },
+          { value: "glm-4.5-air", displayName: "GLM-4.5 Air", description: "Z.ai's fast, lightweight model" },
+        ] : [];
+        
+        return json([...claudeModels, ...glmModels]);
       } catch (e) {
         return json({ error: "Failed to fetch models" }, 500);
       }
+    }
+    
+    if (url.pathname === "/api/auth/zai-key" && method === "POST") {
+      const body = await req.json();
+      const apiKey = body.apiKey;
+      
+      if (!apiKey || typeof apiKey !== "string") {
+        return json({ error: "API key required" }, 400);
+      }
+      
+      globalSettings.set("zaiApiKey", apiKey);
+      return json({ success: true });
+    }
+    
+    if (url.pathname === "/api/auth/zai-key" && method === "DELETE") {
+      globalSettings.set("zaiApiKey", "");
+      return json({ success: true });
     }
 
     if (url.pathname === "/api/auth/status") {
@@ -2686,6 +2710,12 @@ ${content.slice(0, 8000)}`;
         ? `${storedApiKey.slice(0, 10)}...${storedApiKey.slice(-4)}`
         : null;
 
+      const zaiApiKey = globalSettings.get("zaiApiKey") as string | null;
+      const hasZaiKey = !!zaiApiKey;
+      const zaiKeyPreview = zaiApiKey
+        ? `${zaiApiKey.slice(0, 8)}...${zaiApiKey.slice(-4)}`
+        : null;
+
       return json({
         claudeInstalled,
         claudePath,
@@ -2695,6 +2725,8 @@ ${content.slice(0, 8000)}`;
         apiKeyPreview,
         hasOAuth,
         preferredAuth,
+        hasZaiKey,
+        zaiKeyPreview,
       });
     }
 
@@ -3163,11 +3195,19 @@ function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
   const preferredAuth = globalSettings.get("preferredAuth") as "oauth" | "api_key" | null;
   const storedApiKey = globalSettings.get("anthropicApiKey") || process.env.ANTHROPIC_API_KEY;
+  const zaiApiKey = globalSettings.get("zaiApiKey") as string | null;
   
   const workerEnv = { ...process.env };
   delete workerEnv.ANTHROPIC_API_KEY;
+  delete workerEnv.ANTHROPIC_BASE_URL;
   
-  if (preferredAuth === "api_key" && storedApiKey) {
+  const isGlmModel = model?.startsWith("glm-");
+  
+  if (isGlmModel && zaiApiKey) {
+    workerEnv.ANTHROPIC_AUTH_TOKEN = zaiApiKey;
+    workerEnv.ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
+    console.log(`[${sessionId}] Using Z.ai provider for model ${model}`);
+  } else if (preferredAuth === "api_key" && storedApiKey) {
     workerEnv.ANTHROPIC_API_KEY = storedApiKey;
     console.log(`[${sessionId}] Using API key auth`);
   } else {

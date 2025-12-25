@@ -42,6 +42,13 @@
   let anthropicError: string | null = $state(null);
   let savingAnthropic = $state(false);
 
+  let hasZaiKey = $state(false);
+  let zaiKeyPreview: string | null = $state(null);
+  let showZaiInput = $state(false);
+  let zaiKeyInput = $state("");
+  let zaiError: string | null = $state(null);
+  let savingZai = $state(false);
+
   let showOAuthSetup = $state(false);
   let checkingOAuth = $state(false);
 
@@ -124,6 +131,8 @@
       claudeInstalled = auth.claudeInstalled;
       hasOAuth = auth.hasOAuth;
       preferredAuth = auth.preferredAuth;
+      hasZaiKey = auth.hasZaiKey;
+      zaiKeyPreview = auth.zaiKeyPreview;
       permissionSettings = perms.global;
       defaultTools = perms.defaults.tools;
       dangerousTools = perms.defaults.dangerous;
@@ -228,6 +237,38 @@
       anthropicError = e.message || "Failed to save API key";
     } finally {
       savingAnthropic = false;
+    }
+  }
+
+  async function saveZaiKey() {
+    if (!zaiKeyInput.trim()) {
+      zaiError = "Please enter an API key";
+      return;
+    }
+
+    savingZai = true;
+    zaiError = null;
+
+    try {
+      await api.auth.setZaiKey(zaiKeyInput.trim());
+      hasZaiKey = true;
+      zaiKeyPreview = `${zaiKeyInput.slice(0, 8)}...${zaiKeyInput.slice(-4)}`;
+      showZaiInput = false;
+      zaiKeyInput = "";
+    } catch (e: any) {
+      zaiError = e.message || "Failed to save API key";
+    } finally {
+      savingZai = false;
+    }
+  }
+
+  async function deleteZaiKey() {
+    try {
+      await api.auth.deleteZaiKey();
+      hasZaiKey = false;
+      zaiKeyPreview = null;
+    } catch (e) {
+      console.error("Failed to delete Z.ai key:", e);
     }
   }
 
@@ -601,6 +642,81 @@
 
                       <p class="text-xs text-gray-500">
                         Get your key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" class="text-blue-600 hover:underline">platform.openai.com</a>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <div class="flex items-start gap-4">
+                    <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center shrink-0">
+                      <span class="text-purple-600 font-bold text-sm">Z</span>
+                    </div>
+                    <div class="flex-1 space-y-4">
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <h5 class="font-medium text-gray-900">Z.ai (GLM-4.7)</h5>
+                          <p class="text-sm text-gray-500">Access GLM models for coding</p>
+                        </div>
+                        {#if hasZaiKey}
+                          <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">Configured</span>
+                        {:else}
+                          <span class="text-xs font-medium text-gray-500 bg-gray-200 px-2.5 py-1 rounded-full">Optional</span>
+                        {/if}
+                      </div>
+
+                      {#if hasZaiKey && zaiKeyPreview && !showZaiInput}
+                        <div class="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2.5">
+                          <code class="text-sm font-mono text-gray-600">{zaiKeyPreview}</code>
+                          <span class="text-xs text-gray-400">stored</span>
+                          <button
+                            onclick={deleteZaiKey}
+                            class="ml-auto text-xs text-red-500 hover:text-red-700"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      {/if}
+
+                      {#if !showZaiInput}
+                        <button
+                          onclick={() => showZaiInput = true}
+                          class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                        >
+                          {hasZaiKey ? "Update API Key" : "Add API Key"}
+                        </button>
+                      {:else}
+                        <div class="space-y-3">
+                          <input
+                            type="password"
+                            bind:value={zaiKeyInput}
+                            placeholder="Your Z.ai API key"
+                            class="w-full bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm font-mono focus:border-gray-900 focus:outline-none transition-colors"
+                            onkeydown={(e) => e.key === "Enter" && saveZaiKey()}
+                          />
+                          {#if zaiError}
+                            <p class="text-sm text-red-600">{zaiError}</p>
+                          {/if}
+                          <div class="flex gap-2">
+                            <button
+                              onclick={() => { showZaiInput = false; zaiKeyInput = ""; zaiError = null; }}
+                              class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg px-4 py-2 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onclick={saveZaiKey}
+                              disabled={savingZai}
+                              class="text-sm font-medium bg-gray-900 text-white rounded-lg px-4 py-2 hover:bg-black transition-colors disabled:opacity-50"
+                            >
+                              {savingZai ? "Saving..." : "Save"}
+                            </button>
+                          </div>
+                        </div>
+                      {/if}
+
+                      <p class="text-xs text-gray-500">
+                        Get your key from <a href="https://z.ai/subscribe" target="_blank" rel="noopener" class="text-blue-600 hover:underline">z.ai</a> ($3/month for GLM Coding Plan)
                       </p>
                     </div>
                   </div>
