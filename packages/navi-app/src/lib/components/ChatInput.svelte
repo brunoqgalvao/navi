@@ -229,7 +229,7 @@
 
         const formData = new FormData();
         formData.append("file", blob, fileName);
-        formData.append("targetDir", projectPath);
+        formData.append("targetDir", `${projectPath}/.claude/pasted_images`);
 
         try {
           const res = await fetch("http://localhost:3001/api/fs/upload", {
