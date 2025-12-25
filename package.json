@@ -1,0 +1,15 @@
+{
+  "name": "claude-code-local-ui",
+  "private": true,
+  "version": "0.1.2",
+  "scripts": {
+    "dev": "concurrently \"bun run --cwd packages/navi-app dev:all\" \"bun run --cwd packages/landing-page dev\"",
+    "dev:app": "bun run --cwd packages/navi-app dev:all",
+    "dev:tauri": "bun run --cwd packages/navi-app tauri:dev",
+    "dev:landing": "bun run --cwd packages/landing-page dev",
+    "build": "bun run --cwd packages/navi-app build && bun run --cwd packages/landing-page build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

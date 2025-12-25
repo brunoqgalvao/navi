@@ -13,29 +13,29 @@ ROOT="$SCRIPT_DIR/.."
 
 echo "Bumping version to $VERSION..."
 
-# Update claude-code-ui package.json
-cd "$ROOT/claude-code-ui"
+# Update navi-app package.json
+cd "$ROOT/packages/navi-app"
 npm pkg set version="$VERSION"
-echo "Updated claude-code-ui/package.json"
+echo "Updated packages/navi-app/package.json"
 
 # Update Tauri config
-TAURI_CONF="$ROOT/claude-code-ui/src-tauri/tauri.conf.json"
+TAURI_CONF="$ROOT/packages/navi-app/src-tauri/tauri.conf.json"
 if [ -f "$TAURI_CONF" ]; then
   sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$TAURI_CONF"
   echo "Updated src-tauri/tauri.conf.json"
 fi
 
 # Update Cargo.toml
-CARGO_TOML="$ROOT/claude-code-ui/src-tauri/Cargo.toml"
+CARGO_TOML="$ROOT/packages/navi-app/src-tauri/Cargo.toml"
 if [ -f "$CARGO_TOML" ]; then
   sed -i '' "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" "$CARGO_TOML"
   echo "Updated src-tauri/Cargo.toml"
 fi
 
 # Update landing page package.json
-cd "$ROOT/landing-page"
+cd "$ROOT/packages/landing-page"
 npm pkg set version="$VERSION"
-echo "Updated landing-page/package.json"
+echo "Updated packages/landing-page/package.json"
 
 echo ""
 echo "Version bumped to $VERSION"
