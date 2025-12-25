@@ -297,6 +297,8 @@ export const api = {
         apiKeyPreview: string | null;
         hasOAuth: boolean;
         preferredAuth: "oauth" | "api_key" | null;
+        hasZaiKey: boolean;
+        zaiKeyPreview: string | null;
       }>("/auth/status"),
     setApiKey: (apiKey: string) =>
       request<{ success: boolean }>("/auth/api-key", {
@@ -311,6 +313,15 @@ export const api = {
     login: () =>
       request<{ success: boolean; error?: string; requiresTerminal?: boolean }>("/auth/login", {
         method: "POST",
+      }),
+    setZaiKey: (apiKey: string) =>
+      request<{ success: boolean }>("/auth/zai-key", {
+        method: "POST",
+        body: JSON.stringify({ apiKey }),
+      }),
+    deleteZaiKey: () =>
+      request<{ success: boolean }>("/auth/zai-key", {
+        method: "DELETE",
       }),
   },
 
