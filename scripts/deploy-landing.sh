@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-cd "$(dirname "$0")/../landing-page"
+cd "$(dirname "$0")/../packages/landing-page"
 
 echo "Deploying landing page..."
 gcloud run deploy navi-landing \

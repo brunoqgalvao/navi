@@ -1,0 +1,27 @@
+{
+  "name": "navi-landing",
+  "private": true,
+  "version": "0.1.2",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node server.js",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@tsconfig/svelte": "^5.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "svelte": "^5.0.0",
+    "svelte-check": "^4.0.0",
+    "tailwindcss": "^3.4.13",
+    "typescript": "~5.6.2",
+    "vite": "^5.4.8"
+  }
+}

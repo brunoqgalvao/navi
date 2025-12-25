@@ -1,7 +1,10 @@
 #!/bin/bash
 set -e
 
-cd "$(dirname "$0")/../claude-code-ui"
+cd "$(dirname "$0")/../packages/navi-app"
+
+echo "Compiling server sidecar..."
+bun build ./server/index.ts --compile --outfile src-tauri/binaries/navi-server-aarch64-apple-darwin --target bun-darwin-arm64
 
 echo "Building Tauri app..."
 bun run tauri build
