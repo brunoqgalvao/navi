@@ -116,7 +116,7 @@
   }
 
   :global(.diff-viewer .d2h-code-line) {
-    padding: 0 8px;
+    padding: 0 8px 0 4em; /* Left padding must accommodate the absolutely positioned line numbers */
   }
 
   :global(.diff-viewer .d2h-code-line-ctn) {
@@ -141,8 +141,8 @@
   }
 
   :global(.diff-viewer .d2h-code-linenumber) {
-    width: 40px;
-    min-width: 40px;
+    width: 3.5em;
+    min-width: 3.5em;
     color: #6e7781;
     background-color: #f6f8fa;
     border-right: 1px solid #e1e4e8;
