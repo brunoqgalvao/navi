@@ -1,17 +1,21 @@
 <script lang="ts">
   import type { ToolUseBlock } from "../claude";
   import JsonTreeViewer from "./JsonTreeViewer.svelte";
-  import DiffViewer from "./DiffViewer.svelte";
+  import WritePreview from "./tools/WritePreview.svelte";
+  import EditPreview from "./tools/EditPreview.svelte";
+  import WebSearchPreview from "./tools/WebSearchPreview.svelte";
+  import WebFetchPreview from "./tools/WebFetchPreview.svelte";
 
   interface Props {
     tool: ToolUseBlock;
+    toolResult?: { content: string; is_error?: boolean };
     onPreview?: (path: string) => void;
     compact?: boolean;
     index?: number;
     hideHeader?: boolean;
   }
 
-  let { tool, onPreview, compact = false, index, hideHeader = false }: Props = $props();
+  let { tool, toolResult, onPreview, compact = false, index, hideHeader = false }: Props = $props();
   
   const input = $derived(tool.input || {});
 
@@ -174,62 +178,21 @@
       </div>
 
     {:else if tool.name === "Write"}
-      <div class="space-y-2">
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-500">Writing to</span>
-          <button 
-            onclick={() => onPreview?.(input.file_path)}
-            class="text-xs font-mono text-green-600 hover:text-green-800 hover:underline truncate max-w-md"
-            title={input.file_path}
-          >
-            {getFileName(input.file_path || "")}
-          </button>
-          <span class="text-[10px] text-gray-400">
-            {input.content?.split("\n").length || 0} lines
-          </span>
-        </div>
-        {#if input.content}
-          <DiffViewer 
-            oldText="" 
-            newText={input.content} 
-            fileName={getFileName(input.file_path || "")}
-          />
-        {/if}
-      </div>
+      <WritePreview
+        filePath={input.file_path || ""}
+        content={input.content || ""}
+        {onPreview}
+      />
 
     {:else if tool.name === "Edit" || tool.name === "MultiEdit"}
-      <div class="space-y-2">
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-500">Editing</span>
-          <button 
-            onclick={() => onPreview?.(input.file_path)}
-            class="text-xs font-mono text-amber-600 hover:text-amber-800 hover:underline truncate max-w-md"
-            title={input.file_path}
-          >
-            {getFileName(input.file_path || "")}
-          </button>
-        </div>
-        {#if tool.name === "MultiEdit" && input.edits}
-          <div class="space-y-2">
-            {#each input.edits as edit, idx}
-              <div class="border border-gray-200 rounded overflow-hidden">
-                <div class="text-[10px] text-gray-500 bg-gray-100 px-2 py-1">Edit {idx + 1}</div>
-                <DiffViewer 
-                  oldText={edit.old_string || ''} 
-                  newText={edit.new_string || ''} 
-                  fileName={getFileName(input.file_path || "")}
-                />
-              </div>
-            {/each}
-          </div>
-        {:else if input.old_string !== undefined}
-          <DiffViewer 
-            oldText={input.old_string || ''} 
-            newText={input.new_string || ''} 
-            fileName={getFileName(input.file_path || "")}
-          />
-        {/if}
-      </div>
+      <EditPreview
+        filePath={input.file_path || ""}
+        oldString={input.old_string}
+        newString={input.new_string}
+        edits={input.edits}
+        replaceAll={input.replace_all}
+        {onPreview}
+      />
 
     {:else if tool.name === "Bash"}
       <div class="space-y-1">
@@ -272,23 +235,21 @@
       </div>
 
     {:else if tool.name === "WebFetch"}
-      <div class="space-y-1">
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-500">Fetching</span>
-          <a href={input.url || "#"} target="_blank" class="text-xs font-mono text-indigo-600 hover:text-indigo-800 hover:underline truncate max-w-md">
-            {input.url || ""}
-          </a>
-        </div>
-        {#if input.prompt}
-          <div class="text-xs text-gray-500 italic truncate">"{input.prompt}"</div>
-        {/if}
-      </div>
+      <WebFetchPreview
+        url={input.url || ""}
+        prompt={input.prompt}
+        resultContent={toolResult?.content}
+        isError={toolResult?.is_error}
+      />
 
     {:else if tool.name === "WebSearch"}
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-gray-500">Searching:</span>
-        <span class="text-xs font-medium text-indigo-600">"{input.query || ""}"</span>
-      </div>
+      <WebSearchPreview
+        query={input.query || ""}
+        allowedDomains={input.allowed_domains}
+        blockedDomains={input.blocked_domains}
+        resultContent={toolResult?.content}
+        isError={toolResult?.is_error}
+      />
 
     {:else if tool.name === "TodoWrite"}
       <div class="text-xs text-gray-500">Updated execution plan ({input.todos?.length || 0} items)</div>

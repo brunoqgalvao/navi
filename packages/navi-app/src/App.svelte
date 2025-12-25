@@ -88,7 +88,7 @@
   }
   
   import FileBrowser from "./lib/FileBrowser.svelte";
-  import GitPanel from "./lib/components/GitPanel.svelte";
+  import { GitPanel } from "./lib/features/git";
   import Modal from "./lib/components/Modal.svelte";
   import AudioRecorder from "./lib/components/AudioRecorder.svelte";
   import InteractiveCodeBlock from "./lib/components/InteractiveCodeBlock.svelte";

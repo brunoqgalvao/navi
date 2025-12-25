@@ -127,10 +127,33 @@
     }
     return "";
   }
+
+  // Track which messages are manually expanded (collapsed by default for non-final)
+  let expandedMessages = $state<Set<string>>(new Set());
+
+  function isMessageCollapsed(msg: ChatMessage, visibleMsgs: ChatMessage[]): boolean {
+    // Final messages are never collapsed
+    if (msg.isFinal) return false;
+    // User messages are never collapsed
+    if (msg.role !== 'assistant') return false;
+    // If manually expanded, don't collapse
+    if (expandedMessages.has(msg.id)) return false;
+    // Collapse all non-final assistant messages by default
+    return true;
+  }
+
+  function toggleMessageCollapse(msgId: string) {
+    if (expandedMessages.has(msgId)) {
+      expandedMessages.delete(msgId);
+    } else {
+      expandedMessages.add(msgId);
+    }
+    expandedMessages = new Set(expandedMessages);
+  }
 </script>
 
-<div class="space-y-6">
-  <div class="max-w-3xl mx-auto w-full md:pt-10 space-y-8 pb-64" style="overflow-anchor: none;">
+<div class="space-y-2">
+  <div class="max-w-3xl mx-auto w-full md:pt-6 space-y-3 pb-64 px-4" style="overflow-anchor: none;">
     {#if messages.length === 0 && !isStreaming && emptyState !== "none"}
       <div class="flex flex-col items-center justify-center text-gray-400 space-y-4 min-h-[40vh] animate-in fade-in duration-500">
         <div class="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
@@ -148,7 +171,7 @@
 
     {#each getVisibleMessages() as msg, idx (msg.id)}
       {@const visibleMsgs = getVisibleMessages()}
-      {@const showAvatar = isFirstInGroup(msg, visibleMsgs, idx) || msg.isFinal}
+      {@const isCollapsed = isMessageCollapsed(msg, visibleMsgs)}
       <div class="group flex flex-col {msg.role === 'user' ? 'items-end' : 'items-start'}">
         {#if msg.role === 'user'}
           <UserMessage
@@ -184,7 +207,8 @@
             {renderMarkdown}
             {jsonBlocksMap}
             isFinal={msg.isFinal}
-            {showAvatar}
+            collapsed={isCollapsed}
+            onToggleCollapse={() => toggleMessageCollapse(msg.id)}
           />
         {/if}
       </div>

@@ -107,7 +107,7 @@
       </div>
     </div>
   {:else}
-    <div class="bg-gray-100 text-gray-900 px-5 py-3 rounded-2xl rounded-tr-sm text-[15px] leading-relaxed max-w-[85%] w-fit">
+    <div class="bg-gray-100 text-gray-900 px-4 py-2 rounded-xl rounded-tr-sm text-sm leading-normal max-w-[85%] w-fit">
       {#if parsed.files.length > 0}
         <div class="mb-2">
           <FileAttachment files={parsed.files} onPreview={onPreview} />
