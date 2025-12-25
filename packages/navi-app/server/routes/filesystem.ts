@@ -131,6 +131,9 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
       const fs = await import("fs/promises");
       const { join } = await import("path");
 
+      // Ensure target directory exists
+      await fs.mkdir(targetDir, { recursive: true });
+
       const filePath = join(targetDir, file.name);
       const buffer = await file.arrayBuffer();
       await fs.writeFile(filePath, Buffer.from(buffer));

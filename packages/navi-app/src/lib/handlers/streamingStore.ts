@@ -17,7 +17,7 @@ interface ThrottleState {
   lastUpdate: number;
 }
 
-const THROTTLE_MS = 1500;
+const THROTTLE_MS = 500;
 
 function createStreamingStore() {
   const state = writable<Map<string, StreamingState>>(new Map());

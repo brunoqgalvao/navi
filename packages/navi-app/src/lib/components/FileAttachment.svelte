@@ -36,13 +36,18 @@
     {#if isImage(file.name)}
       <!-- Image thumbnail -->
       <div class="relative group/file">
-        <div class="w-16 h-16 rounded-lg border border-gray-200 overflow-hidden bg-gray-50 hover:border-gray-300 transition-colors">
+        <button
+          type="button"
+          onclick={() => onPreview?.(file.path)}
+          class="w-16 h-16 rounded-lg border border-gray-200 overflow-hidden bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+          title="Click to preview"
+        >
           <img
             src={getImageUrl(file.path)}
             alt={file.name}
             class="w-full h-full object-cover"
           />
-        </div>
+        </button>
         {#if removable && onRemove}
           <button
             onclick={() => onRemove?.(file.path)}
