@@ -313,10 +313,12 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
             const usage = msg.resultData.usage || {};
             const contextUsage = msg.lastAssistantUsage || usage;
             console.log("[DEBUG] resultData.usage:", JSON.stringify(usage));
+            console.log("[DEBUG] lastAssistantUsage:", JSON.stringify(msg.lastAssistantUsage));
+            console.log("[DEBUG] using contextUsage:", JSON.stringify(contextUsage));
             const totalInputTokens = (contextUsage.input_tokens || 0) +
               (contextUsage.cache_creation_input_tokens || 0) +
               (contextUsage.cache_read_input_tokens || 0);
-            console.log("[DEBUG] totalInputTokens:", totalInputTokens);
+            console.log("[DEBUG] totalInputTokens calc:", `${contextUsage.input_tokens || 0} + ${contextUsage.cache_creation_input_tokens || 0} + ${contextUsage.cache_read_input_tokens || 0} = ${totalInputTokens}`);
             sessions.updateClaudeSession(
               msg.resultData.session_id,
               msg.resultData.model || null,

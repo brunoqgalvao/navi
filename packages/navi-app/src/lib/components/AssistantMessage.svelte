@@ -7,6 +7,8 @@
   import MediaDisplay from "./MediaDisplay.svelte";
   import GenerativeUI from "./experimental/GenerativeUI.svelte";
   import CopyButton from "./CopyButton.svelte";
+  import TodoListPreview from "./tools/TodoListPreview.svelte";
+  import CompactToolCall from "./CompactToolCall.svelte";
   import { processGenerativeUIContent } from "../generative-ui";
   import { parseMediaContent } from "../media-parser";
 
@@ -24,22 +26,26 @@
     jsonBlocksMap?: Map<string, any>;
     isFinal?: boolean;
     showAvatar?: boolean;
+    collapsed?: boolean;
+    onToggleCollapse?: () => void;
   }
 
-  let { 
+  let {
     content,
     subagentUpdates = [],
     activeSubagents = new Map(),
     basePath = '',
     toolResults = new Map(),
-    onRollback, 
+    onRollback,
     onFork,
     onPreview,
     onMessageClick,
     renderMarkdown,
     jsonBlocksMap = new Map(),
     isFinal = false,
-    showAvatar = true
+    showAvatar = true,
+    collapsed = false,
+    onToggleCollapse
   }: Props = $props();
 
   let showMenu = $state(false);
@@ -62,12 +68,12 @@
       .join("\n");
   }
 
-  function isTaskTool(block: ContentBlock): boolean {
-    return block.type === "tool_use" && (block as ToolUseBlock).name === "Task";
+  function isTaskTool(block: ToolUseBlock): boolean {
+    return block.name === "Task";
   }
 
-  function isTodoWrite(block: ContentBlock): boolean {
-    return block.type === "tool_use" && (block as ToolUseBlock).name === "TodoWrite";
+  function isTodoWrite(block: ToolUseBlock): boolean {
+    return block.name === "TodoWrite";
   }
 
   function getToolSummary(tool: ToolUseBlock): string {
@@ -158,59 +164,135 @@
   }
 
   const groupedContent = $derived(groupToolBlocks(content, toolResults));
+
+  // Collapsed view helpers
+  function getTextSummary(): string {
+    const textBlocks = content.filter((b): b is TextBlock => b.type === "text");
+    const allText = textBlocks.map(b => b.text).join(" ");
+    const firstLine = allText.split("\n").find(l => l.trim().length > 0) || "";
+    const cleaned = firstLine.replace(/[#*`_\[\]]/g, "").trim();
+    return cleaned.length > 100 ? cleaned.slice(0, 100) + "..." : cleaned;
+  }
+
+  function getToolBlocks(): ToolUseBlock[] {
+    return content.filter((b): b is ToolUseBlock => b.type === "tool_use");
+  }
+
+  function getThinkingBlocks(): ThinkingBlock[] {
+    return content.filter((b): b is ThinkingBlock => b.type === "thinking");
+  }
+
+  const textSummary = $derived(getTextSummary());
+  const toolBlocks = $derived(getToolBlocks());
+  const thinkingBlocks = $derived(getThinkingBlocks());
+  const hasThinking = $derived(thinkingBlocks.length > 0);
 </script>
 
 <svelte:window onclick={() => showMenu = false} />
 
-<div class="flex gap-4 w-full pr-4 md:pr-0 relative group">
-  {#if showAvatar}
-    <div class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex-shrink-0 flex items-center justify-center shadow-sm text-gray-900 font-bold text-xs select-none">
-      C
-    </div>
-  {:else}
-    <div class="w-8 flex-shrink-0"></div>
-  {/if}
-
+{#if collapsed}
+  <!-- Collapsed view - compact single-line summary -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="flex-1 min-w-0 relative space-y-3" onclick={onMessageClick}>
-    <div class="absolute -top-6 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5 z-20">
-      <CopyButton text={copyText} />
-      <div class="relative">
-        <button 
-          onclick={(e) => { e.stopPropagation(); showMenu = !showMenu; }} 
-          class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" 
-          title="More actions"
-        >
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+  <button
+    onclick={() => onToggleCollapse?.()}
+    class="w-full text-left group"
+  >
+    <div class="flex flex-col gap-1.5 py-2 px-3 rounded-lg border border-gray-100 bg-gray-50/30 hover:bg-gray-50 transition-colors">
+      <!-- Text summary row -->
+      {#if textSummary}
+        <div class="flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
-        </button>
-        {#if showMenu}
-          <div class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
-            <button onclick={() => { onRollback?.(); showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-              <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path>
-              </svg>
-              Rollback to here
-            </button>
-            <button onclick={() => { onFork?.(); showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-              <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
-              </svg>
-              Fork from here
-            </button>
-          </div>
-        {/if}
-      </div>
+          <span class="text-sm text-gray-600 truncate">{textSummary}</span>
+        </div>
+      {/if}
+
+      <!-- Tool calls row -->
+      {#if toolBlocks.length > 0}
+        <div class="flex items-center gap-1.5 flex-wrap pl-5">
+          {#each toolBlocks.slice(0, 6) as tool (tool.id)}
+            <CompactToolCall
+              {tool}
+              result={toolResults.get(tool.id) as ToolResultBlock | undefined}
+              {onPreview}
+            />
+          {/each}
+          {#if toolBlocks.length > 6}
+            <span class="text-xs text-gray-400">+{toolBlocks.length - 6} more</span>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Thinking indicator -->
+      {#if hasThinking}
+        <div class="flex items-center gap-1.5 pl-5">
+          <span class="text-xs text-purple-500 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            Extended thinking
+          </span>
+        </div>
+      {/if}
     </div>
+  </button>
+{:else}
+  <!-- Expanded view -->
+  <div class="w-full relative group">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="flex-1 min-w-0 relative space-y-2" onclick={onMessageClick}>
+      <!-- Hover actions - only show on non-collapsed -->
+      <div class="absolute -top-5 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5 z-20">
+        {#if onToggleCollapse && !isFinal}
+          <button
+            onclick={(e) => { e.stopPropagation(); onToggleCollapse?.(); }}
+            class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+            title="Collapse"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+            </svg>
+          </button>
+        {/if}
+        <CopyButton text={copyText} />
+        <div class="relative">
+          <button
+            onclick={(e) => { e.stopPropagation(); showMenu = !showMenu; }}
+            class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+            title="More actions"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+            </svg>
+          </button>
+          {#if showMenu}
+            <div class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
+              <button onclick={() => { onRollback?.(); showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path>
+                </svg>
+                Rollback to here
+              </button>
+              <button onclick={() => { onFork?.(); showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                </svg>
+                Fork from here
+              </button>
+            </div>
+          {/if}
+        </div>
+      </div>
 
     {#each groupedContent as item, idx (idx)}
       {#if isGroupedBlock(item)}
         {@const tool = item.toolUse}
         {@const result = item.toolResult}
         {@const originalIdx = item.originalIndex}
-        {#if isTaskTool({ type: "tool_use", ...tool })}
+        {#if isTaskTool(tool)}
           <SubagentBlock
             toolUseId={tool.id}
             description={tool.input?.description || tool.input?.prompt?.slice(0, 100) || "Subagent task"}
@@ -221,95 +303,48 @@
             {renderMarkdown}
             {onMessageClick}
           />
-        {:else if isTodoWrite({ type: "tool_use", ...tool })}
+        {:else if isTodoWrite(tool)}
           {@const expanded = expandedBlocks.has(originalIdx)}
-          {@const todos = tool.input?.todos || []}
-          {@const completedCount = todos.filter((t: any) => t.status === "completed").length}
-          <div class="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
-            <button
-              onclick={() => toggleBlock(originalIdx)}
-              class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-100 transition-colors"
-            >
-              <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
-              </svg>
-              <span class="text-xs font-medium text-gray-600">{completedCount}/{todos.length}</span>
-              <svg
-                class="w-3 h-3 text-gray-400 transition-transform flex-shrink-0 ml-auto {expanded ? 'rotate-180' : ''}"
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {#if expanded}
-              <div class="px-3 pb-2 pt-1 border-t border-gray-200 space-y-1.5 max-h-32 overflow-y-auto">
-                {#each todos as todo}
-                  <div class="flex items-start gap-2">
-                    <div class="mt-0.5 shrink-0">
-                      {#if todo.status === "completed"}
-                        <div class="w-4 h-4 rounded-full bg-green-100 flex items-center justify-center">
-                          <svg class="w-2.5 h-2.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                          </svg>
-                        </div>
-                      {:else if todo.status === "in_progress"}
-                        <div class="w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent animate-spin"></div>
-                      {:else}
-                        <div class="w-4 h-4 rounded-full border-2 border-gray-300"></div>
-                      {/if}
-                    </div>
-                    <span class={`text-xs ${todo.status === "completed" ? "text-gray-400 line-through" : todo.status === "in_progress" ? "text-gray-900 font-medium" : "text-gray-600"}`}>
-                      {todo.content}
-                    </span>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          </div>
+          <TodoListPreview
+            todos={tool.input?.todos || []}
+            {expanded}
+            onToggle={() => toggleBlock(originalIdx)}
+          />
         {:else}
           {@const expanded = expandedBlocks.has(originalIdx)}
           {@const summary = getToolSummary(tool)}
-          <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div class="rounded-lg border border-gray-200 bg-white overflow-hidden">
             <button
               onclick={() => toggleBlock(originalIdx)}
-              class="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50 transition-colors"
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50 transition-colors"
             >
-              <div class="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
-                <span class="text-sm">{getToolIcon(tool.name)}</span>
+              <div class="w-5 h-5 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                <span class="text-xs">{getToolIcon(tool.name)}</span>
               </div>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium text-gray-900">{tool.name}</span>
-                  {#if summary}
-                    <span class="text-xs text-gray-400 truncate font-mono">{summary}</span>
-                  {/if}
-                </div>
-              </div>
+              <span class="text-xs font-medium text-gray-700">{tool.name}</span>
+              {#if summary}
+                <span class="text-xs text-gray-400 truncate font-mono flex-1">{summary}</span>
+              {/if}
               {#if result}
-                <div class="w-5 h-5 rounded-full {result.is_error ? 'bg-red-100' : 'bg-teal-100'} flex items-center justify-center flex-shrink-0">
-                  <span class="text-xs">{result.is_error ? '!' : '✓'}</span>
-                </div>
+                <span class="text-xs {result.is_error ? 'text-red-500' : 'text-green-500'} shrink-0">
+                  {result.is_error ? '✗' : '✓'}
+                </span>
               {:else}
-                <div class="w-4 h-4 rounded-full border-2 border-gray-300 border-t-transparent animate-spin flex-shrink-0"></div>
+                <div class="w-3 h-3 border border-gray-300 border-t-transparent rounded-full animate-spin shrink-0"></div>
               {/if}
               <svg
-                class="w-4 h-4 text-gray-400 transition-transform flex-shrink-0 {expanded ? 'rotate-90' : ''}"
+                class="w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
                 fill="none" stroke="currentColor" viewBox="0 0 24 24"
               >
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
               </svg>
             </button>
             {#if expanded}
-              <div class="px-4 pb-3 pt-2 border-t border-gray-100 space-y-3">
-                <ToolRenderer {tool} {onPreview} hideHeader={true} />
+              <div class="px-3 pb-2 pt-1 border-t border-gray-100 space-y-2">
+                <ToolRenderer {tool} toolResult={result ? { content: String(result.content || ''), is_error: result.is_error } : undefined} {onPreview} hideHeader={true} />
                 {#if result}
-                  <div class="pt-2 border-t border-gray-100">
-                    <div class="flex items-center gap-2 mb-2">
-                      <span class="text-xs font-medium {result.is_error ? 'text-red-600' : 'text-teal-600'}">
-                        {result.is_error ? 'Error' : 'Result'}
-                      </span>
-                    </div>
-                    <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50' : 'text-gray-700 bg-gray-50'} rounded-lg p-3 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto">{result.content}</pre>
+                  <div class="pt-1.5 border-t border-gray-100">
+                    <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50' : 'text-gray-600 bg-gray-50'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{result.content}</pre>
                   </div>
                 {/if}
               </div>
@@ -319,7 +354,7 @@
       {:else if item.type === "text"}
         {@const text = (item as TextBlock).text}
         {@const rendered = renderTextContent(text)}
-        <div class="text-[15px] leading-7 text-gray-800 markdown-body">
+        <div class="text-sm leading-relaxed text-gray-800 markdown-body">
           <MermaidRenderer content={rendered.genuiResult.processedContent} {renderMarkdown} {jsonBlocksMap} />
           {#if rendered.mediaResult.items.length > 0}
             <div class="my-4">
@@ -336,38 +371,35 @@
       {:else if item.type === "thinking"}
         {@const thinking = (item as ThinkingBlock).thinking}
         {@const expanded = expandedBlocks.has(idx)}
-        <div class="rounded-xl border border-purple-200 bg-purple-50/30 shadow-sm overflow-hidden">
+        <div class="rounded-lg border border-purple-200 bg-purple-50/20 overflow-hidden">
           <button
             onclick={() => toggleBlock(idx)}
-            class="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-purple-50 transition-colors"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-purple-50 transition-colors"
           >
-            <div class="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
-              <span class="text-sm">💭</span>
-            </div>
-            <div class="flex-1 min-w-0">
-              <span class="text-sm font-medium text-purple-800">Thinking</span>
-              <span class="ml-2 text-xs text-purple-500 truncate">
-                {thinking.slice(0, 60)}{thinking.length > 60 ? "..." : ""}
-              </span>
-            </div>
+            <span class="text-xs">💭</span>
+            <span class="text-xs font-medium text-purple-700">Thinking</span>
+            <span class="text-xs text-purple-400 truncate flex-1">
+              {thinking.slice(0, 60)}{thinking.length > 60 ? "..." : ""}
+            </span>
             <svg
-              class="w-4 h-4 text-purple-400 transition-transform flex-shrink-0 {expanded ? 'rotate-90' : ''}"
+              class="w-3.5 h-3.5 text-purple-400 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
               fill="none" stroke="currentColor" viewBox="0 0 24 24"
             >
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
             </svg>
           </button>
           {#if expanded}
-            <div class="px-4 pb-3 pt-1 border-t border-purple-100 relative">
-              <div class="absolute top-2 right-4">
+            <div class="px-3 pb-2 pt-1 border-t border-purple-100 relative">
+              <div class="absolute top-1 right-3">
                 <CopyButton text={thinking} />
               </div>
-              <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono bg-purple-50 rounded-lg p-3 pr-10 max-h-64 overflow-y-auto">{thinking}</pre>
+              <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono bg-purple-50 rounded p-2 pr-8 max-h-48 overflow-y-auto">{thinking}</pre>
             </div>
           {/if}
         </div>
 
       {/if}
     {/each}
+    </div>
   </div>
-</div>
+{/if}

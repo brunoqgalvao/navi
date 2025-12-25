@@ -8,19 +8,21 @@
     fileName?: string;
     outputFormat?: 'line-by-line' | 'side-by-side';
     showHeader?: boolean;
+    maxHeight?: string;
   }
 
-  let { 
-    oldText = '', 
-    newText = '', 
+  let {
+    oldText = '',
+    newText = '',
     fileName = 'file',
     outputFormat = 'line-by-line',
-    showHeader = false
+    showHeader = false,
+    maxHeight = '300px'
   }: Props = $props();
 
   const diffHtml = $derived.by(() => {
     if (oldText === newText) return null;
-    
+
     const patch = createPatch(
       fileName,
       oldText,
@@ -29,7 +31,7 @@
       '',
       { context: 3 }
     );
-    
+
     return diff2html(patch, {
       drawFileList: false,
       outputFormat,
@@ -48,7 +50,7 @@
 </script>
 
 {#if diffHtml}
-  <div class="diff-viewer">
+  <div class="diff-viewer" style:--max-height={maxHeight}>
     {#if showHeader}
       <div class="diff-header">
         <span class="diff-stat added">+{stats.added}</span>
@@ -67,9 +69,10 @@
   .diff-viewer {
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     font-size: 12px;
-    line-height: 1.4;
+    line-height: 1.5;
     border-radius: 6px;
     overflow: hidden;
+    border: 1px solid #e1e4e8;
   }
 
   .diff-header {
@@ -94,8 +97,13 @@
   }
 
   .diff-content {
-    max-height: 400px;
+    max-height: var(--max-height, 300px);
     overflow: auto;
+  }
+
+  /* Only hide the file header, let diff2html handle everything else */
+  :global(.diff-viewer .d2h-file-header) {
+    display: none;
   }
 
   :global(.diff-viewer .d2h-wrapper) {
@@ -105,62 +113,5 @@
   :global(.diff-viewer .d2h-file-wrapper) {
     border: none;
     margin: 0;
-  }
-
-  :global(.diff-viewer .d2h-file-header) {
-    display: none;
-  }
-
-  :global(.diff-viewer .d2h-diff-table) {
-    font-size: 12px;
-  }
-
-  :global(.diff-viewer .d2h-code-line) {
-    padding: 0 8px 0 4em; /* Left padding must accommodate the absolutely positioned line numbers */
-  }
-
-  :global(.diff-viewer .d2h-code-line-ctn) {
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
-
-  :global(.diff-viewer .d2h-ins) {
-    background-color: #e6ffec;
-  }
-
-  :global(.diff-viewer .d2h-del) {
-    background-color: #ffebe9;
-  }
-
-  :global(.diff-viewer .d2h-ins .d2h-code-line-ctn) {
-    background-color: #ccffd8;
-  }
-
-  :global(.diff-viewer .d2h-del .d2h-code-line-ctn) {
-    background-color: #ffd7d5;
-  }
-
-  :global(.diff-viewer .d2h-code-linenumber) {
-    width: 3.5em;
-    min-width: 3.5em;
-    color: #6e7781;
-    background-color: #f6f8fa;
-    border-right: 1px solid #e1e4e8;
-  }
-
-  :global(.diff-viewer .d2h-ins .d2h-code-linenumber) {
-    background-color: #ccffd8;
-    color: #22863a;
-  }
-
-  :global(.diff-viewer .d2h-del .d2h-code-linenumber) {
-    background-color: #ffd7d5;
-    color: #cb2431;
-  }
-
-  :global(.diff-viewer .d2h-info) {
-    background-color: #f1f8ff;
-    color: #0366d6;
-    padding: 4px 8px;
   }
 </style>

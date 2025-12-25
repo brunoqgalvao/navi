@@ -949,11 +949,11 @@ export const costEntries = {
       params.push(...projectIds);
     }
     return queryAll<HourlyCost>(
-      `SELECT 
+      `SELECT
         strftime('%Y-%m-%d %H:00', timestamp / 1000, 'unixepoch', 'localtime') as hour,
-        SUM(cost_usd) as total_cost,
+        COALESCE(SUM(cost_usd), 0) as total_cost,
         COUNT(*) as entry_count
-      FROM cost_entries 
+      FROM cost_entries
       ${whereClause}
       GROUP BY hour
       ORDER BY hour DESC`,
@@ -971,13 +971,13 @@ export const costEntries = {
       params.push(...projectIds);
     }
     return queryAll(
-      `SELECT 
+      `SELECT
         strftime('%Y-%m-%d', timestamp / 1000, 'unixepoch', 'localtime') as date,
-        SUM(cost_usd) as total_cost,
+        COALESCE(SUM(cost_usd), 0) as total_cost,
         COUNT(*) as entry_count,
-        SUM(input_tokens) as input_tokens,
-        SUM(output_tokens) as output_tokens
-      FROM cost_entries 
+        COALESCE(SUM(input_tokens), 0) as input_tokens,
+        COALESCE(SUM(output_tokens), 0) as output_tokens
+      FROM cost_entries
       ${whereClause}
       GROUP BY date
       ORDER BY date ASC`,

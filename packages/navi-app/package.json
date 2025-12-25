@@ -12,6 +12,8 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
+    "test:api": "bun run server/test-api.ts",
+    "test:api:verbose": "bun run server/test-api.ts --verbose",
     "tauri": "tauri",
     "tauri:dev": "concurrently \"bun run server\" \"bun run tauri dev\""
   },

@@ -189,5 +189,108 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
     }
   }
 
+  if (url.pathname === "/api/git/commit" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath, message } = body;
+    if (!message || typeof message !== "string") {
+      return json({ error: "commit message required" }, 400);
+    }
+    try {
+      const { execSync } = await import("child_process");
+      // Escape message for shell safety
+      const safeMessage = message.replace(/"/g, '\\"');
+      execSync(`git commit -m "${safeMessage}"`, { cwd: repoPath || process.cwd(), encoding: "utf-8" });
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Git commit error:", e);
+      return json({ error: e.message || "Failed to commit" }, 500);
+    }
+  }
+
+  if (url.pathname === "/api/git/stage-all" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath } = body;
+    try {
+      const { execSync } = await import("child_process");
+      execSync("git add -A", { cwd: repoPath || process.cwd() });
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Git stage-all error:", e);
+      return json({ error: e.message || "Failed to stage all" }, 500);
+    }
+  }
+
+  if (url.pathname === "/api/git/generate-commit-message" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath } = body;
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      // Get staged diff
+      const stagedDiff = execSync("git diff --cached", { cwd, encoding: "utf-8", maxBuffer: 1024 * 1024 });
+
+      if (!stagedDiff.trim()) {
+        return json({ error: "No staged changes to analyze" }, 400);
+      }
+
+      // Truncate diff if too large (keep first 8000 chars for context)
+      const truncatedDiff = stagedDiff.length > 8000
+        ? stagedDiff.slice(0, 8000) + "\n\n... (diff truncated)"
+        : stagedDiff;
+
+      // Get list of staged files for additional context
+      const stagedFiles = execSync("git diff --cached --name-only", { cwd, encoding: "utf-8" }).trim();
+
+      // Call ephemeral chat to generate message
+      const prompt = `Analyze this git diff and generate a concise, conventional commit message.
+
+Files changed:
+${stagedFiles}
+
+Diff:
+\`\`\`diff
+${truncatedDiff}
+\`\`\`
+
+Rules:
+- Use conventional commit format: type(scope): description
+- Types: feat, fix, refactor, docs, style, test, chore
+- Keep the first line under 72 characters
+- Be specific about what changed
+- Don't include the diff in your response
+- Only respond with the commit message, nothing else`;
+
+      const systemPrompt = "You are a helpful assistant that generates git commit messages. Respond only with the commit message, no explanations or markdown.";
+
+      // Use ephemeral chat endpoint internally
+      const response = await fetch("http://localhost:3001/api/ephemeral-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          systemPrompt,
+          maxTokens: 150,
+          projectPath: cwd,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Clean up the result (remove quotes, trim)
+      let message = data.result?.trim() || "";
+      message = message.replace(/^["']|["']$/g, "").trim();
+
+      return json({ message, usage: data.usage, costUsd: data.costUsd });
+    } catch (e: any) {
+      console.error("Generate commit message error:", e);
+      return json({ error: e.message || "Failed to generate commit message" }, 500);
+    }
+  }
+
   return null;
 }
