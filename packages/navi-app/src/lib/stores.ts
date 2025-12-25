@@ -1,5 +1,6 @@
 import { writable, derived } from "svelte/store";
 import type { ContentBlock, ClaudeMessage, StreamEvent } from "./claude";
+import { setHash, parseHash, type RouteState } from "./router";
 import type { Project, Session, Skill } from "./api";
 
 export interface ChatMessage {
@@ -124,21 +125,33 @@ function createCurrentSessionStore() {
     outputTokens: 0,
   });
 
+  // Helper to sync URL after state changes
+  const syncUrl = (projectId: string | null, sessionId: string | null) => {
+    setHash({ projectId, sessionId });
+  };
+
   return {
     subscribe,
     setProject: (projectId: string | null) =>
-      update((s) => ({ ...s, projectId, sessionId: null, claudeSessionId: null, inputTokens: 0, outputTokens: 0 })),
+      update((s) => {
+        syncUrl(projectId, null);
+        return { ...s, projectId, sessionId: null, claudeSessionId: null, inputTokens: 0, outputTokens: 0 };
+      }),
     setSession: (sessionId: string | null, claudeSessionId?: string | null) =>
-      update((s) => ({ ...s, sessionId, claudeSessionId: claudeSessionId ?? null })),
+      update((s) => {
+        syncUrl(s.projectId, sessionId);
+        return { ...s, sessionId, claudeSessionId: claudeSessionId ?? null };
+      }),
     setClaudeSession: (claudeSessionId: string) =>
       update((s) => ({ ...s, claudeSessionId })),
     setLoading: (isLoading: boolean) => update((s) => ({ ...s, isLoading })),
     setCost: (costUsd: number) => update((s) => ({ ...s, costUsd })),
     setModel: (model: string) => update((s) => ({ ...s, model })),
     setSelectedModel: (selectedModel: string) => update((s) => ({ ...s, selectedModel })),
-    setUsage: (inputTokens: number, outputTokens: number) => 
+    setUsage: (inputTokens: number, outputTokens: number) =>
       update((s) => ({ ...s, inputTokens, outputTokens })),
-    reset: () =>
+    reset: () => {
+      syncUrl(null, null);
       set({
         projectId: null,
         sessionId: null,
@@ -149,7 +162,11 @@ function createCurrentSessionStore() {
         selectedModel: "",
         inputTokens: 0,
         outputTokens: 0,
-      }),
+      });
+    },
+    // Restore from URL without triggering URL update (for initial load / back-forward)
+    restoreFromUrl: (projectId: string | null, sessionId: string | null) =>
+      update((s) => ({ ...s, projectId, sessionId, claudeSessionId: null, inputTokens: 0, outputTokens: 0 })),
   };
 }
 
