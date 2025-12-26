@@ -1073,11 +1073,11 @@
                     {@const maxCost = Math.max(...analytics.dailyCosts.map(d => d.total_cost), 0.0001)}
                     <div class="h-32 flex items-end gap-0.5 mb-2">
                       {#each analytics.dailyCosts as day, i}
-                        {@const costHeight = (day.total_cost / maxCost) * 100}
-                        <div class="flex-1 flex flex-col items-center group relative">
-                          <div 
-                            class="w-full bg-blue-400 rounded-t transition-all hover:bg-blue-500 min-h-[2px]" 
-                            style="height: {Math.max(costHeight, 2)}%"
+                        {@const barHeight = Math.max((day.total_cost / maxCost) * 128, 2)}
+                        <div class="flex-1 group relative">
+                          <div
+                            class="w-full bg-blue-400 rounded-t transition-all hover:bg-blue-500"
+                            style="height: {barHeight}px"
                           ></div>
                           <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg">
                             <div class="font-medium">{day.date}</div>
@@ -1124,11 +1124,11 @@
                     {@const maxHourlyCost = Math.max(...sortedHourly.map(h => h.total_cost || 0), 0.0001)}
                     <div class="h-24 flex items-end gap-px mb-2 overflow-x-auto">
                       {#each sortedHourly as hour}
-                        {@const costHeight = ((hour.total_cost || 0) / maxHourlyCost) * 100}
-                        <div class="flex-shrink-0 w-2 flex flex-col items-center group relative">
-                          <div 
-                            class="w-full bg-emerald-400 rounded-t transition-all hover:bg-emerald-500 min-h-[2px]" 
-                            style="height: {Math.max(costHeight, 2)}%"
+                        {@const barHeight = Math.max(((hour.total_cost || 0) / maxHourlyCost) * 96, 2)}
+                        <div class="flex-shrink-0 w-2 group relative">
+                          <div
+                            class="w-full bg-emerald-400 rounded-t transition-all hover:bg-emerald-500"
+                            style="height: {barHeight}px"
                           ></div>
                           <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg">
                             <div class="font-medium">{hour.hour}</div>

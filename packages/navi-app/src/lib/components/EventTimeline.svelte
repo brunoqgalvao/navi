@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { sessionEvents, streamingState, type SDKEvent, type SDKEventType } from "../stores";
+  import { sessionEvents, type SDKEvent, type SDKEventType } from "../stores";
+  import { streamingStore } from "../handlers";
   import type { ContentBlock, StreamEvent } from "../claude";
   import ToolRenderer from "./ToolRenderer.svelte";
 
@@ -12,7 +13,7 @@
   let { sessionId, renderMarkdown, onPreview }: Props = $props();
 
   let events = $derived($sessionEvents.get(sessionId) || []);
-  let streaming = $derived($streamingState.get(sessionId));
+  let streaming = $derived($streamingStore.get(sessionId));
 
   let expandedEvents = $state<Set<string>>(new Set());
   let filterTypes = $state<Set<SDKEventType>>(new Set());
@@ -242,21 +243,18 @@
           <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
           <span class="text-xs font-medium text-green-700">Streaming...</span>
         </div>
-        {#if streaming.currentText}
-          <p class="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{streaming.currentText}</p>
+        {#if streaming.partialText}
+          <p class="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{streaming.partialText}</p>
         {/if}
-        {#if streaming.currentThinking}
+        {#if streaming.partialThinking}
           <details class="mt-2 bg-purple-50 rounded p-2">
             <summary class="text-xs text-purple-700 cursor-pointer">Thinking in progress...</summary>
-            <pre class="mt-1 text-xs text-purple-600 whitespace-pre-wrap">{streaming.currentThinking}</pre>
+            <pre class="mt-1 text-xs text-purple-600 whitespace-pre-wrap">{streaming.partialThinking}</pre>
           </details>
         {/if}
-        {#if streaming.toolUseInProgress}
+        {#if streaming.partialJson}
           <div class="mt-2 text-xs text-orange-700">
-            Tool: {streaming.toolUseInProgress.name}
-            {#if streaming.toolUseInProgress.partialJson}
-              <pre class="mt-1 text-gray-600 font-mono">{streaming.toolUseInProgress.partialJson}</pre>
-            {/if}
+            <pre class="mt-1 text-gray-600 font-mono">{streaming.partialJson}</pre>
           </div>
         {/if}
       </div>

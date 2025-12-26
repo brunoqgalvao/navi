@@ -69,12 +69,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         if (todos) {
           callbacks.onTodoUpdate?.(uiSessionId, todos);
         }
-        
-        const usage = (msg as any).usage;
-        if (!parentId && usage && uiSessionId === currentSessionId) {
-          callbacks.onComplete?.(uiSessionId, { costUsd: 0, usage });
-        }
-        
+
         callbacks.onMessageUpdate?.(uiSessionId);
         if (uiSessionId === currentSessionId) {
           callbacks.scrollToBottom?.();
@@ -117,7 +112,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         const resultCost = (msg as any).costUsd || 0;
         if (uiSessionId) {
           callbacks.onComplete?.(uiSessionId, { costUsd: resultCost, usage: (msg as any).usage });
-          callbacks.onStreamingEnd?.(uiSessionId);
+          callbacks.onStreamingEnd?.(uiSessionId, "done");
         }
         break;
 
@@ -130,7 +125,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
             timestamp: new Date(),
           });
           callbacks.onError?.(uiSessionId, (msg as any).error);
-          callbacks.onStreamingEnd?.(uiSessionId);
+          callbacks.onStreamingEnd?.(uiSessionId, "error");
         }
         break;
 
@@ -140,7 +135,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           if (finalMessageId) {
             sessionMessages.markFinal(uiSessionId, finalMessageId);
           }
-          callbacks.onStreamingEnd?.(uiSessionId);
+          callbacks.onStreamingEnd?.(uiSessionId, "done");
         }
         break;
 
@@ -152,7 +147,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
             content: "Request stopped",
             timestamp: new Date(),
           });
-          callbacks.onStreamingEnd?.(uiSessionId);
+          callbacks.onStreamingEnd?.(uiSessionId, "aborted");
         }
         break;
 

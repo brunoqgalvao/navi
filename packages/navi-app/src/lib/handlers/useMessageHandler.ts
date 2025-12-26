@@ -22,6 +22,7 @@ export interface UseMessageHandlerOptions {
   onUICommand?: (command: UICommand) => void;
   scrollToBottom?: () => void;
   onClaudeSessionInit?: (claudeSessionId: string, model: string) => void;
+  onStreamingEnd?: (sessionId: string, reason: "done" | "aborted" | "error") => void;
 }
 
 function getEventType(msg: ClaudeMessage): SDKEventType {
@@ -68,6 +69,7 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     onUICommand,
     scrollToBottom,
     onClaudeSessionInit,
+    onStreamingEnd: onStreamingEndCallback,
   } = options;
 
   const activeSubagents = new Map<string, { elapsed: number }>();
@@ -104,7 +106,7 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
         }
       },
       
-      onStreamingEnd: (sessionId) => {
+      onStreamingEnd: (sessionId, reason) => {
         loadingSessions.update(s => { s.delete(sessionId); return new Set(s); });
         const projectId = getProjectId();
         const currentSessionId = getCurrentSessionId();
@@ -116,6 +118,8 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
           }
         }
         activeSubagents.clear();
+        // Call the external callback so App.svelte can do additional work
+        onStreamingEndCallback?.(sessionId, reason);
       },
       
       onError: (sessionId, error) => {

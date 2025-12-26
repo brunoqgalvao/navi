@@ -288,10 +288,16 @@ Display a toast notification in Navi:
 ```bash
 curl -X POST http://localhost:3001/api/ui/notification \
   -H "Content-Type: application/json" \
-  -d '{"title": "Build Complete", "message": "Your project built successfully!", "type": "success"}'
+  --data-raw '{"title":"Build Complete","message":"Your project built successfully","type":"success"}'
 ```
 
 Notification types: `info`, `success`, `warning`, `error`
+
+**IMPORTANT:** Use `--data-raw` instead of `-d` to avoid JSON parsing issues. Also avoid:
+- Emojis in the JSON payload
+- Apostrophes or special quotes
+- Escape characters like `\'`
+- Keep the JSON compact (no spaces after colons/commas works best)
 
 ---
 

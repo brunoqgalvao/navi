@@ -23,9 +23,10 @@
     activeSkills?: Skill[];
     onSubmit: () => void;
     onStop?: () => void;
+    onPreview?: (path: string) => void;
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], onSubmit, onStop }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], onSubmit, onStop, onPreview }: Props = $props();
 
   let inputRef: HTMLTextAreaElement | null = $state(null);
   let audioRecorderRef: { toggleRecording: () => void; isRecording: () => boolean } | null = $state(null);
@@ -269,10 +270,11 @@
 
   {#if $attachedFiles.length > 0}
     <div class="px-3 pt-2 pb-1">
-      <FileAttachment 
-        files={$attachedFiles} 
-        removable={true} 
+      <FileAttachment
+        files={$attachedFiles}
+        removable={true}
         onRemove={removeAttachedFile}
+        {onPreview}
         size="sm"
       />
     </div>

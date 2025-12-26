@@ -93,21 +93,22 @@
     }
   }
 
-  const toolIcons: Record<string, string> = {
-    Read: "📄",
-    Write: "✏️",
-    Edit: "🔧",
-    MultiEdit: "🔧",
-    Bash: "⚡",
-    Glob: "🔍",
-    Grep: "🔎",
-    WebFetch: "🌐",
-    WebSearch: "🔍",
-    Task: "🤖",
+  const toolIconPaths: Record<string, string> = {
+    Read: "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253",
+    Write: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
+    Edit: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z",
+    MultiEdit: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z",
+    Bash: "M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
+    Glob: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+    Grep: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+    WebFetch: "M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9",
+    WebSearch: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+    Task: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2",
+    TodoWrite: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4",
   };
 
-  function getToolIcon(name: string): string {
-    return toolIcons[name] || "⚙️";
+  function getToolIconPath(name: string): string {
+    return toolIconPaths[name] || "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z";
   }
 
   function getSubagentForTool(toolUseId: string): ChatMessage[] {
@@ -223,54 +224,48 @@
           {@const expanded = expandedBlocks.has(originalIdx)}
           {@const summary = getToolSummary(tool)}
           {@const isLoading = !result}
-          <div class="rounded-lg border {isLoading ? 'border-blue-200 bg-blue-50/30' : 'border-gray-200 bg-white'} overflow-hidden transition-colors">
+          <div class="overflow-hidden">
             <button
               onclick={() => toggleBlock(originalIdx)}
-              class="w-full flex items-center gap-2 px-3 py-2 text-left {isLoading ? 'hover:bg-blue-50/50' : 'hover:bg-gray-50'} transition-colors"
+              class="w-full flex items-center gap-2 py-1 text-left rounded hover:bg-gray-50 transition-colors -ml-1 pl-1"
             >
-              <div class="w-6 h-6 rounded-md {isLoading ? 'bg-blue-100' : 'bg-gray-100'} flex items-center justify-center flex-shrink-0">
-                {#if isLoading}
-                  <svg class="w-3.5 h-3.5 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                {:else}
-                  <span class="text-xs">{getToolIcon(tool.name)}</span>
-                {/if}
-              </div>
-              <span class="text-xs font-medium {isLoading ? 'text-blue-700' : 'text-gray-700'}">{tool.name}</span>
+              {#if isLoading}
+                <svg class="w-4 h-4 text-gray-400 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              {:else}
+                <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d={getToolIconPath(tool.name)} />
+                </svg>
+              {/if}
+              <span class="text-sm text-gray-600">{tool.name}</span>
               {#if summary}
-                <span class="text-xs {isLoading ? 'text-blue-400' : 'text-gray-400'} truncate font-mono flex-1">{summary}</span>
+                <span class="text-sm text-gray-400 truncate font-mono flex-1">{summary}</span>
               {/if}
               {#if result}
-                <span class="flex items-center gap-1 text-xs {result.is_error ? 'text-red-500' : 'text-green-600'} shrink-0 font-medium">
-                  {#if result.is_error}
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                    Failed
-                  {:else}
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                    </svg>
-                    Done
-                  {/if}
-                </span>
-              {:else}
-                <span class="text-xs text-blue-500 shrink-0">Running...</span>
+                {#if result.is_error}
+                  <svg class="w-4 h-4 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                {:else}
+                  <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                {/if}
               {/if}
               <svg
-                class="w-3.5 h-3.5 {isLoading ? 'text-blue-400' : 'text-gray-400'} transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
+                class="w-3.5 h-3.5 text-gray-300 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
                 fill="none" stroke="currentColor" viewBox="0 0 24 24"
               >
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
               </svg>
             </button>
             {#if expanded}
-              <div class="px-3 pb-2 pt-1 border-t border-gray-100 space-y-2">
+              <div class="pl-6 pt-1 space-y-2">
                 <ToolRenderer {tool} toolResult={result ? { content: String(result.content || ''), is_error: result.is_error } : undefined} {onPreview} hideHeader={true} />
                 {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch'].includes(tool.name)}
-                  <div class="pt-1.5 border-t border-gray-100">
+                  <div class="pt-1">
                     <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50' : 'text-gray-600 bg-gray-50'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{result.content}</pre>
                   </div>
                 {/if}
