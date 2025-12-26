@@ -8,6 +8,8 @@
     "dev:nowatch": "bun run --cwd packages/navi-app dev:nowatch",
     "dev:tauri": "bun run --cwd packages/navi-app tauri:dev",
     "dev:landing": "bun run --cwd packages/landing-page dev",
+    "dev:remix": "bun run --cwd packages/navi-remix dev",
+    "dev:both": "concurrently \"bun run dev:app\" \"bun run dev:remix\"",
     "build": "bun run --cwd packages/navi-app build && bun run --cwd packages/landing-page build"
   },
   "devDependencies": {
