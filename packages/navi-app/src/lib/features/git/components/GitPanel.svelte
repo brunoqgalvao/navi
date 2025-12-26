@@ -4,6 +4,7 @@
   import { STATUS_COLORS } from "../types";
   import * as gitApi from "../api";
   import GitDiffViewer from "./GitDiffViewer.svelte";
+  import GitCommitModal from "./GitCommitModal.svelte";
 
   interface Props {
     rootPath: string;
@@ -27,12 +28,7 @@
   let commitDiff = $state<string | null>(null);
   let loadingDiff = $state(false);
   let showDiff = $state(false);
-
-  // Commit form state
-  let commitMessage = $state("");
-  let committing = $state(false);
-  let generating = $state(false);
-  let commitError = $state("");
+  let showCommitModal = $state(false);
 
   // Computed
   let totalChanges = $derived(
@@ -168,35 +164,6 @@
     }
   }
 
-  async function handleCommit() {
-    if (!commitMessage.trim() || !status?.staged.length) return;
-    committing = true;
-    commitError = "";
-    try {
-      await gitApi.commit(rootPath, commitMessage.trim());
-      commitMessage = "";
-      refresh();
-    } catch (e) {
-      commitError = e instanceof Error ? e.message : "Commit failed";
-    } finally {
-      committing = false;
-    }
-  }
-
-  async function handleGenerateMessage() {
-    if (!status?.staged.length) return;
-    generating = true;
-    commitError = "";
-    try {
-      const message = await gitApi.generateCommitMessage(rootPath);
-      commitMessage = message;
-    } catch (e) {
-      commitError = e instanceof Error ? e.message : "Failed to generate message";
-    } finally {
-      generating = false;
-    }
-  }
-
   $effect(() => {
     if (rootPath) {
       refresh();
@@ -329,50 +296,6 @@
     {:else if activeTab === "changes"}
       <!-- Changes Tab -->
       <div class="flex-1 min-h-0 flex flex-col">
-        <!-- Commit Form -->
-        {#if status && status.staged.length > 0}
-          <div class="px-3 py-2 border-b border-gray-200 bg-white shrink-0">
-            <div class="flex gap-1.5">
-              <input
-                type="text"
-                bind:value={commitMessage}
-                placeholder="Commit message..."
-                class="flex-1 min-w-0 px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400"
-                onkeydown={(e) => e.key === "Enter" && handleCommit()}
-                disabled={committing || generating}
-              />
-              <button
-                onclick={handleGenerateMessage}
-                disabled={generating || committing}
-                class="px-2 py-1.5 text-gray-500 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50"
-                title="Generate with AI"
-              >
-                {#if generating}
-                  <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                {:else}
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                {/if}
-              </button>
-              <button
-                onclick={handleCommit}
-                disabled={!commitMessage.trim() || committing}
-                class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50"
-              >
-                Commit
-              </button>
-            </div>
-            {#if commitError}
-              <p class="text-xs text-red-500 mt-1">{commitError}</p>
-            {/if}
-          </div>
-        {:else if status && (status.modified.length > 0 || status.untracked.length > 0)}
-          <div class="px-3 py-2 border-b border-gray-200 shrink-0">
-            <button onclick={handleStageAll} class="w-full px-3 py-1.5 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200">
-              Stage All
-            </button>
-          </div>
-        {/if}
-
         <!-- File List -->
         <div class="flex-1 overflow-y-auto">
           {#if status}
@@ -381,6 +304,8 @@
               <div class="px-3 py-2">
                 <div class="text-xs font-medium text-green-600 mb-1">Staged ({status.staged.length})</div>
                 {#each status.staged as file}
+                  <!-- svelte-ignore a11y_click_events_have_key_events -->
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
                   <div class="flex items-center gap-2 py-1 hover:bg-gray-50 rounded px-1 group cursor-pointer" onclick={() => handleSelectFile(file.path, true)}>
                     <span class="text-[10px] font-mono px-1 rounded {STATUS_COLORS[file.status]}">{file.status}</span>
                     <span class="flex-1 text-sm text-gray-700 truncate" title={file.path}>{getFileName(file.path)}</span>
@@ -395,6 +320,8 @@
               <div class="px-3 py-2">
                 <div class="text-xs font-medium text-yellow-600 mb-1">Modified ({status.modified.length})</div>
                 {#each status.modified as file}
+                  <!-- svelte-ignore a11y_click_events_have_key_events -->
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
                   <div class="flex items-center gap-2 py-1 hover:bg-gray-50 rounded px-1 group cursor-pointer" onclick={() => handleSelectFile(file.path, false)}>
                     <span class="text-[10px] font-mono px-1 rounded {STATUS_COLORS[file.status]}">{file.status}</span>
                     <span class="flex-1 text-sm text-gray-700 truncate" title={file.path}>{getFileName(file.path)}</span>
@@ -409,6 +336,8 @@
               <div class="px-3 py-2">
                 <div class="text-xs font-medium text-gray-500 mb-1">Untracked ({status.untracked.length})</div>
                 {#each status.untracked as file}
+                  <!-- svelte-ignore a11y_click_events_have_key_events -->
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
                   <div class="flex items-center gap-2 py-1 hover:bg-gray-50 rounded px-1 group cursor-pointer" onclick={() => handleSelectFile(file.path, false)}>
                     <span class="text-[10px] font-mono px-1 rounded text-gray-500 bg-gray-100">?</span>
                     <span class="flex-1 text-sm text-gray-600 truncate" title={file.path}>{getFileName(file.path)}</span>
@@ -446,9 +375,46 @@
       </div>
     {/if}
   </div>
+
+  <!-- Bottom Action Bar -->
+  {#if status && activeTab === "changes" && !showDiff}
+    <div class="h-12 px-3 border-t border-gray-200 bg-gray-50 flex items-center gap-2 shrink-0">
+      {#if status.modified.length > 0 || status.untracked.length > 0}
+        <button
+          onclick={handleStageAll}
+          class="px-3 py-1.5 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+        >
+          Stage All
+        </button>
+      {/if}
+      <div class="flex-1"></div>
+      <button
+        onclick={() => showCommitModal = true}
+        disabled={status.staged.length === 0}
+        class="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+        </svg>
+        Commit
+        {#if status.staged.length > 0}
+          <span class="px-1.5 py-0.5 text-[10px] bg-blue-500 rounded-full">{status.staged.length}</span>
+        {/if}
+      </button>
+    </div>
+  {/if}
 </div>
 
 {#if showBranchDropdown}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="fixed inset-0 z-40" onclick={() => (showBranchDropdown = false)}></div>
+{/if}
+
+{#if showCommitModal && status}
+  <GitCommitModal
+    {rootPath}
+    {status}
+    onClose={() => showCommitModal = false}
+    onCommit={refresh}
+  />
 {/if}

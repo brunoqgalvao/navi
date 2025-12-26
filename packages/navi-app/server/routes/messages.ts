@@ -1,5 +1,6 @@
 import { json } from "../utils/response";
-import { sessions, messages, searchIndex } from "../db";
+import { sessions, messages, searchIndex, projects } from "../db";
+import { triggerQuery } from "../websocket/handler";
 
 export async function handleMessageRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   const messagesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/messages$/);
@@ -8,6 +9,39 @@ export async function handleMessageRoutes(url: URL, method: string, req: Request
     if (method === "GET") {
       const msgs = messages.listBySession(sessionId);
       return json(msgs.map(m => ({ ...m, content: JSON.parse(m.content) })));
+    }
+    if (method === "POST") {
+      try {
+        const body = await req.json();
+        const { message } = body;
+        if (!message || typeof message !== "string") {
+          return json({ error: "Message is required and must be a string" }, 400);
+        }
+
+        const session = sessions.get(sessionId);
+        if (!session) {
+          return json({ error: "Session not found" }, 404);
+        }
+
+        const project = projects.get(session.project_id);
+        if (!project) {
+          return json({ error: "Project not found" }, 404);
+        }
+
+        const triggered = triggerQuery(sessionId, session.project_id, message, session.model);
+        if (!triggered) {
+          return json({ error: "No active connection available to process the query" }, 503);
+        }
+
+        return json({
+          success: true,
+          message: "Query sent successfully. Claude is processing the message.",
+          sessionId
+        });
+      } catch (e) {
+        console.error("Failed to inject message:", e);
+        return json({ error: e instanceof Error ? e.message : "Failed to inject message" }, 500);
+      }
     }
   }
 

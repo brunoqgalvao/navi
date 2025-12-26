@@ -32,7 +32,7 @@
 
   const availableTools = [
     "Read", "Write", "Edit", "MultiEdit", "Bash", "Glob", "Grep",
-    "WebFetch", "WebSearch", "TodoWrite", "Task", "NotebookEdit"
+    "WebFetch", "WebSearch", "TodoWrite", "Task", "TaskOutput", "NotebookEdit"
   ];
 
   $effect(() => {

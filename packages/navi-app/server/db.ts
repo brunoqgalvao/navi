@@ -685,7 +685,7 @@ export interface PermissionSettings {
 }
 
 export const DEFAULT_TOOLS = [
-  "Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite"
+  "Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Task", "TaskOutput"
 ];
 
 export const DANGEROUS_TOOLS = ["Bash", "Write", "Edit"];

@@ -118,6 +118,36 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
     }
   }
 
+  if (url.pathname === "/api/fs/open-editor" && method === "POST") {
+    const body = await req.json();
+    const { path: filePath, editor } = body;
+    if (!filePath) {
+      return json({ error: "Path required" }, 400);
+    }
+    try {
+      const { exec } = await import("child_process");
+      const { promisify } = await import("util");
+      const execAsync = promisify(exec);
+
+      const editorCommands: Record<string, string> = {
+        code: `code "${filePath}"`,
+        cursor: `cursor "${filePath}"`,
+        zed: `zed "${filePath}"`,
+        terminal: process.platform === "darwin"
+          ? `open -a Terminal "${filePath}"`
+          : process.platform === "win32"
+          ? `start cmd /K "cd /d ${filePath}"`
+          : `x-terminal-emulator --working-directory="${filePath}"`,
+      };
+
+      const command = editorCommands[editor] || editorCommands.code;
+      await execAsync(command);
+      return json({ success: true });
+    } catch (e) {
+      return json({ error: "Failed to open editor" }, 500);
+    }
+  }
+
   if (url.pathname === "/api/fs/upload" && method === "POST") {
     try {
       const formData = await req.formData();

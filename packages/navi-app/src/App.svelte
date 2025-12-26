@@ -1739,6 +1739,25 @@
 
         </div>
 
+        <!-- Scroll to Bottom Button -->
+        {#if !userIsNearBottom && currentMessages.length > 0}
+          <button
+            onclick={() => {
+              messagesContainer?.scrollTo({
+                top: messagesContainer.scrollHeight,
+                behavior: "smooth",
+              });
+              userIsNearBottom = true;
+            }}
+            class="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 p-2 bg-white/90 backdrop-blur border border-gray-200 rounded-full shadow-lg hover:bg-gray-50 transition-all hover:shadow-xl group"
+            title="Scroll to bottom"
+          >
+            <svg class="w-5 h-5 text-gray-500 group-hover:text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+            </svg>
+          </button>
+        {/if}
+
         <!-- Input Area (hidden on project home via CSS) -->
         <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}" data-tour="chat-input">
 

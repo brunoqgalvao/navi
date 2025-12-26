@@ -497,3 +497,19 @@ export function createWebSocketHandlers() {
     },
   };
 }
+
+export function triggerQuery(sessionId: string, projectId: string, prompt: string, model?: string) {
+  const activeWs = Array.from(connectedClients)[0];
+  if (!activeWs) {
+    console.error("No active WebSocket connection to trigger query");
+    return false;
+  }
+  handleQueryWithProcess(activeWs, {
+    type: "query",
+    prompt,
+    projectId,
+    sessionId,
+    model,
+  });
+  return true;
+}

@@ -114,7 +114,7 @@
     const target = e.target as HTMLTextAreaElement;
     const cursorPos = target.selectionStart;
     const textBeforeCursor = value.slice(0, cursorPos);
-    
+
     const atMatch = textBeforeCursor.match(/@([^\s@]*)$/);
     if (atMatch) {
       filePickerQuery = atMatch[1];
@@ -124,7 +124,24 @@
       showFilePicker = false;
       filePickerQuery = "";
     }
+
+    adjustTextareaHeight(target);
   }
+
+  function adjustTextareaHeight(textarea: HTMLTextAreaElement) {
+    textarea.style.height = 'auto';
+    const lineHeight = 24;
+    const maxLines = 8;
+    const maxHeight = lineHeight * maxLines;
+    const minHeight = 56;
+    textarea.style.height = `${Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight))}px`;
+  }
+
+  $effect(() => {
+    if (inputRef && value === '') {
+      inputRef.style.height = '56px';
+    }
+  });
 
   function selectFile(file: FileEntry) {
     const cursorPos = inputRef?.selectionStart || 0;
@@ -289,7 +306,7 @@
       onpaste={handlePaste}
       placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : "Message Claude... (@ to attach files)"}
       {disabled}
-      class="w-full bg-transparent text-gray-900 placeholder-gray-400 border-none rounded-xl pl-4 pr-24 py-3.5 focus:outline-none focus:ring-0 resize-none max-h-48 min-h-[56px] text-[15px] disabled:opacity-50"
+      class="w-full bg-transparent text-gray-900 placeholder-gray-400 border-none rounded-xl pl-4 pr-24 py-3.5 focus:outline-none focus:ring-0 resize-none min-h-[56px] text-[15px] disabled:opacity-50 overflow-y-auto"
       rows="1"
     ></textarea>
 

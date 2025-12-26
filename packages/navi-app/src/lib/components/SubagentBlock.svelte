@@ -13,9 +13,10 @@
     elapsedTime?: number;
     renderMarkdown: (content: string) => string;
     onMessageClick?: (e: MouseEvent) => void;
+    onOpenModal?: () => void;
   }
 
-  let { toolUseId, description, subagentType, updates, isActive, elapsedTime, renderMarkdown, onMessageClick }: Props = $props();
+  let { toolUseId, description, subagentType, updates, isActive, elapsedTime, renderMarkdown, onMessageClick, onOpenModal }: Props = $props();
 
   let expanded = $state(false);
 
@@ -96,10 +97,12 @@
 </script>
 
 <div class="rounded-xl border border-indigo-200 bg-white shadow-sm overflow-hidden">
-  <!-- Header - always visible -->
+  <!-- Header - always visible, double-click opens modal -->
   <button
     onclick={() => expanded = !expanded}
+    ondblclick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenModal?.(); }}
     class="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-indigo-50/50 transition-colors"
+    title="Click to expand, double-click for full view"
   >
     <!-- Icon -->
     <div class="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">

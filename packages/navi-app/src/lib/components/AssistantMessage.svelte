@@ -4,6 +4,7 @@
   import MermaidRenderer from "./MermaidRenderer.svelte";
   import ToolRenderer from "./ToolRenderer.svelte";
   import SubagentBlock from "./SubagentBlock.svelte";
+  import SubagentModal from "./SubagentModal.svelte";
   import MediaDisplay from "./MediaDisplay.svelte";
   import GenerativeUI from "./experimental/GenerativeUI.svelte";
   import CopyButton from "./CopyButton.svelte";
@@ -41,6 +42,7 @@
 
   let showMenu = $state(false);
   let expandedBlocks = $state<Set<number>>(new Set());
+  let openSubagentModal = $state<{ toolUseId: string; description: string; subagentType: string } | null>(null);
 
   function toggleBlock(idx: number) {
     if (expandedBlocks.has(idx)) {
@@ -203,15 +205,18 @@
         {@const result = item.toolResult}
         {@const originalIdx = item.originalIndex}
         {#if isTaskTool(tool)}
+          {@const taskDescription = tool.input?.description || tool.input?.prompt?.slice(0, 100) || "Subagent task"}
+          {@const taskSubagentType = tool.input?.subagent_type || "general-purpose"}
           <SubagentBlock
             toolUseId={tool.id}
-            description={tool.input?.description || tool.input?.prompt?.slice(0, 100) || "Subagent task"}
-            subagentType={tool.input?.subagent_type || "general-purpose"}
+            description={taskDescription}
+            subagentType={taskSubagentType}
             updates={getSubagentForTool(tool.id)}
             isActive={activeSubagents.has(tool.id)}
             elapsedTime={activeSubagents.get(tool.id)?.elapsed}
             {renderMarkdown}
             {onMessageClick}
+            onOpenModal={() => openSubagentModal = { toolUseId: tool.id, description: taskDescription, subagentType: taskSubagentType }}
           />
         {:else if isTodoWrite(tool)}
           {@const expanded = expandedBlocks.has(originalIdx)}
@@ -324,3 +329,18 @@
     {/each}
     </div>
   </div>
+
+<!-- Subagent Modal -->
+{#if openSubagentModal}
+  <SubagentModal
+    toolUseId={openSubagentModal.toolUseId}
+    description={openSubagentModal.description}
+    subagentType={openSubagentModal.subagentType}
+    messages={getSubagentForTool(openSubagentModal.toolUseId)}
+    isActive={activeSubagents.has(openSubagentModal.toolUseId)}
+    elapsedTime={activeSubagents.get(openSubagentModal.toolUseId)?.elapsed}
+    onClose={() => openSubagentModal = null}
+    {renderMarkdown}
+    {onPreview}
+  />
+{/if}

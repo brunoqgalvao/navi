@@ -483,6 +483,8 @@ async function runQuery(input: WorkerInput) {
       "WebFetch",
       "WebSearch",
       "TodoWrite",
+      "Task",
+      "TaskOutput",
     ];
     
     const requireConfirmation = permissionSettings?.requireConfirmation || [];

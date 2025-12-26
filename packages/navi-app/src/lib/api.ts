@@ -266,6 +266,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ path }),
       }),
+    openInEditor: (path: string, editor: "code" | "cursor" | "zed" | "terminal" = "code") =>
+      request<{ success: boolean }>("/fs/open-editor", {
+        method: "POST",
+        body: JSON.stringify({ path, editor }),
+      }),
   },
 
   config: {

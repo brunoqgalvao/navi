@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Project } from "../api";
-  import WorkspaceCard from "../components/WorkspaceCard.svelte";
 
   interface Props {
     projects: Project[];
@@ -11,42 +10,58 @@
   }
 
   let { projects, onSelectProject, onTogglePin, onNewProject, relativeTime }: Props = $props();
+
+  // Show only the 5 most recent projects
+  const recentProjects = $derived(projects.slice(0, 5));
 </script>
 
-<div class="flex-1 overflow-y-auto p-8 bg-white">
-  <div class="w-full max-w-4xl mx-auto flex flex-col items-center pt-12">
-    <div class="w-16 h-16 bg-white rounded-xl flex items-center justify-center shadow-sm border border-gray-200 mb-6">
-      <img src="/logo.png" alt="Logo" class="w-10 h-10" />
+<div class="flex-1 overflow-y-auto bg-white">
+  <div class="min-h-full flex flex-col">
+    <!-- Hero Section -->
+    <div class="flex-1 flex flex-col items-center justify-center px-8">
+      <!-- Logo & Branding -->
+      <div class="w-14 h-14 bg-white rounded-xl flex items-center justify-center shadow-sm border border-gray-100 mb-5">
+        <img src="/logo.png" alt="Logo" class="w-9 h-9" />
+      </div>
+
+      <h1 class="text-2xl font-serif text-gray-900 mb-2 tracking-tight">Navi</h1>
+      <p class="text-sm text-gray-400 mb-8 text-center">Your AI coding companion</p>
+
+      <!-- Main CTA -->
+      <button
+        onclick={onNewProject}
+        class="group relative inline-flex items-center justify-center gap-2.5 px-7 py-3.5 text-[15px] font-medium text-white transition-all duration-200 bg-gray-900 rounded-xl hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2"
+      >
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+        </svg>
+        Create Workspace
+      </button>
     </div>
 
-    <h1 class="text-3xl font-serif text-gray-900 mb-3 tracking-tight">Navi</h1>
-    <p class="text-base text-gray-500 mb-8 max-w-md text-center font-light">Select a workspace to get started. Already on it.</p>
-
-    <button
-      onclick={onNewProject}
-      class="group relative inline-flex items-center justify-center gap-2 px-6 py-3 text-[15px] font-medium text-white transition-all duration-200 bg-gray-900 rounded-lg hover:bg-gray-800 hover:shadow-lg hover:shadow-gray-900/10 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 mb-16"
-    >
-      <svg class="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-      </svg>
-      Create New Workspace
-    </button>
-
-    {#if projects.length > 0}
-      <div class="w-full">
-        <div class="flex items-center justify-between mb-5">
-          <h3 class="text-sm font-semibold text-gray-700">Your Workspaces</h3>
-          <span class="text-xs text-gray-400">{projects.length} workspace{projects.length !== 1 ? 's' : ''}</span>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {#each projects as proj}
-            <WorkspaceCard
-              project={proj}
-              onclick={() => onSelectProject(proj)}
-              onTogglePin={(e) => onTogglePin(proj, e)}
-              {relativeTime}
-            />
-          {/each}
+    <!-- Recent Projects - Floating at bottom -->
+    {#if recentProjects.length > 0}
+      <div class="px-8 pb-8">
+        <div class="max-w-md mx-auto">
+          <h3 class="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3 text-center">Recent</h3>
+          <div class="flex flex-wrap justify-center gap-2">
+            {#each recentProjects as proj}
+              <button
+                onclick={() => onSelectProject(proj)}
+                class="group flex items-center gap-2 py-1.5 px-3 rounded-full bg-gray-50 hover:bg-gray-100 border border-gray-100 hover:border-gray-200 transition-all text-left"
+              >
+                <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+                <span class="text-xs text-gray-600 font-medium">{proj.name}</span>
+              </button>
+            {/each}
+          </div>
+          {#if projects.length > 5}
+            <button class="mt-3 text-xs text-gray-400 hover:text-gray-600 transition-colors w-full text-center">
+              +{projects.length - 5} more
+            </button>
+          {/if}
         </div>
       </div>
     {/if}

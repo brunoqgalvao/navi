@@ -44,13 +44,14 @@
   async function startRecording() {
     error = null;
     audioChunks = [];
-    
+
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ 
+      // Don't specify sampleRate as a hard constraint - many browsers/devices
+      // don't support exactly 16kHz and will throw NotFoundError
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 16000,
         }
       });
       
@@ -84,9 +85,15 @@
         recordingDuration++;
       }, 1000);
       
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to start recording:", e);
-      error = "Microphone access denied";
+      if (e.name === "NotFoundError") {
+        error = "No microphone found. Check your audio input device.";
+      } else if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
+        error = "Microphone access denied";
+      } else {
+        error = e.message || "Failed to access microphone";
+      }
     }
   }
 

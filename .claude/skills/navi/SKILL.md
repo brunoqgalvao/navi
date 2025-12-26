@@ -15,6 +15,7 @@ All endpoints are at `http://localhost:3001/api`. Use `curl` for all requests.
 
 | Action | Endpoint | Method |
 |--------|----------|--------|
+| **Send message to chat** | `/sessions/{id}/messages` | POST |
 | Create new chat | `/projects/{id}/sessions` | POST |
 | Fork chat | `/sessions/{id}/fork` | POST |
 | **Open preview panel** | `/ui/preview` | POST |
@@ -26,6 +27,25 @@ All endpoints are at `http://localhost:3001/api`. Use `curl` for all requests.
 ---
 
 ## Session Management
+
+### Send Message to Session
+
+Send a message to an existing chat session. The message will be processed by Claude:
+
+```bash
+curl -X POST http://localhost:3001/api/sessions/{sessionId}/messages \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Your message here"}'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Query injected successfully. The message will be processed by Claude.",
+  "sessionId": "..."
+}
+```
 
 ### Create New Chat Session
 
@@ -210,6 +230,23 @@ curl -X DELETE http://localhost:3001/api/folders/{folderId}
 ```bash
 curl http://localhost:3001/api/sessions/{sessionId}/messages
 ```
+
+### Send a Message to Session
+
+Send a message to an existing session and trigger Claude to respond:
+
+```bash
+curl -X POST http://localhost:3001/api/sessions/{sessionId}/messages \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Your message here"}'
+```
+
+This will:
+1. Add the message to the session
+2. Trigger Claude to process and respond
+3. The response will be streamed to any connected UI clients
+
+**Note:** Requires an active Navi UI connection to process the query.
 
 ### Rollback to a Message
 
