@@ -7,3 +7,5 @@ dist/
 .env*.local
 target/
 .claude/pasted_images/
+pasted-image*
+
