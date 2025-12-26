@@ -269,7 +269,7 @@
             {#if expanded}
               <div class="px-3 pb-2 pt-1 border-t border-gray-100 space-y-2">
                 <ToolRenderer {tool} toolResult={result ? { content: String(result.content || ''), is_error: result.is_error } : undefined} {onPreview} hideHeader={true} />
-                {#if result && !['Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch'].includes(tool.name)}
+                {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch'].includes(tool.name)}
                   <div class="pt-1.5 border-t border-gray-100">
                     <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50' : 'text-gray-600 bg-gray-50'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{result.content}</pre>
                   </div>
