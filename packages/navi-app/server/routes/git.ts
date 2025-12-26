@@ -264,7 +264,7 @@ Rules:
       const systemPrompt = "You are a helpful assistant that generates git commit messages. Respond only with the commit message, no explanations or markdown.";
 
       // Use ephemeral chat endpoint internally
-      const response = await fetch("http://localhost:3001/api/ephemeral-chat", {
+      const response = await fetch("http://localhost:3001/api/ephemeral", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
