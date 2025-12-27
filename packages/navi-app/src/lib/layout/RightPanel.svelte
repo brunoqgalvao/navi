@@ -19,6 +19,7 @@
   interface Props {
     mode: PanelMode;
     width: number;
+    projectId: string | null;
     projectPath: string | null;
     previewSource: string | null;
     browserUrl: string;
@@ -36,6 +37,7 @@
   let {
     mode,
     width,
+    projectId,
     projectPath,
     previewSource,
     browserUrl,
@@ -125,6 +127,7 @@
     {:else if mode === "browser"}
       <WorkspacePanel
         mode="browser"
+        {projectId}
         {projectPath}
         {browserUrl}
         onBrowserUrlChange={onBrowserUrlChange}
@@ -134,6 +137,7 @@
     {:else if mode === "terminal"}
       <WorkspacePanel
         mode="terminal"
+        {projectId}
         {projectPath}
         onTerminalRef={handleTerminalRef}
         onTerminalSendToClaude={onTerminalSendToClaude}

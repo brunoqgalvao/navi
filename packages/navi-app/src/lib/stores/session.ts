@@ -505,6 +505,218 @@ function createSessionWorkspacesStore() {
 
 export const sessionWorkspaces = createSessionWorkspacesStore();
 
+// Project workspaces store (terminals per project - persisted across sessions)
+export interface ProjectWorkspace {
+  projectId: string;
+  terminalTabs: TerminalTab[];
+  activeTerminalId: string;
+  terminalCounter: number;
+  browser: BrowserState;
+  lastLoadedFromServer: number;
+}
+
+function createProjectWorkspacesStore() {
+  const { subscribe, set, update } = writable<Map<string, ProjectWorkspace>>(new Map());
+
+  const getDefaultWorkspace = (projectId: string): ProjectWorkspace => ({
+    projectId,
+    terminalTabs: [],
+    activeTerminalId: "",
+    terminalCounter: 0,
+    browser: {
+      url: "",
+      history: [],
+      historyIndex: -1,
+    },
+    lastLoadedFromServer: 0,
+  });
+
+  return {
+    subscribe,
+    set,
+
+    getOrCreate: (projectId: string): ProjectWorkspace => {
+      const map = get({ subscribe });
+      if (map.has(projectId)) {
+        return map.get(projectId)!;
+      }
+      const workspace = getDefaultWorkspace(projectId);
+      update((m) => {
+        m.set(projectId, workspace);
+        return new Map(m);
+      });
+      return workspace;
+    },
+
+    get: (projectId: string): ProjectWorkspace | undefined => {
+      const map = get({ subscribe });
+      return map.get(projectId);
+    },
+
+    setTerminals: (projectId: string, terminals: Array<{ terminalId: string; name?: string; cwd?: string }>) =>
+      update((map) => {
+        const workspace = map.get(projectId) || getDefaultWorkspace(projectId);
+        const terminalTabs: TerminalTab[] = terminals.map((t, i) => ({
+          id: `tab-${t.terminalId}`,
+          name: t.name || `Terminal ${i + 1}`,
+          terminalId: t.terminalId,
+          cwd: t.cwd,
+        }));
+        map.set(projectId, {
+          ...workspace,
+          terminalTabs,
+          activeTerminalId: terminalTabs[0]?.id || "",
+          terminalCounter: terminalTabs.length,
+          lastLoadedFromServer: Date.now(),
+        });
+        return new Map(map);
+      }),
+
+    addTerminalTab: (projectId: string, tab?: Partial<TerminalTab>) =>
+      update((map) => {
+        const workspace = map.get(projectId) || getDefaultWorkspace(projectId);
+        const newCounter = workspace.terminalCounter + 1;
+        const newTab: TerminalTab = {
+          id: tab?.id || `term-${newCounter}`,
+          name: tab?.name || `Terminal ${newCounter}`,
+          terminalId: tab?.terminalId,
+          initialCommand: tab?.initialCommand,
+          cwd: tab?.cwd,
+        };
+        map.set(projectId, {
+          ...workspace,
+          terminalTabs: [...workspace.terminalTabs, newTab],
+          activeTerminalId: newTab.id,
+          terminalCounter: newCounter,
+        });
+        return new Map(map);
+      }),
+
+    removeTerminalTab: (projectId: string, tabId: string) =>
+      update((map) => {
+        const workspace = map.get(projectId);
+        if (!workspace || workspace.terminalTabs.length <= 1) return map;
+
+        const idx = workspace.terminalTabs.findIndex((t) => t.id === tabId);
+        const newTabs = workspace.terminalTabs.filter((t) => t.id !== tabId);
+        const newActiveId =
+          workspace.activeTerminalId === tabId
+            ? newTabs[Math.max(0, idx - 1)]?.id || newTabs[0]?.id
+            : workspace.activeTerminalId;
+
+        map.set(projectId, {
+          ...workspace,
+          terminalTabs: newTabs,
+          activeTerminalId: newActiveId,
+        });
+        return new Map(map);
+      }),
+
+    setActiveTerminal: (projectId: string, tabId: string) =>
+      update((map) => {
+        const workspace = map.get(projectId);
+        if (!workspace) return map;
+        map.set(projectId, { ...workspace, activeTerminalId: tabId });
+        return new Map(map);
+      }),
+
+    updateTerminalTab: (projectId: string, tabId: string, updates: Partial<TerminalTab>) =>
+      update((map) => {
+        const workspace = map.get(projectId);
+        if (!workspace) return map;
+        const newTabs = workspace.terminalTabs.map((t) =>
+          t.id === tabId ? { ...t, ...updates } : t
+        );
+        map.set(projectId, { ...workspace, terminalTabs: newTabs });
+        return new Map(map);
+      }),
+
+    updateBrowser: (projectId: string, updates: Partial<BrowserState>) =>
+      update((map) => {
+        const workspace = map.get(projectId) || getDefaultWorkspace(projectId);
+        map.set(projectId, {
+          ...workspace,
+          browser: { ...workspace.browser, ...updates },
+        });
+        return new Map(map);
+      }),
+
+    navigateBrowser: (projectId: string, url: string) =>
+      update((map) => {
+        const workspace = map.get(projectId) || getDefaultWorkspace(projectId);
+        const { browser } = workspace;
+        const newHistory = [...browser.history.slice(0, browser.historyIndex + 1), url];
+        map.set(projectId, {
+          ...workspace,
+          browser: {
+            url,
+            history: newHistory,
+            historyIndex: newHistory.length - 1,
+          },
+        });
+        return new Map(map);
+      }),
+
+    browserBack: (projectId: string) =>
+      update((map) => {
+        const workspace = map.get(projectId);
+        if (!workspace || workspace.browser.historyIndex <= 0) return map;
+        const newIndex = workspace.browser.historyIndex - 1;
+        map.set(projectId, {
+          ...workspace,
+          browser: {
+            ...workspace.browser,
+            url: workspace.browser.history[newIndex],
+            historyIndex: newIndex,
+          },
+        });
+        return new Map(map);
+      }),
+
+    browserForward: (projectId: string) =>
+      update((map) => {
+        const workspace = map.get(projectId);
+        if (!workspace || workspace.browser.historyIndex >= workspace.browser.history.length - 1)
+          return map;
+        const newIndex = workspace.browser.historyIndex + 1;
+        map.set(projectId, {
+          ...workspace,
+          browser: {
+            ...workspace.browser,
+            url: workspace.browser.history[newIndex],
+            historyIndex: newIndex,
+          },
+        });
+        return new Map(map);
+      }),
+
+    browserGoToIndex: (projectId: string, index: number) =>
+      update((map) => {
+        const workspace = map.get(projectId);
+        if (!workspace || index < 0 || index >= workspace.browser.history.length) return map;
+        map.set(projectId, {
+          ...workspace,
+          browser: {
+            ...workspace.browser,
+            url: workspace.browser.history[index],
+            historyIndex: index,
+          },
+        });
+        return new Map(map);
+      }),
+
+    clearProject: (projectId: string) =>
+      update((map) => {
+        map.delete(projectId);
+        return new Map(map);
+      }),
+
+    reset: () => set(new Map()),
+  };
+}
+
+export const projectWorkspaces = createProjectWorkspacesStore();
+
 // Session models store (per-session model selection)
 function createSessionModelsStore() {
   const { subscribe, set, update } = writable<Map<string, string>>(new Map());

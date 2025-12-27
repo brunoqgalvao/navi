@@ -1,6 +1,7 @@
-import { getApiBase } from "./config";
+import { getApiBase, getPtyApiUrl } from "./config";
 
 const getApiBaseUrl = () => getApiBase();
+const getPtyBaseUrl = () => getPtyApiUrl();
 
 export interface WorkspaceFolder {
   id: string;
@@ -711,6 +712,33 @@ export const terminalApi = {
     request<{ terminalId: string; hasErrors: boolean; errorLines: string[]; context: string }>(
       `/terminal/pty/${terminalId}/errors`
     ),
+};
+
+// PTY Server API (talks directly to Node PTY server on port 3002)
+export interface PtyTerminalInfo {
+  terminalId: string;
+  pid: number;
+  cwd: string;
+  createdAt: number;
+  projectId?: string;
+  name?: string;
+}
+
+export const ptyApi = {
+  // Check PTY server health
+  health: async () => {
+    const res = await fetch(`${getPtyBaseUrl()}/health`);
+    return res.json() as Promise<{ status: string; terminals: number; uptime: number }>;
+  },
+
+  // List terminals (optionally filtered by projectId)
+  list: async (projectId?: string) => {
+    const url = projectId
+      ? `${getPtyBaseUrl()}/terminals?projectId=${projectId}`
+      : `${getPtyBaseUrl()}/terminals`;
+    const res = await fetch(url);
+    return res.json() as Promise<PtyTerminalInfo[]>;
+  },
 };
 
 // Process management API

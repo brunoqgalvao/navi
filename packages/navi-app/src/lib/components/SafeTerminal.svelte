@@ -11,7 +11,8 @@
   interface Props {
     cwd?: string;
     initialCommand?: string;
-    sessionId?: string;
+    projectId?: string;
+    name?: string;
     existingTerminalId?: string;
     onClose?: () => void;
     onSendToClaude?: (context: string) => void;
@@ -21,7 +22,8 @@
   let {
     cwd,
     initialCommand,
-    sessionId,
+    projectId,
+    name,
     existingTerminalId,
     onClose,
     onSendToClaude,
@@ -88,6 +90,16 @@
     if (!hasError && terminalRef) {
       try {
         terminalRef.runCommand(command);
+      } catch (e) {
+        handleError(e instanceof Error ? e : new Error(String(e)));
+      }
+    }
+  }
+
+  export function killTerminal() {
+    if (!hasError && terminalRef) {
+      try {
+        terminalRef.killTerminal();
       } catch (e) {
         handleError(e instanceof Error ? e : new Error(String(e)));
       }
@@ -165,7 +177,8 @@
       bind:this={terminalRef}
       {cwd}
       {initialCommand}
-      {sessionId}
+      {projectId}
+      {name}
       {existingTerminalId}
       {onClose}
       {onSendToClaude}

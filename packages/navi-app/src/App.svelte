@@ -510,6 +510,17 @@
     }
   });
 
+  // Close right panel when leaving a workspace
+  let lastProjectId: string | null = null;
+  $effect(() => {
+    const projectId = currentProject?.id ?? null;
+    if (lastProjectId && !projectId) {
+      // Left a workspace - close panel
+      closeRightPanel();
+    }
+    lastProjectId = projectId;
+  });
+
   function handleOnboardingComplete() {
     showWelcome = true;
     onboardingComplete.complete();
@@ -2008,6 +2019,7 @@
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
+      projectId={currentProject?.id || null}
       projectPath={currentProject?.path || null}
       {previewSource}
       {browserUrl}

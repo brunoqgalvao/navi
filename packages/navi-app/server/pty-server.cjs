@@ -18,8 +18,11 @@ const PORT = parseInt(process.env.PTY_PORT || '3002', 10);
 // Active PTY sessions
 const terminals = new Map();
 
-// Output buffer settings
-const MAX_BUFFER_LINES = 500;
+// Index terminals by projectId for quick lookup
+const terminalsByProject = new Map(); // projectId -> Set<terminalId>
+
+// Output buffer settings - store raw chunks, not split lines
+const MAX_BUFFER_SIZE = 100000; // ~100KB of terminal output
 const ERROR_PATTERNS = [
   /error:/i,
   /ERR!/,
@@ -48,16 +51,38 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
-  if (req.url === '/terminals') {
+  if (req.url === '/terminals' || req.url.startsWith('/terminals?')) {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    const projectId = url.searchParams.get('projectId');
+    
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    const list = Array.from(terminals.entries()).map(([id, t]) => ({
-      terminalId: id,
-      pid: t.pty.pid,
-      cwd: t.cwd,
-      createdAt: t.createdAt,
-      sessionId: t.sessionId,
-    }));
-    res.end(JSON.stringify(list));
+    
+    let terminalList;
+    if (projectId) {
+      // Filter by projectId
+      const projectTerminalIds = terminalsByProject.get(projectId) || new Set();
+      terminalList = Array.from(projectTerminalIds)
+        .map(id => terminals.get(id))
+        .filter(Boolean)
+        .map(t => ({
+          terminalId: t.id,
+          pid: t.pty.pid,
+          cwd: t.cwd,
+          createdAt: t.createdAt,
+          projectId: t.projectId,
+          name: t.name,
+        }));
+    } else {
+      terminalList = Array.from(terminals.entries()).map(([id, t]) => ({
+        terminalId: id,
+        pid: t.pty.pid,
+        cwd: t.cwd,
+        createdAt: t.createdAt,
+        projectId: t.projectId,
+        name: t.name,
+      }));
+    }
+    res.end(JSON.stringify(terminalList));
     return;
   }
 
@@ -103,7 +128,7 @@ wss.on('connection', (ws) => {
 function handleMessage(ws, message, attachedTerminals) {
   switch (message.type) {
     case 'create': {
-      const { cwd = os.homedir(), cols = 80, rows = 24, sessionId } = message;
+      const { cwd = os.homedir(), cols = 80, rows = 24, projectId, name = 'Terminal' } = message;
       const safeCols = Number.isFinite(cols) && cols > 1 ? Math.floor(cols) : 80;
       const safeRows = Number.isFinite(rows) && rows > 1 ? Math.floor(rows) : 24;
 
@@ -123,24 +148,34 @@ function handleMessage(ws, message, attachedTerminals) {
         });
 
         const terminal = {
+          id: terminalId,
           pty: ptyProcess,
           cwd,
           createdAt: Date.now(),
-          sessionId,
-          outputBuffer: [],
+          projectId,
+          name,
+          outputBuffer: '', // Raw string buffer
           clients: new Set([ws]),
         };
 
         terminals.set(terminalId, terminal);
         attachedTerminals.add(terminalId);
 
+        // Add to project index
+        if (projectId) {
+          if (!terminalsByProject.has(projectId)) {
+            terminalsByProject.set(projectId, new Set());
+          }
+          terminalsByProject.get(projectId).add(terminalId);
+        }
+
         // Handle output
         ptyProcess.onData((data) => {
-          // Buffer output
-          const lines = data.split('\n');
-          terminal.outputBuffer.push(...lines);
-          while (terminal.outputBuffer.length > MAX_BUFFER_LINES) {
-            terminal.outputBuffer.shift();
+          // Buffer raw output
+          terminal.outputBuffer += data;
+          // Trim if too large (keep last MAX_BUFFER_SIZE chars)
+          if (terminal.outputBuffer.length > MAX_BUFFER_SIZE) {
+            terminal.outputBuffer = terminal.outputBuffer.slice(-MAX_BUFFER_SIZE);
           }
 
           // Broadcast to clients
@@ -162,7 +197,7 @@ function handleMessage(ws, message, attachedTerminals) {
             const errorMsg = JSON.stringify({
               type: 'error_detected',
               terminalId,
-              context: terminal.outputBuffer.slice(-30).join('\n'),
+              context: terminal.outputBuffer.slice(-2000),
             });
             for (const client of terminal.clients) {
               try {
@@ -185,7 +220,11 @@ function handleMessage(ws, message, attachedTerminals) {
               client.send(exitMsg);
             } catch {}
           }
+          // Clean up from indexes
           terminals.delete(terminalId);
+          if (projectId && terminalsByProject.has(projectId)) {
+            terminalsByProject.get(projectId).delete(terminalId);
+          }
         });
 
         ws.send(JSON.stringify({
@@ -194,10 +233,11 @@ function handleMessage(ws, message, attachedTerminals) {
           pid: ptyProcess.pid,
           shell,
           cwd,
-          sessionId,
+          projectId,
+          name,
         }));
 
-        console.log(`[PTY] Created terminal ${terminalId} (pid: ${ptyProcess.pid})`);
+        console.log(`[PTY] Created terminal ${terminalId} for project ${projectId} (pid: ${ptyProcess.pid})`);
       } catch (e) {
         ws.send(JSON.stringify({
           type: 'error',
@@ -219,13 +259,12 @@ function handleMessage(ws, message, attachedTerminals) {
       terminal.clients.add(ws);
       attachedTerminals.add(terminalId);
 
-      // Send recent buffer
-      const recentOutput = terminal.outputBuffer.slice(-100).join('');
-      if (recentOutput) {
+      // Send full buffer (entire terminal history)
+      if (terminal.outputBuffer) {
         ws.send(JSON.stringify({
           type: 'output',
           terminalId,
-          data: recentOutput,
+          data: terminal.outputBuffer,
         }));
       }
 
@@ -290,6 +329,11 @@ function handleMessage(ws, message, attachedTerminals) {
           terminal.pty.kill();
         } catch {}
         terminals.delete(terminalId);
+        
+        // Clean up project index
+        if (terminal.projectId && terminalsByProject.has(terminal.projectId)) {
+          terminalsByProject.get(terminal.projectId).delete(terminalId);
+        }
 
         ws.send(JSON.stringify({
           type: 'killed',
@@ -300,16 +344,52 @@ function handleMessage(ws, message, attachedTerminals) {
       break;
     }
 
+    case 'list': {
+      const { projectId } = message;
+      
+      let terminalList;
+      if (projectId) {
+        const projectTerminalIds = terminalsByProject.get(projectId) || new Set();
+        terminalList = Array.from(projectTerminalIds)
+          .map(id => terminals.get(id))
+          .filter(Boolean)
+          .map(t => ({
+            terminalId: t.id,
+            pid: t.pty.pid,
+            cwd: t.cwd,
+            createdAt: t.createdAt,
+            projectId: t.projectId,
+            name: t.name,
+          }));
+      } else {
+        terminalList = Array.from(terminals.entries()).map(([id, t]) => ({
+          terminalId: id,
+          pid: t.pty.pid,
+          cwd: t.cwd,
+          createdAt: t.createdAt,
+          projectId: t.projectId,
+          name: t.name,
+        }));
+      }
+      
+      ws.send(JSON.stringify({
+        type: 'list',
+        terminals: terminalList,
+        projectId,
+      }));
+      break;
+    }
+
     case 'buffer': {
-      const { terminalId, lines = 100 } = message;
+      const { terminalId, chars = 10000 } = message;
       const terminal = terminals.get(terminalId);
 
       if (terminal) {
         ws.send(JSON.stringify({
           type: 'buffer',
           terminalId,
-          lines: terminal.outputBuffer.slice(-lines),
-          totalLines: terminal.outputBuffer.length,
+          data: terminal.outputBuffer.slice(-chars),
+          totalSize: terminal.outputBuffer.length,
         }));
       }
       break;

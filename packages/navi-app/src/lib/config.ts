@@ -2,6 +2,7 @@ declare global {
   interface Window {
     __TAURI__?: unknown;
     __NAVI_SERVER_PORT__?: number;
+    __NAVI_PTY_PORT__?: number;
   }
 }
 
@@ -16,6 +17,13 @@ function getServerPort(): number {
   return 3001;
 }
 
+function getPtyServerPort(): number {
+  if (typeof window !== "undefined" && window.__NAVI_PTY_PORT__) {
+    return window.__NAVI_PTY_PORT__;
+  }
+  return 3002;
+}
+
 export function getApiBase(): string {
   const port = getServerPort();
   return `http://localhost:${port}/api`;
@@ -26,6 +34,16 @@ export function getWsUrl(): string {
   return `ws://localhost:${port}/ws`;
 }
 
+export function getPtyWsUrl(): string {
+  const port = getPtyServerPort();
+  return `ws://localhost:${port}`;
+}
+
+export function getPtyApiUrl(): string {
+  const port = getPtyServerPort();
+  return `http://localhost:${port}`;
+}
+
 export function getServerUrl(): string {
   const port = getServerPort();
   return `http://localhost:${port}`;
@@ -34,6 +52,12 @@ export function getServerUrl(): string {
 export function setServerPort(port: number): void {
   if (typeof window !== "undefined") {
     window.__NAVI_SERVER_PORT__ = port;
+  }
+}
+
+export function setPtyServerPort(port: number): void {
+  if (typeof window !== "undefined") {
+    window.__NAVI_PTY_PORT__ = port;
   }
 }
 

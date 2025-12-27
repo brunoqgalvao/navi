@@ -1,20 +1,23 @@
 <script lang="ts">
   /**
-   * WorkspacePanel - Session-aware container for terminal tabs and browser
+   * WorkspacePanel - Project-aware container for terminal tabs and browser
    *
    * Handles:
-   * - Session workspace state (terminals, browser)
-   * - Terminal tab management
+   * - Project workspace state (terminals, browser)
+   * - Terminal tab management (per project, not per session)
    * - Browser navigation state
-   * - Terminal reconnection
+   * - Terminal reconnection from PTY server
    */
-  import { currentSession, sessionWorkspaces } from "../stores/session";
-  import type { TerminalTab, SessionWorkspace } from "../stores/types";
+  import { onMount } from "svelte";
+  import { currentSession, projectWorkspaces } from "../stores/session";
+  import type { TerminalTab } from "../stores/types";
   import SafeTerminal from "./SafeTerminal.svelte";
   import Preview from "../Preview.svelte";
+  import { ptyApi } from "../api";
 
   interface Props {
     mode: "terminal" | "browser";
+    projectId: string | null;
     projectPath: string | null;
     browserUrl?: string;
     onBrowserUrlChange?: (url: string) => void;
@@ -24,6 +27,7 @@
 
   let {
     mode,
+    projectId,
     projectPath,
     browserUrl = "",
     onBrowserUrlChange,
@@ -31,25 +35,42 @@
     onTerminalSendToClaude,
   }: Props = $props();
 
-  // Get current session ID reactively
-  let sessionId = $derived($currentSession.sessionId);
-
-  // Get workspace for current session reactively
-  let workspace = $derived(sessionId ? $sessionWorkspaces.get(sessionId) : null);
+  // Get workspace for current project reactively
+  let workspace = $derived(projectId ? $projectWorkspaces.get(projectId) : null);
 
   // Derived terminal state from workspace
-  let terminalTabs = $derived(workspace?.terminalTabs ?? [{ id: "term-1", name: "Terminal 1" }]);
-  let activeTerminalId = $derived(workspace?.activeTerminalId ?? "term-1");
+  let terminalTabs = $derived(workspace?.terminalTabs ?? []);
+  let activeTerminalId = $derived(workspace?.activeTerminalId ?? "");
 
   // Terminal refs
   let terminalRefs: Record<string, SafeTerminal | null> = {};
 
-  // Initialize workspace when session changes
+  // Load terminals from PTY server when project changes
+  let lastLoadedProjectId: string | null = null;
+
   $effect(() => {
-    if (sessionId && !workspace) {
-      sessionWorkspaces.getOrCreate(sessionId);
+    if (projectId && projectId !== lastLoadedProjectId) {
+      lastLoadedProjectId = projectId;
+      loadTerminalsFromServer(projectId);
     }
   });
+
+  async function loadTerminalsFromServer(pid: string) {
+    try {
+      const terminals = await ptyApi.list(pid);
+      if (terminals.length > 0) {
+        projectWorkspaces.setTerminals(pid, terminals);
+        console.log(`[WorkspacePanel] Loaded ${terminals.length} terminals for project ${pid}`);
+      } else {
+        // No terminals exist yet - create workspace with no tabs
+        projectWorkspaces.getOrCreate(pid);
+      }
+    } catch (e) {
+      console.warn("[WorkspacePanel] Failed to load terminals from PTY server:", e);
+      // Create default workspace
+      projectWorkspaces.getOrCreate(pid);
+    }
+  }
 
   // Expose the active terminal's methods
   $effect(() => {
@@ -59,51 +80,51 @@
     }
   });
 
-  // NOTE: Removed browser URL sync effect - was causing infinite loop.
-  // Preview handles navigation via onUrlChange callback which goes through
-  // the parent's onBrowserUrlChange, which should update the store directly.
-
   // Terminal tab actions
   function addTerminalTab() {
-    if (!sessionId) return;
-    sessionWorkspaces.addTerminalTab(sessionId, { cwd: projectPath || undefined });
+    if (!projectId) return;
+    projectWorkspaces.addTerminalTab(projectId, { cwd: projectPath || undefined });
   }
 
   function closeTerminalTab(tabId: string) {
-    if (!sessionId || terminalTabs.length <= 1) return;
+    if (!projectId || terminalTabs.length <= 1) return;
+    // Kill the terminal on the PTY server
+    const tab = terminalTabs.find(t => t.id === tabId);
+    if (tab?.terminalId) {
+      const ref = terminalRefs[tabId];
+      ref?.killTerminal?.();
+    }
     delete terminalRefs[tabId];
-    sessionWorkspaces.removeTerminalTab(sessionId, tabId);
+    projectWorkspaces.removeTerminalTab(projectId, tabId);
   }
 
   function setActiveTerminal(tabId: string) {
-    if (!sessionId) return;
-    sessionWorkspaces.setActiveTerminal(sessionId, tabId);
+    if (!projectId) return;
+    projectWorkspaces.setActiveTerminal(projectId, tabId);
   }
 
   function handleTerminalIdChange(tabId: string, newTerminalId: string | null) {
-    if (!sessionId) return;
-    sessionWorkspaces.updateTerminalTab(sessionId, tabId, { terminalId: newTerminalId || undefined });
+    if (!projectId) return;
+    projectWorkspaces.updateTerminalTab(projectId, tabId, { terminalId: newTerminalId || undefined });
   }
 
   // Browser actions
   function handleBrowserBack() {
-    if (sessionId) sessionWorkspaces.browserBack(sessionId);
+    if (projectId) projectWorkspaces.browserBack(projectId);
   }
 
   function handleBrowserForward() {
-    if (sessionId) sessionWorkspaces.browserForward(sessionId);
+    if (projectId) projectWorkspaces.browserForward(projectId);
   }
 
   function handleBrowserGoToIndex(index: number) {
-    if (sessionId) sessionWorkspaces.browserGoToIndex(sessionId, index);
+    if (projectId) projectWorkspaces.browserGoToIndex(projectId, index);
   }
 
   function handleBrowserUrlChange(url: string) {
-    // Update session store with new URL
-    if (sessionId && url && url !== workspace?.browser.url) {
-      sessionWorkspaces.navigateBrowser(sessionId, url);
+    if (projectId && url && url !== workspace?.browser.url) {
+      projectWorkspaces.navigateBrowser(projectId, url);
     }
-    // Also notify parent if needed
     onBrowserUrlChange?.(url);
   }
 </script>
@@ -149,19 +170,37 @@
 
   <!-- Terminal Content -->
   <div class="flex-1 overflow-hidden flex flex-col">
-    {#each terminalTabs as tab (tab.id)}
-      <div class="flex-1 {activeTerminalId === tab.id ? '' : 'hidden'}">
-        <SafeTerminal
-          bind:this={terminalRefs[tab.id]}
-          cwd={tab.cwd || projectPath || undefined}
-          initialCommand={tab.initialCommand}
-          sessionId={sessionId || undefined}
-          existingTerminalId={tab.terminalId}
-          onSendToClaude={onTerminalSendToClaude}
-          onTerminalIdChange={(newId) => handleTerminalIdChange(tab.id, newId)}
-        />
+    {#if terminalTabs.length === 0}
+      <!-- No terminals yet - show placeholder with button -->
+      <div class="flex-1 flex flex-col items-center justify-center gap-4 text-[#565f89]">
+        <svg class="w-12 h-12 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <polyline points="4 17 10 11 4 5"></polyline>
+          <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+        <p class="text-sm">No terminals open</p>
+        <button
+          onclick={addTerminalTab}
+          class="px-3 py-1.5 text-sm bg-[#24283b] hover:bg-[#32344a] text-[#a9b1d6] rounded transition-colors"
+        >
+          Open Terminal
+        </button>
       </div>
-    {/each}
+    {:else}
+      {#each terminalTabs as tab (tab.id)}
+        <div class="flex-1 {activeTerminalId === tab.id ? '' : 'hidden'}">
+          <SafeTerminal
+            bind:this={terminalRefs[tab.id]}
+            cwd={tab.cwd || projectPath || undefined}
+            initialCommand={tab.initialCommand}
+            projectId={projectId || undefined}
+            name={tab.name}
+            existingTerminalId={tab.terminalId}
+            onSendToClaude={onTerminalSendToClaude}
+            onTerminalIdChange={(newId) => handleTerminalIdChange(tab.id, newId)}
+          />
+        </div>
+      {/each}
+    {/if}
   </div>
 {:else if mode === "browser"}
   <Preview

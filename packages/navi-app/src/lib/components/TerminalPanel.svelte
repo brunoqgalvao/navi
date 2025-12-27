@@ -1,21 +1,22 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { terminalApi, type ExecEvent } from "../api";
-  import { getWsUrl } from "../config";
+  import { getWsUrl, getPtyWsUrl } from "../config";
   import type { Terminal } from "xterm";
   import type { FitAddon } from "xterm-addon-fit";
 
   interface Props {
     cwd?: string;
     initialCommand?: string;
-    sessionId?: string;
+    projectId?: string;
+    name?: string;
     existingTerminalId?: string; // For reconnecting to existing PTY
     onClose?: () => void;
     onSendToClaude?: (context: string) => void;
     onTerminalIdChange?: (terminalId: string | null) => void; // Notify parent of new terminal ID
   }
 
-  let { cwd = "", initialCommand = "", sessionId, existingTerminalId, onClose, onSendToClaude, onTerminalIdChange }: Props = $props();
+  let { cwd = "", initialCommand = "", projectId, name = "Terminal", existingTerminalId, onClose, onSendToClaude, onTerminalIdChange }: Props = $props();
 
   let terminalContainer: HTMLDivElement;
   let terminal: Terminal | null = $state(null);
@@ -112,14 +113,14 @@
     isConnected = false;
 
     if (ws) {
+      if (terminalId) {
+        ws.send(JSON.stringify({ type: "kill", terminalId }));
+      }
       ws.close();
       ws = null;
     }
-    if (terminalId) {
-      terminalApi.killPty(terminalId).catch(() => {});
-      terminalId = null;
-      onTerminalIdChange?.(null);
-    }
+    terminalId = null;
+    onTerminalIdChange?.(null);
     resizeDisposable?.dispose();
     resizeDisposable = null;
 
@@ -367,21 +368,17 @@
     terminal?.writeln(`\x1b[33mPTY error: ${reason}. Reconnecting...\x1b[0m`);
 
     if (ws) {
+      if (terminalId) {
+        ws.send(JSON.stringify({ type: "kill", terminalId }));
+      }
       ws.close();
       ws = null;
     }
-    if (terminalId) {
-      terminalApi.killPty(terminalId).catch(() => {});
-      terminalId = null;
-      onTerminalIdChange?.(null);
-    }
+    terminalId = null;
+    onTerminalIdChange?.(null);
 
     try {
-      const { cols, rows } = getCreateSize();
-      const session = await terminalApi.createPty(cwd || undefined, cols, rows, sessionId);
-      terminalId = session.terminalId;
-      onTerminalIdChange?.(session.terminalId);
-      connectWebSocket(session.terminalId);
+      connectPtyWebSocket("create");
     } catch (e: any) {
       initExecMode(`PTY recovery failed: ${e.message || "Unknown error"}`);
     } finally {
@@ -445,47 +442,23 @@
       terminalContainer.addEventListener("click", focusOnClick);
       console.log("[TerminalPanel] Terminal opened, cols:", terminal.cols, "rows:", terminal.rows);
 
-      // Try to create or reconnect to a PTY terminal
+      // Try to create or reconnect to a PTY terminal via PTY server
       try {
-        let activeTerminalId: string | null = null;
-
         if (existingTerminalId) {
-          try {
-            await terminalApi.getBuffer(existingTerminalId, 1);
-            // Attempt to reconnect to existing terminal
-            activeTerminalId = existingTerminalId;
-            terminalId = existingTerminalId;
-            terminal.writeln("\x1b[90mReconnecting to terminal...\x1b[0m");
-            console.log("[TerminalPanel] Reconnecting to existing terminal:", existingTerminalId);
-          } catch {
-            onTerminalIdChange?.(null);
-          }
+          terminal.writeln("\x1b[90mReconnecting to terminal...\x1b[0m");
+          console.log("[TerminalPanel] Reconnecting to existing terminal:", existingTerminalId);
+          terminalId = existingTerminalId;
+          connectPtyWebSocket("attach", existingTerminalId);
+        } else {
+          console.log("[TerminalPanel] Creating new PTY, cwd:", cwd, "projectId:", projectId);
+          connectPtyWebSocket("create");
         }
-
-        if (!activeTerminalId) {
-          // Create new PTY
-          const { cols: safeCols, rows: safeRows } = getCreateSize();
-          console.log("[TerminalPanel] Creating new PTY, cwd:", cwd, "sessionId:", sessionId, "cols:", safeCols, "rows:", safeRows);
-          const session = await terminalApi.createPty(cwd || undefined, safeCols, safeRows, sessionId);
-          console.log("[TerminalPanel] PTY created:", session);
-          activeTerminalId = session.terminalId;
-          terminalId = session.terminalId;
-          onTerminalIdChange?.(session.terminalId);
-        }
-
-        if (!activeTerminalId) {
-          throw new Error("Failed to establish terminal session");
-        }
-
-        // Connect via WebSocket for PTY I/O
-        console.log("[TerminalPanel] Connecting WebSocket for terminal:", activeTerminalId);
-        connectWebSocket(activeTerminalId);
 
         setDataHandler((data) => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
+          if (ws && ws.readyState === WebSocket.OPEN && terminalId) {
             ws.send(JSON.stringify({
-              type: "terminal_input",
-              terminalId: activeTerminalId,
+              type: "input",
+              terminalId,
               data,
             }));
           }
@@ -493,22 +466,10 @@
 
         setResizeHandler(({ cols, rows }) => {
           const safeSize = getResizeSize(cols, rows);
-          if (terminalId && safeSize) {
-            terminalApi
-              .resizePty(terminalId, safeSize.cols, safeSize.rows)
-              .then((res) => {
-                if (!res.success) {
-                  recoverPty(res.error || "Terminal resize failed");
-                }
-              })
-              .catch((resizeError: Error) => {
-                recoverPty(resizeError.message || "Terminal resize failed");
-              });
-          }
-          if (ws && ws.readyState === WebSocket.OPEN && safeSize) {
+          if (ws && ws.readyState === WebSocket.OPEN && terminalId && safeSize) {
             ws.send(JSON.stringify({
-              type: "terminal_resize",
-              terminalId: activeTerminalId,
+              type: "resize",
+              terminalId,
               cols: safeSize.cols,
               rows: safeSize.rows,
             }));
@@ -520,10 +481,10 @@
         // Run initial command if provided (only for new terminals)
         if (initialCommand && !existingTerminalId) {
           setTimeout(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
+            if (ws && ws.readyState === WebSocket.OPEN && terminalId) {
               ws.send(JSON.stringify({
-                type: "terminal_input",
-                terminalId: activeTerminalId,
+                type: "input",
+                terminalId,
                 data: initialCommand + "\r",
               }));
             }
@@ -603,35 +564,55 @@
     }));
   }
 
-  function connectWebSocket(termId: string) {
-    const wsUrl = getWsUrl();
+  function connectPtyWebSocket(mode: "create" | "attach", termId?: string) {
+    const wsUrl = getPtyWsUrl();
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       isConnected = true;
-      // Subscribe to terminal output
-      ws!.send(JSON.stringify({
-        type: "terminal_attach",
-        terminalId: termId,
-      }));
+      if (mode === "create") {
+        const { cols, rows } = getCreateSize();
+        ws!.send(JSON.stringify({
+          type: "create",
+          cwd: cwd || undefined,
+          cols,
+          rows,
+          projectId,
+          name,
+        }));
+      } else if (mode === "attach" && termId) {
+        ws!.send(JSON.stringify({
+          type: "attach",
+          terminalId: termId,
+        }));
+      }
     };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === "terminal_output" && data.terminalId === termId && terminal) {
+        
+        if (data.type === "created") {
+          terminalId = data.terminalId;
+          onTerminalIdChange?.(data.terminalId);
+          console.log("[TerminalPanel] PTY created:", data.terminalId);
+        } else if (data.type === "attached") {
+          console.log("[TerminalPanel] Attached to PTY:", data.terminalId);
+        } else if (data.type === "output" && terminal) {
           terminal.write(data.data);
           captureOutput(data.data);
-        } else if (data.type === "terminal_error_detected" && data.terminalId === termId) {
+        } else if (data.type === "error_detected") {
           hasRecentError = true;
-        } else if (data.type === "terminal_exit" && data.terminalId === termId) {
+        } else if (data.type === "exit") {
           terminal?.writeln(`\r\n\x1b[90mTerminal exited with code ${data.exitCode}\x1b[0m`);
           isConnected = false;
-          recoverPty("Terminal exited");
-        } else if (data.type === "terminal_resize_error" && data.terminalId === termId) {
-          recoverPty(data.message || "Terminal resize failed");
-        } else if (data.type === "error" && typeof data.message === "string") {
-          if (data.message.toLowerCase().includes("terminal not found")) {
+          terminalId = null;
+          onTerminalIdChange?.(null);
+        } else if (data.type === "resize_error") {
+          console.warn("[TerminalPanel] Resize error:", data.message);
+        } else if (data.type === "error") {
+          console.error("[TerminalPanel] PTY error:", data.message);
+          if (data.message?.toLowerCase().includes("terminal not found")) {
             recoverPty(data.message);
           }
         }
@@ -645,7 +626,7 @@
     };
 
     ws.onerror = () => {
-      error = "WebSocket connection failed";
+      error = "PTY WebSocket connection failed";
       isConnected = false;
     };
   }
@@ -764,9 +745,6 @@
 
   onDestroy(() => {
     window.removeEventListener("resize", handleResize);
-    if (ws) {
-      ws.close();
-    }
     dataDisposable?.dispose();
     resizeDisposable?.dispose();
     dataDisposable = null;
@@ -775,10 +753,12 @@
       terminalContainer.removeEventListener("click", focusOnClick);
       focusOnClick = null;
     }
-    if (terminalId) {
-      terminalApi.killPty(terminalId).catch(() => {});
-      terminalId = null;
-      onTerminalIdChange?.(null);
+    // Don't kill terminal on destroy - it persists for workspace
+    // Just detach from it
+    if (ws && terminalId) {
+      ws.send(JSON.stringify({ type: "detach", terminalId }));
+      ws.close();
+      ws = null;
     }
     if (terminal) {
       terminal.dispose();
@@ -793,7 +773,7 @@
       terminal.write(command);
     } else if (ws && ws.readyState === WebSocket.OPEN && terminalId) {
       ws.send(JSON.stringify({
-        type: "terminal_input",
+        type: "input",
         terminalId,
         data: command,
       }));
@@ -809,10 +789,17 @@
       executeCommand(command);
     } else if (ws && ws.readyState === WebSocket.OPEN && terminalId) {
       ws.send(JSON.stringify({
-        type: "terminal_input",
+        type: "input",
         terminalId,
         data: command + "\r",
       }));
+    }
+  }
+
+  // Public method to kill this terminal
+  export function killTerminal() {
+    if (ws && ws.readyState === WebSocket.OPEN && terminalId) {
+      ws.send(JSON.stringify({ type: "kill", terminalId }));
     }
   }
 </script>
@@ -826,7 +813,7 @@
           <line x1="12" y1="19" x2="20" y2="19"></line>
         </svg>
       </span>
-      <span class="terminal-label">Terminal</span>
+      <span class="terminal-label">{name || "Terminal"}</span>
       {#if cwd}
         <span class="terminal-cwd" title={cwd}>{cwd.split("/").pop()}</span>
       {/if}

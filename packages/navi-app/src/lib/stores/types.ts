@@ -11,6 +11,10 @@ export interface ChatMessage {
   isSynthetic?: boolean;
   isFinal?: boolean;
   pruned?: boolean;
+  inlineCommand?: {
+    command: string;
+    cwd?: string;
+  };
 }
 
 export interface TodoItem {

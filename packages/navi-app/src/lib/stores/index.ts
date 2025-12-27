@@ -43,7 +43,10 @@ export {
   sessionWorkspaces,
   currentWorkspace,
   sessionModels,
+  projectWorkspaces,
 } from "./session";
+
+export type { ProjectWorkspace } from "./session";
 
 // Project stores
 export {
