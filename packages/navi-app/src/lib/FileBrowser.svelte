@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
   import { attachedFiles } from "./stores";
+  import { getApiBase } from "./config";
 
   interface FileEntry {
     name: string;
@@ -64,7 +65,7 @@
         formData.append("targetDir", rootPath);
         
         try {
-          const res = await fetch("http://localhost:3001/api/fs/upload", {
+          const res = await fetch(`${getApiBase()}/fs/upload`, {
             method: "POST",
             body: formData,
           });
@@ -145,7 +146,7 @@
   }
 
   async function loadDirectory(path: string): Promise<FileEntry[]> {
-    const res = await fetch(`http://localhost:3001/api/fs/list?path=${encodeURIComponent(path)}`);
+    const res = await fetch(`${getApiBase()}/fs/list?path=${encodeURIComponent(path)}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     return data.entries;
@@ -202,7 +203,7 @@
 
   async function revealInFinder(path: string) {
     try {
-      await fetch("http://localhost:3001/api/fs/reveal", {
+      await fetch(`${getApiBase()}/fs/reveal`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path }),

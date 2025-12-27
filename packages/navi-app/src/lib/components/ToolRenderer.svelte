@@ -5,17 +5,20 @@
   import EditPreview from "./tools/EditPreview.svelte";
   import WebSearchPreview from "./tools/WebSearchPreview.svelte";
   import WebFetchPreview from "./tools/WebFetchPreview.svelte";
+  import BashPreview from "./tools/BashPreview.svelte";
 
   interface Props {
     tool: ToolUseBlock;
     toolResult?: { content: string; is_error?: boolean };
     onPreview?: (path: string) => void;
+    onRunInTerminal?: (command: string) => void;
+    onSendToClaude?: (context: string) => void;
     compact?: boolean;
     index?: number;
     hideHeader?: boolean;
   }
 
-  let { tool, toolResult, onPreview, compact = false, index, hideHeader = false }: Props = $props();
+  let { tool, toolResult, onPreview, onRunInTerminal, onSendToClaude, compact = false, index, hideHeader = false }: Props = $props();
   
   const input = $derived(tool.input || {});
 
@@ -195,15 +198,15 @@
       />
 
     {:else if tool.name === "Bash"}
-      <div class="space-y-1">
-        {#if input.description}
-          <div class="text-xs text-gray-600">{input.description}</div>
-        {/if}
-        <div class="font-mono text-xs text-purple-700 bg-purple-50 rounded px-2 py-1.5 overflow-x-auto whitespace-pre">$ {formatCommand(input.command || "")}</div>
-        {#if input.timeout}
-          <div class="text-[10px] text-gray-400">timeout: {input.timeout}ms</div>
-        {/if}
-      </div>
+      <BashPreview
+        command={input.command || ""}
+        description={input.description}
+        timeout={input.timeout}
+        resultContent={toolResult?.content}
+        isError={toolResult?.is_error}
+        {onRunInTerminal}
+        {onSendToClaude}
+      />
 
     {:else if tool.name === "Glob"}
       <div class="flex items-center gap-2 flex-wrap">

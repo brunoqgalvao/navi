@@ -5,6 +5,7 @@
   import TodoProgress from "./TodoProgress.svelte";
   import StreamingPreview from "./StreamingPreview.svelte";
   import WorkingIndicator from "./WorkingIndicator.svelte";
+  import ContextWarning from "./ContextWarning.svelte";
   import { streamingStore, type StreamingState } from "../handlers";
   import { sessionMessages, loadingSessions, sessionTodos, type ChatMessage } from "../stores";
   import type { ContentBlock } from "../claude";
@@ -28,11 +29,19 @@
     onRollback?: (msgId: string) => void;
     onFork?: (msgId: string) => void;
     onPreview?: (path: string) => void;
+    onRunInTerminal?: (command: string) => void;
+    onSendToClaude?: (context: string) => void;
     onMessageClick?: (e: MouseEvent) => void;
     onPermissionApprove?: (approveAll?: boolean) => void;
     onPermissionDeny?: () => void;
     editingMessageId?: string | null;
     editingMessageContent?: string;
+    // Context management
+    inputTokens?: number;
+    contextWindow?: number;
+    isPruned?: boolean;
+    onPruneToolResults?: () => void;
+    onStartNewChat?: () => void;
   }
 
   let { 
@@ -49,12 +58,23 @@
     onRollback,
     onFork,
     onPreview,
+    onRunInTerminal,
+    onSendToClaude,
     onMessageClick,
     onPermissionApprove,
     onPermissionDeny,
     editingMessageId = null,
     editingMessageContent = $bindable(""),
+    inputTokens = 0,
+    contextWindow = 200000,
+    isPruned = false,
+    onPruneToolResults,
+    onStartNewChat,
   }: Props = $props();
+
+  const usagePercent = $derived(
+    contextWindow > 0 ? Math.min(100, Math.round((inputTokens / contextWindow) * 100)) : 0
+  );
 
   let messagesMap = $state<Map<string, ChatMessage[]>>(new Map());
   let streamingMap = $state<Map<string, StreamingState>>(new Map());
@@ -69,11 +89,9 @@
   const isStreaming = $derived(streamingState?.isStreaming ?? false);
 
   function getMainMessages(): ChatMessage[] {
-    const main = messages
+    return messages
       .filter(m => !m.parentToolUseId)
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    console.log("[ChatView] messages with isFinal:", main.map(m => ({ id: m.id, role: m.role, isFinal: m.isFinal })));
-    return main;
   }
 
   function getVisibleMessages(): ChatMessage[] {
@@ -178,6 +196,8 @@
             onRollback={() => onRollback?.(msg.id)}
             onFork={() => onFork?.(msg.id)}
             {onPreview}
+            {onRunInTerminal}
+            {onSendToClaude}
             {onMessageClick}
             {renderMarkdown}
             {jsonBlocksMap}
@@ -216,7 +236,20 @@
       <WorkingIndicator variant="dots" size="xs" color="gray" label="Thinking..." />
     </div>
     {/if}
-    
+
+    {#if (usagePercent >= 80 || isPruned) && onPruneToolResults && onStartNewChat}
+      <div class="mt-4">
+        <ContextWarning
+          {usagePercent}
+          {inputTokens}
+          {contextWindow}
+          {isPruned}
+          {onPruneToolResults}
+          {onStartNewChat}
+        />
+      </div>
+    {/if}
+
     <div style="overflow-anchor: auto; height: 1px;"></div>
   </div>
 </div>

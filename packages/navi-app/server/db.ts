@@ -408,6 +408,8 @@ export const sessions = {
         [id, project_id, title, created_at, updated_at]),
   updateTitle: (title: string, updated_at: number, id: string) =>
     run("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", [title, updated_at, id]),
+  updateModel: (model: string, id: string) =>
+    run("UPDATE sessions SET model = ? WHERE id = ?", [model, id]),
   updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, inputTokens: number, outputTokens: number, updated_at: number, id: string) =>
     run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
         [claude_session_id, model, cost, turns, inputTokens, outputTokens, updated_at, id]),

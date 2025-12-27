@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { getApiBase } from "../config";
+
   interface Props {
     files: { path: string; name: string }[];
     onPreview?: (path: string) => void;
@@ -27,7 +29,7 @@
   }
 
   function getImageUrl(path: string): string {
-    return `http://localhost:3001/api/fs/read?path=${encodeURIComponent(path)}&raw=true`;
+    return `${getApiBase()}/fs/read?path=${encodeURIComponent(path)}&raw=true`;
   }
 </script>
 

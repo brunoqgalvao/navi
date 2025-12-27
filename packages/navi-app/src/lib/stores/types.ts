@@ -10,6 +10,7 @@ export interface ChatMessage {
   parentToolUseId?: string | null;
   isSynthetic?: boolean;
   isFinal?: boolean;
+  pruned?: boolean;
 }
 
 export interface TodoItem {
@@ -32,6 +33,12 @@ export interface AttachedFile {
   type: "file" | "directory";
 }
 
+export interface QueuedMessage {
+  sessionId: string;
+  text: string;
+  attachments: AttachedFile[];
+}
+
 export interface SessionDebugInfo {
   cwd: string;
   model: string;
@@ -44,6 +51,7 @@ export type ModelInfo = {
   value: string;
   displayName: string;
   description: string;
+  provider?: string;
 };
 
 export type NotificationType = "info" | "success" | "warning" | "error" | "permission_request";
@@ -105,6 +113,31 @@ export interface CostState {
 }
 
 export type ChatViewMode = "conversation" | "timeline";
+
+// Terminal tab state
+export interface TerminalTab {
+  id: string;
+  name: string;
+  terminalId?: string; // PTY terminal ID from backend
+  initialCommand?: string;
+  cwd?: string;
+}
+
+// Browser state per session
+export interface BrowserState {
+  url: string;
+  history: string[];
+  historyIndex: number;
+}
+
+// Workspace state per session (terminals + browser)
+export interface SessionWorkspace {
+  sessionId: string;
+  terminalTabs: TerminalTab[];
+  activeTerminalId: string;
+  terminalCounter: number;
+  browser: BrowserState;
+}
 
 // SDK Event types for debug/timeline view
 export type SDKEventType =

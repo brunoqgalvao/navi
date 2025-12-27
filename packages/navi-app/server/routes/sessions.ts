@@ -57,6 +57,9 @@ export async function handleSessionRoutes(
         sessions.updateTitle(body.title, Date.now(), id);
         searchIndex.indexSession(id);
       }
+      if (body.model !== undefined) {
+        sessions.updateModel(body.model, id);
+      }
       return json(sessions.get(id));
     }
     if (method === "DELETE") {

@@ -53,5 +53,16 @@ export {
   loadCosts,
   loadRecentChats,
   loadActiveSessions,
+  getDefaultModel,
   type DataLoaderCallbacks,
 } from "./data-loaders";
+
+// Context management
+export {
+  pruneToolResults,
+  startNewChatWithSummary,
+  getMessagesForApi,
+  hasPrunedContext,
+  clearPrunedCache,
+  clearPrunedState,
+} from "./context-actions";

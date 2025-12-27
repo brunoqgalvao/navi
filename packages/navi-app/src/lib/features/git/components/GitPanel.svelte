@@ -18,6 +18,7 @@
   let branches = $state<GitBranches | null>(null);
   let loading = $state(false);
   let error = $state("");
+  let initializingRepo = $state(false);
 
   // UI state
   let showBranchDropdown = $state(false);
@@ -42,6 +43,7 @@
     error = "";
     try {
       status = await gitApi.getStatus(rootPath);
+      // Clear error if we get a valid response (even if not a git repo)
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to fetch status";
       status = null;
@@ -50,21 +52,47 @@
     }
   }
 
+  async function handleInitRepo() {
+    if (!rootPath) return;
+    initializingRepo = true;
+    error = "";
+    try {
+      await gitApi.initRepo(rootPath);
+      refresh();
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to initialize repository";
+    } finally {
+      initializingRepo = false;
+    }
+  }
+
   async function fetchCommits() {
     if (!rootPath) return;
+    // Only fetch if we know it's a git repo
+    if (status && !status.isGitRepo) {
+      commits = [];
+      return;
+    }
     try {
       commits = await gitApi.getLog(rootPath, 50);
     } catch (e) {
       console.error("Failed to fetch commits:", e);
+      commits = [];
     }
   }
 
   async function fetchBranches() {
     if (!rootPath) return;
+    // Only fetch if we know it's a git repo
+    if (status && !status.isGitRepo) {
+      branches = null;
+      return;
+    }
     try {
       branches = await gitApi.getBranches(rootPath);
     } catch (e) {
       console.error("Failed to fetch branches:", e);
+      branches = null;
     }
   }
 
@@ -104,10 +132,16 @@
     }
   }
 
-  function refresh() {
-    fetchStatus();
-    fetchCommits();
-    fetchBranches();
+  async function refresh() {
+    await fetchStatus();
+    // Only fetch commits and branches if it's a git repo
+    if (status?.isGitRepo) {
+      fetchCommits();
+      fetchBranches();
+    } else {
+      commits = [];
+      branches = null;
+    }
   }
 
   function handleSelectFile(file: string, staged: boolean) {
@@ -135,6 +169,58 @@
     if (parts.length <= 2) return path;
     return parts.slice(-2).join("/");
   }
+
+  // Parse conventional commit type from message
+  function getCommitType(message: string): { type: string; color: string } | null {
+    const match = message.match(/^(feat|fix|refactor|docs|style|test|chore|perf|ci|build)(\(.+?\))?:/i);
+    if (!match) return null;
+    const type = match[1].toLowerCase();
+    const colors: Record<string, string> = {
+      feat: "bg-green-100 text-green-700",
+      fix: "bg-red-100 text-red-700",
+      refactor: "bg-purple-100 text-purple-700",
+      docs: "bg-blue-100 text-blue-700",
+      style: "bg-pink-100 text-pink-700",
+      test: "bg-yellow-100 text-yellow-700",
+      chore: "bg-gray-100 text-gray-600",
+      perf: "bg-orange-100 text-orange-700",
+      ci: "bg-cyan-100 text-cyan-700",
+      build: "bg-amber-100 text-amber-700",
+    };
+    return { type, color: colors[type] || "bg-gray-100 text-gray-600" };
+  }
+
+  // Get commit message without type prefix
+  function getCommitMessage(message: string): string {
+    return message.replace(/^(feat|fix|refactor|docs|style|test|chore|perf|ci|build)(\(.+?\))?:\s*/i, "");
+  }
+
+  // Group commits by date
+  function getDateGroup(dateStr: string): string {
+    const lower = dateStr.toLowerCase();
+    if (lower.includes("minute") || lower.includes("hour") || lower === "just now") return "Today";
+    if (lower.includes("yesterday") || lower === "1 day ago") return "Yesterday";
+    if (lower.includes("day") && !lower.includes("week") && !lower.includes("month")) {
+      const days = parseInt(lower);
+      if (days <= 7) return "This Week";
+    }
+    return "Older";
+  }
+
+  // Group commits by date category
+  let groupedCommits = $derived(() => {
+    const groups: Record<string, typeof commits> = {
+      "Today": [],
+      "Yesterday": [],
+      "This Week": [],
+      "Older": [],
+    };
+    for (const commit of commits) {
+      const group = getDateGroup(commit.date);
+      groups[group].push(commit);
+    }
+    return groups;
+  });
 
   // Commit actions
   async function stageFile(file: string) {
@@ -177,6 +263,36 @@
 </script>
 
 <div class="h-full flex flex-col bg-white">
+  <!-- Not a git repo state -->
+  {#if status && !status.isGitRepo}
+    <div class="flex-1 flex flex-col items-center justify-center p-6 text-center">
+      <div class="w-12 h-12 mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+        <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 3v12M6 9a3 3 0 103 3M18 9a3 3 0 10-3 3m3-3v9m0 0a3 3 0 01-3-3" />
+        </svg>
+      </div>
+      <h3 class="text-sm font-medium text-gray-900 mb-1">Not a Git Repository</h3>
+      <p class="text-xs text-gray-500 mb-4">This folder is not tracked by Git.</p>
+      <button
+        onclick={handleInitRepo}
+        disabled={initializingRepo}
+        class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+      >
+        {#if initializingRepo}
+          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          Initializing...
+        {:else}
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          Initialize Repository
+        {/if}
+      </button>
+    </div>
+  {:else}
   <!-- Header -->
   <div class="h-10 px-3 border-b border-gray-200 flex items-center gap-2 bg-gray-50/50 shrink-0">
     {#if status}
@@ -358,26 +474,40 @@
     {:else}
       <!-- History Tab -->
       <div class="flex-1 overflow-y-auto">
-        {#each commits as commit}
-          <button
-            onclick={() => handleSelectCommit(commit)}
-            class="w-full px-3 py-2 text-left hover:bg-gray-50 border-b border-gray-100"
-          >
-            <div class="flex items-start gap-2">
-              <span class="shrink-0 text-[10px] font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{commit.shortHash}</span>
-              <div class="flex-1 min-w-0">
-                <p class="text-sm text-gray-900 truncate">{commit.message}</p>
-                <p class="text-xs text-gray-500">{commit.author} · {commit.date}</p>
-              </div>
+        {#each ["Today", "Yesterday", "This Week", "Older"] as group}
+          {@const groupCommits = groupedCommits()[group]}
+          {#if groupCommits.length > 0}
+            <div class="sticky top-0 bg-gray-50 border-b border-gray-200 px-3 py-1.5 z-10">
+              <span class="text-xs font-medium text-gray-500">{group}</span>
             </div>
-          </button>
+            {#each groupCommits as commit}
+              {@const commitType = getCommitType(commit.message)}
+              <button
+                onclick={() => handleSelectCommit(commit)}
+                class="w-full px-3 py-2.5 text-left hover:bg-blue-50 border-b border-gray-100 transition-colors group"
+              >
+                <div class="flex items-start gap-2">
+                  <span class="shrink-0 text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">{commit.shortHash}</span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-1.5">
+                      {#if commitType}
+                        <span class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded {commitType.color}">{commitType.type}</span>
+                      {/if}
+                      <p class="text-sm text-gray-900 truncate">{getCommitMessage(commit.message)}</p>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-0.5">{commit.author} · {commit.date}</p>
+                  </div>
+                </div>
+              </button>
+            {/each}
+          {/if}
         {/each}
       </div>
     {/if}
   </div>
 
   <!-- Bottom Action Bar -->
-  {#if status && activeTab === "changes" && !showDiff}
+  {#if status && status.isGitRepo && activeTab === "changes" && !showDiff}
     <div class="h-12 px-3 border-t border-gray-200 bg-gray-50 flex items-center gap-2 shrink-0">
       {#if status.modified.length > 0 || status.untracked.length > 0}
         <button
@@ -402,6 +532,7 @@
         {/if}
       </button>
     </div>
+  {/if}
   {/if}
 </div>
 

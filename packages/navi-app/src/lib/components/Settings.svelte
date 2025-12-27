@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, onboardingComplete, tour, showArchivedWorkspaces } from "../stores";
+  import { advancedMode, debugMode, onboardingComplete, tour, showArchivedWorkspaces, uiScale } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
 
@@ -19,6 +19,7 @@
   let loadingAnalytics = $state(false);
   let analyticsProjectFilter = $state<string[]>([]);
   let projectsList = $state<Project[]>([]);
+  let activityView: "daily" | "hourly" = $state("daily");
 
   let hasOpenAIKey = $state(false);
   let openAIKeyPreview: string | null = $state(null);
@@ -337,7 +338,7 @@
     aria-modal="true"
     tabindex="-1"
   >
-    <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+    <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
       <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-3">
           <div class="p-2 bg-gray-100 rounded-lg">
@@ -881,6 +882,57 @@
                 <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
                   <div class="flex items-center justify-between">
                     <div>
+                      <h5 class="font-medium text-gray-900">UI Zoom Level</h5>
+                      <p class="text-sm text-gray-500">Adjust the interface scale like browser zoom</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <button
+                        onclick={() => uiScale.decrease()}
+                        disabled={$uiScale <= 75}
+                        class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title="Zoom out"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+                        </svg>
+                      </button>
+                      <select
+                        value={$uiScale}
+                        onchange={(e) => uiScale.set(parseInt(e.currentTarget.value) as 75 | 80 | 85 | 90 | 95 | 100 | 105 | 110)}
+                        class="w-20 text-center text-sm bg-white border border-gray-300 rounded-lg px-2 py-1.5 focus:border-gray-900 focus:outline-none font-medium"
+                      >
+                        {#each uiScale.levels as level}
+                          <option value={level}>{level}%</option>
+                        {/each}
+                      </select>
+                      <button
+                        onclick={() => uiScale.increase()}
+                        disabled={$uiScale >= 110}
+                        class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title="Zoom in"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                        </svg>
+                      </button>
+                      {#if $uiScale !== 100}
+                        <button
+                          onclick={() => uiScale.reset()}
+                          class="text-xs text-gray-500 hover:text-gray-700 ml-1"
+                        >
+                          Reset
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-3 bg-gray-100 rounded-lg px-3 py-2">
+                    Tip: Use ⌘+ / ⌘- keyboard shortcuts for quick zoom
+                  </p>
+                </div>
+
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
                       <h5 class="font-medium text-gray-900">Auto-generate chat titles</h5>
                       <p class="text-sm text-gray-500">Use AI to create descriptive titles for new chats</p>
                     </div>
@@ -891,7 +943,7 @@
                       <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {autoTitleEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
                     </button>
                   </div>
-                  
+
                   {#if autoTitleEnabled}
                     <p class="text-sm text-gray-500 mt-3 bg-gray-100 rounded-lg px-3 py-2">
                       Uses {hasOpenAIKey ? "GPT-4o-mini" : hasAnthropicKey ? "Claude Haiku" : "your API"} for title generation (~$0.0001 per title)
@@ -1066,82 +1118,114 @@
                 </div>
 
                 <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
-                  <h5 class="font-medium text-gray-900 mb-4">Daily Cost (Last 30 Days)</h5>
-                  {#if analytics.dailyCosts.length === 0}
-                    <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
-                  {:else}
-                    {@const maxCost = Math.max(...analytics.dailyCosts.map(d => d.total_cost), 0.0001)}
-                    <div class="h-32 flex items-end gap-0.5 mb-2">
-                      {#each analytics.dailyCosts as day, i}
-                        {@const barHeight = Math.max((day.total_cost / maxCost) * 128, 2)}
-                        <div class="flex-1 group relative">
-                          <div
-                            class="w-full bg-blue-400 rounded-t transition-all hover:bg-blue-500"
-                            style="height: {barHeight}px"
-                          ></div>
-                          <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg">
-                            <div class="font-medium">{day.date}</div>
-                            <div class="text-gray-300">${(day.total_cost || 0).toFixed(4)}</div>
-                            <div class="text-gray-400">{((day.input_tokens || 0) + (day.output_tokens || 0)).toLocaleString()} tokens</div>
-                            <div class="text-gray-400">{day.entry_count || 0} calls</div>
+                  <div class="flex items-center justify-between mb-4">
+                    <h5 class="font-medium text-gray-900">Activity / Costs</h5>
+                    <select
+                      bind:value={activityView}
+                      class="text-sm bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:border-gray-900 focus:outline-none"
+                    >
+                      <option value="daily">Daily (30 days)</option>
+                      <option value="hourly">Hourly (7 days)</option>
+                    </select>
+                  </div>
+
+                  {#if activityView === "daily"}
+                    {#if analytics.dailyCosts.length === 0}
+                      <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                    {:else}
+                      {@const maxCost = Math.max(...analytics.dailyCosts.map(d => d.total_cost), 0.0001)}
+                      <div class="h-32 flex items-end gap-0.5 mb-2">
+                        {#each analytics.dailyCosts as day}
+                          {@const barHeight = Math.max((day.total_cost / maxCost) * 128, 2)}
+                          <div class="flex-1 group relative">
+                            <div
+                              class="w-full bg-blue-400 rounded-t transition-all hover:bg-blue-500"
+                              style="height: {barHeight}px"
+                            ></div>
+                            <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg pointer-events-none left-1/2 -translate-x-1/2">
+                              <div class="font-medium">{day.date}</div>
+                              <div class="text-gray-300">${(day.total_cost || 0).toFixed(4)}</div>
+                              <div class="text-gray-400">{((day.input_tokens || 0) + (day.output_tokens || 0)).toLocaleString()} tokens</div>
+                              <div class="text-gray-400">{day.entry_count || 0} calls</div>
+                            </div>
                           </div>
-                        </div>
-                      {/each}
-                    </div>
-                    <div class="flex justify-between text-xs text-gray-400">
-                      <span>{analytics.dailyCosts[0]?.date}</span>
-                      <span>{analytics.dailyCosts[analytics.dailyCosts.length - 1]?.date}</span>
-                    </div>
+                        {/each}
+                      </div>
+                      <div class="flex justify-between text-xs text-gray-400">
+                        <span>{analytics.dailyCosts[0]?.date}</span>
+                        <span>{analytics.dailyCosts[analytics.dailyCosts.length - 1]?.date}</span>
+                      </div>
+                    {/if}
+                  {:else}
+                    {#if analytics.hourlyCosts.length === 0}
+                      <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                    {:else}
+                      {@const sortedHourly = [...analytics.hourlyCosts].sort((a, b) => a.hour.localeCompare(b.hour))}
+                      {@const maxHourlyCost = Math.max(...sortedHourly.map(h => h.total_cost || 0), 0.0001)}
+                      <div class="h-32 flex items-end gap-0.5 mb-2">
+                        {#each sortedHourly as hour}
+                          {@const barHeight = Math.max(((hour.total_cost || 0) / maxHourlyCost) * 128, 2)}
+                          <div class="flex-1 min-w-[4px] group relative">
+                            <div
+                              class="w-full bg-emerald-400 rounded-t transition-all hover:bg-emerald-500"
+                              style="height: {barHeight}px"
+                            ></div>
+                            <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg pointer-events-none left-1/2 -translate-x-1/2">
+                              <div class="font-medium">{hour.hour.split(' ')[0]}</div>
+                              <div class="text-gray-300">{hour.hour.split(' ')[1] || hour.hour}</div>
+                              <div class="text-gray-300">${(hour.total_cost || 0).toFixed(4)}</div>
+                              <div class="text-gray-400">{hour.entry_count || 0} calls</div>
+                            </div>
+                          </div>
+                        {/each}
+                      </div>
+                      <div class="flex justify-between text-xs text-gray-400">
+                        <span>{sortedHourly[0]?.hour.split(' ')[0] || ''}</span>
+                        <span>{sortedHourly[sortedHourly.length - 1]?.hour.split(' ')[0] || ''}</span>
+                      </div>
+                    {/if}
                   {/if}
                 </div>
 
                 <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
-                  <h5 class="font-medium text-gray-900 mb-4">Daily Breakdown</h5>
-                  {#if analytics.dailyCosts.length === 0}
-                    <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
-                  {:else}
-                    <div class="space-y-1 max-h-[250px] overflow-y-auto">
-                      {#each [...analytics.dailyCosts].reverse() as day}
-                        <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
-                          <span class="text-sm text-gray-600">{day.date}</span>
-                          <div class="flex items-center gap-4">
-                            <span class="text-xs text-gray-400">{day.entry_count || 0} calls</span>
-                            <span class="text-xs text-blue-500">{((day.input_tokens || 0) + (day.output_tokens || 0)).toLocaleString()} tok</span>
-                            <span class="font-mono text-sm text-gray-900 w-20 text-right">${(day.total_cost || 0).toFixed(4)}</span>
+                  <h5 class="font-medium text-gray-900 mb-4">{activityView === "daily" ? "Daily" : "Hourly"} Breakdown</h5>
+                  {#if activityView === "daily"}
+                    {#if analytics.dailyCosts.length === 0}
+                      <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                    {:else}
+                      <div class="space-y-1 max-h-[250px] overflow-y-auto">
+                        {#each [...analytics.dailyCosts].reverse() as day}
+                          <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                            <span class="text-sm text-gray-600">{day.date}</span>
+                            <div class="flex items-center gap-4">
+                              <span class="text-xs text-gray-400">{day.entry_count || 0} calls</span>
+                              <span class="text-xs text-blue-500">{((day.input_tokens || 0) + (day.output_tokens || 0)).toLocaleString()} tok</span>
+                              <span class="font-mono text-sm text-gray-900 w-20 text-right">${(day.total_cost || 0).toFixed(4)}</span>
+                            </div>
                           </div>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
-                  <h5 class="font-medium text-gray-900 mb-4">Hourly Activity (Last 7 Days)</h5>
-                  {#if analytics.hourlyCosts.length === 0}
-                    <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                        {/each}
+                      </div>
+                    {/if}
                   {:else}
-                    {@const sortedHourly = [...analytics.hourlyCosts].reverse()}
-                    {@const maxHourlyCost = Math.max(...sortedHourly.map(h => h.total_cost || 0), 0.0001)}
-                    <div class="h-24 flex items-end gap-px mb-2 overflow-x-auto">
-                      {#each sortedHourly as hour}
-                        {@const barHeight = Math.max(((hour.total_cost || 0) / maxHourlyCost) * 96, 2)}
-                        <div class="flex-shrink-0 w-2 group relative">
-                          <div
-                            class="w-full bg-emerald-400 rounded-t transition-all hover:bg-emerald-500"
-                            style="height: {barHeight}px"
-                          ></div>
-                          <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg">
-                            <div class="font-medium">{hour.hour}</div>
-                            <div class="text-gray-300">${(hour.total_cost || 0).toFixed(4)}</div>
-                            <div class="text-gray-400">{hour.entry_count || 0} calls</div>
+                    {#if analytics.hourlyCosts.length === 0}
+                      <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                    {:else}
+                      <div class="space-y-1 max-h-[250px] overflow-y-auto">
+                        {#each [...analytics.hourlyCosts].sort((a, b) => b.hour.localeCompare(a.hour)) as hour}
+                          {@const [date, time] = hour.hour.split(' ')}
+                          <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                            <div class="flex items-center gap-2">
+                              <span class="text-sm text-gray-600">{date}</span>
+                              <span class="text-xs text-gray-400">{time || ''}</span>
+                            </div>
+                            <div class="flex items-center gap-4">
+                              <span class="text-xs text-gray-400">{hour.entry_count || 0} calls</span>
+                              <span class="font-mono text-sm text-gray-900 w-20 text-right">${(hour.total_cost || 0).toFixed(4)}</span>
+                            </div>
                           </div>
-                        </div>
-                      {/each}
-                    </div>
-                    <div class="flex justify-between text-xs text-gray-400">
-                      <span>{sortedHourly[0]?.hour}</span>
-                      <span>{sortedHourly[sortedHourly.length - 1]?.hour}</span>
-                    </div>
+                        {/each}
+                      </div>
+                    {/if}
                   {/if}
                 </div>
 

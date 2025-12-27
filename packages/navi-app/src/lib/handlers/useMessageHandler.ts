@@ -135,9 +135,11 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
           onCostUpdate?.(sessionId, data.costUsd);
         }
         if (data.usage) {
-          const totalInputTokens = (data.usage.input_tokens || 0) + 
-            (data.usage.cache_creation_input_tokens || 0) + 
+          console.log("[DEBUG onComplete] usage:", JSON.stringify(data.usage));
+          const totalInputTokens = (data.usage.input_tokens || 0) +
+            (data.usage.cache_creation_input_tokens || 0) +
             (data.usage.cache_read_input_tokens || 0);
+          console.log("[DEBUG onComplete] totalInputTokens:", totalInputTokens);
           onUsageUpdate?.(totalInputTokens, data.usage.output_tokens || 0);
         }
       },

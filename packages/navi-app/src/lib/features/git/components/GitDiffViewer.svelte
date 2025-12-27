@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { html as diff2html } from "diff2html";
+  import GitUnifiedDiff from "../../../components/GitUnifiedDiff.svelte";
   import type { GitCommit } from "../types";
 
   interface Props {
@@ -10,15 +10,6 @@
   }
 
   let { diff, loading, selectedCommit, selectedFile }: Props = $props();
-
-  function getDiffHtml(diffStr: string): string {
-    if (!diffStr) return "";
-    return diff2html(diffStr, {
-      drawFileList: false,
-      outputFormat: "line-by-line",
-      matching: "lines",
-    });
-  }
 </script>
 
 <div class="h-full overflow-y-auto bg-gray-50">
@@ -30,21 +21,21 @@
       </svg>
     </div>
   {:else if diff}
-    <div class="diff-viewer text-xs">
+    <div class="p-3">
       {#if selectedCommit}
-        <div class="p-3 border-b border-gray-200 bg-white sticky top-0">
-          <p class="font-medium text-gray-900">{selectedCommit.message}</p>
+        <div class="mb-3 p-3 bg-white border border-gray-200 rounded-lg">
+          <p class="font-medium text-gray-900 text-sm">{selectedCommit.message}</p>
           <p class="text-gray-500 text-xs mt-1">
             {selectedCommit.author} · {selectedCommit.date}
           </p>
         </div>
       {/if}
       {#if selectedFile}
-        <div class="p-2 border-b border-gray-200 bg-white sticky top-0">
+        <div class="mb-3 p-2 bg-white border border-gray-200 rounded">
           <p class="text-xs font-mono text-gray-600 truncate" title={selectedFile}>{selectedFile}</p>
         </div>
       {/if}
-      {@html getDiffHtml(diff)}
+      <GitUnifiedDiff {diff} />
     </div>
   {:else}
     <div class="flex items-center justify-center h-full text-sm text-gray-400">
@@ -53,71 +44,3 @@
   {/if}
 </div>
 
-<style>
-  :global(.diff-viewer) {
-    overflow: hidden;
-  }
-  :global(.diff-viewer .d2h-wrapper) {
-    margin: 0;
-  }
-  :global(.diff-viewer .d2h-file-wrapper) {
-    border: none;
-    margin: 0;
-  }
-  :global(.diff-viewer .d2h-file-header) {
-    background: #f9fafb;
-    padding: 8px 12px;
-    border-bottom: 1px solid #e5e7eb;
-  }
-  :global(.diff-viewer .d2h-file-name) {
-    font-size: 12px;
-  }
-  :global(.diff-viewer .d2h-diff-table) {
-    font-size: 11px;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    width: 100%;
-    table-layout: fixed;
-  }
-  :global(.diff-viewer .d2h-code-line) {
-    padding: 0 8px;
-  }
-  :global(.diff-viewer .d2h-code-line-ctn) {
-    white-space: pre-wrap;
-    word-break: break-all;
-    overflow-wrap: break-word;
-  }
-  :global(.diff-viewer .d2h-ins) {
-    background-color: #dcfce7;
-  }
-  :global(.diff-viewer .d2h-del) {
-    background-color: #fee2e2;
-  }
-  :global(.diff-viewer .d2h-ins .d2h-code-line-ctn) {
-    background-color: #bbf7d0;
-  }
-  :global(.diff-viewer .d2h-del .d2h-code-line-ctn) {
-    background-color: #fecaca;
-  }
-  :global(.diff-viewer .d2h-code-linenumber) {
-    width: 36px;
-    min-width: 36px;
-    max-width: 36px;
-    color: #9ca3af;
-    background-color: #f9fafb;
-    border-right: 1px solid #e5e7eb;
-  }
-  :global(.diff-viewer .d2h-ins .d2h-code-linenumber) {
-    background-color: #bbf7d0;
-    color: #166534;
-  }
-  :global(.diff-viewer .d2h-del .d2h-code-linenumber) {
-    background-color: #fecaca;
-    color: #991b1b;
-  }
-  :global(.diff-viewer .d2h-info) {
-    background-color: #eff6ff;
-    color: #2563eb;
-    padding: 4px 8px;
-    font-size: 11px;
-  }
-</style>

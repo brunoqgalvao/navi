@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { getApiBase } from "../config";
+
   interface MediaItem {
     type: 'image' | 'audio' | 'video';
     src: string;
@@ -22,7 +24,7 @@
     if (!src.startsWith('/') && basePath) {
       fullPath = `${basePath}/${src}`;
     }
-    return `http://localhost:3001/api/fs/read?path=${encodeURIComponent(fullPath)}&raw=true`;
+    return `${getApiBase()}/fs/read?path=${encodeURIComponent(fullPath)}&raw=true`;
   }
 
   let lightboxOpen = $state(false);

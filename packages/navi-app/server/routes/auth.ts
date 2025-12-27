@@ -89,6 +89,12 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       ? `${storedApiKey.slice(0, 10)}...${storedApiKey.slice(-4)}`
       : null;
 
+    const zaiKey = globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY;
+    const hasZaiKey = !!zaiKey;
+    const zaiKeyPreview = zaiKey
+      ? `${zaiKey.slice(0, 8)}...${zaiKey.slice(-4)}`
+      : null;
+
     return json({
       claudeInstalled,
       claudePath,
@@ -98,6 +104,8 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       apiKeyPreview,
       hasOAuth,
       preferredAuth,
+      hasZaiKey,
+      zaiKeyPreview,
     });
   }
 
@@ -138,6 +146,34 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
     }
 
     return json({ success: true });
+  }
+
+  if (url.pathname === "/api/auth/zai-key" && method === "POST") {
+    const body = await req.json();
+    const apiKey = body.apiKey;
+
+    if (!apiKey || typeof apiKey !== "string") {
+      return json({ error: "API key required" }, 400);
+    }
+
+    globalSettings.set("zaiApiKey", apiKey);
+
+    return json({ success: true });
+  }
+
+  if (url.pathname === "/api/auth/zai-key" && method === "DELETE") {
+    globalSettings.set("zaiApiKey", "");
+    return json({ success: true });
+  }
+
+  if (url.pathname === "/api/auth/zai-key" && method === "GET") {
+    const zaiKey = globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY;
+    const hasZaiKey = !!zaiKey;
+    const zaiKeyPreview = zaiKey
+      ? `${zaiKey.slice(0, 8)}...${zaiKey.slice(-4)}`
+      : null;
+
+    return json({ hasZaiKey, zaiKeyPreview });
   }
 
   if (url.pathname === "/api/auth/login" && method === "POST") {

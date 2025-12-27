@@ -1,6 +1,8 @@
 import { api, costsApi, type Project } from "../api";
 import { currentSession, costStore, sessionMessages, sessionStatus, tour } from "../stores";
 import { get } from "svelte/store";
+import { getApiBase } from "../config";
+import { showError } from "../errorHandler";
 
 export interface ProjectActionCallbacks {
   setSidebarProjects: (projects: Project[]) => void;
@@ -28,7 +30,7 @@ export async function loadProjects(showArchived?: boolean): Promise<Project[]> {
     callbacks?.setSidebarProjects(projectsList);
     return projectsList;
   } catch (e) {
-    console.error("Failed to load projects:", e);
+    showError({ title: "Projects Error", message: "Failed to load projects", error: e });
     return [];
   }
 }
@@ -67,10 +69,11 @@ export async function selectProject(project: Project) {
     const sessionsList = await api.sessions.list(project.id, callbacks.getShowArchivedWorkspaces());
     callbacks.setSidebarSessions(sessionsList);
   } catch (e) {
-    console.error("Failed to load sessions:", e);
+    showError({ title: "Sessions Error", message: "Failed to load sessions", error: e });
   }
 
   api.claudeMd.initProject(project.path).catch(e => {
+    // Silent - CLAUDE.md init is not critical
     console.error("Failed to init CLAUDE.md:", e);
   });
 
@@ -87,7 +90,7 @@ export async function selectProject(project: Project) {
 
 export async function loadClaudeMd(projectPath: string) {
   try {
-    const res = await fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(projectPath + "/CLAUDE.md")}`);
+    const res = await fetch(`${getApiBase()}/fs/read?path=${encodeURIComponent(projectPath + "/CLAUDE.md")}`);
     const data = await res.json();
     if (!data.error && data.content) {
       callbacks?.setClaudeMdContent(data.content);
@@ -168,7 +171,7 @@ export async function indexProjectFiles(rootPath: string, currentPath: string = 
 
   async function indexDir(path: string) {
     try {
-      const res = await fetch(`http://localhost:3001/api/fs/list?path=${encodeURIComponent(path)}`);
+      const res = await fetch(`${getApiBase()}/fs/list?path=${encodeURIComponent(path)}`);
       const data = await res.json();
       if (data.entries) {
         for (const entry of data.entries) {
@@ -252,7 +255,7 @@ export async function updateProject(projectId: string, name: string, path: strin
     await loadProjects();
     return true;
   } catch (e) {
-    console.error("Failed to update project:", e);
+    showError({ title: "Update Failed", message: "Failed to update project", error: e });
     return false;
   }
 }
@@ -268,7 +271,7 @@ export async function deleteProject(projectId: string): Promise<boolean> {
     }
     return true;
   } catch (e) {
-    console.error("Failed to delete project:", e);
+    showError({ title: "Delete Failed", message: "Failed to delete project", error: e });
     return false;
   }
 }
@@ -287,7 +290,7 @@ export async function toggleProjectPin(project: Project): Promise<boolean> {
     callbacks?.setSidebarProjects(updated);
     return true;
   } catch (e) {
-    console.error("Failed to toggle project pin:", e);
+    showError({ title: "Pin Failed", message: "Failed to toggle project pin", error: e });
     return false;
   }
 }
@@ -297,6 +300,7 @@ export async function reorderProjects(projectIds: string[]): Promise<boolean> {
     await api.projects.reorder(projectIds);
     return true;
   } catch (e) {
+    // Silent failure for reorder - not critical
     console.error("Failed to reorder projects:", e);
     return false;
   }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { sessionDebugInfo, sessionMessages, advancedMode, type ChatMessage, type SessionDebugInfo } from "../stores";
+  import { getApiBase } from "../config";
 
   interface Props {
     open: boolean;
@@ -133,7 +134,7 @@ ${UI_INSTRUCTIONS}
     loadingSkills = true;
     const newContents = new Map<string, SkillData>();
     
-    const homedir = await fetch('http://localhost:3001/api/fs/homedir').then(r => r.json()).catch(() => ({ path: '' }));
+    const homedir = await fetch('${getApiBase()}/fs/homedir').then(r => r.json()).catch(() => ({ path: '' }));
     
     for (const skillName of debug.skills) {
       try {
@@ -144,7 +145,7 @@ ${UI_INSTRUCTIONS}
         let usedPath = '';
 
         if (projectSkillPath) {
-          const res = await fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(projectSkillPath)}`);
+          const res = await fetch(`${getApiBase()}/fs/read?path=${encodeURIComponent(projectSkillPath)}`);
           if (res.ok) {
             const data = await res.json();
             content = data.content;
@@ -153,7 +154,7 @@ ${UI_INSTRUCTIONS}
         }
         
         if (!content && globalSkillPath) {
-          const res = await fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(globalSkillPath)}`);
+          const res = await fetch(`${getApiBase()}/fs/read?path=${encodeURIComponent(globalSkillPath)}`);
           if (res.ok) {
             const data = await res.json();
             content = data.content;

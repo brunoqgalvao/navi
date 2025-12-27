@@ -1,3 +1,5 @@
+import { getWsUrl } from "./config";
+
 export interface TextBlock {
   type: "text";
   text: string;
@@ -256,7 +258,7 @@ export class ClaudeClient {
   private listeners: ((msg: ClaudeMessage) => void)[] = [];
   private url: string;
 
-  constructor(url = "ws://localhost:3001/ws") {
+  constructor(url = getWsUrl()) {
     this.url = url;
   }
 

@@ -15,6 +15,9 @@ import { handleProjectRoutes } from "./routes/projects";
 import { handleSessionRoutes } from "./routes/sessions";
 import { handleMessageRoutes } from "./routes/messages";
 import { handleSkillRoutes } from "./routes/skills";
+import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal";
+import { handleProxyRoutes } from "./routes/proxy";
+import { handleProcessRoutes } from "./routes/processes";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -30,6 +33,9 @@ import {
 
 // Initialize database
 await initDb();
+
+// Install global error handler for PTY crashes
+installPtyErrorHandler();
 
 // Migrate env keys to database
 async function migrateEnvKeys() {
@@ -63,7 +69,7 @@ if (stats.total === 0) {
   console.log("Search index built:", searchIndex.getStats());
 }
 
-const PORT = 3001;
+const PORT = parseInt(process.argv[2] || Bun.env.PORT || "3001", 10);
 
 // Get shared state for routes that need it
 const pendingPermissions = getPendingPermissions();
@@ -166,6 +172,18 @@ const server = Bun.serve({
 
     // Skill routes
     response = await handleSkillRoutes(url, method, req);
+    if (response) return response;
+
+    // Terminal routes
+    response = await handleTerminalRoutes(url, method, req);
+    if (response) return response;
+
+    // Proxy routes (for external URL preview)
+    response = await handleProxyRoutes(url, method, req);
+    if (response) return response;
+
+    // Process management routes
+    response = await handleProcessRoutes(url, method, req);
     if (response) return response;
 
     // Ephemeral chat

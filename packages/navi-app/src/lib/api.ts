@@ -1,4 +1,6 @@
-const API_BASE = "http://localhost:3001/api";
+import { getApiBase } from "./config";
+
+const getApiBaseUrl = () => getApiBase();
 
 export interface WorkspaceFolder {
   id: string;
@@ -63,10 +65,11 @@ export interface Message {
   timestamp: number;
   parent_tool_use_id?: string | null;
   is_synthetic?: number;
+  is_final?: number;
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -90,7 +93,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: { name: string; path: string; description?: string; context_window?: number }) =>
+    update: (id: string, data: { name?: string; path?: string; description?: string; context_window?: number; summary?: string; summary_updated_at?: number }) =>
       request<Project>(`/projects/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
@@ -172,7 +175,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: { title: string }) =>
+    update: (id: string, data: { title?: string; model?: string }) =>
       request<Session>(`/sessions/${id}`, {
         method: "PATCH",
         body: JSON.stringify(data),
@@ -242,7 +245,7 @@ export const api = {
 
   export: {
     markdown: (sessionId: string) =>
-      fetch(`${API_BASE}/sessions/${sessionId}/export`).then((res) => res.text()),
+      fetch(`${getApiBaseUrl()}/sessions/${sessionId}/export`).then((res) => res.text()),
     download: async (sessionId: string, title: string) => {
       const markdown = await api.export.markdown(sessionId);
       const blob = new Blob([markdown], { type: "text/markdown" });
@@ -334,7 +337,7 @@ export const api = {
     const formData = new FormData();
     formData.append("audio", audioBlob, "recording.webm");
     
-    const res = await fetch(`${API_BASE}/transcribe`, {
+    const res = await fetch(`${getApiBaseUrl()}/transcribe`, {
       method: "POST",
       body: formData,
     });
@@ -351,7 +354,7 @@ export const api = {
     const formData = new FormData();
     formData.append("audio", audioBlob, "recording.webm");
     
-    const res = await fetch(`${API_BASE}/audio/save`, {
+    const res = await fetch(`${getApiBaseUrl()}/audio/save`, {
       method: "POST",
       body: formData,
     });
@@ -540,7 +543,7 @@ export const skillsApi = {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("useAi", String(useAi));
-    const res = await fetch(`${API_BASE}/skills/import`, {
+    const res = await fetch(`${getApiBaseUrl()}/skills/import`, {
       method: "POST",
       body: formData,
     });
@@ -556,7 +559,7 @@ export const skillsApi = {
       body: JSON.stringify({ url, useAi }),
     }),
   async exportZip(id: string, slug: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/skills/${id}/export`);
+    const res = await fetch(`${getApiBaseUrl()}/skills/${id}/export`);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || `Export failed: ${res.status}`);
@@ -623,8 +626,122 @@ export interface CostAnalytics {
 
 export const costsApi = {
   getTotal: () => request<CostSummary>("/costs"),
-  getAnalytics: (projectIds?: string[]) => 
+  getAnalytics: (projectIds?: string[]) =>
     request<CostAnalytics>(`/costs/analytics${projectIds && projectIds.length > 0 ? `?projectIds=${projectIds.join(',')}` : ''}`),
   getProjectCost: (projectId: string) => request<CostSummary>(`/projects/${projectId}/cost`),
   getSessionCost: (sessionId: string) => request<{ total: number }>(`/sessions/${sessionId}/cost`),
+};
+
+// Terminal API
+export interface ExecEvent {
+  type: "started" | "stdout" | "stderr" | "exit" | "error";
+  execId?: string;
+  data?: string;
+  code?: number;
+  message?: string;
+}
+
+export interface TerminalSession {
+  terminalId: string;
+  pid: number;
+  shell: string;
+  cwd: string;
+}
+
+export interface ActiveExec {
+  execId: string;
+  cwd: string;
+  startedAt: number;
+  pid: number;
+}
+
+export const terminalApi = {
+  // Execute a command and get SSE stream
+  exec: (command: string, cwd?: string, env?: Record<string, string>) => {
+    return fetch(`${getApiBaseUrl()}/terminal/exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, cwd, env }),
+    });
+  },
+
+  // Kill an exec process
+  killExec: (execId: string) =>
+    request<{ success: boolean; execId: string }>(`/terminal/exec/${execId}`, {
+      method: "DELETE",
+    }),
+
+  // List active exec processes
+  listExec: () => request<ActiveExec[]>("/terminal/exec"),
+
+  // Create a new PTY terminal
+  createPty: (cwd?: string, cols?: number, rows?: number, sessionId?: string) =>
+    request<TerminalSession>("/terminal/pty", {
+      method: "POST",
+      body: JSON.stringify({ cwd, cols, rows, sessionId }),
+    }),
+
+  // Resize a PTY terminal
+  resizePty: (terminalId: string, cols: number, rows: number) =>
+    request<{ success: boolean; error?: string }>(`/terminal/pty/${terminalId}/resize`, {
+      method: "POST",
+      body: JSON.stringify({ cols, rows }),
+    }),
+
+  // Kill a PTY terminal
+  killPty: (terminalId: string) =>
+    request<{ success: boolean }>(`/terminal/pty/${terminalId}`, {
+      method: "DELETE",
+    }),
+
+  // List active PTY terminals (optionally filtered by sessionId)
+  listPty: (sessionId?: string) =>
+    request<Array<{ terminalId: string; cwd: string; createdAt: number; pid: number; sessionId?: string }>>(
+      sessionId ? `/terminal/pty?sessionId=${sessionId}` : "/terminal/pty"
+    ),
+
+  // Get terminal output buffer for Claude context
+  getBuffer: (terminalId: string, lines = 100) =>
+    request<{ terminalId: string; lines: string[]; totalLines: number }>(
+      `/terminal/pty/${terminalId}/buffer?lines=${lines}`
+    ),
+
+  // Check for errors in terminal output
+  checkErrors: (terminalId: string) =>
+    request<{ terminalId: string; hasErrors: boolean; errorLines: string[]; context: string }>(
+      `/terminal/pty/${terminalId}/errors`
+    ),
+};
+
+// Process management API
+export interface ProcessInfo {
+  id: string;
+  type: "query" | "exec" | "pty" | "child";
+  pid?: number;
+  ppid?: number;
+  sessionId?: string;
+  sessionTitle?: string;
+  cwd?: string;
+  startedAt: number;
+  command?: string;
+}
+
+export const processApi = {
+  // List all active child processes (includeChildren defaults to true)
+  list: (includeChildren = true) =>
+    request<ProcessInfo[]>(`/processes${includeChildren ? '' : '?children=false'}`),
+
+  // Kill a specific process (supports SIGTERM, SIGKILL, etc.)
+  kill: (processId: string, signal: string = "SIGTERM") =>
+    request<{ success: boolean; processId: string; type: string }>(`/processes/${processId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ signal }),
+    }),
+
+  // Kill all processes of a specific type
+  killAll: (type: "query" | "exec" | "pty" | "child" | "all") =>
+    request<{ success: boolean; killedCount: number }>("/processes/kill-all", {
+      method: "POST",
+      body: JSON.stringify({ type }),
+    }),
 };

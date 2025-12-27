@@ -13,6 +13,7 @@
 
   const dispatch = createEventDispatcher<{
     run: { code: string; language: string };
+    runInDock: { code: string; language: string };
   }>();
 
   let codeElement: HTMLElement;
@@ -47,6 +48,10 @@
     dispatch('run', { code, language });
   }
 
+  function handleRunInDock() {
+    dispatch('runInDock', { code, language });
+  }
+
   function isRunnableLanguage(lang: string): boolean {
     const runnableLanguages = [
       'bash', 'sh', 'shell', 'zsh', 'fish',
@@ -55,6 +60,11 @@
       'typescript', 'ts'
     ];
     return runnableLanguages.includes(lang.toLowerCase());
+  }
+
+  function isShellLanguage(lang: string): boolean {
+    const shellLanguages = ['bash', 'sh', 'shell', 'zsh', 'fish', 'console', 'terminal'];
+    return shellLanguages.includes(lang.toLowerCase());
   }
 
   $effect(() => {
@@ -95,7 +105,19 @@
     </div>
     
     <div class="flex items-center gap-2">
-      {#if isRunnableLanguage(language)}
+      {#if isShellLanguage(language)}
+        <button
+          onclick={handleRunInDock}
+          class="run-btn px-2 py-1 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded transition-all flex items-center gap-1.5 text-xs"
+          title="Run in Dock Terminal"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          Run in Dock
+        </button>
+      {:else if isRunnableLanguage(language)}
         <button
           onclick={handleRun}
           class="run-btn px-2 py-1 text-gray-400 hover:text-emerald-400 hover:bg-emerald-400/10 rounded transition-all flex items-center gap-1.5 text-xs"

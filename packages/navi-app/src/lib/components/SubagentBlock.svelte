@@ -96,7 +96,7 @@
   };
 </script>
 
-<div class="rounded-xl border border-indigo-200 bg-white shadow-sm overflow-hidden">
+<div class="rounded-xl border border-indigo-200 bg-white shadow-sm overflow-hidden relative group">
   <!-- Header - always visible, double-click opens modal -->
   <button
     onclick={() => expanded = !expanded}
@@ -119,10 +119,10 @@
       </div>
       {#if !expanded && latestActivity}
         <div class="text-xs text-gray-500 truncate mt-0.5">
-          {#if latestActivity.type === 'tool'}
+          {#if latestActivity.type === 'tool' && latestActivity.tool}
             <span class="text-orange-600">{latestActivity.tool.name}</span>
             <span class="text-gray-400 ml-1">{getToolSummary(latestActivity.tool)}</span>
-          {:else}
+          {:else if latestActivity.type === 'text'}
             {latestActivity.text}
           {/if}
         </div>
@@ -156,6 +156,17 @@
       fill="none" stroke="currentColor" viewBox="0 0 24 24"
     >
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+    </svg>
+  </button>
+
+  <!-- Fullscreen button - opens modal -->
+  <button
+    onclick={(e) => { e.stopPropagation(); onOpenModal?.(); }}
+    class="absolute top-2 right-2 p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+    title="Open full view"
+  >
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
     </svg>
   </button>
 

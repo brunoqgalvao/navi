@@ -7,12 +7,13 @@ import { projects, sessions, messages, globalSettings, searchIndex, costEntries 
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
 import { generateChatTitle } from "../services/title-generator";
 import { hasMessageContent, shouldPersistUserMessage, safeSend } from "../services/message-helpers";
+import { handlePtyWebSocket, detachFromAllTerminals, cleanupWsExec, type PtyMessage } from "../routes/terminal";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export interface ClientMessage {
-  type: "query" | "cancel" | "abort" | "permission_response" | "attach";
+  type: "query" | "cancel" | "abort" | "permission_response" | "attach" | "terminal_input" | "terminal_resize" | "terminal_attach" | "terminal_detach" | "exec_start" | "exec_kill";
   prompt?: string;
   projectId?: string;
   sessionId?: string;
@@ -23,6 +24,14 @@ export interface ClientMessage {
   permissionRequestId?: string;
   approved?: boolean;
   approveAll?: boolean;
+  // Terminal-related fields
+  terminalId?: string;
+  execId?: string;
+  command?: string;
+  cwd?: string;
+  data?: string;
+  cols?: number;
+  rows?: number;
 }
 
 interface ActiveProcess {
@@ -58,15 +67,19 @@ export function broadcastToClients(payload: unknown) {
   }
 }
 
-function sendToSession(sessionId: string | undefined, payload: unknown, fallbackWs?: any) {
-  if (sessionId) {
-    const active = activeProcesses.get(sessionId);
-    if (active?.ws) {
-      safeSend(active.ws, payload);
-      return;
-    }
+function sendToSession(sessionId: string | undefined, payload: unknown) {
+  if (!sessionId) {
+    console.warn("[sendToSession] No sessionId provided, dropping message");
+    return;
   }
-  safeSend(fallbackWs, payload);
+  const active = activeProcesses.get(sessionId);
+  if (active?.ws) {
+    safeSend(active.ws, payload);
+  } else {
+    // No active websocket for this session - this can happen if client disconnected
+    // Don't fall back to a different websocket as that causes cross-session leaks
+    console.warn(`[sendToSession] No active ws for session ${sessionId}, dropping message`);
+  }
 }
 
 function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
@@ -187,11 +200,19 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
   const preferredAuth = globalSettings.get("preferredAuth") as "oauth" | "api_key" | null;
   const storedApiKey = globalSettings.get("anthropicApiKey") || process.env.ANTHROPIC_API_KEY;
+  const zaiApiKey = (globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY) as string | null;
 
   const workerEnv = { ...process.env };
   delete workerEnv.ANTHROPIC_API_KEY;
+  delete workerEnv.ANTHROPIC_BASE_URL;
 
-  if (preferredAuth === "api_key" && storedApiKey) {
+  const isGlmModel = model?.startsWith("glm-");
+
+  if (isGlmModel && zaiApiKey) {
+    workerEnv.ANTHROPIC_API_KEY = zaiApiKey;
+    workerEnv.ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
+    console.log(`[${sessionId}] Using Z.AI provider for model ${model}`);
+  } else if (preferredAuth === "api_key" && storedApiKey) {
     workerEnv.ANTHROPIC_API_KEY = storedApiKey;
     console.log(`[${sessionId}] Using API key auth`);
   } else {
@@ -283,7 +304,7 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
               data.isSynthetic ? 1 : 0
             );
           }
-          sendToSession(sessionId, data, ws);
+          sendToSession(sessionId, data);
         } else if (msg.type === "permission_request") {
           const payload = {
             type: "permission_request",
@@ -295,7 +316,7 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
           if (sessionId) {
             pendingPermissions.set(msg.requestId, { sessionId, payload });
           }
-          sendToSession(sessionId, payload, ws);
+          sendToSession(sessionId, payload);
         } else if (msg.type === "complete") {
           if (lastMainAssistantMsgId) {
             messages.markFinal(lastMainAssistantMsgId);
@@ -345,21 +366,17 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
             }
           }
 
-          sendToSession(sessionId, { type: "done", uiSessionId: sessionId, finalMessageId: lastMainAssistantMsgId }, ws);
+          sendToSession(sessionId, { type: "done", uiSessionId: sessionId, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
           if (sessionId) {
             activeProcesses.delete(sessionId);
             deleteStreamCapture(sessionId);
           }
         } else if (msg.type === "error") {
-          sendToSession(
-            sessionId,
-            {
-              type: "error",
-              uiSessionId: sessionId,
-              error: msg.error,
-            },
-            ws
-          );
+          sendToSession(sessionId, {
+            type: "error",
+            uiSessionId: sessionId,
+            error: msg.error,
+          });
           if (sessionId) {
             activeProcesses.delete(sessionId);
             deleteStreamCapture(sessionId);
@@ -377,15 +394,11 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
   child.on("error", (error) => {
     console.error(`[${sessionId}] Process error:`, error);
-    sendToSession(
-      sessionId,
-      {
-        type: "error",
-        uiSessionId: sessionId,
-        error: error.message,
-      },
-      ws
-    );
+    sendToSession(sessionId, {
+      type: "error",
+      uiSessionId: sessionId,
+      error: error.message,
+    });
     if (sessionId) {
       activeProcesses.delete(sessionId);
       deleteStreamCapture(sessionId);
@@ -398,7 +411,7 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
       try {
         const msg = JSON.parse(buffer);
         if (msg.type === "complete") {
-          sendToSession(sessionId, { type: "done", uiSessionId: sessionId }, ws);
+          sendToSession(sessionId, { type: "done", uiSessionId: sessionId });
         }
       } catch {}
     }
@@ -439,21 +452,17 @@ export function createWebSocketHandlers() {
             active.ws = ws;
             activeProcesses.set(data.sessionId, active);
             if (!wasSameWs) {
-              sendToSession(
-                data.sessionId,
-                {
-                  type: "stream_event",
-                  uiSessionId: data.sessionId,
-                  event: { type: "message_start" },
-                  parentToolUseId: null,
-                  uuid: crypto.randomUUID(),
-                  timestamp: Date.now(),
-                },
-                ws
-              );
+              sendToSession(data.sessionId, {
+                type: "stream_event",
+                uiSessionId: data.sessionId,
+                event: { type: "message_start" },
+                parentToolUseId: null,
+                uuid: crypto.randomUUID(),
+                timestamp: Date.now(),
+              });
               for (const pending of pendingPermissions.values()) {
                 if (pending.sessionId === data.sessionId) {
-                  sendToSession(data.sessionId, pending.payload, ws);
+                  sendToSession(data.sessionId, pending.payload);
                 }
               }
             }
@@ -477,6 +486,18 @@ export function createWebSocketHandlers() {
             }
             pendingPermissions.delete(data.permissionRequestId);
           }
+        } else if (data.type.startsWith("terminal_") || data.type.startsWith("exec_")) {
+          // Route terminal/exec messages to handler
+          handlePtyWebSocket(ws, {
+            type: data.type as PtyMessage["type"],
+            terminalId: data.terminalId,
+            execId: data.execId,
+            command: data.command,
+            cwd: data.cwd,
+            data: data.data,
+            cols: data.cols,
+            rows: data.rows,
+          });
         }
       } catch (error) {
         safeSend(ws, {
@@ -489,6 +510,10 @@ export function createWebSocketHandlers() {
     close(ws: any) {
       console.log("Client disconnected");
       connectedClients.delete(ws);
+      // Detach from all terminals and cleanup exec processes
+      detachFromAllTerminals(ws);
+      cleanupWsExec(ws);
+      // Update active processes
       for (const [sessionId, active] of activeProcesses.entries()) {
         if (active.ws === ws) {
           activeProcesses.set(sessionId, { ...active, ws: null });

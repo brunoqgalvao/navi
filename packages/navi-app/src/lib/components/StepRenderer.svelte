@@ -136,9 +136,8 @@
               {@html renderMarkdown(step.isStreaming ? (step.streamingText || "") : ((step.content as any).text || ""))}
             </div>
           {:else if step.type === "tool_use"}
-            <ToolRenderer 
-              tool={step.content as any} 
-              {basePath}
+            <ToolRenderer
+              tool={step.content as any}
               {onPreview}
               compact={false}
             />

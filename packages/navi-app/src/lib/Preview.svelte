@@ -5,6 +5,7 @@
   import MermaidRenderer from "./components/MermaidRenderer.svelte";
   import JsonTreeViewer from "./components/JsonTreeViewer.svelte";
   import { api } from "./api";
+  import { getApiBase } from "./config";
 
   type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "json" | "none";
 
@@ -13,9 +14,28 @@
     type?: PreviewType;
     onClose?: () => void;
     onUrlChange?: (url: string) => void;
+    // Session-aware browser props
+    browserHistory?: string[];
+    browserHistoryIndex?: number;
+    onBrowserBack?: () => void;
+    onBrowserForward?: () => void;
+    onBrowserGoToIndex?: (index: number) => void;
   }
 
-  let { source, type = "none", onClose, onUrlChange }: Props = $props();
+  let {
+    source,
+    type = "none",
+    onClose,
+    onUrlChange,
+    browserHistory,
+    browserHistoryIndex,
+    onBrowserBack,
+    onBrowserForward,
+    onBrowserGoToIndex,
+  }: Props = $props();
+
+  // Use external history if provided, otherwise use internal state
+  let isControlled = $derived(browserHistory !== undefined);
 
   let content = $state("");
   let loading = $state(false);
@@ -24,12 +44,18 @@
   let iframeKey = $state(0);
   let urlInput = $state("");
   let currentUrl = $state("");
-  let history = $state<string[]>([]);
-  let historyIndex = $state(-1);
+  let internalHistory = $state<string[]>([]);
+  let internalHistoryIndex = $state(-1);
+
+  // Use external or internal history
+  let history = $derived(isControlled ? (browserHistory ?? []) : internalHistory);
+  let historyIndex = $derived(isControlled ? (browserHistoryIndex ?? -1) : internalHistoryIndex);
   let iframeRef: HTMLIFrameElement | null = $state(null);
   let iframeLoading = $state(false);
   let iframeError = $state("");
   let showDebug = $state(false);
+  let showBackHistory = $state(false);
+  let showForwardHistory = $state(false);
 
   const imageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp"];
   const audioExtensions = ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma"];
@@ -82,7 +108,7 @@
       const [filePath, fragment] = path.split('#');
       const lineNumber = fragment?.startsWith('line') ? parseInt(fragment.slice(4), 10) : null;
       
-      const res = await fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(filePath)}`);
+      const res = await fetch(`${getApiBase()}/fs/read?path=${encodeURIComponent(filePath)}`);
       const data = await res.json();
       if (data.error) {
         error = data.error;
@@ -144,6 +170,25 @@
     return url;
   }
 
+  function isLocalUrl(url: string): boolean {
+    const formatted = formatUrl(url);
+    try {
+      const parsed = new URL(formatted);
+      return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    } catch {
+      return false;
+    }
+  }
+
+  function getProxiedUrl(url: string): string {
+    const formatted = formatUrl(url);
+    // Only proxy external URLs, not localhost
+    if (isLocalUrl(formatted)) {
+      return formatted;
+    }
+    return `${getApiBase()}/proxy?url=${encodeURIComponent(formatted)}`;
+  }
+
   function renderMarkdown(md: string): string {
     return marked(md) as string;
   }
@@ -197,8 +242,10 @@
     if (!url) return;
     const formatted = formatUrl(url);
     if (addToHistory && formatted !== currentUrl) {
-      history = [...history.slice(0, historyIndex + 1), formatted];
-      historyIndex = history.length - 1;
+      if (!isControlled) {
+        internalHistory = [...internalHistory.slice(0, internalHistoryIndex + 1), formatted];
+        internalHistoryIndex = internalHistory.length - 1;
+      }
     }
     urlInput = formatted;
     currentUrl = formatted;
@@ -209,10 +256,13 @@
   }
 
   function goBack() {
-    if (historyIndex > 0) {
-      historyIndex--;
-      urlInput = history[historyIndex];
-      currentUrl = history[historyIndex];
+    if (isControlled) {
+      // Delegate to parent
+      onBrowserBack?.();
+    } else if (internalHistoryIndex > 0) {
+      internalHistoryIndex--;
+      urlInput = internalHistory[internalHistoryIndex];
+      currentUrl = internalHistory[internalHistoryIndex];
       iframeLoading = true;
       iframeError = "";
       iframeKey++;
@@ -220,10 +270,13 @@
   }
 
   function goForward() {
-    if (historyIndex < history.length - 1) {
-      historyIndex++;
-      urlInput = history[historyIndex];
-      currentUrl = history[historyIndex];
+    if (isControlled) {
+      // Delegate to parent
+      onBrowserForward?.();
+    } else if (internalHistoryIndex < internalHistory.length - 1) {
+      internalHistoryIndex++;
+      urlInput = internalHistory[internalHistoryIndex];
+      currentUrl = internalHistory[internalHistoryIndex];
       iframeLoading = true;
       iframeError = "";
       iframeKey++;
@@ -235,6 +288,81 @@
       navigateTo(urlInput);
     }
   }
+
+  function handleBackContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    if (historyIndex > 0) {
+      showBackHistory = true;
+      showForwardHistory = false;
+    }
+  }
+
+  function handleForwardContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    if (historyIndex < history.length - 1) {
+      showForwardHistory = true;
+      showBackHistory = false;
+    }
+  }
+
+  function goToHistoryIndex(index: number) {
+    if (isControlled) {
+      // Use direct navigation callback if available
+      onBrowserGoToIndex?.(index);
+    } else {
+      internalHistoryIndex = index;
+      urlInput = internalHistory[index];
+      currentUrl = internalHistory[index];
+      iframeLoading = true;
+      iframeError = "";
+      iframeKey++;
+    }
+    showBackHistory = false;
+    showForwardHistory = false;
+  }
+
+  function closeHistoryDropdowns() {
+    showBackHistory = false;
+    showForwardHistory = false;
+  }
+
+  function getDisplayUrl(url: string): string {
+    try {
+      const parsed = new URL(url);
+      return parsed.hostname + (parsed.pathname !== "/" ? parsed.pathname : "");
+    } catch {
+      return url;
+    }
+  }
+
+  // Sync URL when history index changes (back/forward navigation or session switch)
+  let prevBrowserHistoryIndex = $state<number | undefined>(undefined);
+
+  $effect(() => {
+    // Only react to history index changes in controlled mode
+    if (!isControlled) return;
+
+    const indexChanged = browserHistoryIndex !== prevBrowserHistoryIndex;
+    if (!indexChanged) return;
+
+    // Close any open history dropdowns
+    showBackHistory = false;
+    showForwardHistory = false;
+
+    // Sync URL with the new history position
+    if (browserHistory && browserHistoryIndex !== undefined && browserHistoryIndex >= 0) {
+      const newUrl = browserHistory[browserHistoryIndex];
+      if (newUrl && newUrl !== currentUrl) {
+        urlInput = newUrl;
+        currentUrl = newUrl;
+        iframeLoading = true;
+        iframeError = "";
+        iframeKey++;
+      }
+    }
+
+    prevBrowserHistoryIndex = browserHistoryIndex;
+  });
 
   function handleIframeLoad() {
     iframeLoading = false;
@@ -263,9 +391,12 @@
       if (formatted !== lastSource) {
         urlInput = formatted;
         currentUrl = formatted;
-        if (history.length === 0 || history[history.length - 1] !== formatted) {
-          history = [...history, formatted];
-          historyIndex = history.length - 1;
+        // Only update internal history if not controlled externally
+        if (!isControlled) {
+          if (internalHistory.length === 0 || internalHistory[internalHistory.length - 1] !== formatted) {
+            internalHistory = [...internalHistory, formatted];
+            internalHistoryIndex = internalHistory.length - 1;
+          }
         }
         lastSource = formatted;
         iframeLoading = true;
@@ -277,7 +408,7 @@
         lastSource = source;
         loading = true;
         error = "";
-        fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(source)}`)
+        fetch(`${getApiBase()}/fs/read?path=${encodeURIComponent(source)}`)
           .then(res => res.json())
           .then(data => {
             if (data.error) {
@@ -305,24 +436,70 @@
 </script>
 
 <div class="h-full flex flex-col bg-white">
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  {#if showBackHistory || showForwardHistory}
+    <div class="fixed inset-0 z-40" onclick={closeHistoryDropdowns}></div>
+  {/if}
+
   {#if detectedType === "url"}
     <div class="h-11 px-2 border-b border-gray-200 flex items-center gap-1.5 bg-gray-50/50 shrink-0">
-      <button 
-        onclick={goBack} 
-        disabled={historyIndex <= 0}
-        class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed" 
-        title="Back"
-      >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
-      </button>
-      <button 
-        onclick={goForward} 
-        disabled={historyIndex >= history.length - 1}
-        class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed" 
-        title="Forward"
-      >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-      </button>
+      <!-- Back button with right-click history -->
+      <div class="relative">
+        <button
+          onclick={goBack}
+          oncontextmenu={handleBackContextMenu}
+          disabled={historyIndex <= 0}
+          class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Back (right-click for history)"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+        </button>
+        {#if showBackHistory}
+          <div class="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 max-h-64 overflow-y-auto">
+            {#each history.slice(0, historyIndex).reverse() as url, i}
+              <button
+                onclick={() => goToHistoryIndex(historyIndex - 1 - i)}
+                class="w-full px-3 py-1.5 text-left text-xs hover:bg-gray-100 flex items-center gap-2 truncate"
+              >
+                <svg class="w-3 h-3 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10"></circle>
+                </svg>
+                <span class="truncate">{getDisplayUrl(url)}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <!-- Forward button with right-click history -->
+      <div class="relative">
+        <button
+          onclick={goForward}
+          oncontextmenu={handleForwardContextMenu}
+          disabled={historyIndex >= history.length - 1}
+          class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Forward (right-click for history)"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+        </button>
+        {#if showForwardHistory}
+          <div class="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 max-h-64 overflow-y-auto">
+            {#each history.slice(historyIndex + 1) as url, i}
+              <button
+                onclick={() => goToHistoryIndex(historyIndex + 1 + i)}
+                class="w-full px-3 py-1.5 text-left text-xs hover:bg-gray-100 flex items-center gap-2 truncate"
+              >
+                <svg class="w-3 h-3 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10"></circle>
+                </svg>
+                <span class="truncate">{getDisplayUrl(url)}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
       <button onclick={() => iframeKey++} class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors" title="Refresh">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
       </button>
@@ -460,7 +637,7 @@
         {#key iframeKey}
           <iframe
             bind:this={iframeRef}
-            src={currentUrl || formatUrl(source)}
+            src={getProxiedUrl(currentUrl || source)}
             class="w-full h-full border-0"
             title="Preview"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
@@ -471,13 +648,13 @@
       </div>
     {:else if detectedType === "pdf"}
       <iframe
-        src={`http://localhost:3001/api/fs/read?path=${encodeURIComponent(source)}&raw=true`}
+        src={`${getApiBase()}/fs/read?path=${encodeURIComponent(source)}&raw=true`}
         class="w-full h-full border-0"
         title="PDF Preview"
       ></iframe>
     {:else if detectedType === "image"}
       <div class="flex items-center justify-center h-full p-4 bg-[#f5f5f5]" style="background-image: url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2220%22><rect width=%2220%22 height=%2220%22 fill=%22%23f5f5f5%22/><rect width=%2210%22 height=%2210%22 fill=%22%23e5e5e5%22/><rect x=%2210%22 y=%2210%22 width=%2210%22 height=%2210%22 fill=%22%23e5e5e5%22/></svg>')">
-        <img src={`http://localhost:3001/api/fs/read?path=${encodeURIComponent(source)}&raw=true`} alt="Preview" class="max-w-full max-h-full object-contain shadow-lg rounded" />
+        <img src={`${getApiBase()}/fs/read?path=${encodeURIComponent(source)}&raw=true`} alt="Preview" class="max-w-full max-h-full object-contain shadow-lg rounded" />
       </div>
     {:else if detectedType === "audio"}
       <div class="flex flex-col items-center justify-center h-full gap-5 p-8 bg-gray-50">
@@ -490,7 +667,7 @@
         </div>
         <audio 
           controls 
-          src={`http://localhost:3001/api/fs/read?path=${encodeURIComponent(source)}&raw=true`}
+          src={`${getApiBase()}/fs/read?path=${encodeURIComponent(source)}&raw=true`}
           class="w-full max-w-sm"
         >
           Your browser does not support the audio element.
@@ -500,7 +677,7 @@
       <div class="flex flex-col h-full bg-black">
         <video 
           controls 
-          src={`http://localhost:3001/api/fs/read?path=${encodeURIComponent(source)}&raw=true`}
+          src={`${getApiBase()}/fs/read?path=${encodeURIComponent(source)}&raw=true`}
           class="flex-1 w-full h-full object-contain"
         >
           Your browser does not support the video element.

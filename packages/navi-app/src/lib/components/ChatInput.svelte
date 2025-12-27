@@ -2,6 +2,7 @@
   import { attachedFiles, type AttachedFile } from "../stores";
   import FileAttachment from "./FileAttachment.svelte";
   import AudioRecorder from "./AudioRecorder.svelte";
+  import { getApiBase } from "../config";
 
   interface FileEntry {
     name: string;
@@ -24,9 +25,28 @@
     onSubmit: () => void;
     onStop?: () => void;
     onPreview?: (path: string) => void;
+    onExecCommand?: (command: string) => void;
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], onSubmit, onStop, onPreview }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], onSubmit, onStop, onPreview, onExecCommand }: Props = $props();
+
+  // Check if the input is a ! command
+  function isShellCommand(text: string): boolean {
+    return text.trim().startsWith("!");
+  }
+
+  function handleSubmit() {
+    const trimmedValue = value.trim();
+    if (isShellCommand(trimmedValue) && onExecCommand) {
+      const command = trimmedValue.slice(1).trim(); // Remove the ! prefix
+      if (command) {
+        onExecCommand(command);
+        value = "";
+      }
+    } else {
+      onSubmit();
+    }
+  }
 
   let inputRef: HTMLTextAreaElement | null = $state(null);
   let audioRecorderRef: { toggleRecording: () => void; isRecording: () => boolean } | null = $state(null);
@@ -58,7 +78,7 @@
   async function loadProjectFiles(rootPath: string, currentPath: string = rootPath, depth: number = 0) {
     if (depth > 4 || availableFiles.length > 500) return;
     try {
-      const res = await fetch(`http://localhost:3001/api/fs/list?path=${encodeURIComponent(currentPath)}`);
+      const res = await fetch(`${getApiBase()}/fs/list?path=${encodeURIComponent(currentPath)}`);
       const data = await res.json();
       if (data.entries) {
         for (const entry of data.entries) {
@@ -106,7 +126,7 @@
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      onSubmit();
+      handleSubmit();
     }
   }
 
@@ -212,7 +232,7 @@
         formData.append("targetDir", projectPath);
         
         try {
-          const res = await fetch("http://localhost:3001/api/fs/upload", {
+          const res = await fetch(`${getApiBase()}/fs/upload`, {
             method: "POST",
             body: formData,
           });
@@ -250,7 +270,7 @@
         formData.append("targetDir", `${projectPath}/.claude/pasted_images`);
 
         try {
-          const res = await fetch("http://localhost:3001/api/fs/upload", {
+          const res = await fetch(`${getApiBase()}/fs/upload`, {
             method: "POST",
             body: formData,
           });
@@ -359,13 +379,21 @@
       </button>
     {:else}
       <button
-        onclick={onSubmit}
+        onclick={handleSubmit}
         disabled={disabled || !value.trim()}
         class="p-1.5 text-gray-400 bg-transparent rounded-lg hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+        title={isShellCommand(value) ? "Run command (!)" : "Send message"}
       >
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path>
-        </svg>
+        {#if isShellCommand(value)}
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+        {:else}
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path>
+          </svg>
+        {/if}
       </button>
     {/if}
   </div>

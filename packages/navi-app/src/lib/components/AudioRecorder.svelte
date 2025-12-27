@@ -9,8 +9,8 @@
   let { onTranscript, disabled = false }: Props = $props();
 
   type RecordingState = "idle" | "recording" | "processing";
-  
-  let state: RecordingState = $state("idle");
+
+  let recordingState: RecordingState = $state("idle");
   let mediaRecorder: MediaRecorder | null = null;
   let audioChunks: Blob[] = [];
   let recordingDuration = $state(0);
@@ -79,7 +79,7 @@
       };
       
       mediaRecorder.start(100);
-      state = "recording";
+      recordingState = "recording";
       recordingDuration = 0;
       durationInterval = window.setInterval(() => {
         recordingDuration++;
@@ -114,14 +114,14 @@
   }
 
   async function processAudio(audioBlob: Blob) {
-    state = "processing";
+    recordingState = "processing";
     
     try {
       const result = await api.transcribe(audioBlob);
       
       if (result.text && result.text.trim()) {
         onTranscript(result.text.trim());
-        state = "idle";
+        recordingState = "idle";
       } else {
         throw new Error("Empty transcription");
       }
@@ -133,8 +133,8 @@
       if (savedPath) {
         error = `Transcription failed. Audio saved to: ${savedPath}`;
       }
-      
-      state = "idle";
+
+      recordingState = "idle";
     }
   }
 
@@ -153,7 +153,7 @@
   }
 
   export function isRecording() {
-    return state === "recording";
+    return recordingState === "recording";
   }
 
   function handleClick() {
@@ -164,9 +164,9 @@
       return;
     }
     
-    if (state === "idle") {
+    if (recordingState === "idle") {
       startRecording();
-    } else if (state === "recording") {
+    } else if (recordingState === "recording") {
       stopRecording();
     }
   }
@@ -189,7 +189,7 @@
     }
     
     audioChunks = [];
-    state = "idle";
+    recordingState = "idle";
     error = null;
   }
 
@@ -227,7 +227,7 @@
 </script>
 
 <div class="flex items-center gap-2 relative">
-  {#if state === "recording"}
+  {#if recordingState === "recording"}
     <button
       onclick={handleCancel}
       class="p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
@@ -245,24 +245,24 @@
   
   <button
     onclick={handleClick}
-    disabled={disabled || state === "processing" || hasApiKey === null}
+    disabled={disabled || recordingState === "processing" || hasApiKey === null}
     class={`relative p-2 rounded-lg transition-all ${
-      state === "idle" 
-        ? hasApiKey === false 
+      recordingState === "idle"
+        ? hasApiKey === false
           ? "text-amber-500 hover:text-amber-600 hover:bg-amber-50"
-          : "text-gray-400 hover:text-gray-600 hover:bg-gray-100" 
-        : state === "recording"
+          : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+        : recordingState === "recording"
         ? "text-white bg-red-500 hover:bg-red-600 animate-pulse"
         : "text-gray-400 bg-gray-100 cursor-wait"
     } disabled:opacity-30 disabled:cursor-not-allowed`}
-    title={hasApiKey === false ? "Click to configure OpenAI API key" : state === "idle" ? "Start recording" : state === "recording" ? "Stop recording" : "Processing..."}
+    title={hasApiKey === false ? "Click to configure OpenAI API key" : recordingState === "idle" ? "Start recording" : recordingState === "recording" ? "Stop recording" : "Processing..."}
   >
-    {#if state === "processing"}
+    {#if recordingState === "processing"}
       <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
       </svg>
-    {:else if state === "recording"}
+    {:else if recordingState === "recording"}
       <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
         <rect x="6" y="6" width="12" height="12" rx="2" />
       </svg>
@@ -272,7 +272,7 @@
       </svg>
     {/if}
     
-    {#if hasApiKey === false && state === "idle"}
+    {#if hasApiKey === false && recordingState === "idle"}
       <span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border-2 border-white"></span>
     {/if}
   </button>

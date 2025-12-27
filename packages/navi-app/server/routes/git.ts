@@ -9,7 +9,8 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
       try {
         execSync("git rev-parse --git-dir", { cwd: repoPath, stdio: "pipe" });
       } catch {
-        return json({ error: "Not a git repository" }, 400);
+        // Not a git repo - return a valid response with isGitRepo: false
+        return json({ isGitRepo: false });
       }
 
       const branch = execSync("git branch --show-current", { cwd: repoPath, encoding: "utf-8" }).trim();
@@ -48,7 +49,7 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
         }
       } catch {}
 
-      return json({ branch, staged, modified, untracked, ahead, behind });
+      return json({ isGitRepo: true, branch, staged, modified, untracked, ahead, behind });
     } catch (e) {
       console.error("Git status error:", e);
       return json({ error: "Failed to get git status" }, 500);
@@ -60,6 +61,13 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
     const limit = parseInt(url.searchParams.get("limit") || "50");
     try {
       const { execSync } = await import("child_process");
+
+      // Check if it's a git repo first
+      try {
+        execSync("git rev-parse --git-dir", { cwd: repoPath, stdio: "pipe" });
+      } catch {
+        return json({ isGitRepo: false, commits: [] });
+      }
 
       const format = "%H|%h|%an|%ae|%ar|%s";
       const output = execSync(`git log -${limit} --format="${format}"`, { cwd: repoPath, encoding: "utf-8" });
@@ -87,6 +95,13 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
     const repoPath = url.searchParams.get("path") || process.cwd();
     try {
       const { execSync } = await import("child_process");
+
+      // Check if it's a git repo first
+      try {
+        execSync("git rev-parse --git-dir", { cwd: repoPath, stdio: "pipe" });
+      } catch {
+        return json({ isGitRepo: false, current: "", local: [], remote: [] });
+      }
 
       const current = execSync("git branch --show-current", { cwd: repoPath, encoding: "utf-8" }).trim();
       const localOutput = execSync("git branch --format='%(refname:short)'", { cwd: repoPath, encoding: "utf-8" });
@@ -220,6 +235,20 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
     }
   }
 
+  if (url.pathname === "/api/git/init" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath } = body;
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+      execSync("git init", { cwd, encoding: "utf-8" });
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Git init error:", e);
+      return json({ error: e.message || "Failed to initialize git repository" }, 500);
+    }
+  }
+
   if (url.pathname === "/api/git/generate-commit-message" && method === "POST") {
     const body = await req.json();
     const { path: repoPath } = body;
@@ -243,7 +272,7 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
       const stagedFiles = execSync("git diff --cached --name-only", { cwd, encoding: "utf-8" }).trim();
 
       // Call ephemeral chat to generate message
-      const prompt = `Analyze this git diff and generate a concise, conventional commit message.
+      const prompt = `Analyze this git diff and generate a commit message following the Conventional Commits specification.
 
 Files changed:
 ${stagedFiles}
@@ -253,15 +282,42 @@ Diff:
 ${truncatedDiff}
 \`\`\`
 
-Rules:
-- Use conventional commit format: type(scope): description
-- Types: feat, fix, refactor, docs, style, test, chore
-- Keep the first line under 72 characters
-- Be specific about what changed
-- Don't include the diff in your response
-- Only respond with the commit message, nothing else`;
+## Conventional Commits Format
 
-      const systemPrompt = "You are a helpful assistant that generates git commit messages. Respond only with the commit message, no explanations or markdown.";
+<type>[optional scope]: <description>
+
+[optional body]
+
+## Types (choose ONE):
+- feat: A new feature (correlates with MINOR in SemVer)
+- fix: A bug fix (correlates with PATCH in SemVer)
+- docs: Documentation only changes
+- style: Changes that don't affect code meaning (white-space, formatting, etc)
+- refactor: Code change that neither fixes a bug nor adds a feature
+- perf: Code change that improves performance
+- test: Adding missing tests or correcting existing tests
+- build: Changes to build system or external dependencies
+- ci: Changes to CI configuration files and scripts
+- chore: Other changes that don't modify src or test files
+
+## Rules:
+1. First line (subject): max 50 characters, imperative mood ("add" not "added")
+2. Scope is optional but helpful: feat(auth): or fix(api):
+3. No period at the end of the subject line
+4. Separate subject from body with a blank line (if body is needed)
+5. Body should explain WHAT and WHY, not HOW
+6. Use BREAKING CHANGE: in footer for breaking changes (adds ! after type)
+
+## Examples:
+- feat(git): add commit message generation with AI
+- fix: resolve null pointer in user authentication
+- refactor(api): extract validation logic into separate module
+- docs: update README with installation instructions
+- feat!: drop support for Node 12
+
+IMPORTANT: Respond with ONLY the commit message. No explanations, no markdown formatting, no quotes.`;
+
+      const systemPrompt = "You are an expert at writing git commit messages following the Conventional Commits specification. Output ONLY the commit message, nothing else. No markdown, no quotes, no explanations.";
 
       // Use ephemeral chat endpoint internally
       const response = await fetch("http://localhost:3001/api/ephemeral", {

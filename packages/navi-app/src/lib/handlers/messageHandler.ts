@@ -110,9 +110,8 @@ export function createMessageHandler(config: MessageHandlerConfig) {
 
       case "result":
         const resultCost = (msg as any).costUsd || 0;
-        if (uiSessionId) {
-          callbacks.onComplete?.(uiSessionId, { costUsd: resultCost, usage: (msg as any).usage });
-          callbacks.onStreamingEnd?.(uiSessionId, "done");
+        if (uiSessionId && resultCost) {
+          callbacks.onComplete?.(uiSessionId, { costUsd: resultCost });
         }
         break;
 
@@ -134,6 +133,10 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           const finalMessageId = (msg as any).finalMessageId;
           if (finalMessageId) {
             sessionMessages.markFinal(uiSessionId, finalMessageId);
+          }
+          const usage = (msg as any).usage;
+          if (usage) {
+            callbacks.onComplete?.(uiSessionId, { costUsd: 0, usage });
           }
           callbacks.onStreamingEnd?.(uiSessionId, "done");
         }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import DiffViewer from "../DiffViewer.svelte";
+  import UnifiedDiff from "../UnifiedDiff.svelte";
 
   interface Props {
     filePath: string;
@@ -60,7 +60,7 @@
             <div class="text-[10px] text-gray-500 bg-gray-100 px-2 py-1 border-b border-gray-200">
               Change {idx + 1}
             </div>
-            <DiffViewer
+            <UnifiedDiff
               oldText={edit.old_string || ""}
               newText={edit.new_string || ""}
               fileName={getFileName(filePath)}
@@ -70,7 +70,7 @@
         {/each}
       </div>
     {:else if oldString !== undefined}
-      <DiffViewer
+      <UnifiedDiff
         oldText={oldString || ""}
         newText={newString || ""}
         fileName={getFileName(filePath)}

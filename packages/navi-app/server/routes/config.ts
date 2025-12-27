@@ -181,9 +181,31 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
         prompt: "",
         options: { cwd: process.cwd() },
       });
-      const models = await q.supportedModels();
+      const sdkModels = await q.supportedModels();
       await q.interrupt();
-      return json(models);
+
+      // Add provider info to Claude models and ensure Sonnet is included
+      const claudeModels = sdkModels.map((m: any) => ({ ...m, provider: "anthropic" }));
+
+      // Check if sonnet is missing and add it
+      const hasSonnet = claudeModels.some((m: any) => m.value === "sonnet" || m.value.includes("sonnet"));
+      if (!hasSonnet) {
+        claudeModels.push({
+          value: "sonnet",
+          displayName: "Sonnet",
+          description: "Sonnet 4 · Best balance of speed and capability · $3/$15 per Mtok",
+          provider: "anthropic"
+        });
+      }
+
+      // Add Z.AI models if API key is configured
+      const zaiApiKey = globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY;
+      const zaiModels = zaiApiKey ? [
+        { value: "glm-4.7", displayName: "GLM-4.7", description: "Z.AI flagship coding model", provider: "zai" },
+        { value: "glm-4.5-air", displayName: "GLM-4.5 Air", description: "Fast, lightweight model", provider: "zai" },
+      ] : [];
+
+      return json([...claudeModels, ...zaiModels]);
     } catch (e) {
       return json({ error: "Failed to fetch models" }, 500);
     }

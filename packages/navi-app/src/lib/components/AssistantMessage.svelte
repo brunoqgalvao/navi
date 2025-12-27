@@ -21,6 +21,8 @@
     onRollback?: () => void;
     onFork?: () => void;
     onPreview?: (path: string) => void;
+    onRunInTerminal?: (command: string) => void;
+    onSendToClaude?: (context: string) => void;
     onMessageClick?: (e: MouseEvent) => void;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
@@ -35,6 +37,8 @@
     onRollback,
     onFork,
     onPreview,
+    onRunInTerminal,
+    onSendToClaude,
     onMessageClick,
     renderMarkdown,
     jsonBlocksMap = new Map(),
@@ -268,8 +272,8 @@
             </button>
             {#if expanded}
               <div class="pl-6 pt-1 space-y-2">
-                <ToolRenderer {tool} toolResult={result ? { content: String(result.content || ''), is_error: result.is_error } : undefined} {onPreview} hideHeader={true} />
-                {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch'].includes(tool.name)}
+                <ToolRenderer {tool} toolResult={result ? { content: String(result.content || ''), is_error: result.is_error } : undefined} {onPreview} {onRunInTerminal} {onSendToClaude} hideHeader={true} />
+                {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch', 'Bash'].includes(tool.name)}
                   <div class="pt-1">
                     <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50' : 'text-gray-600 bg-gray-50'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{result.content}</pre>
                   </div>
@@ -331,16 +335,15 @@
   </div>
 
 <!-- Subagent Modal -->
-{#if openSubagentModal}
-  <SubagentModal
-    toolUseId={openSubagentModal.toolUseId}
-    description={openSubagentModal.description}
-    subagentType={openSubagentModal.subagentType}
-    messages={getSubagentForTool(openSubagentModal.toolUseId)}
-    isActive={activeSubagents.has(openSubagentModal.toolUseId)}
-    elapsedTime={activeSubagents.get(openSubagentModal.toolUseId)?.elapsed}
-    onClose={() => openSubagentModal = null}
-    {renderMarkdown}
-    {onPreview}
-  />
-{/if}
+<SubagentModal
+  open={openSubagentModal !== null}
+  toolUseId={openSubagentModal?.toolUseId ?? ""}
+  description={openSubagentModal?.description ?? ""}
+  subagentType={openSubagentModal?.subagentType ?? ""}
+  messages={openSubagentModal ? getSubagentForTool(openSubagentModal.toolUseId) : []}
+  isActive={openSubagentModal ? activeSubagents.has(openSubagentModal.toolUseId) : false}
+  elapsedTime={openSubagentModal ? activeSubagents.get(openSubagentModal.toolUseId)?.elapsed : undefined}
+  onClose={() => openSubagentModal = null}
+  {renderMarkdown}
+  {onPreview}
+/>

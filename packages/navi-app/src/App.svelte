@@ -3,9 +3,11 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, type ChatMessage, type AttachedFile } from "./lib/stores";
-    import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, type ChatMessage, type AttachedFile, type NavHistoryEntry } from "./lib/stores";
+  import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
   import { parseHash, onHashChange } from "./lib/router";
+  import { setServerPort, isTauri } from "./lib/config";
+  import { setupGlobalErrorHandlers, pendingErrorReport, type ErrorReport } from "./lib/errorHandler";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
   import hljs from "highlight.js";
@@ -90,6 +92,7 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
+  import ProcessManager from "./lib/components/ProcessManager.svelte";
   import { useMessageHandler } from "./lib/handlers";
   import SessionDebug from "./lib/components/SessionDebug.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
@@ -97,7 +100,9 @@
   import ProjectEmptyState from "./lib/components/ProjectEmptyState.svelte";
   import NewProjectModal from "./lib/components/NewProjectModal.svelte";
   import ProjectPermissionsModal from "./lib/components/ProjectPermissionsModal.svelte";
+  import FeedbackModal from "./lib/components/FeedbackModal.svelte";
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
+  import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings, WorkspaceFolder } from "./lib/api";
   import { TOUR_STEPS, HOTKEYS } from "./lib/constants";
@@ -128,9 +133,50 @@
     loadCosts as loadCostsAction,
     loadRecentChats as loadRecentChatsAction,
     loadActiveSessions as loadActiveSessionsAction,
+    pruneToolResults,
+    startNewChatWithSummary,
+    hasPrunedContext,
+    getDefaultModel,
   } from "./lib/actions";
 
-  const isTauri = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
+  let sidecarProcess: any = null;
+  let serverReady = $state(false);
+
+  async function startSidecar(): Promise<number> {
+    if (!isTauri()) {
+      return 3001;
+    }
+    
+    const { Command } = await import("@tauri-apps/plugin-shell");
+    
+    const port = 3001;
+    setServerPort(port);
+    
+    try {
+      const command = Command.sidecar("binaries/navi-server", [String(port)]);
+      sidecarProcess = await command.spawn();
+      
+      console.log("Sidecar started with PID:", sidecarProcess.pid);
+      
+      for (let i = 0; i < 30; i++) {
+        try {
+          const res = await fetch(`http://localhost:${port}/api/health`);
+          if (res.ok) {
+            console.log("Server is ready on port", port);
+            return port;
+          }
+        } catch {
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+      
+      console.log("Server started (assuming ready)");
+      return port;
+    } catch (e) {
+      console.error("Failed to start sidecar:", e);
+      return 3001;
+    }
+  }
 
   let client: ClaudeClient;
   let inputText = $state("");
@@ -185,7 +231,7 @@
         session.setCost($session.costUsd + costUsd);
       }
       costStore.addSessionCost(sessionId, costUsd);
-      loadCosts();
+      loadCostsAction();
       if ($session.projectId) {
         loadProjectCost($session.projectId);
       }
@@ -227,7 +273,8 @@
         case "navigate":
           const { projectId: navProjectId, sessionId: navSessionId } = command.payload as { projectId?: string; sessionId?: string };
           if (navProjectId) {
-            selectProject($projects.find(p => p.id === navProjectId) || null);
+            const foundProject = $projects.find(p => p.id === navProjectId);
+            if (foundProject) selectProject(foundProject);
           }
           if (navSessionId) {
             const navSession = sidebarSessions.find(s => s.id === navSessionId);
@@ -278,8 +325,11 @@
   let showFileBrowser = $state(false);
   let showBrowser = $state(false);
   let showGitPanel = $state(false);
+  let showTerminal = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal">("preview");
+  let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
+  let terminalInitialCommand = $state("");
   let projectFileIndex = $state<Map<string, string>>(new Map());
   let activeSubagents = $state<Map<string, { elapsed: number }>>(new Map());
   let codeBlocksMap = $state<Map<string, { code: string; language: string }>>(new Map());
@@ -297,7 +347,18 @@
 
   let audioRecorderRef: { toggleRecording: () => void; isRecording: () => boolean } | null = $state(null);
   let showHotkeysHelp = $state(false);
-  let inputRef: HTMLTextAreaElement | null = $state(null);
+  let showFeedbackModal = $state(false);
+  let currentErrorReport = $state<ErrorReport | null>(null);
+
+  // Subscribe to pending error reports to open feedback modal
+  $effect(() => {
+    const report = $pendingErrorReport;
+    if (report) {
+      currentErrorReport = report;
+      showFeedbackModal = true;
+    }
+  });
+  let inputRef: HTMLTextAreaElement | undefined = $state(undefined);
   let showSearchModal = $state(false);
 
   let showConfetti = $state(false);
@@ -436,9 +497,9 @@
     }
   }
 
-  let currentProject = $derived(sidebarProjects.find(p => p.id === $session.projectId));
+  let currentProject = $derived(sidebarProjects.find(p => p.id === $session.projectId) ?? null);
   let currentSessionLoading = $derived($session.sessionId && $loadingSessions.has($session.sessionId));
-  let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.startsWith($session.sessionId + ':')).length : 0);
+  let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.sessionId === $session.sessionId).length : 0);
   let showOnboarding = $derived(!$onboardingComplete);
   let activeSkills = $state<Skill[]>([]);
 
@@ -494,7 +555,14 @@
     setRecentChats: (chats) => { recentChats = chats; },
   });
 
-  onMount(async () => {
+  onMount(() => {
+    // Set up global error handlers
+    const cleanupErrorHandlers = setupGlobalErrorHandlers();
+
+    startSidecar().then(() => {
+      serverReady = true;
+    });
+
     if ($onboardingComplete) {
       showWelcome = true;
     }
@@ -508,12 +576,11 @@
     loadCostsAction();
 
     client = new ClaudeClient();
-    try {
-      await client.connect();
+    client.connect().then(() => {
       isConnected.set(true);
-    } catch (e) {
+    }).catch(e => {
       console.error("Failed to connect:", e);
-    }
+    });
     loadActiveSessionsAction();
     activeSessionsPoll = setInterval(loadActiveSessionsAction, 5000);
 
@@ -559,6 +626,7 @@
     return () => {
       document.removeEventListener("click", handleGlobalClick);
       unsubscribeHash();
+      cleanupErrorHandlers();
     };
   });
 
@@ -567,6 +635,9 @@
     client?.disconnect();
     if (activeSessionsPoll) {
       clearInterval(activeSessionsPoll);
+    }
+    if (sidecarProcess) {
+      sidecarProcess.kill();
     }
   });
 
@@ -634,7 +705,7 @@
     }
   });
 
-  async function toggleProjectArchive(proj: Project, e: MouseEvent) {
+  async function toggleProjectArchive(proj: Project, e: Event) {
     e.stopPropagation();
     const newArchived = !proj.archived;
     try {
@@ -661,9 +732,24 @@
     loadRecentChatsAction();
   });
 
-  function handleModelSelect(model: string) {
+  async function handleModelSelect(model: string) {
     modelSelection = model;
     session.setSelectedModel(model);
+    // Store in per-session model cache and update sidebar sessions
+    if ($session.sessionId) {
+      sessionModels.setModel($session.sessionId, model);
+      // Update the model in sidebarSessions so it persists when switching sessions
+      const idx = sidebarSessions.findIndex(s => s.id === $session.sessionId);
+      if (idx !== -1) {
+        sidebarSessions[idx] = { ...sidebarSessions[idx], model };
+      }
+      // Persist model to session in DB
+      try {
+        await api.sessions.update($session.sessionId, { model });
+      } catch (e) {
+        console.error("Failed to save model:", e);
+      }
+    }
   }
 
   async function selectProject(project: Project) {
@@ -781,7 +867,7 @@
   }
 
   async function pickDirectory() {
-    if (isTauri) {
+    if (isTauri()) {
       try {
         const { open } = await import("@tauri-apps/plugin-dialog");
         const selected = await open({
@@ -856,7 +942,7 @@
   }
 
   async function pickDirectoryForEdit() {
-    if (isTauri) {
+    if (isTauri()) {
       try {
         const { open } = await import("@tauri-apps/plugin-dialog");
         const selected = await open({
@@ -877,24 +963,54 @@
     }
   }
 
-  async function selectSession(s: Session) {
+  async function selectSession(s: Session, skipHistory = false) {
     const prevSessionId = $session.sessionId;
     if (prevSessionId && inputText.trim()) {
       sessionDrafts.setDraft(prevSessionId, inputText);
     }
-    
+
     inputText = $sessionDrafts.get(s.id) || "";
-    
+
     session.setSession(s.id, s.claude_session_id);
     session.setCost(s.total_cost_usd || 0);
     session.setUsage(s.input_tokens || 0, s.output_tokens || 0);
+
+    // Restore model for this session from cache or DB, default to Opus
+    const cachedModel = $sessionModels.get(s.id);
+    if (cachedModel) {
+      session.setSelectedModel(cachedModel);
+    } else if (s.model) {
+      session.setSelectedModel(s.model);
+      sessionModels.setModel(s.id, s.model);
+    } else {
+      // No model set - use default (Opus)
+      const defaultModel = getDefaultModel();
+      session.setSelectedModel(defaultModel);
+    }
+
     sessionStatus.markSeen(s.id);
-    
+
+    // Track in navigation history
+    if (!skipHistory) {
+      const project = sidebarProjects.find(p => p.id === $session.projectId);
+      navHistory.push({
+        chatId: s.id,
+        chatTitle: s.title || "Untitled Chat",
+        projectId: $session.projectId || "",
+        projectName: project?.name || "Unknown Project",
+      });
+    }
+
     try {
       const freshSession = await api.sessions.get(s.id);
       if (freshSession) {
         session.setUsage(freshSession.input_tokens || 0, freshSession.output_tokens || 0);
         session.setCost(freshSession.total_cost_usd || 0);
+        // Update model from DB if we don't have a cached value
+        if (freshSession.model && !cachedModel) {
+          session.setSelectedModel(freshSession.model);
+          sessionModels.setModel(s.id, freshSession.model);
+        }
       }
     } catch {}
     
@@ -952,6 +1068,40 @@
       selectSession(forked);
     } catch (err) {
       console.error("Failed to duplicate session:", err);
+    }
+  }
+
+  async function handleNavHistoryNavigate(entry: NavHistoryEntry) {
+    // If different project, switch to it first
+    if (entry.projectId !== $session.projectId) {
+      const project = sidebarProjects.find(p => p.id === entry.projectId);
+      if (project) {
+        session.setProject(project.id);
+        try {
+          const sessionsList = await api.sessions.list(project.id, $showArchivedWorkspaces);
+          sidebarSessions = sessionsList;
+        } catch (e) {
+          console.error("Failed to load sessions:", e);
+        }
+        indexProjectFiles(project.path);
+        loadProjectContext(project);
+        loadClaudeMd(project.path);
+        loadProjectCost(project.id);
+      }
+    }
+
+    // Find and select the session
+    let targetSession = sidebarSessions.find(s => s.id === entry.chatId);
+    if (!targetSession) {
+      try {
+        targetSession = await api.sessions.get(entry.chatId);
+      } catch (e) {
+        console.error("Failed to load session from history:", e);
+        return;
+      }
+    }
+    if (targetSession) {
+      selectSession(targetSession, true); // skipHistory = true to avoid duplicate entries
     }
   }
 
@@ -1070,13 +1220,13 @@
   }
 
   function processMessageQueue(sessionId: string) {
-    const queue = $messageQueue.filter(m => m.startsWith(`${sessionId}:`));
+    const queue = $messageQueue.filter(m => m.sessionId === sessionId);
     if (queue.length === 0) return;
     
     const first = queue[0];
     messageQueue.update(q => q.filter(m => m !== first));
     
-    const prompt = first.substring(sessionId.length + 1);
+    const prompt = first.text;
     
     sessionMessages.addMessage(sessionId, {
       id: crypto.randomUUID(),
@@ -1138,7 +1288,7 @@
     const isCurrentSessionLoading = $loadingSessions.has(currentSessionId);
     
     if (isCurrentSessionLoading) {
-      messageQueue.update(q => [...q, `${currentSessionId}:${inputText.trim()}`]);
+      messageQueue.update(q => [...q, { sessionId: currentSessionId, text: inputText.trim(), attachments: [] }]);
       inputText = "";
       sessionDrafts.clearDraft(currentSessionId);
       return;
@@ -1204,12 +1354,43 @@
     }
   }
 
+  // Handle ! commands - run in terminal
+  function handleExecCommand(command: string) {
+    if (!command.trim()) return;
+    // Open terminal in dock with the command
+    terminalInitialCommand = command;
+    showTerminal = true;
+    rightPanelMode = "terminal";
+  }
+
+  // Handle "Send to Claude" from Terminal Panel in Dock (auto-sends)
+  function handleTerminalSendToClaude(context: string) {
+    inputText = context;
+    sendMessage();
+  }
+
+  // Handle "Send to Claude" from Bash tool results (pre-fills input for review)
+  function handleBashSendToClaude(context: string) {
+    inputText = context;
+    // Focus the input - scroll to bottom first
+    messagesContainer?.scrollTo({
+      top: messagesContainer.scrollHeight,
+      behavior: "smooth",
+    });
+  }
+
   async function handleTitleSuggestionApply(title: string) {
     if ($session.sessionId) {
       await api.sessions.update($session.sessionId, { title });
       const idx = sidebarSessions.findIndex(s => s.id === $session.sessionId);
       if (idx !== -1) sidebarSessions[idx].title = title;
     }
+  }
+
+  async function renameSession(sessionId: string, newTitle: string) {
+    await api.sessions.update(sessionId, { title: newTitle });
+    const idx = sidebarSessions.findIndex(s => s.id === sessionId);
+    if (idx !== -1) sidebarSessions[idx].title = newTitle;
   }
 
   function openPreview(source: string, line?: number) {
@@ -1261,7 +1442,9 @@
     showPreview = false;
     showBrowser = false;
     showGitPanel = false;
+    showTerminal = false;
     previewSource = "";
+    terminalInitialCommand = "";
   }
 
   function toggleGitPanel() {
@@ -1270,6 +1453,15 @@
     } else {
       showGitPanel = true;
       rightPanelMode = "git";
+    }
+  }
+
+  function toggleTerminal() {
+    if (showTerminal && rightPanelMode === "terminal") {
+      showTerminal = false;
+    } else {
+      showTerminal = true;
+      rightPanelMode = "terminal";
     }
   }
 
@@ -1588,6 +1780,7 @@
     onSettings={() => showSettings = true}
     onSearchModal={() => showSearchModal = true}
     onHotkeysHelp={() => showHotkeysHelp = true}
+    onFeedback={() => showFeedbackModal = true}
     onProjectSettings={() => showProjectSettings = true}
     onEditProject={openEditProject}
     onDeleteProject={openDeleteConfirm}
@@ -1595,6 +1788,7 @@
     onToggleProjectArchive={toggleProjectArchive}
     onProjectPermissions={(p) => showProjectPermissions = p}
     onEditSession={openEditSession}
+    onRenameSession={renameSession}
     onDeleteSession={deleteSession}
     onDuplicateSession={duplicateSession}
     onToggleSessionFavorite={toggleSessionFavorite}
@@ -1635,6 +1829,11 @@
   <!-- Chat Area -->
   <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-white relative overflow-hidden">
 
+    <!-- Navigation History (top-left) -->
+    <div class="absolute top-3 left-3 z-20 bg-white/80 backdrop-blur border border-gray-200 rounded-lg shadow-sm">
+      <NavHistoryButton onNavigate={handleNavHistoryNavigate} />
+    </div>
+
     <!-- Toolbar Buttons -->
     {#if currentProject}
     <div class="absolute top-3 right-3 z-20 flex gap-1">
@@ -1667,6 +1866,13 @@
         title="Git Panel (Cmd+G)"
       >
         <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+      </button>
+      <button
+        onclick={toggleTerminal}
+        class={`p-2 border rounded-lg shadow-sm transition-all group ${showTerminal && rightPanelMode === 'terminal' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
+        title="Terminal"
+      >
+        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
       </button>
     </div>
     {/if}
@@ -1730,10 +1936,17 @@
               onRollback={rollbackToMessage}
               onFork={forkFromMessage}
               onPreview={openPreview}
+              onRunInTerminal={handleExecCommand}
+              onSendToClaude={handleBashSendToClaude}
               onMessageClick={handleMessageClick}
               onPermissionApprove={handlePermissionApprove}
               onPermissionDeny={handlePermissionDeny}
               emptyState="continue"
+              inputTokens={$session.inputTokens}
+              contextWindow={currentProject?.context_window || 200000}
+              isPruned={hasPrunedContext($session.sessionId || '')}
+              onPruneToolResults={() => pruneToolResults($session.sessionId || '')}
+              onStartNewChat={() => startNewChatWithSummary($session.sessionId || '')}
             />
           {/if}
 
@@ -1761,17 +1974,22 @@
         <!-- Input Area (hidden on project home via CSS) -->
         <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}" data-tour="chat-input">
 
-            <div class="w-full max-w-3xl pointer-events-auto">
+            <div class="w-full max-w-3xl pointer-events-auto relative">
+                <!-- Process Manager - positioned top right above input -->
+                <div class="absolute -top-2 right-0 transform -translate-y-full z-10">
+                    <ProcessManager sessionId={$session.sessionId} />
+                </div>
                 <ChatInput
                     bind:value={inputText}
                     disabled={!$isConnected}
                     loading={currentSessionLoading || false}
                     {queuedCount}
                     projectPath={currentProject?.path}
-                    {activeSkills}
+                    activeSkills={activeSkills.map(s => ({ name: s.name, path: s.slug }))}
                     onSubmit={sendMessage}
                     onStop={stopGeneration}
                     onPreview={openPreview}
+                    onExecCommand={handleExecCommand}
                 />
 
                 <div class="text-center mt-2">
@@ -1785,8 +2003,8 @@
 
   </main>
 
-  <!-- Right Panel (File Browser / Preview / Browser / Git) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel}
+  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal) -->
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -1794,17 +2012,21 @@
       {previewSource}
       {browserUrl}
       isResizing={isResizingRight}
+      {terminalInitialCommand}
       onModeChange={(mode) => {
         rightPanelMode = mode;
         if (mode === "files") showFileBrowser = true;
         else if (mode === "preview") showPreview = true;
         else if (mode === "browser") showBrowser = true;
         else if (mode === "git") showGitPanel = true;
+        else if (mode === "terminal") showTerminal = true;
       }}
       onClose={closeRightPanel}
       onStartResize={startResizingRight}
       onFileSelect={handleFileSelect}
       onBrowserUrlChange={(url) => browserUrl = url}
+      onTerminalRef={(ref) => terminalRef = ref}
+      onTerminalSendToClaude={handleTerminalSendToClaude}
     />
   {/if}
 
@@ -1889,6 +2111,14 @@
   </Modal>
 
   <Settings open={showSettings} onClose={() => showSettings = false} />
+  <FeedbackModal
+    open={showFeedbackModal}
+    onClose={() => {
+      showFeedbackModal = false;
+      currentErrorReport = null;
+    }}
+    initialReport={currentErrorReport}
+  />
 
   {#if showProjectSettings && currentProject}
     <ProjectSettings project={currentProject} onClose={() => showProjectSettings = false} />
@@ -1897,18 +2127,28 @@
   <SearchModal 
     bind:isOpen={showSearchModal} 
     projectId={$session.projectId}
-    onNavigate={async (sessionId, projectId) => {
+    onNavigate={async (sessionId: string, projectId: string) => {
       session.setProject(projectId);
-      await loadSessions(projectId);
+      try {
+        const sessionsList = await api.sessions.list(projectId);
+        sidebarSessions = sessionsList;
+      } catch (e) {
+        console.error("Failed to load sessions:", e);
+      }
       const targetSession = sidebarSessions.find(s => s.id === sessionId);
       if (targetSession) {
         selectSession(targetSession);
       }
     }}
-    onNavigateProject={async (projectId) => {
+    onNavigateProject={async (projectId: string) => {
       session.setProject(projectId);
       session.setSession(null);
-      await loadSessions(projectId);
+      try {
+        const sessionsList = await api.sessions.list(projectId);
+        sidebarSessions = sessionsList;
+      } catch (e) {
+        console.error("Failed to load sessions:", e);
+      }
     }}
   />
 

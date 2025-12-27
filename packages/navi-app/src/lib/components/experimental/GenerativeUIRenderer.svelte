@@ -55,11 +55,11 @@
 
 {#each genuiBlocks as block (block.id)}
   <div class="genui-wrapper">
-    <GenerativeUI 
-      html={block.html} 
+    <GenerativeUI
+      html={block.html}
       id={block.id}
-      oninteraction={handleInteraction}
-      onerror={handleError}
+      on:interaction={handleInteraction}
+      on:error={handleError}
     />
   </div>
 {/each}

@@ -7,9 +7,19 @@
     title: string;
     children: Snippet;
     footer?: Snippet;
+    size?: "sm" | "md" | "lg" | "xl" | "full";
+    headerSlot?: Snippet;
   }
 
-  let { open, onClose, title, children, footer }: Props = $props();
+  let { open, onClose, title, children, footer, size = "md", headerSlot }: Props = $props();
+
+  const sizeClasses: Record<string, string> = {
+    sm: "max-w-sm",
+    md: "max-w-md",
+    lg: "max-w-2xl",
+    xl: "max-w-4xl",
+    full: "max-w-[90vw] max-h-[90vh]",
+  };
 
   function handleBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) {
@@ -34,9 +44,13 @@
     role="dialog"
     aria-modal="true"
   >
-    <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-      <div class="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
-        <h3 class="font-semibold text-base text-gray-900">{title}</h3>
+    <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full {sizeClasses[size]} overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col {size === 'full' ? 'h-[90vh]' : ''}">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+        {#if headerSlot}
+          {@render headerSlot()}
+        {:else}
+          <h3 class="font-semibold text-base text-gray-900">{title}</h3>
+        {/if}
         <button
           onclick={onClose}
           class="p-1 text-gray-400 hover:text-gray-600 transition-colors"
@@ -46,7 +60,7 @@
           </svg>
         </button>
       </div>
-      <div class="p-6">
+      <div class="p-6 overflow-y-auto flex-1">
         {@render children()}
       </div>
       {#if footer}

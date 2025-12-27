@@ -21,6 +21,9 @@ export type {
   Project,
   Session,
   Skill,
+  TerminalTab,
+  BrowserState,
+  SessionWorkspace,
 } from "./types";
 
 // Session stores
@@ -37,6 +40,9 @@ export {
   sessionHistoryContext,
   todos,
   sessionEvents,
+  sessionWorkspaces,
+  currentWorkspace,
+  sessionModels,
 } from "./session";
 
 // Project stores
@@ -57,6 +63,7 @@ export {
   notifications,
   attachedFiles,
   chatViewMode,
+  uiScale,
   isConnected,
   unreadNotificationCount,
   activeNotifications,
@@ -64,8 +71,16 @@ export {
   projectStatus,
 } from "./ui";
 
+export type { UIScaleLevel } from "./ui";
+
 // Cost stores
 export { costStore } from "./costs";
 
 // Skills stores
 export { skillLibrary } from "./skills";
+
+// Navigation history
+export { navHistory, type NavHistoryEntry } from "./navHistory";
+
+// Error handling (re-export for convenience)
+export { showError, showWarning, showSuccess, showInfo, pendingErrorReport } from "../errorHandler";

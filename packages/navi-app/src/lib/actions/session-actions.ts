@@ -4,9 +4,12 @@ import {
   sessionMessages,
   sessionDrafts,
   sessionStatus,
+  sessionModels,
   type ChatMessage,
 } from "../stores";
 import { get } from "svelte/store";
+import { getDefaultModel } from "./data-loaders";
+import { showError } from "../errorHandler";
 
 export interface SessionActionCallbacks {
   setSidebarSessions: (sessions: Session[]) => void;
@@ -32,11 +35,14 @@ export async function createNewChat(): Promise<string | null> {
     const sessions = callbacks?.getSidebarSessions() || [];
     callbacks?.setSidebarSessions([newSession, ...sessions]);
     currentSession.setSession(newSession.id, newSession.claude_session_id);
+    // Set default model (Opus) for new chat
+    const defaultModel = getDefaultModel();
+    currentSession.setSelectedModel(defaultModel);
     sessionMessages.setMessages(newSession.id, []);
     callbacks?.loadRecentChats();
     return newSession.id;
   } catch (e) {
-    console.error("Failed to create session:", e);
+    showError({ title: "Chat Error", message: "Failed to create new chat", error: e });
     return null;
   }
 }
@@ -60,6 +66,20 @@ export async function selectSession(s: Session) {
   currentSession.setSession(s.id, s.claude_session_id);
   currentSession.setCost(s.total_cost_usd || 0);
   currentSession.setUsage(s.input_tokens || 0, s.output_tokens || 0);
+
+  // Load model from sessionModels store first, then fall back to session model from DB
+  const models = get(sessionModels);
+  const cachedModel = models.get(s.id);
+  if (cachedModel) {
+    currentSession.setSelectedModel(cachedModel);
+  } else if (s.model) {
+    currentSession.setSelectedModel(s.model);
+    sessionModels.setModel(s.id, s.model);
+  } else {
+    // No model set - use default (Opus)
+    const defaultModel = getDefaultModel();
+    currentSession.setSelectedModel(defaultModel);
+  }
   sessionStatus.markSeen(s.id);
 
   // Refresh session data
@@ -68,6 +88,11 @@ export async function selectSession(s: Session) {
     if (freshSession) {
       currentSession.setUsage(freshSession.input_tokens || 0, freshSession.output_tokens || 0);
       currentSession.setCost(freshSession.total_cost_usd || 0);
+      // Only update model from DB if we don't have a cached value
+      if (freshSession.model && !cachedModel) {
+        currentSession.setSelectedModel(freshSession.model);
+        sessionModels.setModel(s.id, freshSession.model);
+      }
     }
   } catch {}
 
@@ -93,7 +118,7 @@ export async function selectSession(s: Session) {
       });
       sessionMessages.setMessages(s.id, loadedMsgs);
     } catch (e) {
-      console.error("Failed to load messages:", e);
+      showError({ title: "Messages Error", message: "Failed to load chat messages", error: e });
     }
   }
 
@@ -113,7 +138,7 @@ export async function deleteSession(id: string): Promise<boolean> {
     }
     return true;
   } catch (e) {
-    console.error("Failed to delete session:", e);
+    showError({ title: "Delete Failed", message: "Failed to delete chat", error: e });
     return false;
   }
 }
@@ -127,7 +152,7 @@ export async function duplicateSession(sess: Session): Promise<Session | null> {
     await selectSession(forked);
     return forked;
   } catch (err) {
-    console.error("Failed to duplicate session:", err);
+    showError({ title: "Duplicate Failed", message: "Failed to duplicate chat", error: err });
     return null;
   }
 }
@@ -143,7 +168,7 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
     );
     return true;
   } catch (e) {
-    console.error("Failed to update session:", e);
+    showError({ title: "Update Failed", message: "Failed to update chat title", error: e });
     return false;
   }
 }
@@ -164,6 +189,7 @@ export async function toggleSessionPin(sess: Session): Promise<boolean> {
     callbacks?.setSidebarSessions(updated);
     return true;
   } catch (e) {
+    // Silent for pin toggle - not critical
     console.error("Failed to toggle session pin:", e);
     return false;
   }
@@ -185,6 +211,7 @@ export async function toggleSessionFavorite(sess: Session): Promise<boolean> {
     callbacks?.setSidebarSessions(updated);
     return true;
   } catch (e) {
+    // Silent for favorite toggle - not critical
     console.error("Failed to toggle session favorite:", e);
     return false;
   }
@@ -211,7 +238,7 @@ export async function toggleSessionArchive(sess: Session, showArchivedWorkspaces
     callbacks?.loadRecentChats();
     return true;
   } catch (err) {
-    console.error("Failed to toggle session archive:", err);
+    showError({ title: "Archive Failed", message: "Failed to toggle chat archive", error: err });
     return false;
   }
 }
@@ -221,6 +248,7 @@ export async function reorderSessions(projectId: string, sessionIds: string[]): 
     await api.sessions.reorder(projectId, sessionIds);
     return true;
   } catch (e) {
+    // Silent for reorder - not critical
     console.error("Failed to reorder sessions:", e);
     return false;
   }

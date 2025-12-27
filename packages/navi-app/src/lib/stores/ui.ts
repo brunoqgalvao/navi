@@ -10,6 +10,7 @@ const NEW_CHAT_VIEW_KEY = "claude-code-ui-new-chat-view";
 const SHOW_ARCHIVED_KEY = "claude-code-ui-show-archived";
 const TOUR_COMPLETE_KEY = "claude-code-ui-tours-complete";
 const CHAT_VIEW_MODE_KEY = "claude-code-ui-chat-view-mode";
+const UI_SCALE_KEY = "claude-code-ui-scale";
 
 // Onboarding store
 function createOnboardingStore() {
@@ -369,6 +370,72 @@ function createChatViewModeStore() {
   };
 }
 
+// UI Scale store (zoom level like browser 75%, 100%, etc.)
+export type UIScaleLevel = 75 | 80 | 85 | 90 | 95 | 100 | 105 | 110;
+const UI_SCALE_LEVELS: UIScaleLevel[] = [75, 80, 85, 90, 95, 100, 105, 110];
+
+function createUIScaleStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(UI_SCALE_KEY) : null;
+  const initial: UIScaleLevel = stored ? (parseInt(stored) as UIScaleLevel) : 100;
+  const { subscribe, set } = writable<UIScaleLevel>(UI_SCALE_LEVELS.includes(initial) ? initial : 100);
+
+  const applyScale = (scale: UIScaleLevel) => {
+    if (typeof document !== "undefined") {
+      document.documentElement.style.fontSize = `${scale}%`;
+    }
+  };
+
+  // Apply initial scale on load
+  if (typeof window !== "undefined") {
+    applyScale(initial);
+  }
+
+  return {
+    subscribe,
+    levels: UI_SCALE_LEVELS,
+    set: (scale: UIScaleLevel) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(UI_SCALE_KEY, String(scale));
+      }
+      applyScale(scale);
+      set(scale);
+    },
+    increase: () => {
+      let current: UIScaleLevel = 100;
+      subscribe(v => current = v)();
+      const idx = UI_SCALE_LEVELS.indexOf(current);
+      if (idx < UI_SCALE_LEVELS.length - 1) {
+        const newScale = UI_SCALE_LEVELS[idx + 1];
+        if (typeof window !== "undefined") {
+          localStorage.setItem(UI_SCALE_KEY, String(newScale));
+        }
+        applyScale(newScale);
+        set(newScale);
+      }
+    },
+    decrease: () => {
+      let current: UIScaleLevel = 100;
+      subscribe(v => current = v)();
+      const idx = UI_SCALE_LEVELS.indexOf(current);
+      if (idx > 0) {
+        const newScale = UI_SCALE_LEVELS[idx - 1];
+        if (typeof window !== "undefined") {
+          localStorage.setItem(UI_SCALE_KEY, String(newScale));
+        }
+        applyScale(newScale);
+        set(newScale);
+      }
+    },
+    reset: () => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(UI_SCALE_KEY, "100");
+      }
+      applyScale(100);
+      set(100);
+    },
+  };
+}
+
 // Export store instances
 export const onboardingComplete = createOnboardingStore();
 export const advancedMode = createAdvancedModeStore();
@@ -379,6 +446,7 @@ export const tour = createTourStore();
 export const notifications = createNotificationsStore();
 export const attachedFiles = createAttachedFilesStore();
 export const chatViewMode = createChatViewModeStore();
+export const uiScale = createUIScaleStore();
 export const isConnected = writable(false);
 
 // Derived stores
