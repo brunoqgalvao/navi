@@ -169,10 +169,10 @@
   </div>
 
   <!-- Terminal Content -->
-  <div class="flex-1 overflow-hidden flex flex-col">
+  <div class="flex-1 overflow-hidden flex flex-col bg-[#1a1b26]">
     {#if terminalTabs.length === 0}
       <!-- No terminals yet - show placeholder with button -->
-      <div class="flex-1 flex flex-col items-center justify-center gap-4 text-[#565f89]">
+      <div class="flex-1 flex flex-col items-center justify-center gap-4 text-[#565f89] bg-[#1a1b26]">
         <svg class="w-12 h-12 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <polyline points="4 17 10 11 4 5"></polyline>
           <line x1="12" y1="19" x2="20" y2="19"></line>

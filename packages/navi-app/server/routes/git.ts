@@ -272,7 +272,7 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
       const stagedFiles = execSync("git diff --cached --name-only", { cwd, encoding: "utf-8" }).trim();
 
       // Call ephemeral chat to generate message
-      const prompt = `Analyze this git diff and generate a commit message following the Conventional Commits specification.
+      const prompt = `Analyze this git diff and generate a commit message as a LIST of conventional commit lines - one line per distinct change.
 
 Files changed:
 ${stagedFiles}
@@ -282,40 +282,37 @@ Diff:
 ${truncatedDiff}
 \`\`\`
 
-## Conventional Commits Format
+## Format
 
-<type>[optional scope]: <description>
+Each line follows: <type>[optional scope]: <description>
 
-[optional body]
-
-## Types (choose ONE):
-- feat: A new feature (correlates with MINOR in SemVer)
-- fix: A bug fix (correlates with PATCH in SemVer)
-- docs: Documentation only changes
-- style: Changes that don't affect code meaning (white-space, formatting, etc)
-- refactor: Code change that neither fixes a bug nor adds a feature
-- perf: Code change that improves performance
-- test: Adding missing tests or correcting existing tests
-- build: Changes to build system or external dependencies
-- ci: Changes to CI configuration files and scripts
-- chore: Other changes that don't modify src or test files
+## Types:
+- feat: A new feature
+- fix: A bug fix
+- docs: Documentation only
+- style: Formatting, no code change
+- refactor: Code restructuring
+- perf: Performance improvement
+- test: Adding/fixing tests
+- build: Build system changes
+- ci: CI config changes
+- chore: Other maintenance
 
 ## Rules:
-1. First line (subject): max 50 characters, imperative mood ("add" not "added")
-2. Scope is optional but helpful: feat(auth): or fix(api):
-3. No period at the end of the subject line
-4. Separate subject from body with a blank line (if body is needed)
-5. Body should explain WHAT and WHY, not HOW
-6. Use BREAKING CHANGE: in footer for breaking changes (adds ! after type)
+1. One line per distinct change/feature/fix
+2. Each line max 72 characters
+3. Imperative mood ("add" not "added")
+4. No periods at end
+5. Scope is optional: feat(auth): or fix(api):
 
-## Examples:
-- feat(git): add commit message generation with AI
-- fix: resolve null pointer in user authentication
-- refactor(api): extract validation logic into separate module
-- docs: update README with installation instructions
-- feat!: drop support for Node 12
+## Example output for a commit with multiple changes:
 
-IMPORTANT: Respond with ONLY the commit message. No explanations, no markdown formatting, no quotes.`;
+feat(git): add AI commit message generation
+fix(auth): resolve token refresh race condition
+refactor(api): extract validation into middleware
+style: format sidebar components
+
+IMPORTANT: Output ONLY the list of commit lines, one per line. No explanations, no markdown, no bullets, no dashes at the start. Just the conventional commit lines.`;
 
       const systemPrompt = "You are an expert at writing git commit messages following the Conventional Commits specification. Output ONLY the commit message, nothing else. No markdown, no quotes, no explanations.";
 
@@ -326,7 +323,7 @@ IMPORTANT: Respond with ONLY the commit message. No explanations, no markdown fo
         body: JSON.stringify({
           prompt,
           systemPrompt,
-          maxTokens: 150,
+          maxTokens: 1000,
           projectPath: cwd,
         }),
       });

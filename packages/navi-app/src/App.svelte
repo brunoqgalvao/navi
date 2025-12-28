@@ -192,6 +192,7 @@
   let recentChats = $state<Session[]>([]);
   let workspaceFolders = $state<WorkspaceFolder[]>([]);
   let showNewProjectModal = $state(false);
+  let newProjectTargetFolderId = $state<string | null>(null);
   let newProjectName = $state("");
   let newProjectPath = $state("");
   let newProjectQuickName = $state("");
@@ -849,27 +850,35 @@
           name: newProjectQuickName.trim(),
           path: fullPath
         });
+        if (newProjectTargetFolderId) {
+          await setProjectFolder(newProject.id, newProjectTargetFolderId);
+        }
         await loadProjects();
         selectProject(newProject);
         showNewProjectModal = false;
         newProjectQuickName = "";
+        newProjectTargetFolderId = null;
       } catch (e: any) {
         console.error("Failed to create project:", e);
         alert(`Failed to create project: ${e.message}`);
       }
     } else {
       if (!newProjectName || !newProjectPath) return;
-      
+
       try {
         const newProject = await api.projects.create({
           name: newProjectName,
           path: newProjectPath
         });
+        if (newProjectTargetFolderId) {
+          await setProjectFolder(newProject.id, newProjectTargetFolderId);
+        }
         await loadProjects();
         selectProject(newProject);
         showNewProjectModal = false;
         newProjectName = "";
         newProjectPath = "";
+        newProjectTargetFolderId = null;
       } catch (e: any) {
         console.error("Failed to create project:", e);
         alert(`Failed to create project: ${e.message}`);
@@ -1809,7 +1818,7 @@
     onSelectSession={selectSession}
     onCreateNewChat={createNewChatAction}
     onGoToChat={goToChat}
-    onNewProjectModal={() => showNewProjectModal = true}
+    onNewProjectModal={() => { newProjectTargetFolderId = null; showNewProjectModal = true; }}
     onSettings={() => showSettings = true}
     onSearchModal={() => showSearchModal = true}
     onHotkeysHelp={() => showHotkeysHelp = true}
@@ -1852,6 +1861,7 @@
     onProjectSetFolder={setProjectFolder}
     onFolderReorder={reorderFolders}
     onToggleFolderPin={toggleFolderPin}
+    onNewProjectInFolder={(folderId) => { newProjectTargetFolderId = folderId; showNewProjectModal = true; }}
     bind:titleSuggestionRef
   />
 
@@ -2070,7 +2080,7 @@
   <NewProjectModal
     open={showNewProjectModal}
     {defaultProjectsDir}
-    onClose={() => showNewProjectModal = false}
+    onClose={() => { showNewProjectModal = false; newProjectTargetFolderId = null; }}
     onCreate={createProject}
     onPickDirectory={pickDirectory}
     {projectCreationMode}

@@ -56,6 +56,7 @@
     onProjectSetFolder: (projectId: string, folderId: string | null) => void;
     onFolderReorder: (order: string[]) => void;
     onToggleFolderPin: (folder: WorkspaceFolder, e: Event) => void;
+    onNewProjectInFolder: (folderId: string) => void;
     titleSuggestionRef?: TitleSuggestion | null;
   }
 
@@ -106,6 +107,7 @@
     onProjectSetFolder,
     onFolderReorder,
     onToggleFolderPin,
+    onNewProjectInFolder,
     titleSuggestionRef = $bindable(null),
   }: Props = $props();
 
@@ -120,6 +122,14 @@
       if (!a.favorite && b.favorite) return 1;
       return 0;
     })
+  );
+
+  // Chats with pending actions (permission required or running) across all projects
+  let pendingActionChats = $derived(
+    recentChats.filter(chat => {
+      const status = $sessionStatus.get(chat.id);
+      return status?.status === "permission" || status?.status === "running";
+    }).slice(0, 5)
   );
 
   let draggedProjectId = $state<string | null>(null);
@@ -525,6 +535,13 @@
         <div class="flex items-center justify-between mb-2 mt-2 px-2">
           <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Workspaces</h3>
           <div class="flex items-center gap-1">
+            <button
+              onclick={() => showArchivedWorkspaces.toggle()}
+              class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors {$showArchivedWorkspaces ? 'bg-gray-200 text-gray-600' : ''}"
+              title={$showArchivedWorkspaces ? 'Hide archived' : 'Show archived'}
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+            </button>
             <button onclick={() => showNewFolderInput = true} class="text-[10px] font-medium text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded transition-colors" title="New folder">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
             </button>
@@ -574,6 +591,7 @@
                   ondragleave={(e) => { handleFolderDragLeave(e); handleFolderReorderDragLeave(e); }}
                   ondrop={(e) => { handleFolderDrop(e, folder.id); handleFolderReorderDrop(e, folder); }}
                   onclick={() => editingFolderId !== folder.id && onFolderToggleCollapse(folder.id, !folder.collapsed)}
+                  oncontextmenu={(e) => { e.preventDefault(); folderMenuId = folder.id; }}
                 >
                   <div class="p-0.5 text-gray-400">
                     <svg class="w-3 h-3 transition-transform {folder.collapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
@@ -600,7 +618,12 @@
                       <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
                     </button>
                     {#if folderMenuId === folder.id}
-                      <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[120px] z-50">
+                      <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px] z-50">
+                        <button onclick={(e) => { e.stopPropagation(); onNewProjectInFolder(folder.id); folderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
+                          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"></path></svg>
+                          New Workspace
+                        </button>
+                        <div class="border-t border-gray-100 my-1"></div>
                         <button onclick={(e) => startEditFolder(folder, e)} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
                           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                           Rename
@@ -743,6 +766,28 @@
                     </div>
                   </div>
                 </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if pendingActionChats.length > 0}
+          <div class="mt-4">
+            <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1 px-2 flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
+              Pending Actions
+            </h3>
+            <div class="space-y-0">
+              {#each pendingActionChats as chat}
+                <button onclick={() => onGoToChat(chat)} class="w-full text-left px-2 py-1.5 rounded text-gray-600 hover:bg-amber-50 hover:text-gray-800 transition-colors flex items-center gap-1.5 border-l-2 border-amber-400 ml-1">
+                  <svg class="w-2.5 h-2.5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                  <span class="text-[11px] truncate flex-1 font-medium">{chat.title}</span>
+                  {#if $sessionStatus.get(chat.id)?.status === "running"}
+                    <svg class="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                  {:else if $sessionStatus.get(chat.id)?.status === "permission"}
+                    <span class="w-2 h-2 bg-amber-500 rounded-full animate-pulse shrink-0" title="Permission required"></span>
+                  {/if}
+                </button>
               {/each}
             </div>
           </div>

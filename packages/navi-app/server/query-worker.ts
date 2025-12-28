@@ -424,10 +424,15 @@ async function runQuery(input: WorkerInput) {
     console.error(`[Worker] API key prefix: ${authOverrides.apiKey.slice(0, 8)}...`);
   }
   if (authOverrides.baseUrl) {
-    console.error(`[Worker] Base URL: ${authOverrides.baseUrl}`);
+    console.error(`[Worker] Base URL override: ${authOverrides.baseUrl}`);
   }
 
   const claudeEnv = buildClaudeCodeEnv(process.env, authOverrides);
+
+  // Debug: confirm what's being passed to Claude Code subprocess
+  console.error(`[Worker] claudeEnv.ANTHROPIC_API_KEY: ${claudeEnv.ANTHROPIC_API_KEY ? claudeEnv.ANTHROPIC_API_KEY.slice(0, 8) + "..." : "NOT SET"}`);
+  console.error(`[Worker] claudeEnv.ANTHROPIC_BASE_URL: ${claudeEnv.ANTHROPIC_BASE_URL || "NOT SET"}`);
+  console.error(`[Worker] Model requested: ${model || "default"}`);
   const runtimeOptions = getClaudeCodeRuntimeOptions();
 
   const canUseTool = async (
