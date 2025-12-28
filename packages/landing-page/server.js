@@ -220,6 +220,150 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// ============================================
+// OTA Update Endpoints for Tauri Updater
+// ============================================
+
+// Initialize releases table
+async function initReleasesTable() {
+  if (!sql) return;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS releases (
+      id SERIAL PRIMARY KEY,
+      version TEXT UNIQUE NOT NULL,
+      notes TEXT,
+      pub_date TIMESTAMPTZ DEFAULT NOW(),
+      platforms JSONB NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  console.log('Releases table initialized');
+}
+
+// Call after main initDatabase
+if (DATABASE_URL) {
+  initReleasesTable().catch(console.error);
+}
+
+// Public endpoint - returns latest release for Tauri updater
+app.get('/api/updates/latest.json', async (req, res) => {
+  // Set CORS headers for Tauri app
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+
+  if (!sql) {
+    return res.status(503).json({ error: 'Database not configured' });
+  }
+
+  try {
+    const [release] = await sql`
+      SELECT version, notes, pub_date, platforms
+      FROM releases
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    if (!release) {
+      return res.status(404).json({ error: 'No releases found' });
+    }
+
+    // Format for Tauri updater
+    res.json({
+      version: release.version,
+      notes: release.notes || `Release ${release.version}`,
+      pub_date: release.pub_date,
+      platforms: release.platforms
+    });
+  } catch (err) {
+    console.error('Failed to get latest release:', err);
+    res.status(500).json({ error: 'Failed to get release info' });
+  }
+});
+
+// Admin endpoint - create new release
+app.post('/api/releases', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { version, notes, platforms } = req.body;
+
+  if (!version || !platforms) {
+    return res.status(400).json({ error: 'Version and platforms are required' });
+  }
+
+  if (!sql) {
+    console.log(`[NO DB] New release: ${version}`);
+    return res.json({ success: true, version });
+  }
+
+  try {
+    await sql`
+      INSERT INTO releases (version, notes, platforms)
+      VALUES (${version}, ${notes || ''}, ${JSON.stringify(platforms)})
+      ON CONFLICT (version) DO UPDATE SET
+        notes = EXCLUDED.notes,
+        platforms = EXCLUDED.platforms,
+        pub_date = NOW()
+    `;
+
+    console.log(`New release published: ${version}`);
+    res.json({ success: true, version });
+  } catch (err) {
+    console.error('Failed to create release:', err);
+    res.status(500).json({ error: 'Failed to create release' });
+  }
+});
+
+// Admin endpoint - list all releases
+app.get('/api/releases', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!sql) {
+    return res.json({ releases: [], message: 'Database not configured' });
+  }
+
+  try {
+    const releases = await sql`
+      SELECT id, version, notes, pub_date, platforms, created_at
+      FROM releases
+      ORDER BY created_at DESC
+    `;
+    res.json({ count: releases.length, releases });
+  } catch (err) {
+    console.error('Failed to list releases:', err);
+    res.status(500).json({ error: 'Failed to list releases' });
+  }
+});
+
+// Admin endpoint - delete a release
+app.delete('/api/releases/:version', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { version } = req.params;
+
+  if (!sql) {
+    return res.json({ success: true });
+  }
+
+  try {
+    await sql`DELETE FROM releases WHERE version = ${version}`;
+    console.log(`Release deleted: ${version}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to delete release:', err);
+    res.status(500).json({ error: 'Failed to delete release' });
+  }
+});
+
 app.get('/downloads/*', (req, res) => {
   const filePath = path.join(__dirname, 'dist', req.path);
   res.download(filePath);

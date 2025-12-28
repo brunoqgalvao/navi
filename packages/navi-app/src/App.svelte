@@ -98,6 +98,7 @@
   import SessionDebug from "./lib/components/SessionDebug.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
+  import UpdateChecker from "./lib/components/UpdateChecker.svelte";
   import ProjectEmptyState from "./lib/components/ProjectEmptyState.svelte";
   import NewProjectModal from "./lib/components/NewProjectModal.svelte";
   import ProjectPermissionsModal from "./lib/components/ProjectPermissionsModal.svelte";
@@ -641,16 +642,52 @@
       messageHandler.handleMessage(msg);
     });
 
-    // Restore state from URL hash on load
+    // Restore state from URL hash on load (e.g., when opening in new window)
     const initialRoute = parseHash();
     if (initialRoute.projectId) {
-      session.restoreFromUrl(initialRoute.projectId, initialRoute.sessionId);
-      // Load sessions for the restored project
-      if (initialRoute.projectId) {
-        api.sessions.list(initialRoute.projectId).then(sessions => {
-          sidebarSessions = sessions;
-        }).catch(e => console.error("Failed to load sessions from URL:", e));
-      }
+      // Wait for projects to load, then properly initialize the project
+      const initProjectFromUrl = async () => {
+        // Give projects a moment to load
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Find the project in the loaded list
+        const projectsList = get(projects);
+        const project = projectsList.find(p => p.id === initialRoute.projectId);
+
+        if (project) {
+          // Fully initialize the project (like selectProject does)
+          session.setProject(project.id);
+
+          try {
+            const sessionsList = await api.sessions.list(project.id, $showArchivedWorkspaces);
+            sidebarSessions = sessionsList;
+
+            // Load project context and files
+            indexProjectFiles(project.path);
+            loadProjectContext(project);
+            loadClaudeMd(project.path);
+            loadProjectCost(project.id);
+
+            // If a specific session was requested, select it
+            if (initialRoute.sessionId) {
+              const targetSession = sessionsList.find(s => s.id === initialRoute.sessionId);
+              if (targetSession) {
+                selectSession(targetSession, true);
+              }
+            }
+          } catch (e) {
+            console.error("Failed to initialize project from URL:", e);
+          }
+        } else {
+          // Fallback: just set the session store
+          session.restoreFromUrl(initialRoute.projectId, initialRoute.sessionId);
+          api.sessions.list(initialRoute.projectId).then(sessions => {
+            sidebarSessions = sessions;
+          }).catch(e => console.error("Failed to load sessions from URL:", e));
+        }
+      };
+
+      initProjectFromUrl();
     }
 
     // Listen for back/forward navigation
@@ -1172,7 +1209,7 @@
     const newPinned = !proj.pinned;
     try {
       await api.projects.togglePin(proj.id, newPinned);
-      sidebarProjects = sidebarProjects.map(p => 
+      sidebarProjects = sidebarProjects.map(p =>
         p.id === proj.id ? { ...p, pinned: newPinned ? 1 : 0 } : p
       ).sort((a, b) => {
         if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
@@ -1180,6 +1217,29 @@
       });
     } catch (e) {
       console.error("Failed to toggle project pin:", e);
+    }
+  }
+
+  async function openProjectInNewWindow(project: Project) {
+    if (!isTauri) {
+      // In browser mode, open in a new browser tab
+      window.open(`#/project/${project.id}`, '_blank');
+      return;
+    }
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_project_in_new_window", {
+        projectId: project.id,
+        projectName: project.name
+      });
+    } catch (e) {
+      console.error("Failed to open project in new window:", e);
+      notifications.show({
+        title: "Error",
+        message: "Failed to open project in new window",
+        type: "error"
+      });
     }
   }
 
@@ -1275,24 +1335,31 @@
       alert("Failed to update chat name");
     }
   }
+  let isProgrammaticScroll = false;
+
   function scrollToBottom(instant = false) {
     // Only auto-scroll if user is near the bottom, or if it's an instant scroll (session switch)
     if (!instant && !userIsNearBottom) return;
 
+    isProgrammaticScroll = true;
     setTimeout(() => {
       messagesContainer?.scrollTo({
         top: messagesContainer.scrollHeight,
         behavior: instant ? "instant" : "smooth",
       });
-      // Don't reset userIsNearBottom here - let handleMessagesScroll determine it
+      // Reset flag after scroll animation completes
+      setTimeout(() => { isProgrammaticScroll = false; }, instant ? 50 : 300);
     }, instant ? 0 : 50);
   }
 
   function handleMessagesScroll() {
     if (!messagesContainer) return;
+    // Ignore scroll events triggered by our own scrollToBottom
+    if (isProgrammaticScroll) return;
+
     const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
-    // Consider "near bottom" if within 300px of the bottom (more forgiving threshold)
-    userIsNearBottom = scrollHeight - scrollTop - clientHeight < 300;
+    // User scrolled - are they at the very bottom? (within 20px tolerance for rounding)
+    userIsNearBottom = scrollHeight - scrollTop - clientHeight < 20;
   }
 
   function processMessageQueue(sessionId: string) {
@@ -1941,6 +2008,7 @@
     onFolderReorder={reorderFolders}
     onToggleFolderPin={toggleFolderPin}
     onNewProjectInFolder={(folderId) => { newProjectTargetFolderId = folderId; showNewProjectModal = true; }}
+    onOpenProjectInNewWindow={openProjectInNewWindow}
     bind:titleSuggestionRef
   />
 
@@ -2392,6 +2460,7 @@
 {/if}
 
 <NotificationToast />
+<UpdateChecker />
 
 <style>
 
