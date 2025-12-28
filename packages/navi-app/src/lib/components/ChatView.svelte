@@ -1,5 +1,6 @@
 <script lang="ts">
   import UserMessage from "./UserMessage.svelte";
+  import UserCommandMessage from "./UserCommandMessage.svelte";
   import AssistantMessage from "./AssistantMessage.svelte";
   import PermissionRequest from "./PermissionRequest.svelte";
   import TodoProgress from "./TodoProgress.svelte";
@@ -165,8 +166,16 @@
     {/if}
 
     {#each getVisibleMessages() as msg, idx (msg.id)}
-      <div class="group flex flex-col {msg.role === 'user' ? 'items-end' : 'items-start'}">
-        {#if msg.role === 'user'}
+      <div class="group flex flex-col {msg.role === 'user' && !msg.inlineCommand ? 'items-end' : 'items-start'}">
+        {#if msg.role === 'user' && msg.inlineCommand}
+          <UserCommandMessage
+            command={msg.inlineCommand.command}
+            cwd={msg.inlineCommand.cwd || projectPath}
+            timestamp={msg.timestamp}
+            onOpenInDock={onRunInTerminal}
+            {onSendToClaude}
+          />
+        {:else if msg.role === 'user'}
           <UserMessage
             content={formatUserContent(msg.content)}
             timestamp={msg.timestamp}

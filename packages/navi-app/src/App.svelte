@@ -1365,13 +1365,21 @@
     }
   }
 
-  // Handle ! commands - run in terminal
   function handleExecCommand(command: string) {
     if (!command.trim()) return;
-    // Open terminal in dock with the command
-    terminalInitialCommand = command;
-    showTerminal = true;
-    rightPanelMode = "terminal";
+    if (!$session.sessionId) return;
+    
+    const msg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: `!${command}`,
+      timestamp: new Date(),
+      inlineCommand: {
+        command,
+        cwd: currentProject?.path,
+      },
+    };
+    sessionMessages.addMessage($session.sessionId, msg);
   }
 
   // Handle "Send to Claude" from Terminal Panel in Dock (auto-sends)

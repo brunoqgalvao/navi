@@ -1,5 +1,5 @@
 import express from 'express';
-import { appendFileSync, existsSync, readFileSync } from 'fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 8080;
 const EMAILS_FILE = '/tmp/emails.txt';
+const FEEDBACK_FILE = '/tmp/feedback.json';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
@@ -36,7 +37,7 @@ app.get('/api/subscribers', (req, res) => {
   if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  
+
   try {
     if (existsSync(EMAILS_FILE)) {
       const content = readFileSync(EMAILS_FILE, 'utf-8');
@@ -47,6 +48,60 @@ app.get('/api/subscribers', (req, res) => {
     }
   } catch (err) {
     res.status(500).json({ error: 'Failed to read subscribers' });
+  }
+});
+
+// Feedback endpoint
+app.post('/api/feedback', (req, res) => {
+  const { type, title, description, email, systemInfo } = req.body;
+
+  if (!title || !description) {
+    return res.status(400).json({ error: 'Title and description are required' });
+  }
+
+  const feedback = {
+    id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+    type: type || 'general',
+    title,
+    description,
+    email: email || null,
+    systemInfo: systemInfo || null,
+    createdAt: new Date().toISOString()
+  };
+
+  try {
+    let feedbackList = [];
+    if (existsSync(FEEDBACK_FILE)) {
+      const content = readFileSync(FEEDBACK_FILE, 'utf-8');
+      feedbackList = JSON.parse(content);
+    }
+    feedbackList.push(feedback);
+    writeFileSync(FEEDBACK_FILE, JSON.stringify(feedbackList, null, 2));
+
+    console.log(`New feedback [${type}]: ${title}`);
+    res.json({ success: true, id: feedback.id });
+  } catch (err) {
+    console.error('Failed to save feedback:', err);
+    res.status(500).json({ error: 'Failed to save feedback' });
+  }
+});
+
+app.get('/api/feedback', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    if (existsSync(FEEDBACK_FILE)) {
+      const content = readFileSync(FEEDBACK_FILE, 'utf-8');
+      const feedback = JSON.parse(content);
+      res.json({ count: feedback.length, feedback });
+    } else {
+      res.json({ count: 0, feedback: [] });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read feedback' });
   }
 });
 

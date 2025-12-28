@@ -287,8 +287,8 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div 
-  class="relative group bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border transition-shadow focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] {isDraggingOver ? 'border-blue-400 bg-blue-50/30' : 'border-gray-200 focus-within:border-gray-300'}" 
+<div
+  class="relative group rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border transition-all duration-200 {isShellCommand(value) ? 'bg-[#1a1b26] border-[#3d59a1] focus-within:border-[#7aa2f7] shadow-[0_8px_30px_rgb(0,0,0,0.3)]' : 'bg-white focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)]'} {isDraggingOver ? 'border-blue-400 bg-blue-50/30' : isShellCommand(value) ? '' : 'border-gray-200 focus-within:border-gray-300'}"
   ondragenter={handleDragEnter}
   ondragleave={handleDragLeave}
   ondragover={handleDragOver}
@@ -318,15 +318,21 @@
   {/if}
 
   <div class="relative">
+    {#if isShellCommand(value)}
+      <div class="absolute left-3 top-2 flex items-center gap-1.5 text-[10px] font-medium text-[#7aa2f7] bg-[#1a1b26] border border-[#3d59a1] px-2 py-0.5 rounded z-10 font-mono">
+        <span class="text-[#9ece6a]">$</span>
+        <span>terminal</span>
+      </div>
+    {/if}
     <textarea
       bind:this={inputRef}
       bind:value
       onkeydown={handleKeydown}
       oninput={handleInput}
       onpaste={handlePaste}
-      placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : "Message Claude... (@ to attach files)"}
+      placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : "Message Claude... (@ to attach files, ! for shell)"}
       {disabled}
-      class="w-full bg-transparent text-gray-900 placeholder-gray-400 border-none rounded-xl pl-4 pr-24 py-3.5 focus:outline-none focus:ring-0 resize-none min-h-[56px] text-[15px] disabled:opacity-50 overflow-y-auto"
+      class="w-full bg-transparent border-none rounded-xl pl-4 pr-24 {isShellCommand(value) ? 'pt-8 text-[#c0caf5] placeholder-[#565f89] font-mono' : 'pt-3.5 text-gray-900 placeholder-gray-400'} pb-3.5 focus:outline-none focus:ring-0 resize-none min-h-[56px] text-[15px] disabled:opacity-50 overflow-y-auto"
       rows="1"
     ></textarea>
 
@@ -381,13 +387,12 @@
       <button
         onclick={handleSubmit}
         disabled={disabled || !value.trim()}
-        class="p-1.5 text-gray-400 bg-transparent rounded-lg hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-        title={isShellCommand(value) ? "Run command (!)" : "Send message"}
+        class="p-1.5 rounded-lg transition-all disabled:opacity-30 {isShellCommand(value) ? 'text-[#9ece6a] hover:bg-[#9ece6a]/20' : 'text-gray-400 bg-transparent hover:bg-gray-100 hover:text-gray-900 disabled:hover:bg-transparent'}"
+        title={isShellCommand(value) ? "Run command (Enter)" : "Send message"}
       >
         {#if isShellCommand(value)}
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <polyline points="4 17 10 11 4 5"></polyline>
-            <line x1="12" y1="19" x2="20" y2="19"></line>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
           </svg>
         {:else}
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
