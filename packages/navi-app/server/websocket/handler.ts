@@ -8,6 +8,7 @@ import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "..
 import { generateChatTitle } from "../services/title-generator";
 import { hasMessageContent, shouldPersistUserMessage, safeSend } from "../services/message-helpers";
 import { handlePtyWebSocket, detachFromAllTerminals, cleanupWsExec, type PtyMessage } from "../routes/terminal";
+import { resolveNaviClaudeAuth, formatAuthForLog } from "../utils/navi-auth";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -164,8 +165,9 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
   const workingDirectory = project?.path || process.cwd();
+  const workerCwd = join(__dirname, "..");
 
-  console.log(`[${sessionId}] Spawning worker process in ${workingDirectory}`);
+  console.log(`[${sessionId}] Spawning worker process (cwd: ${workerCwd}) for project ${workingDirectory}`);
 
   const permissionSettings = globalSettings.getPermissions();
 
@@ -198,29 +200,29 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
     },
   });
 
-  const preferredAuth = globalSettings.get("preferredAuth") as "oauth" | "api_key" | null;
-  const storedApiKey = globalSettings.get("anthropicApiKey") || process.env.ANTHROPIC_API_KEY;
-  const zaiApiKey = (globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY) as string | null;
-
   const workerEnv = { ...process.env };
   delete workerEnv.ANTHROPIC_API_KEY;
   delete workerEnv.ANTHROPIC_BASE_URL;
+  delete workerEnv.NAVI_ANTHROPIC_API_KEY;
+  delete workerEnv.NAVI_ANTHROPIC_BASE_URL;
 
-  const isGlmModel = model?.startsWith("glm-");
+  const authResult = resolveNaviClaudeAuth(model);
+  console.log(`[${sessionId}] ${formatAuthForLog(authResult)}`);
 
-  if (isGlmModel && zaiApiKey) {
-    workerEnv.ANTHROPIC_API_KEY = zaiApiKey;
-    workerEnv.ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
-    console.log(`[${sessionId}] Using Z.AI provider for model ${model}`);
-  } else if (preferredAuth === "api_key" && storedApiKey) {
-    workerEnv.ANTHROPIC_API_KEY = storedApiKey;
-    console.log(`[${sessionId}] Using API key auth`);
-  } else {
-    console.log(`[${sessionId}] Using OAuth auth`);
+  if (authResult.overrides.apiKey) {
+    workerEnv.NAVI_ANTHROPIC_API_KEY = authResult.overrides.apiKey;
   }
+  if (authResult.overrides.baseUrl) {
+    workerEnv.NAVI_ANTHROPIC_BASE_URL = authResult.overrides.baseUrl;
+  }
+  // Pass auth mode to worker for its own logging
+  workerEnv.NAVI_AUTH_MODE = authResult.mode;
+  workerEnv.NAVI_AUTH_SOURCE = authResult.source;
 
-  const child = spawn("bun", ["run", workerPath, inputJson], {
-    cwd: workingDirectory,
+  // Avoid running Bun from the project directory, and disable Bun dotenv loading.
+  // The worker (and the Claude Code subprocess it spawns) must never pick up project-local `.env` auth.
+  const child = spawn("bun", ["run", "--env-file=/dev/null", workerPath, inputJson], {
+    cwd: workerCwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: workerEnv,
   });

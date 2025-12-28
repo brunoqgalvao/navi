@@ -3,6 +3,7 @@ import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions, getNaviAuthOverridesFromEnv } from "./utils/claude-code";
 
 interface SkillInfo {
   name: string;
@@ -407,12 +408,27 @@ let sessionApprovedAll = false;
 
 async function runQuery(input: WorkerInput) {
   const { prompt, cwd, resume, model, allowedTools, sessionId, permissionSettings } = input;
-  
-  const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
-  console.error(`[Worker] Auth method: ${hasApiKey ? "API_KEY" : "OAuth"}`);
-  if (hasApiKey) {
-    console.error(`[Worker] API Key prefix: ${process.env.ANTHROPIC_API_KEY?.slice(0, 10)}...`);
+
+  // Clear any stray API keys from environment - Navi controls auth exclusively
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_BASE_URL;
+
+  // Get auth config passed from handler
+  const authMode = process.env.NAVI_AUTH_MODE || "unknown";
+  const authSource = process.env.NAVI_AUTH_SOURCE || "unknown";
+  const authOverrides = getNaviAuthOverridesFromEnv(process.env);
+
+  console.error(`[Worker] Auth mode: ${authMode.toUpperCase()}`);
+  console.error(`[Worker] Auth source: ${authSource}`);
+  if (authOverrides.apiKey) {
+    console.error(`[Worker] API key prefix: ${authOverrides.apiKey.slice(0, 8)}...`);
   }
+  if (authOverrides.baseUrl) {
+    console.error(`[Worker] Base URL: ${authOverrides.baseUrl}`);
+  }
+
+  const claudeEnv = buildClaudeCodeEnv(process.env, authOverrides);
+  const runtimeOptions = getClaudeCodeRuntimeOptions();
 
   const canUseTool = async (
     toolName: string,
@@ -502,6 +518,8 @@ async function runQuery(input: WorkerInput) {
         model,
         tools: allTools,
         allowedTools: permissionSettings?.autoAcceptAll ? allTools : autoAllowedTools,
+        env: claudeEnv,
+        ...runtimeOptions,
         permissionMode: "default",
         canUseTool,
         settingSources: ['user', 'project', 'local'] as const,
@@ -521,11 +539,17 @@ async function runQuery(input: WorkerInput) {
       send({ type: "message", data: formatted });
 
       if (msg.type === "system" && (msg as any).subtype === "init") {
-        console.error(`[Worker] Skills loaded:`, (msg as any).skills);
+        const initMsg = msg as any;
+        console.error(`[Worker] SDK init received:`);
+        console.error(`[Worker]   apiKeySource: ${initMsg.apiKeySource || "not reported"}`);
+        console.error(`[Worker]   model: ${initMsg.model}`);
+        console.error(`[Worker]   tools: ${initMsg.tools?.length || 0}`);
+        console.error(`[Worker]   skills: ${initMsg.skills?.join(", ") || "none"}`);
       }
 
       if (msg.type === "assistant") {
         lastAssistantContent = msg.message.content;
+        console.error(`[Worker] Assistant content:`, JSON.stringify(lastAssistantContent, null, 2));
         const usage = (msg as any).message?.usage;
         if (!msg.parent_tool_use_id && usage) {
           lastAssistantUsage = usage;
@@ -533,6 +557,7 @@ async function runQuery(input: WorkerInput) {
       }
       if (msg.type === "result") {
         resultData = msg;
+        console.error(`[Worker] Result:`, JSON.stringify(resultData, null, 2));
       }
     }
 

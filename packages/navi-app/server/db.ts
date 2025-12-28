@@ -109,6 +109,9 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN archived INTEGER DEFAULT 0");
   } catch {}
   try {
+    db.run("ALTER TABLE sessions ADD COLUMN marked_for_review INTEGER DEFAULT 0");
+  } catch {}
+  try {
     db.run("ALTER TABLE workspace_folders ADD COLUMN pinned INTEGER DEFAULT 0");
   } catch {}
   try {
@@ -264,6 +267,7 @@ export interface Session {
   auto_accept_all: number;
   favorite: number;
   archived: number;
+  marked_for_review: number;
   created_at: number;
   updated_at: number;
 }
@@ -444,6 +448,8 @@ export const sessions = {
     run("UPDATE sessions SET archived = ?, updated_at = ? WHERE project_id = ?", [archived ? 1 : 0, Date.now(), projectId]),
   setArchived: (id: string, archived: boolean) =>
     run("UPDATE sessions SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
+  setMarkedForReview: (id: string, markedForReview: boolean) =>
+    run("UPDATE sessions SET marked_for_review = ?, updated_at = ? WHERE id = ?", [markedForReview ? 1 : 0, Date.now(), id]),
 };
 
 export const messages = {

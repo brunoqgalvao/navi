@@ -133,6 +133,16 @@
 
   const toolResults = $derived(getToolResults());
   const assistantMessages = $derived(getAssistantMessages());
+
+  // Debug logging
+  $effect(() => {
+    if (open) {
+      console.log("[SubagentModal] toolUseId:", toolUseId);
+      console.log("[SubagentModal] messages received:", messages.length);
+      console.log("[SubagentModal] messages:", messages);
+      console.log("[SubagentModal] assistant messages:", assistantMessages.length);
+    }
+  });
 </script>
 
 <Modal {open} {onClose} title="" size="full">

@@ -1,6 +1,8 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { json } from "../utils/response";
 import { projects, sessions, searchIndex } from "../db";
+import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
+import { resolveNaviClaudeAuth } from "../utils/navi-auth";
 
 export async function handleProjectRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/projects") {
@@ -125,6 +127,8 @@ export async function handleProjectRoutes(url: URL, method: string, req: Request
             allowedTools: ["Read", "Glob", "Grep"],
             maxTurns: 3,
             settingSources: ['project'],
+            env: buildClaudeCodeEnv(process.env, resolveNaviClaudeAuth().overrides),
+            ...getClaudeCodeRuntimeOptions(),
           },
         });
 

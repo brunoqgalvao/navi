@@ -118,7 +118,9 @@
   }
 
   function getSubagentForTool(toolUseId: string): ChatMessage[] {
-    return subagentUpdates.filter(u => u.parentToolUseId === toolUseId);
+    const filtered = subagentUpdates.filter(u => u.parentToolUseId === toolUseId);
+    console.log("[AssistantMessage] getSubagentForTool:", toolUseId, "subagentUpdates:", subagentUpdates.length, "filtered:", filtered.length);
+    return filtered;
   }
 
   function renderTextContent(text: string) {

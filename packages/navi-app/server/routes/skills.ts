@@ -125,9 +125,9 @@ Return ONLY valid JSON, no markdown code blocks.`;
 ${content.slice(0, 8000)}`;
 
   try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = globalSettings.get("anthropicApiKey") as string | null;
     if (!apiKey) {
-      throw new Error("No API key available for AI conversion");
+      throw new Error("No API key configured. Please set an API key in settings.");
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {

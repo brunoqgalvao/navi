@@ -40,6 +40,7 @@
     onDuplicateSession: (session: Session, e: Event) => void;
     onToggleSessionFavorite: (session: Session, e: Event) => void;
     onToggleSessionArchive: (session: Session, e: Event) => void;
+    onToggleSessionMarkedForReview: (session: Session, e: Event) => void;
     onProjectReorder: (order: string[]) => void;
     onSessionReorder: (order: string[]) => void;
     onModelSelect: (model: string) => void;
@@ -89,6 +90,7 @@
     onDuplicateSession,
     onToggleSessionFavorite,
     onToggleSessionArchive,
+    onToggleSessionMarkedForReview,
     onProjectReorder,
     onSessionReorder,
     onModelSelect,
@@ -911,7 +913,17 @@
                   {:else if $sessionStatus.get(sess.id)?.status === "unread"}
                     <span class="w-2 h-2 bg-gray-400 rounded-full" title="New results"></span>
                   {/if}
-                  
+
+                  {#if sess.marked_for_review}
+                    <button
+                      onclick={(e) => onToggleSessionMarkedForReview(sess, e)}
+                      class="p-0.5 text-blue-500 hover:text-blue-600 transition-colors"
+                      title="Marked for review - click to clear"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                    </button>
+                  {/if}
+
                   <StarButton active={!!sess.favorite} onclick={(e) => onToggleSessionFavorite(sess, e)} />
 
                   <div class="relative">
@@ -937,6 +949,10 @@
                             Suggest title
                           </button>
                         {/if}
+                        <button onclick={(e) => { onToggleSessionMarkedForReview(sess, e); sessionMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                          {sess.marked_for_review ? 'Clear review mark' : 'Mark for review'}
+                        </button>
                         <button onclick={(e) => { onToggleSessionArchive(sess, e); sessionMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
                           {sess.archived ? 'Unarchive' : 'Archive'}

@@ -1,6 +1,8 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { json } from "../utils/response";
 import { globalSettings } from "../db";
+import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
+import { resolveNaviClaudeAuth } from "../utils/navi-auth";
 
 export async function handleEphemeralChat(req: Request): Promise<Response> {
   try {
@@ -93,6 +95,7 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
       };
       costUsd = (usage.input_tokens * 0.00025 + usage.output_tokens * 0.00125) / 1000;
     } else {
+      const { overrides } = resolveNaviClaudeAuth(model);
       const q = query({
         prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
         options: {
@@ -100,6 +103,8 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
           allowedTools: useTools ? ["Read", "Glob", "Grep", "Bash"] : [],
           maxTurns: useTools ? 5 : 1,
           model: model,
+          env: buildClaudeCodeEnv(process.env, overrides),
+          ...getClaudeCodeRuntimeOptions(),
         },
       });
 

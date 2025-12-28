@@ -1001,6 +1001,7 @@
     width: 100%;
     height: 100%;
     padding: 8px;
+    background: #1a1b26;
   }
 
   .terminal-container.hidden {

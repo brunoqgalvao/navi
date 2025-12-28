@@ -1190,6 +1190,20 @@
     }
   }
 
+  async function toggleSessionMarkedForReview(sess: Session, e: Event) {
+    e.stopPropagation();
+    const newMarkedForReview = !sess.marked_for_review;
+    try {
+      await api.sessions.setMarkedForReview(sess.id, newMarkedForReview);
+      sidebarSessions = sidebarSessions.map(s =>
+        s.id === sess.id ? { ...s, marked_for_review: newMarkedForReview ? 1 : 0 } : s
+      );
+      loadRecentChatsAction();
+    } catch (err) {
+      console.error("Failed to toggle session marked for review:", err);
+    }
+  }
+
   function openEditSession(sess: Session, e: Event) {
     e.stopPropagation();
     editingSession = sess;
@@ -1812,6 +1826,7 @@
     onDuplicateSession={duplicateSession}
     onToggleSessionFavorite={toggleSessionFavorite}
     onToggleSessionArchive={toggleSessionArchive}
+    onToggleSessionMarkedForReview={toggleSessionMarkedForReview}
     onProjectReorder={async (order) => { 
       await api.projects.reorder(order); 
       const orderMap = new Map(order.map((id, i) => [id, i]));

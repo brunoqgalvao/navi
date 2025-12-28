@@ -93,6 +93,14 @@ export async function handleSessionRoutes(
     return json(sessions.get(id));
   }
 
+  const sessionMarkedForReviewMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mark-for-review$/);
+  if (sessionMarkedForReviewMatch && method === "POST") {
+    const id = sessionMarkedForReviewMatch[1];
+    const body = await req.json();
+    sessions.setMarkedForReview(id, body.markedForReview);
+    return json(sessions.get(id));
+  }
+
   const sessionAutoAcceptMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/auto-accept$/);
   if (sessionAutoAcceptMatch && method === "POST") {
     const id = sessionAutoAcceptMatch[1];

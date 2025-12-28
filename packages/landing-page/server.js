@@ -1,29 +1,72 @@
 import express from 'express';
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { neon } from '@neondatabase/serverless';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 8080;
-const EMAILS_FILE = '/tmp/emails.txt';
-const FEEDBACK_FILE = '/tmp/feedback.json';
+
+// Initialize Neon connection
+const DATABASE_URL = process.env.DATABASE_URL;
+let sql = null;
+
+if (DATABASE_URL) {
+  sql = neon(DATABASE_URL);
+  console.log('Connected to Neon database');
+  initDatabase().catch(console.error);
+} else {
+  console.warn('DATABASE_URL not set - database features disabled');
+}
+
+async function initDatabase() {
+  if (!sql) return;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS subscribers (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      source TEXT DEFAULT 'landing',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS feedback (
+      id SERIAL PRIMARY KEY,
+      type TEXT DEFAULT 'general',
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      email TEXT,
+      system_info JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
+  console.log('Database tables initialized');
+}
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
-app.post('/api/subscribe', (req, res) => {
-  const { email } = req.body;
-  
+app.post('/api/subscribe', async (req, res) => {
+  const { email, source } = req.body;
+
   if (!email || !email.includes('@')) {
     return res.status(400).json({ error: 'Invalid email' });
   }
-  
-  const timestamp = new Date().toISOString();
-  const entry = `${timestamp},${email}\n`;
-  
+
+  if (!sql) {
+    console.log(`[NO DB] New subscriber: ${email}`);
+    return res.json({ success: true });
+  }
+
   try {
-    appendFileSync(EMAILS_FILE, entry);
+    await sql`
+      INSERT INTO subscribers (email, source)
+      VALUES (${email}, ${source || 'landing'})
+      ON CONFLICT (email) DO NOTHING
+    `;
     console.log(`New subscriber: ${email}`);
     res.json({ success: true });
   } catch (err) {
@@ -32,76 +75,148 @@ app.post('/api/subscribe', (req, res) => {
   }
 });
 
-app.get('/api/subscribers', (req, res) => {
+app.get('/api/subscribers', async (req, res) => {
   const authHeader = req.headers.authorization;
   if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  if (!sql) {
+    return res.json({ count: 0, subscribers: [], message: 'Database not configured' });
+  }
+
   try {
-    if (existsSync(EMAILS_FILE)) {
-      const content = readFileSync(EMAILS_FILE, 'utf-8');
-      const emails = content.trim().split('\n').filter(Boolean);
-      res.json({ count: emails.length, emails });
-    } else {
-      res.json({ count: 0, emails: [] });
-    }
+    const subscribers = await sql`
+      SELECT id, email, source, created_at
+      FROM subscribers
+      ORDER BY created_at DESC
+    `;
+    res.json({ count: subscribers.length, subscribers });
   } catch (err) {
+    console.error('Failed to read subscribers:', err);
     res.status(500).json({ error: 'Failed to read subscribers' });
   }
 });
 
+// Export subscribers as CSV
+app.get('/api/subscribers/export', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!sql) {
+    return res.status(503).json({ error: 'Database not configured' });
+  }
+
+  try {
+    const subscribers = await sql`
+      SELECT email, source, created_at
+      FROM subscribers
+      ORDER BY created_at DESC
+    `;
+
+    const csv = ['email,source,created_at'];
+    for (const sub of subscribers) {
+      csv.push(`${sub.email},${sub.source},${sub.created_at}`);
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=subscribers.csv');
+    res.send(csv.join('\n'));
+  } catch (err) {
+    console.error('Failed to export subscribers:', err);
+    res.status(500).json({ error: 'Failed to export subscribers' });
+  }
+});
+
 // Feedback endpoint
-app.post('/api/feedback', (req, res) => {
+app.post('/api/feedback', async (req, res) => {
   const { type, title, description, email, systemInfo } = req.body;
 
   if (!title || !description) {
     return res.status(400).json({ error: 'Title and description are required' });
   }
 
-  const feedback = {
-    id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-    type: type || 'general',
-    title,
-    description,
-    email: email || null,
-    systemInfo: systemInfo || null,
-    createdAt: new Date().toISOString()
-  };
+  if (!sql) {
+    console.log(`[NO DB] Feedback [${type}]: ${title}`);
+    return res.json({ success: true, id: Date.now().toString(36) });
+  }
 
   try {
-    let feedbackList = [];
-    if (existsSync(FEEDBACK_FILE)) {
-      const content = readFileSync(FEEDBACK_FILE, 'utf-8');
-      feedbackList = JSON.parse(content);
-    }
-    feedbackList.push(feedback);
-    writeFileSync(FEEDBACK_FILE, JSON.stringify(feedbackList, null, 2));
+    const result = await sql`
+      INSERT INTO feedback (type, title, description, email, system_info)
+      VALUES (${type || 'general'}, ${title}, ${description}, ${email || null}, ${systemInfo ? JSON.stringify(systemInfo) : null})
+      RETURNING id
+    `;
 
     console.log(`New feedback [${type}]: ${title}`);
-    res.json({ success: true, id: feedback.id });
+    res.json({ success: true, id: result[0].id });
   } catch (err) {
     console.error('Failed to save feedback:', err);
     res.status(500).json({ error: 'Failed to save feedback' });
   }
 });
 
-app.get('/api/feedback', (req, res) => {
+app.get('/api/feedback', async (req, res) => {
   const authHeader = req.headers.authorization;
   if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  if (!sql) {
+    return res.json({ count: 0, feedback: [], message: 'Database not configured' });
+  }
+
   try {
-    if (existsSync(FEEDBACK_FILE)) {
-      const content = readFileSync(FEEDBACK_FILE, 'utf-8');
-      const feedback = JSON.parse(content);
-      res.json({ count: feedback.length, feedback });
-    } else {
-      res.json({ count: 0, feedback: [] });
-    }
+    const feedback = await sql`
+      SELECT id, type, title, description, email, system_info, created_at
+      FROM feedback
+      ORDER BY created_at DESC
+    `;
+    res.json({ count: feedback.length, feedback });
   } catch (err) {
+    console.error('Failed to read feedback:', err);
     res.status(500).json({ error: 'Failed to read feedback' });
+  }
+});
+
+// Stats endpoint
+app.get('/api/stats', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!sql) {
+    return res.json({ message: 'Database not configured' });
+  }
+
+  try {
+    const [subCount] = await sql`SELECT COUNT(*) as count FROM subscribers`;
+    const [feedbackCount] = await sql`SELECT COUNT(*) as count FROM feedback`;
+    const [todaySubs] = await sql`
+      SELECT COUNT(*) as count FROM subscribers
+      WHERE created_at >= CURRENT_DATE
+    `;
+    const [weekSubs] = await sql`
+      SELECT COUNT(*) as count FROM subscribers
+      WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
+    `;
+
+    res.json({
+      subscribers: {
+        total: parseInt(subCount.count),
+        today: parseInt(todaySubs.count),
+        thisWeek: parseInt(weekSubs.count),
+      },
+      feedback: {
+        total: parseInt(feedbackCount.count),
+      },
+    });
+  } catch (err) {
+    console.error('Failed to get stats:', err);
+    res.status(500).json({ error: 'Failed to get stats' });
   }
 });
 

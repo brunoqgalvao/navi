@@ -2,6 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { spawn } from "child_process";
 import { json } from "../utils/response";
 import { globalSettings } from "../db";
+import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
 
 export async function handleAuthRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/auth/status") {
@@ -42,21 +43,18 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       } catch {}
     }
 
-    const storedApiKey = globalSettings.get("anthropicApiKey") || process.env.ANTHROPIC_API_KEY;
+    const storedApiKey = globalSettings.get("anthropicApiKey") as string | null;
     const hasApiKey = !!storedApiKey;
-
-    if (storedApiKey && !globalSettings.get("anthropicApiKey")) {
-      globalSettings.set("anthropicApiKey", storedApiKey);
-    }
 
     let hasOAuth = false;
     try {
-      const originalKey = process.env.ANTHROPIC_API_KEY;
-      delete process.env.ANTHROPIC_API_KEY;
-
       const q = query({
         prompt: "",
-        options: { cwd: process.cwd() },
+        options: {
+          cwd: process.cwd(),
+          env: buildClaudeCodeEnv(process.env),
+          ...getClaudeCodeRuntimeOptions(),
+        },
       });
       const models = await q.supportedModels();
       await q.interrupt();
@@ -64,10 +62,6 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       if (models && models.length > 0) {
         hasOAuth = true;
         claudeInstalled = true;
-      }
-
-      if (originalKey) {
-        process.env.ANTHROPIC_API_KEY = originalKey;
       }
     } catch (e: any) {
       hasOAuth = false;
@@ -89,7 +83,7 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       ? `${storedApiKey.slice(0, 10)}...${storedApiKey.slice(-4)}`
       : null;
 
-    const zaiKey = globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY;
+    const zaiKey = globalSettings.get("zaiApiKey") as string | null;
     const hasZaiKey = !!zaiKey;
     const zaiKeyPreview = zaiKey
       ? `${zaiKey.slice(0, 8)}...${zaiKey.slice(-4)}`
@@ -167,7 +161,7 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
   }
 
   if (url.pathname === "/api/auth/zai-key" && method === "GET") {
-    const zaiKey = globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY;
+    const zaiKey = globalSettings.get("zaiApiKey") as string | null;
     const hasZaiKey = !!zaiKey;
     const zaiKeyPreview = zaiKey
       ? `${zaiKey.slice(0, 8)}...${zaiKey.slice(-4)}`

@@ -47,6 +47,7 @@ export interface Session {
   auto_accept_all?: number;
   favorite?: number;
   archived?: number;
+  marked_for_review?: number;
   created_at: number;
   updated_at: number;
   project_name?: string;
@@ -202,6 +203,11 @@ export const api = {
       request<Session>(`/sessions/${id}/archive`, {
         method: "POST",
         body: JSON.stringify({ archived }),
+      }),
+    setMarkedForReview: (id: string, markedForReview: boolean) =>
+      request<Session>(`/sessions/${id}/mark-for-review`, {
+        method: "POST",
+        body: JSON.stringify({ markedForReview }),
       }),
     reorder: (projectId: string, order: string[]) =>
       request<{ success: boolean }>(`/projects/${projectId}/sessions/reorder`, {

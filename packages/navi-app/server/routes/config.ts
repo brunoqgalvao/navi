@@ -1,6 +1,8 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { json } from "../utils/response";
 import { globalSettings, DEFAULT_TOOLS, DANGEROUS_TOOLS } from "../db";
+import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
+import { resolveNaviClaudeAuth } from "../utils/navi-auth";
 
 export async function handleConfigRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/config") {
@@ -177,9 +179,14 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
 
   if (url.pathname === "/api/models") {
     try {
+      const { overrides } = resolveNaviClaudeAuth();
       const q = query({
         prompt: "",
-        options: { cwd: process.cwd() },
+        options: {
+          cwd: process.cwd(),
+          env: buildClaudeCodeEnv(process.env, overrides),
+          ...getClaudeCodeRuntimeOptions(),
+        },
       });
       const sdkModels = await q.supportedModels();
       await q.interrupt();
