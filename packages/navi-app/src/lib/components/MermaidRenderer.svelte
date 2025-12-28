@@ -1,14 +1,17 @@
 <script lang="ts">
   import MermaidDiagram from './MermaidDiagram.svelte';
   import JsonTreeViewer from './JsonTreeViewer.svelte';
-  
+  import InteractiveCodeBlock from './InteractiveCodeBlock.svelte';
+
   interface Props {
     content: string;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
+    shellBlocksMap?: Map<string, { code: string; language: string }>;
+    onRunInTerminal?: (command: string) => void;
   }
 
-  let { content, renderMarkdown, jsonBlocksMap = new Map() }: Props = $props();
+  let { content, renderMarkdown, jsonBlocksMap = new Map(), shellBlocksMap = new Map(), onRunInTerminal }: Props = $props();
 
   interface ContentBlock {
     type: 'markdown' | 'mermaid';
@@ -16,10 +19,12 @@
   }
 
   interface ParsedContent {
-    type: 'html' | 'json';
+    type: 'html' | 'json' | 'shell';
     content: string;
     jsonId?: string;
     jsonData?: any;
+    shellId?: string;
+    shellData?: { code: string; language: string };
   }
 
   function parseContentBlocks(content: string): ContentBlock[] {
@@ -40,9 +45,10 @@
     return blocks;
   }
 
-  function parseHtmlForJsonPlaceholders(html: string): ParsedContent[] {
+  function parseHtmlForPlaceholders(html: string): ParsedContent[] {
     const parts: ParsedContent[] = [];
-    const regex = /<div class="json-block-placeholder" data-json-id="([^"]+)"><\/div>/g;
+    // Combined regex for both JSON and shell placeholders
+    const regex = /<div class="(json|shell)-block-placeholder" data-(json|shell)-id="([^"]+)"><\/div>/g;
     let lastIndex = 0;
     let match;
 
@@ -50,10 +56,19 @@
       if (match.index > lastIndex) {
         parts.push({ type: 'html', content: html.slice(lastIndex, match.index) });
       }
-      const jsonId = match[1];
-      const jsonData = jsonBlocksMap.get(jsonId);
-      if (jsonData !== undefined) {
-        parts.push({ type: 'json', content: '', jsonId, jsonData });
+      const blockType = match[1]; // 'json' or 'shell'
+      const blockId = match[3];
+
+      if (blockType === 'json') {
+        const jsonData = jsonBlocksMap.get(blockId);
+        if (jsonData !== undefined) {
+          parts.push({ type: 'json', content: '', jsonId: blockId, jsonData });
+        }
+      } else if (blockType === 'shell') {
+        const shellData = shellBlocksMap.get(blockId);
+        if (shellData !== undefined) {
+          parts.push({ type: 'shell', content: '', shellId: blockId, shellData });
+        }
       }
       lastIndex = match.index + match[0].length;
     }
@@ -71,7 +86,7 @@
 {#each contentBlocks as block}
   {#if block.type === 'markdown'}
     {@const renderedHtml = renderMarkdown(block.content)}
-    {@const parsedParts = parseHtmlForJsonPlaceholders(renderedHtml)}
+    {@const parsedParts = parseHtmlForPlaceholders(renderedHtml)}
     <div class="markdown-content">
       {#each parsedParts as part}
         {#if part.type === 'html'}
@@ -83,6 +98,12 @@
             </div>
             <JsonTreeViewer value={part.jsonData} maxHeight="400px" showButtons={true} />
           </div>
+        {:else if part.type === 'shell' && part.shellData}
+          <InteractiveCodeBlock
+            code={part.shellData.code}
+            language={part.shellData.language}
+            on:runInDock={(e) => onRunInTerminal?.(e.detail.code)}
+          />
         {/if}
       {/each}
     </div>

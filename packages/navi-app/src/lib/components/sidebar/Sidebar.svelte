@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces } from "../../stores";
+  import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, attentionItems } from "../../stores";
   import { api, type Project, type Session, type WorkspaceFolder } from "../../api";
   import { getApiBase } from "../../config";
   import ModelSelector from "../ModelSelector.svelte";
@@ -124,13 +124,9 @@
     })
   );
 
-  // Chats with pending actions (permission required or running) across all projects
-  let pendingActionChats = $derived(
-    recentChats.filter(chat => {
-      const status = $sessionStatus.get(chat.id);
-      return status?.status === "permission" || status?.status === "running";
-    }).slice(0, 5)
-  );
+  // Use centralized attention store for pending/review items
+  let pendingActionChats = $derived($attentionItems.pendingActions.map(item => item.session));
+  let reviewQueueChats = $derived($attentionItems.needsReview.map(item => item.session));
 
   let draggedProjectId = $state<string | null>(null);
   let draggedProjectFolderId = $state<string | null>(null);
@@ -787,6 +783,31 @@
                   {:else if $sessionStatus.get(chat.id)?.status === "permission"}
                     <span class="w-2 h-2 bg-amber-500 rounded-full animate-pulse shrink-0" title="Permission required"></span>
                   {/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if reviewQueueChats.length > 0}
+          <div class="mt-4">
+            <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1 px-2 flex items-center gap-1.5">
+              <svg class="w-3 h-3 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+              Needs Review
+            </h3>
+            <div class="space-y-0">
+              {#each reviewQueueChats as chat}
+                <button onclick={() => onGoToChat(chat)} class="w-full text-left px-2 py-1.5 rounded text-gray-600 hover:bg-blue-50 hover:text-gray-800 transition-colors flex items-center gap-1.5 border-l-2 border-blue-400 ml-1">
+                  <svg class="w-2.5 h-2.5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                  <span class="text-[11px] truncate flex-1 font-medium">{chat.title}</span>
+                  <div class="flex items-center gap-1 shrink-0">
+                    {#if chat.marked_for_review}
+                      <svg class="w-3 h-3 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Marked for review"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                    {/if}
+                    {#if $sessionStatus.get(chat.id)?.status === "unread"}
+                      <span class="w-1.5 h-1.5 bg-gray-500 rounded-full" title="Unread"></span>
+                    {/if}
+                  </div>
                 </button>
               {/each}
             </div>

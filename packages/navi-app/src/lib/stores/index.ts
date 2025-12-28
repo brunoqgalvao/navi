@@ -72,9 +72,10 @@ export {
   activeNotifications,
   pendingPermissionRequests,
   projectStatus,
+  fileBrowserState,
 } from "./ui";
 
-export type { UIScaleLevel } from "./ui";
+export type { UIScaleLevel, FileBrowserState } from "./ui";
 
 // Cost stores
 export { costStore } from "./costs";
@@ -84,6 +85,18 @@ export { skillLibrary } from "./skills";
 
 // Navigation history
 export { navHistory, type NavHistoryEntry } from "./navHistory";
+
+// Attention system - bubbles up items needing user attention
+export {
+  attention,
+  attentionItems,
+  pendingActionCount,
+  reviewQueueCount,
+  totalAttentionCount,
+  sessionNeedsAttention,
+  type AttentionItem,
+  type AttentionReason,
+} from "./attention";
 
 // Error handling (re-export for convenience)
 export { showError, showWarning, showSuccess, showInfo, pendingErrorReport } from "../errorHandler";

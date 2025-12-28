@@ -23,6 +23,7 @@
     } | null;
     emptyState?: "start" | "continue" | "none";
     jsonBlocksMap?: Map<string, any>;
+    shellBlocksMap?: Map<string, { code: string; language: string }>;
     renderMarkdown: (content: string) => string;
     onEditMessage?: (msgId: string) => void;
     onSaveEdit?: (content: string) => void;
@@ -52,6 +53,7 @@
     pendingPermissionRequest = null,
     emptyState = "start",
     jsonBlocksMap = new Map(),
+    shellBlocksMap = new Map(),
     renderMarkdown,
     onEditMessage,
     onSaveEdit,
@@ -210,6 +212,7 @@
             {onMessageClick}
             {renderMarkdown}
             {jsonBlocksMap}
+            {shellBlocksMap}
           />
         {/if}
       </div>
@@ -223,6 +226,8 @@
           partialThinking={streamingState.partialThinking}
           {renderMarkdown}
           {jsonBlocksMap}
+          {shellBlocksMap}
+          {onRunInTerminal}
         />
       </div>
     {/if}

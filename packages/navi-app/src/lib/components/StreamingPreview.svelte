@@ -10,9 +10,11 @@
     partialThinking: string;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
+    shellBlocksMap?: Map<string, { code: string; language: string }>;
+    onRunInTerminal?: (command: string) => void;
   }
 
-  let { blocks, partialText, partialThinking, renderMarkdown, jsonBlocksMap = new Map() }: Props = $props();
+  let { blocks, partialText, partialThinking, renderMarkdown, jsonBlocksMap = new Map(), shellBlocksMap = new Map(), onRunInTerminal }: Props = $props();
 
   function getDisplayBlocks(): { block: ContentBlock; isStreaming: boolean; streamingContent?: string }[] {
     return blocks.map((block, idx) => {
@@ -91,7 +93,7 @@
       <div class="fade-in">
         {#if block.type === "text"}
           <div class="text-sm leading-relaxed text-gray-800 markdown-body streaming-text">
-            <MermaidRenderer content={streamingContent || (block as TextBlock).text || ""} {renderMarkdown} {jsonBlocksMap} />
+            <MermaidRenderer content={streamingContent || (block as TextBlock).text || ""} {renderMarkdown} {jsonBlocksMap} {shellBlocksMap} {onRunInTerminal} />
             {#if isStreaming}
               <span class="cursor inline-block w-0.5 h-4 bg-blue-500 ml-0.5 align-middle"></span>
             {/if}

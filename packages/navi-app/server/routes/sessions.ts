@@ -114,6 +114,19 @@ export async function handleSessionRoutes(
     return json(sessions.get(id));
   }
 
+  // Reset claude session ID (used when pruning context)
+  const sessionResetContextMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/reset-context$/);
+  if (sessionResetContextMatch && method === "POST") {
+    const id = sessionResetContextMatch[1];
+    const session = sessions.get(id);
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+    // Clear claude_session_id so next query starts fresh
+    sessions.updateClaudeSession(null, session.model, 0, 0, 0, 0, Date.now(), id);
+    return json({ success: true, sessionReset: true });
+  }
+
   const sessionsReorderMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions\/reorder$/);
   if (sessionsReorderMatch && method === "POST") {
     const body = await req.json();

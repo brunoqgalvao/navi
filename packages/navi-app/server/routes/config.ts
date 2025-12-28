@@ -2,7 +2,8 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { json } from "../utils/response";
 import { globalSettings, DEFAULT_TOOLS, DANGEROUS_TOOLS } from "../db";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
-import { resolveNaviClaudeAuth } from "../utils/navi-auth";
+import { resolveNaviClaudeAuth, formatAuthForLog } from "../utils/navi-auth";
+import { describePath, writeDebugLog } from "../utils/logging";
 
 export async function handleConfigRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/config") {
@@ -178,18 +179,35 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
   }
 
   if (url.pathname === "/api/models") {
+    const authResult = resolveNaviClaudeAuth();
+    logModelsDiagnostics("start", {
+      auth: formatAuthForLog(authResult),
+      cwd: process.cwd(),
+      execPath: process.execPath,
+      argv0: process.argv?.[0] ?? null,
+    });
+
+    const runtimeOptions = getClaudeCodeRuntimeOptions();
+    logModelsDiagnostics("runtime", {
+      runtimeOptions,
+      executable: describePath(runtimeOptions.executable),
+      claudeCode: describePath(runtimeOptions.pathToClaudeCodeExecutable),
+    });
+
+    let q: ReturnType<typeof query> | null = null;
     try {
-      const { overrides } = resolveNaviClaudeAuth();
-      const q = query({
+      q = query({
         prompt: "",
         options: {
           cwd: process.cwd(),
-          env: buildClaudeCodeEnv(process.env, overrides),
-          ...getClaudeCodeRuntimeOptions(),
+          env: buildClaudeCodeEnv(process.env, authResult.overrides),
+          ...runtimeOptions,
         },
       });
       const sdkModels = await q.supportedModels();
-      await q.interrupt();
+      logModelsDiagnostics("success", {
+        modelCount: Array.isArray(sdkModels) ? sdkModels.length : null,
+      });
 
       // Add provider info to Claude models and ensure Sonnet is included
       const claudeModels = sdkModels.map((m: any) => ({ ...m, provider: "anthropic" }));
@@ -214,7 +232,23 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
 
       return json([...claudeModels, ...zaiModels]);
     } catch (e) {
+      logModelsDiagnostics("error", {
+        message: e instanceof Error ? e.message : String(e),
+        name: e instanceof Error ? e.name : null,
+        stack: e instanceof Error ? e.stack : null,
+      });
       return json({ error: "Failed to fetch models" }, 500);
+    } finally {
+      if (q) {
+        try {
+          await q.interrupt();
+        } catch (e) {
+          logModelsDiagnostics("interrupt_error", {
+            message: e instanceof Error ? e.message : String(e),
+            name: e instanceof Error ? e.name : null,
+          });
+        }
+      }
     }
   }
 
@@ -240,4 +274,10 @@ function getDefaultClaudeMdContent(): string {
 - Focus on what changed, not explanations
 - One word answers when appropriate
 `;
+}
+
+function logModelsDiagnostics(stage: string, payload: Record<string, unknown>) {
+  const message = `[Models] ${stage}: ${JSON.stringify(payload)}`;
+  console.error(message);
+  writeDebugLog(message);
 }

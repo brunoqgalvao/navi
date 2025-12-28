@@ -23,6 +23,7 @@
     onBrowserUrlChange?: (url: string) => void;
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
+    isResizing?: boolean;
   }
 
   let {
@@ -33,6 +34,7 @@
     onBrowserUrlChange,
     onTerminalRef,
     onTerminalSendToClaude,
+    isResizing = false,
   }: Props = $props();
 
   // Get workspace for current project reactively
@@ -212,5 +214,6 @@
     onBrowserBack={handleBrowserBack}
     onBrowserForward={handleBrowserForward}
     onBrowserGoToIndex={handleBrowserGoToIndex}
+    isParentResizing={isResizing}
   />
 {/if}

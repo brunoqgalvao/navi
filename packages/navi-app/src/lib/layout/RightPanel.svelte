@@ -52,8 +52,8 @@
     onTerminalSendToClaude,
   }: Props = $props();
 
-  // Handle initial command for terminal
-  let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = null;
+  // Handle initial command for terminal - use $state so $effect reacts to changes
+  let terminalRef = $state<{ pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null>(null);
 
   function handleTerminalRef(ref: typeof terminalRef) {
     terminalRef = ref;
@@ -119,10 +119,16 @@
   </div>
 
   <!-- Panel Content -->
-  <div class="flex-1 overflow-hidden flex flex-col">
-    {#if mode === "files" && projectPath}
-      <FileBrowser rootPath={projectPath} onPreview={onFileSelect} />
-    {:else if mode === "preview" && previewSource}
+  <div class="flex-1 overflow-hidden flex flex-col relative">
+    <!-- Files panel - always mounted, hidden with CSS to preserve state -->
+    {#if projectPath}
+      <div class="absolute inset-0 flex flex-col {mode === 'files' ? '' : 'invisible pointer-events-none'}">
+        <FileBrowser rootPath={projectPath} onPreview={onFileSelect} />
+      </div>
+    {/if}
+
+    <!-- Other panels use conditional rendering -->
+    {#if mode === "preview" && previewSource}
       <Preview source={previewSource} />
     {:else if mode === "browser"}
       <WorkspacePanel
@@ -131,6 +137,7 @@
         {projectPath}
         {browserUrl}
         onBrowserUrlChange={onBrowserUrlChange}
+        {isResizing}
       />
     {:else if mode === "git" && projectPath}
       <GitPanel rootPath={projectPath} />

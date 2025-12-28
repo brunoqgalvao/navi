@@ -26,9 +26,12 @@
     onStop?: () => void;
     onPreview?: (path: string) => void;
     onExecCommand?: (command: string) => void;
+    onManageSkills?: () => void;
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], onSubmit, onStop, onPreview, onExecCommand }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], onSubmit, onStop, onPreview, onExecCommand, onManageSkills }: Props = $props();
+
+  let showSkillsMenu = $state(false);
 
   // Check if the input is a ! command
   function isShellCommand(text: string): boolean {
@@ -403,14 +406,81 @@
     {/if}
   </div>
 
-  {#if activeSkills.length > 0}
-    <div class="absolute -bottom-6 left-3 flex items-center gap-1">
-      {#each activeSkills.slice(0, 3) as skill}
-        <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded font-medium">{skill.name}</span>
-      {/each}
-      {#if activeSkills.length > 3}
-        <span class="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">+{activeSkills.length - 3}</span>
-      {/if}
-    </div>
-  {/if}
+  <!-- Skills bar -->
+  <div class="absolute -bottom-7 left-0 right-0 px-3 flex items-center justify-between">
+    {#if activeSkills.length > 0}
+      <div class="flex items-center gap-1.5">
+        <svg class="w-3 h-3 text-purple-500" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        {#each activeSkills.slice(0, 3) as skill}
+          <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded font-medium">{skill.name}</span>
+        {/each}
+        {#if activeSkills.length > 3}
+          <span class="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">(+{activeSkills.length - 3})</span>
+        {/if}
+      </div>
+    {:else}
+      <button
+        onclick={() => onManageSkills?.()}
+        class="flex items-center gap-1.5 text-[10px] text-gray-400 hover:text-gray-600 transition-colors"
+      >
+        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        <span>Add skills to customize Claude</span>
+        <span class="text-purple-500 font-medium hover:text-purple-600">+ Add</span>
+      </button>
+    {/if}
+
+    <!-- Skills menu button -->
+    {#if activeSkills.length > 0}
+      <div class="relative">
+        <button
+          onclick={() => showSkillsMenu = !showSkillsMenu}
+          class="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+          title="Manage skills"
+        >
+          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="5" r="2"/>
+            <circle cx="12" cy="12" r="2"/>
+            <circle cx="12" cy="19" r="2"/>
+          </svg>
+        </button>
+
+        {#if showSkillsMenu}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="fixed inset-0 z-40"
+            onclick={() => showSkillsMenu = false}
+          ></div>
+          <div class="absolute bottom-full right-0 mb-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
+            <button
+              onclick={() => { showSkillsMenu = false; onManageSkills?.(); }}
+              class="w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+            >
+              <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+              Manage Skills
+            </button>
+            <div class="border-t border-gray-100 my-1"></div>
+            <div class="px-3 py-1.5 text-[10px] text-gray-400 font-medium uppercase tracking-wide">Active ({activeSkills.length})</div>
+            {#each activeSkills.slice(0, 5) as skill}
+              <div class="px-3 py-1.5 text-xs text-gray-600 flex items-center gap-2">
+                <span class="w-1.5 h-1.5 bg-purple-400 rounded-full"></span>
+                {skill.name}
+              </div>
+            {/each}
+            {#if activeSkills.length > 5}
+              <div class="px-3 py-1.5 text-[10px] text-gray-400">
+                +{activeSkills.length - 5} more
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+  </div>
 </div>

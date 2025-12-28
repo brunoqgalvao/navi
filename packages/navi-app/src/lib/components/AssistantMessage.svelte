@@ -26,6 +26,7 @@
     onMessageClick?: (e: MouseEvent) => void;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
+    shellBlocksMap?: Map<string, { code: string; language: string }>;
   }
 
   let {
@@ -42,6 +43,7 @@
     onMessageClick,
     renderMarkdown,
     jsonBlocksMap = new Map(),
+    shellBlocksMap = new Map(),
   }: Props = $props();
 
   let showMenu = $state(false);
@@ -288,7 +290,7 @@
         {@const text = (item as TextBlock).text}
         {@const rendered = renderTextContent(text)}
         <div class="text-sm leading-relaxed text-gray-800 markdown-body">
-          <MermaidRenderer content={rendered.genuiResult.processedContent} {renderMarkdown} {jsonBlocksMap} />
+          <MermaidRenderer content={rendered.genuiResult.processedContent} {renderMarkdown} {jsonBlocksMap} {shellBlocksMap} {onRunInTerminal} />
           {#if rendered.mediaResult.items.length > 0}
             <div class="my-4">
               <MediaDisplay items={rendered.mediaResult.items} layout={rendered.mediaResult.items.length === 1 ? 'single' : 'grid'} {basePath} />

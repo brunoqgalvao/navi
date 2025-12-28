@@ -256,8 +256,8 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
       const { execSync } = await import("child_process");
       const cwd = repoPath || process.cwd();
 
-      // Get staged diff
-      const stagedDiff = execSync("git diff --cached", { cwd, encoding: "utf-8", maxBuffer: 1024 * 1024 });
+      // Get staged diff (50MB buffer to handle large diffs - we truncate anyway)
+      const stagedDiff = execSync("git diff --cached", { cwd, encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 });
 
       if (!stagedDiff.trim()) {
         return json({ error: "No staged changes to analyze" }, 400);
@@ -304,15 +304,20 @@ Each line follows: <type>[optional scope]: <description>
 3. Imperative mood ("add" not "added")
 4. No periods at end
 5. Scope is optional: feat(auth): or fix(api):
+6. IMPORTANT: Describe the OUTCOME/BENEFIT, not the code change
+   - BAD: "add maxTokens parameter to API call"
+   - GOOD: "allow longer AI-generated commit messages"
+   - BAD: "change condition in auth middleware"
+   - GOOD: "prevent users from being logged out unexpectedly"
 
 ## Example output for a commit with multiple changes:
 
-feat(git): add AI commit message generation
-fix(auth): resolve token refresh race condition
-refactor(api): extract validation into middleware
-style: format sidebar components
+feat(git): generate comprehensive multi-line commit messages
+fix(auth): prevent session timeout during active use
+refactor(api): improve request validation reliability
+perf(search): reduce search latency for large repos
 
-IMPORTANT: Output ONLY the list of commit lines, one per line. No explanations, no markdown, no bullets, no dashes at the start. Just the conventional commit lines.`;
+IMPORTANT: Output ONLY the list of commit lines, one per line. No explanations, no markdown, no bullets, no dashes at the start. Just the conventional commit lines. Focus on WHAT the user gains, not WHAT the code does.`;
 
       const systemPrompt = "You are an expert at writing git commit messages following the Conventional Commits specification. Output ONLY the commit message, nothing else. No markdown, no quotes, no explanations.";
 

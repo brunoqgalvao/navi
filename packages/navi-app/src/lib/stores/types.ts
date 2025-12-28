@@ -38,6 +38,7 @@ export interface AttachedFile {
 }
 
 export interface QueuedMessage {
+  id?: string;
   sessionId: string;
   text: string;
   attachments: AttachedFile[];

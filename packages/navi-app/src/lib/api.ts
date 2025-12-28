@@ -214,6 +214,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ order }),
       }),
+    resetContext: (id: string) =>
+      request<{ success: boolean; sessionReset: boolean }>(`/sessions/${id}/reset-context`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
     search: (query: string, projectId?: string) => {
       const params = new URLSearchParams({ q: query });
       if (projectId) params.set("projectId", projectId);
@@ -599,6 +604,62 @@ export interface SkillFileInfo {
   type: "file" | "directory";
   size?: number;
 }
+
+// Agents (subagents for Claude Agent SDK)
+export interface Agent {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  model?: "haiku" | "sonnet" | "opus";
+  tools?: string[];
+  body: string;
+  scope: "global" | "project";
+  projectId?: string;
+  path: string;
+}
+
+export interface CreateAgentInput {
+  name: string;
+  description?: string;
+  model?: "haiku" | "sonnet" | "opus";
+  tools?: string[];
+  instructions?: string;
+}
+
+export interface UpdateAgentInput {
+  name?: string;
+  description?: string;
+  model?: "haiku" | "sonnet" | "opus";
+  tools?: string[];
+  instructions?: string;
+}
+
+export const agentsApi = {
+  // Global agents
+  list: () => request<Agent[]>("/agents"),
+  get: (id: string) => request<Agent>(`/agents/${encodeURIComponent(id)}`),
+  create: (data: CreateAgentInput) =>
+    request<Agent>("/agents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: UpdateAgentInput) =>
+    request<Agent>(`/agents/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    request<{ success: boolean }>(`/agents/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // Project agents
+  listForProject: (projectId: string) => request<Agent[]>(`/projects/${projectId}/agents`),
+  createForProject: (projectId: string, data: CreateAgentInput) =>
+    request<Agent>(`/projects/${projectId}/agents`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};
 
 export interface CostSummary {
   totalEver: number;

@@ -64,18 +64,159 @@ function loadSkillsFromDir(skillsDir: string): SkillInfo[] {
 function loadAllSkills(cwd: string): SkillInfo[] {
   const projectSkillsDir = path.join(cwd, '.claude', 'skills');
   const globalSkillsDir = path.join(os.homedir(), '.claude', 'skills');
-  
+
   const projectSkills = loadSkillsFromDir(projectSkillsDir);
   const globalSkills = loadSkillsFromDir(globalSkillsDir);
-  
+
   const allSkills = [...projectSkills];
   for (const gs of globalSkills) {
     if (!allSkills.find(s => s.name === gs.name)) {
       allSkills.push(gs);
     }
   }
-  
+
   return allSkills;
+}
+
+// Agent loading for Claude Agent SDK
+interface AgentInfo {
+  name: string;
+  description: string;
+  model?: 'haiku' | 'sonnet' | 'opus';
+  tools?: string[];
+  prompt: string;
+}
+
+function parseAgentFrontmatter(content: string): {
+  name?: string;
+  description?: string;
+  model?: 'haiku' | 'sonnet' | 'opus';
+  tools?: string[];
+  body: string
+} {
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!frontmatterMatch) {
+    return { body: content };
+  }
+
+  const [, frontmatter, body] = frontmatterMatch;
+  const result: {
+    name?: string;
+    description?: string;
+    model?: 'haiku' | 'sonnet' | 'opus';
+    tools?: string[];
+    body: string
+  } = { body };
+
+  let currentKey = '';
+  let inArray = false;
+  const arrayValues: string[] = [];
+
+  for (const line of frontmatter.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Check if it's an array item
+    if (trimmed.startsWith('- ') && inArray) {
+      arrayValues.push(trimmed.slice(2).trim());
+      continue;
+    }
+
+    // Finish previous array if any
+    if (inArray && currentKey === 'tools') {
+      result.tools = [...arrayValues];
+      arrayValues.length = 0;
+      inArray = false;
+    }
+
+    const colonIndex = trimmed.indexOf(':');
+    if (colonIndex > 0) {
+      const key = trimmed.slice(0, colonIndex).trim();
+      const value = trimmed.slice(colonIndex + 1).trim();
+
+      currentKey = key;
+
+      if (value === '' || value === '|') {
+        inArray = true;
+      } else {
+        const cleanValue = value.replace(/^["']|["']$/g, '');
+        if (key === 'name') result.name = cleanValue;
+        else if (key === 'description') result.description = cleanValue;
+        else if (key === 'model' && ['haiku', 'sonnet', 'opus'].includes(cleanValue)) {
+          result.model = cleanValue as 'haiku' | 'sonnet' | 'opus';
+        }
+      }
+    }
+  }
+
+  // Handle trailing array
+  if (inArray && currentKey === 'tools' && arrayValues.length > 0) {
+    result.tools = [...arrayValues];
+  }
+
+  return result;
+}
+
+function loadAgentsFromDir(agentsDir: string): AgentInfo[] {
+  const agents: AgentInfo[] = [];
+
+  if (!fs.existsSync(agentsDir)) return agents;
+
+  try {
+    const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith('.md')) {
+        const agentPath = path.join(agentsDir, entry.name);
+        const content = fs.readFileSync(agentPath, 'utf-8');
+        const parsed = parseAgentFrontmatter(content);
+        const slug = entry.name.replace(/\.md$/, '');
+
+        if (parsed.description) { // description is required for agents
+          agents.push({
+            name: slug,
+            description: parsed.description,
+            model: parsed.model,
+            tools: parsed.tools,
+            prompt: parsed.body,
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`[Worker] Error loading agents from ${agentsDir}:`, e);
+  }
+
+  return agents;
+}
+
+function loadAllAgents(cwd: string): Record<string, any> {
+  const projectAgentsDir = path.join(cwd, '.claude', 'agents');
+  const globalAgentsDir = path.join(os.homedir(), '.claude', 'agents');
+
+  const projectAgents = loadAgentsFromDir(projectAgentsDir);
+  const globalAgents = loadAgentsFromDir(globalAgentsDir);
+
+  // Merge, project takes precedence
+  const allAgents: AgentInfo[] = [...projectAgents];
+  for (const ga of globalAgents) {
+    if (!allAgents.find(a => a.name === ga.name)) {
+      allAgents.push(ga);
+    }
+  }
+
+  // Convert to SDK format: Record<string, AgentDefinition>
+  const agentsMap: Record<string, any> = {};
+  for (const agent of allAgents) {
+    agentsMap[agent.name] = {
+      description: agent.description,
+      prompt: agent.prompt,
+      ...(agent.model && { model: agent.model }),
+      ...(agent.tools && agent.tools.length > 0 && { tools: agent.tools }),
+    };
+  }
+
+  console.error(`[Worker] Loaded ${allAgents.length} agents:`, Object.keys(agentsMap));
+  return agentsMap;
 }
 
 const UI_INSTRUCTIONS = `
@@ -490,7 +631,9 @@ async function runQuery(input: WorkerInput) {
     
     const skills = loadAllSkills(cwd);
     console.error(`[Worker] Loaded ${skills.length} skills:`, skills.map(s => s.name));
-    
+
+    const agents = loadAllAgents(cwd);
+
     const systemPromptAppend = buildSystemPromptAppend(skills);
     console.error(`[Worker] System prompt append (${systemPromptAppend.length} chars)`);
     
@@ -530,6 +673,8 @@ async function runQuery(input: WorkerInput) {
         settingSources: ['user', 'project', 'local'] as const,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
         includePartialMessages: true,
+        // Pass custom agents from .claude/agents/
+        ...(Object.keys(agents).length > 0 && { agents }),
       },
     });
 

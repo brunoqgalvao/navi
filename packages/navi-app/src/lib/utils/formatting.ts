@@ -40,11 +40,37 @@ export function formatContent(content: ContentBlock[] | string): string {
 }
 
 export function linkifyUrls(html: string, escapeHtmlFn: typeof escapeHtml = escapeHtml): string {
+  // Split HTML into tags and text content to avoid matching URLs inside attributes
+  const parts = html.split(/(<[^>]+>)/);
+
   const urlPattern = /(https?:\/\/localhost[:\d]*[^\s<"']*|https?:\/\/127\.0\.0\.1[:\d]*[^\s<"']*|(?<![\/\w])localhost:\d+[^\s<"']*|(?<![\/\w])127\.0\.0\.1:\d+[^\s<"']*)/g;
-  return html.replace(urlPattern, (url) => {
-    const fullUrl = url.startsWith("http") ? url : `http://${url}`;
-    return `<a href="#" class="preview-link" data-url="${escapeHtmlFn(fullUrl)}">${url}</a>`;
-  });
+
+  let insideAnchor = false;
+
+  return parts.map(part => {
+    // Track if we're inside an <a> tag
+    if (part.match(/^<a[\s>]/i)) {
+      insideAnchor = true;
+    } else if (part.match(/^<\/a>/i)) {
+      insideAnchor = false;
+    }
+
+    // If this part is an HTML tag (starts with <), don't process it
+    if (part.startsWith('<')) {
+      return part;
+    }
+
+    // Don't linkify URLs that are already inside anchor tags (as link text)
+    if (insideAnchor) {
+      return part;
+    }
+
+    // Only linkify URLs in text content outside of anchor tags
+    return part.replace(urlPattern, (url) => {
+      const fullUrl = url.startsWith("http") ? url : `http://${url}`;
+      return `<a href="#" class="preview-link" data-url="${escapeHtmlFn(fullUrl)}">${url}</a>`;
+    });
+  }).join('');
 }
 
 export function linkifyCodePaths(

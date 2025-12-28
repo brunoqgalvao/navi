@@ -37,6 +37,16 @@ cd "$ROOT/packages/landing-page"
 npm pkg set version="$VERSION"
 echo "Updated packages/landing-page/package.json"
 
+# Update landing page Hero.svelte download links and version display
+HERO_SVELTE="$ROOT/packages/landing-page/src/lib/components/Hero.svelte"
+if [ -f "$HERO_SVELTE" ]; then
+  # Update download link: Navi_X.X.X_aarch64.dmg
+  sed -i '' "s/Navi_[0-9]*\.[0-9]*\.[0-9]*_aarch64\.dmg/Navi_${VERSION}_aarch64.dmg/g" "$HERO_SVELTE"
+  # Update all version displays: vX.X.X (matches "vX.X.X Alpha" and "vX.X.X Alpha • macOS 12+")
+  sed -i '' "s/v[0-9]*\.[0-9]*\.[0-9]*/v${VERSION}/g" "$HERO_SVELTE"
+  echo "Updated packages/landing-page/src/lib/components/Hero.svelte"
+fi
+
 echo ""
 echo "Version bumped to $VERSION"
 echo "Next steps:"

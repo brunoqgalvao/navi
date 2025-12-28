@@ -5,15 +5,24 @@
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
 
+  type Tab = "api" | "permissions" | "claude-md" | "skills" | "features" | "analytics";
+
   interface Props {
     open: boolean;
     onClose: () => void;
+    initialTab?: Tab;
   }
 
-  let { open, onClose }: Props = $props();
+  let { open, onClose, initialTab }: Props = $props();
 
-  type Tab = "api" | "permissions" | "claude-md" | "skills" | "features" | "analytics";
-  let activeTab: Tab = $state("api");
+  let activeTab: Tab = $state(initialTab || "api");
+
+  // Reset to initialTab when opening with a specific tab
+  $effect(() => {
+    if (open && initialTab) {
+      activeTab = initialTab;
+    }
+  });
 
   let analytics = $state<CostAnalytics | null>(null);
   let loadingAnalytics = $state(false);

@@ -3,10 +3,10 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, type ChatMessage, type AttachedFile, type NavHistoryEntry } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, type ChatMessage, type AttachedFile, type NavHistoryEntry } from "./lib/stores";
   import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
   import { parseHash, onHashChange } from "./lib/router";
-  import { setServerPort, isTauri } from "./lib/config";
+  import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT } from "./lib/config";
   import { setupGlobalErrorHandlers, pendingErrorReport, type ErrorReport } from "./lib/errorHandler";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
@@ -41,18 +41,18 @@
   
   let jsonBlocksMap = new Map<string, any>();
   let jsonBlockCounter = 0;
+  let shellBlocksMap = new Map<string, { code: string; language: string }>();
+  let shellBlockCounter = 0;
 
   renderer.code = ({ text, lang }: Tokens.Code) => {
     const language = lang || '';
     const shellLanguages = ['bash', 'sh', 'shell', 'zsh', 'console', 'terminal'];
-    
-    // Use terminal style for shell/bash output
+
+    // Use interactive code block for shell/bash - store and use placeholder
     if (shellLanguages.includes(language.toLowerCase())) {
-      const escapedText = text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-      return `<div class="terminal-block"><div class="terminal-header"><span class="terminal-dot red"></span><span class="terminal-dot yellow"></span><span class="terminal-dot green"></span><span class="terminal-title">${language}</span></div><pre class="terminal-content">${escapedText}</pre></div>`;
+      const id = `shell-block-${shellBlockCounter++}`;
+      shellBlocksMap.set(id, { code: text, language });
+      return `<div class="shell-block-placeholder" data-shell-id="${id}"></div>`;
     }
     
     // Use interactive JSON tree for JSON
@@ -92,6 +92,7 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
+  import { QueuedMessagesPanel } from "./lib/components/queue";
   import ProcessManager from "./lib/components/ProcessManager.svelte";
   import { useMessageHandler } from "./lib/handlers";
   import SessionDebug from "./lib/components/SessionDebug.svelte";
@@ -141,40 +142,74 @@
 
   let sidecarProcess: any = null;
   let serverReady = $state(false);
+  let serverError = $state<string | null>(null);
 
   async function startSidecar(): Promise<number> {
     if (!isTauri()) {
-      return 3001;
-    }
-    
-    const { Command } = await import("@tauri-apps/plugin-shell");
-    
-    const port = 3001;
-    setServerPort(port);
-    
-    try {
-      const command = Command.sidecar("binaries/navi-server", [String(port)]);
-      sidecarProcess = await command.spawn();
-      
-      console.log("Sidecar started with PID:", sidecarProcess.pid);
-      
-      for (let i = 0; i < 30; i++) {
-        try {
-          const res = await fetch(`http://localhost:${port}/api/health`);
-          if (res.ok) {
-            console.log("Server is ready on port", port);
-            return port;
-          }
-        } catch {
-        }
-        await new Promise(r => setTimeout(r, 100));
+      const port = DEV_SERVER_PORT;
+      setServerPort(port);
+
+      try {
+        const res = await fetch(`http://localhost:${port}/health`);
+        if (res.ok) return port;
+      } catch {
       }
-      
-      console.log("Server started (assuming ready)");
-      return port;
+      serverError = "Server not running. Start with: bun run dev:all";
+      throw new Error(serverError);
+    }
+
+    let serverPort = BUNDLED_SERVER_PORT;
+    let ptyPort = BUNDLED_PTY_PORT;
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const ports = await invoke<[number, number]>("get_server_ports");
+      if (Array.isArray(ports)) {
+        const [tauriServerPort, tauriPtyPort] = ports;
+        if (typeof tauriServerPort === "number") {
+          serverPort = tauriServerPort;
+        }
+        if (typeof tauriPtyPort === "number") {
+          ptyPort = tauriPtyPort;
+        }
+      }
     } catch (e) {
-      console.error("Failed to start sidecar:", e);
-      return 3001;
+      console.warn("Failed to read ports from Tauri backend, using defaults", e);
+    }
+
+    setServerPort(serverPort);
+    setPtyServerPort(ptyPort);
+
+    for (let i = 0; i < 30; i++) {
+      try {
+        const res = await fetch(`http://localhost:${serverPort}/health`);
+        if (res.ok) {
+          console.log("Server is ready on port", serverPort);
+          return serverPort;
+        }
+      } catch {
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    serverError = "Bundled server failed to respond";
+    throw new Error(serverError);
+  }
+  
+  async function retryServerConnection() {
+    serverError = null;
+    try {
+      await startSidecar();
+      serverReady = true;
+      loadProjects();
+      loadRecentChatsAction();
+      loadFolders();
+      loadConfigAction();
+      loadModelsAction();
+      loadPermissionsAction();
+      loadCostsAction();
+    } catch {
+      // Error already set in startSidecar
     }
   }
 
@@ -210,6 +245,7 @@
   let modelSelection = $state("");
   let lastSessionModel = $state("");
   let showSettings = $state(false);
+  let settingsInitialTab = $state<"api" | "permissions" | "claude-md" | "skills" | "features" | "analytics" | undefined>(undefined);
   let showProjectSettings = $state(false);
   let showDebugInfo = $state(false);
   let sidebarCollapsed = $state(false);
@@ -564,7 +600,10 @@
     setDefaultProjectsDir: (dir) => { defaultProjectsDir = dir; },
     setGlobalPermissionSettings: (settings) => { globalPermissionSettings = settings; },
     setPermissionDefaults: (defaults) => { permissionDefaults = defaults; },
-    setRecentChats: (chats) => { recentChats = chats; },
+    setRecentChats: (chats) => {
+      recentChats = chats;
+      attention.setRecentChats(chats); // Sync to attention store for derived attention items
+    },
   });
 
   onMount(() => {
@@ -573,6 +612,8 @@
 
     startSidecar().then(() => {
       serverReady = true;
+    }).catch(() => {
+      // Error already set in startSidecar
     });
 
     if ($onboardingComplete) {
@@ -725,6 +766,7 @@
       if (!$showArchivedWorkspaces && newArchived) {
         sidebarProjects = sidebarProjects.filter(p => p.id !== proj.id);
         recentChats = recentChats.filter(c => c.project_id !== proj.id);
+        attention.setRecentChats(recentChats);
       } else {
         sidebarProjects = sidebarProjects.map(p => 
           p.id === proj.id ? { ...p, archived: newArchived ? 1 : 0 } : p
@@ -1242,24 +1284,26 @@
         top: messagesContainer.scrollHeight,
         behavior: instant ? "instant" : "smooth",
       });
-      userIsNearBottom = true;
+      // Don't reset userIsNearBottom here - let handleMessagesScroll determine it
     }, instant ? 0 : 50);
   }
 
   function handleMessagesScroll() {
     if (!messagesContainer) return;
     const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
-    // Consider "near bottom" if within 100px of the bottom
-    userIsNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+    // Consider "near bottom" if within 300px of the bottom (more forgiving threshold)
+    userIsNearBottom = scrollHeight - scrollTop - clientHeight < 300;
   }
 
   function processMessageQueue(sessionId: string) {
     const queue = $messageQueue.filter(m => m.sessionId === sessionId);
     if (queue.length === 0) return;
-    
+
     const first = queue[0];
-    messageQueue.update(q => q.filter(m => m !== first));
-    
+    if (first.id) {
+      messageQueue.remove(first.id);
+    }
+
     const prompt = first.text;
     
     sessionMessages.addMessage(sessionId, {
@@ -1322,7 +1366,7 @@
     const isCurrentSessionLoading = $loadingSessions.has(currentSessionId);
     
     if (isCurrentSessionLoading) {
-      messageQueue.update(q => [...q, { sessionId: currentSessionId, text: inputText.trim(), attachments: [] }]);
+      messageQueue.add({ sessionId: currentSessionId, text: inputText.trim(), attachments: [] });
       inputText = "";
       sessionDrafts.clearDraft(currentSessionId);
       return;
@@ -1390,19 +1434,35 @@
 
   function handleExecCommand(command: string) {
     if (!command.trim()) return;
-    if (!$session.sessionId) return;
-    
-    const msg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: `!${command}`,
-      timestamp: new Date(),
-      inlineCommand: {
-        command,
-        cwd: currentProject?.path,
-      },
-    };
-    sessionMessages.addMessage($session.sessionId, msg);
+
+    const projectId = currentProject?.id;
+    if (!projectId) return;
+
+    // Open the terminal panel
+    showTerminal = true;
+    rightPanelMode = "terminal";
+
+    // Check if there's already an active terminal
+    const workspace = get(projectWorkspaces).get(projectId);
+    const hasActiveTerminal = workspace && workspace.terminalTabs.length > 0;
+
+    if (hasActiveTerminal && terminalRef) {
+      // Terminal already exists and is connected - run the command directly
+      terminalRef.runCommand(command);
+    } else if (hasActiveTerminal) {
+      // Terminal exists but not connected yet - wait for it
+      setTimeout(() => {
+        if (terminalRef) {
+          terminalRef.runCommand(command);
+        }
+      }, 500);
+    } else {
+      // No terminal tabs exist - create one with the initial command
+      projectWorkspaces.addTerminalTab(projectId, {
+        cwd: currentProject?.path || undefined,
+        initialCommand: command,
+      });
+    }
   }
 
   // Handle "Send to Claude" from Terminal Panel in Dock (auto-sends)
@@ -1801,6 +1861,25 @@
 
 <TourOverlay tourSteps={TOUR_STEPS} />
 
+{#if serverError}
+<div class="flex h-screen bg-white items-center justify-center">
+  <div class="text-center p-8 max-w-md">
+    <div class="w-16 h-16 mx-auto mb-6 rounded-full bg-red-100 flex items-center justify-center">
+      <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+    </div>
+    <h1 class="text-xl font-semibold text-gray-900 mb-2">Server Connection Failed</h1>
+    <p class="text-gray-600 mb-6">{serverError}</p>
+    <button 
+      onclick={retryServerConnection}
+      class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+    >
+      Retry Connection
+    </button>
+  </div>
+</div>
+{:else}
 <div class="flex h-screen bg-white text-gray-900 font-sans overflow-hidden selection:bg-blue-100 selection:text-blue-900">
 
   <!-- Sidebar -->
@@ -1974,6 +2053,7 @@
               bind:editingMessageContent={editingMessageContent}
               renderMarkdown={renderMarkdown}
               jsonBlocksMap={jsonBlocksMap}
+              shellBlocksMap={shellBlocksMap}
               onEditMessage={startEditMessage}
               onSaveEdit={saveEditedMessage}
               onCancelEdit={cancelEditMessage}
@@ -2023,6 +2103,12 @@
                 <div class="absolute -top-2 right-0 transform -translate-y-full z-10">
                     <ProcessManager sessionId={$session.sessionId} />
                 </div>
+
+                <!-- Queued Messages Panel -->
+                {#if $session.sessionId && currentSessionLoading}
+                    <QueuedMessagesPanel sessionId={$session.sessionId} />
+                {/if}
+
                 <ChatInput
                     bind:value={inputText}
                     disabled={!$isConnected}
@@ -2034,6 +2120,7 @@
                     onStop={stopGeneration}
                     onPreview={openPreview}
                     onExecCommand={handleExecCommand}
+                    onManageSkills={() => { settingsInitialTab = "skills"; showSettings = true; }}
                 />
 
                 <div class="text-center mt-2">
@@ -2155,7 +2242,7 @@
     {/snippet}
   </Modal>
 
-  <Settings open={showSettings} onClose={() => showSettings = false} />
+  <Settings open={showSettings} onClose={() => { showSettings = false; settingsInitialTab = undefined; }} initialTab={settingsInitialTab} />
   <FeedbackModal
     open={showFeedbackModal}
     onClose={() => {
@@ -2293,6 +2380,7 @@
   />
 
 </div>
+{/if}
 
 {#if linkContextMenu}
   <ContextMenu

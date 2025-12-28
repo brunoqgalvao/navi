@@ -20,6 +20,8 @@
     onBrowserBack?: () => void;
     onBrowserForward?: () => void;
     onBrowserGoToIndex?: (index: number) => void;
+    // Resize state - when true, overlay blocks iframe mouse capture
+    isParentResizing?: boolean;
   }
 
   let {
@@ -32,6 +34,7 @@
     onBrowserBack,
     onBrowserForward,
     onBrowserGoToIndex,
+    isParentResizing = false,
   }: Props = $props();
 
   // Use external history if provided, otherwise use internal state
@@ -613,7 +616,11 @@
           <div><span class="text-gray-500">history:</span> {JSON.stringify(history)}</div>
         </div>
       {/if}
-      <div class="flex-1 relative min-h-0 h-full">
+      <div class="flex-1 relative min-h-0 h-full" class:pointer-events-none={isParentResizing}>
+        {#if isParentResizing}
+          <!-- Overlay to capture mouse events during resize -->
+          <div class="absolute inset-0 z-20"></div>
+        {/if}
         {#if iframeLoading}
           <div class="absolute inset-0 flex items-center justify-center bg-white/80 z-10">
             <div class="flex items-center gap-2 text-gray-500">

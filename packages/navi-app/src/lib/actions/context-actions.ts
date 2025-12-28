@@ -5,127 +5,178 @@
 
 import { get } from "svelte/store";
 import { sessionMessages, sessionHistoryContext, notifications, currentSession } from "../stores";
+import { api } from "../api";
 import type { ChatMessage } from "../stores/types";
 import type { ContentBlock, ToolUseBlock, ToolResultBlock } from "../claude";
 
-const PRUNED_TOOL_MARKER = "[content pruned]";
+// How many recent user/assistant exchanges to keep
+const RECENT_EXCHANGES_TO_KEEP = 3;
 
-// Track which sessions have been pruned (for UI indicator)
-const prunedSessions = new Set<string>();
+// Max chars for user message in recent context
+const MAX_USER_MSG_LENGTH = 500;
+
+// Max chars for assistant text in recent context
+const MAX_ASSISTANT_TEXT_LENGTH = 1000;
 
 /**
  * Check if a session has pruned context active
+ * Uses sessionHistoryContext as source of truth (not a separate Set)
  */
 export function hasPrunedContext(sessionId: string): boolean {
-  return prunedSessions.has(sessionId);
+  if (!sessionId) return false;
+  const historyCtx = get(sessionHistoryContext);
+  return historyCtx.has(sessionId);
 }
 
 /**
- * Clear pruned state for a session (call when session ends or resets)
+ * Clear pruned state for a session
  */
 export function clearPrunedState(sessionId: string): void {
-  prunedSessions.delete(sessionId);
+  sessionHistoryContext.update(map => {
+    map.delete(sessionId);
+    return new Map(map);
+  });
 }
 
 /**
- * Format a single message for history context
- * Prunes tool result content but keeps tool names for context
+ * Truncate text with ellipsis
  */
-function formatMessageForHistory(msg: ChatMessage, pruneToolResults: boolean): string {
-  const content = msg.content;
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength - 3) + "...";
+}
 
-  if (typeof content === "string") {
-    return content;
+/**
+ * Extract just text content from a message
+ */
+function extractText(msg: ChatMessage): string {
+  if (typeof msg.content === "string") return msg.content;
+  if (!Array.isArray(msg.content)) return "";
+
+  return (msg.content as ContentBlock[])
+    .filter(b => b.type === "text")
+    .map(b => (b as { text: string }).text)
+    .join("\n");
+}
+
+/**
+ * Get a minimal summary of what tools were used
+ */
+function getToolSummary(msg: ChatMessage): string {
+  if (!Array.isArray(msg.content)) return "";
+
+  const tools = (msg.content as ContentBlock[])
+    .filter(b => b.type === "tool_use")
+    .map(b => (b as ToolUseBlock).name);
+
+  if (tools.length === 0) return "";
+
+  // Dedupe and limit
+  const uniqueTools = [...new Set(tools)];
+  if (uniqueTools.length <= 3) {
+    return `[Tools: ${uniqueTools.join(", ")}]`;
+  }
+  return `[Tools: ${uniqueTools.slice(0, 3).join(", ")} +${uniqueTools.length - 3} more]`;
+}
+
+/**
+ * Format minimal history - VERY aggressive compression
+ * Only keeps last few exchanges, heavily truncated
+ */
+function formatMinimalHistory(messages: ChatMessage[]): string {
+  if (messages.length === 0) return "";
+
+  // Filter to main thread only (no subagent messages)
+  const mainMessages = messages.filter(m => !m.parentToolUseId && m.role !== "system");
+
+  // Find user/assistant pairs from the end
+  const exchanges: { user: ChatMessage; assistant: ChatMessage }[] = [];
+
+  for (let i = mainMessages.length - 1; i >= 0 && exchanges.length < RECENT_EXCHANGES_TO_KEEP; i--) {
+    const msg = mainMessages[i];
+    if (msg.role === "assistant") {
+      // Look for preceding user message
+      for (let j = i - 1; j >= 0; j--) {
+        if (mainMessages[j].role === "user") {
+          exchanges.unshift({ user: mainMessages[j], assistant: msg });
+          i = j; // Skip to before this user message
+          break;
+        }
+      }
+    }
   }
 
-  if (!Array.isArray(content)) {
+  if (exchanges.length === 0) {
+    // Fallback: just get last message
+    const lastMsg = mainMessages[mainMessages.length - 1];
+    if (lastMsg) {
+      const text = truncate(extractText(lastMsg), MAX_USER_MSG_LENGTH);
+      return `<context>\nLast message (${lastMsg.role}): ${text}\n</context>\n\nContinue the conversation.`;
+    }
     return "";
   }
 
-  const parts: string[] = [];
+  // Build minimal context
+  let history = "<recent_context>\n";
 
-  for (const block of content as ContentBlock[]) {
-    if (block.type === "text") {
-      parts.push(block.text);
-    } else if (block.type === "tool_use") {
-      const toolBlock = block as ToolUseBlock;
-      if (pruneToolResults) {
-        // Just note which tool was used, skip the full input
-        parts.push(`[Used tool: ${toolBlock.name}]`);
-      } else {
-        parts.push(`[Tool: ${toolBlock.name}]\n${JSON.stringify(toolBlock.input, null, 2)}`);
-      }
-    } else if (block.type === "tool_result") {
-      const resultBlock = block as ToolResultBlock;
-      if (pruneToolResults) {
-        parts.push(PRUNED_TOOL_MARKER);
-      } else {
-        const preview = resultBlock.content.length > 500
-          ? resultBlock.content.slice(0, 500) + "..."
-          : resultBlock.content;
-        parts.push(`[Tool result]: ${preview}`);
-      }
-    } else if (block.type === "thinking") {
-      // Skip thinking blocks in history - they're verbose
+  for (const { user, assistant } of exchanges) {
+    // User message - truncated
+    const userText = truncate(extractText(user), MAX_USER_MSG_LENGTH);
+    if (userText) {
+      history += `User: ${userText}\n`;
     }
+
+    // Assistant - just text summary + tool list, no details
+    const assistantText = truncate(extractText(assistant), MAX_ASSISTANT_TEXT_LENGTH);
+    const toolSummary = getToolSummary(assistant);
+
+    if (assistantText || toolSummary) {
+      history += `Assistant: ${assistantText}`;
+      if (toolSummary) {
+        history += ` ${toolSummary}`;
+      }
+      history += "\n";
+    }
+
+    history += "\n";
   }
 
-  return parts.filter(Boolean).join("\n");
-}
-
-/**
- * Format messages into history context string
- * Uses XML format matching server-side format
- */
-function formatHistoryContext(messages: ChatMessage[], pruneToolResults: boolean): string {
-  if (messages.length === 0) return "";
-
-  let history = "<conversation_history>\n";
-
-  for (const msg of messages) {
-    if (msg.role === "system") continue; // Skip system messages
-
-    const text = formatMessageForHistory(msg, pruneToolResults);
-    if (text.trim()) {
-      history += `<${msg.role}>${text}</${msg.role}>\n`;
-    }
-  }
-
-  history += "</conversation_history>\n\n";
-  history += "Continue from this conversation context. The previous messages above are your conversation history.";
-  history += pruneToolResults
-    ? " Note: Some tool results have been pruned to reduce context size."
-    : "";
+  history += "</recent_context>\n\n";
+  history += "Continue from this context. Earlier conversation history has been compressed.";
 
   return history;
 }
 
 /**
- * Estimate token savings from pruning
+ * Estimate original context size
  */
-function estimateTokenSavings(messages: ChatMessage[]): { originalTokens: number; prunedTokens: number } {
-  let originalTokens = 0;
-  let prunedTokens = 0;
-
+function estimateOriginalSize(messages: ChatMessage[]): number {
+  let size = 0;
   for (const msg of messages) {
-    const originalText = formatMessageForHistory(msg, false);
-    const prunedText = formatMessageForHistory(msg, true);
-
-    // Rough estimate: 1 token ≈ 4 characters
-    originalTokens += Math.ceil(originalText.length / 4);
-    prunedTokens += Math.ceil(prunedText.length / 4);
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content as ContentBlock[]) {
+        if (block.type === "tool_result") {
+          size += (block as ToolResultBlock).content.length;
+        } else if (block.type === "text") {
+          size += (block as { text: string }).text.length;
+        } else if (block.type === "tool_use") {
+          size += JSON.stringify((block as ToolUseBlock).input).length;
+        }
+      }
+    } else if (typeof msg.content === "string") {
+      size += msg.content.length;
+    }
   }
-
-  return { originalTokens, prunedTokens };
+  return size;
 }
 
 /**
- * Prune tool results and prepare for context reset
- * - Generates pruned history context
- * - Clears claudeSessionId to force fresh SDK session
+ * Prune context aggressively
+ * - Generates minimal history (only last few exchanges, heavily truncated)
+ * - Clears claudeSessionId in BOTH client store AND server database
  * - Sets historyContext for next query
  */
-export function pruneToolResults(sessionId: string): { success: boolean; prunedCount: number; tokensSaved: number } {
+export async function pruneToolResults(sessionId: string): Promise<{ success: boolean; prunedCount: number; tokensSaved: number }> {
   if (!sessionId) {
     return { success: false, prunedCount: 0, tokensSaved: 0 };
   }
@@ -141,56 +192,39 @@ export function pruneToolResults(sessionId: string): { success: boolean; prunedC
     return { success: false, prunedCount: 0, tokensSaved: 0 };
   }
 
-  // Count how many tool results we'll prune
-  let toolResultCount = 0;
-  for (const msg of currentMsgs) {
-    if (Array.isArray(msg.content)) {
-      for (const block of msg.content as ContentBlock[]) {
-        if (block.type === "tool_result") {
-          const resultBlock = block as ToolResultBlock;
-          if (resultBlock.content !== PRUNED_TOOL_MARKER) {
-            toolResultCount++;
-          }
-        }
-      }
-    }
-  }
+  const originalSize = estimateOriginalSize(currentMsgs);
 
-  if (toolResultCount === 0) {
-    notifications.add({
-      type: "info",
-      title: "Nothing to prune",
-      message: "No tool results found to prune",
-    });
-    return { success: false, prunedCount: 0, tokensSaved: 0 };
-  }
-
-  // Estimate savings
-  const { originalTokens, prunedTokens } = estimateTokenSavings(currentMsgs);
-  const tokensSaved = originalTokens - prunedTokens;
-
-  // Generate pruned history context
-  const prunedHistory = formatHistoryContext(currentMsgs, true);
+  // Generate minimal history
+  const minimalHistory = formatMinimalHistory(currentMsgs);
+  const newSize = minimalHistory.length;
 
   // Set history context for next query
   sessionHistoryContext.update(map => {
-    map.set(sessionId, prunedHistory);
+    map.set(sessionId, minimalHistory);
     return new Map(map);
   });
 
-  // Clear claudeSessionId to force fresh SDK session
+  // Clear claudeSessionId in client store
   currentSession.clearClaudeSession();
 
-  // Mark session as pruned
-  prunedSessions.add(sessionId);
+  // CRITICAL: Also reset in the database so server doesn't try to resume old session
+  try {
+    await api.sessions.resetContext(sessionId);
+  } catch (e) {
+    console.error("Failed to reset context on server:", e);
+    // Continue anyway - client-side historyContext will still work
+  }
+
+  const reduction = originalSize > 0 ? Math.round((1 - newSize / originalSize) * 100) : 0;
+  const tokensSaved = Math.round((originalSize - newSize) / 4);
 
   notifications.add({
     type: "success",
-    title: "Context pruned",
-    message: `Pruned ${toolResultCount} tool results (~${Math.round(tokensSaved / 1000)}k tokens saved). Next message will use compressed history.`,
+    title: "Context compressed",
+    message: `Reduced by ~${reduction}% (~${Math.round(tokensSaved / 1000)}k tokens). Kept last ${RECENT_EXCHANGES_TO_KEEP} exchanges.`,
   });
 
-  return { success: true, prunedCount: toolResultCount, tokensSaved };
+  return { success: true, prunedCount: currentMsgs.length, tokensSaved };
 }
 
 /**
@@ -205,7 +239,7 @@ export function startNewChatWithSummary(_sessionId: string): void {
   });
 }
 
-// Legacy exports for compatibility - can be removed later
+// Legacy exports for compatibility
 export function getMessagesForApi(sessionId: string): ChatMessage[] {
   return get(sessionMessages).get(sessionId) || [];
 }

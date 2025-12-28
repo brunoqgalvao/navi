@@ -483,3 +483,71 @@ export const projectStatus = derived(
     return projectMap;
   }
 );
+
+// File browser state - tracks expanded directories per project
+export interface FileBrowserState {
+  expandedDirs: Set<string>;
+  dirContents: Map<string, Array<{ name: string; type: "file" | "directory"; path: string }>>;
+}
+
+function createFileBrowserStore() {
+  // Map of projectPath -> FileBrowserState
+  const { subscribe, update } = writable<Map<string, FileBrowserState>>(new Map());
+
+  return {
+    subscribe,
+    getOrCreate: (projectPath: string): FileBrowserState => {
+      let state: FileBrowserState | undefined;
+      update(map => {
+        state = map.get(projectPath);
+        if (!state) {
+          state = { expandedDirs: new Set(), dirContents: new Map() };
+          map.set(projectPath, state);
+        }
+        return map;
+      });
+      return state!;
+    },
+    setExpandedDirs: (projectPath: string, expandedDirs: Set<string>) => {
+      update(map => {
+        const state = map.get(projectPath) || { expandedDirs: new Set(), dirContents: new Map() };
+        state.expandedDirs = expandedDirs;
+        map.set(projectPath, state);
+        return new Map(map);
+      });
+    },
+    setDirContents: (projectPath: string, dirContents: Map<string, Array<{ name: string; type: "file" | "directory"; path: string }>>) => {
+      update(map => {
+        const state = map.get(projectPath) || { expandedDirs: new Set(), dirContents: new Map() };
+        state.dirContents = dirContents;
+        map.set(projectPath, state);
+        return new Map(map);
+      });
+    },
+    toggleDir: (projectPath: string, dirPath: string, contents?: Array<{ name: string; type: "file" | "directory"; path: string }>) => {
+      update(map => {
+        const state = map.get(projectPath) || { expandedDirs: new Set(), dirContents: new Map() };
+        if (state.expandedDirs.has(dirPath)) {
+          state.expandedDirs.delete(dirPath);
+        } else {
+          state.expandedDirs.add(dirPath);
+          if (contents) {
+            state.dirContents.set(dirPath, contents);
+          }
+        }
+        state.expandedDirs = new Set(state.expandedDirs);
+        state.dirContents = new Map(state.dirContents);
+        map.set(projectPath, state);
+        return new Map(map);
+      });
+    },
+    clear: (projectPath: string) => {
+      update(map => {
+        map.delete(projectPath);
+        return new Map(map);
+      });
+    },
+  };
+}
+
+export const fileBrowserState = createFileBrowserStore();

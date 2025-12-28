@@ -265,7 +265,38 @@ export const sessionDebugInfo = createSessionDebugStore();
 export const sessionStatus = createSessionStatusStore();
 export const loadingSessions = writable<Set<string>>(new Set());
 export const availableModels = writable<ModelInfo[]>([]);
-export const messageQueue = writable<QueuedMessage[]>([]);
+// Message queue store with helper methods
+function createMessageQueueStore() {
+  const { subscribe, set, update } = writable<QueuedMessage[]>([]);
+
+  return {
+    subscribe,
+    set,
+    update,
+    add: (message: QueuedMessage) =>
+      update((queue) => [...queue, { ...message, id: crypto.randomUUID() }]),
+    remove: (id: string) =>
+      update((queue) => queue.filter((m) => m.id !== id)),
+    updateText: (id: string, text: string) =>
+      update((queue) =>
+        queue.map((m) => (m.id === id ? { ...m, text } : m))
+      ),
+    reorder: (sessionId: string, fromIndex: number, toIndex: number) =>
+      update((queue) => {
+        const sessionMessages = queue.filter((m) => m.sessionId === sessionId);
+        const otherMessages = queue.filter((m) => m.sessionId !== sessionId);
+        const [moved] = sessionMessages.splice(fromIndex, 1);
+        sessionMessages.splice(toIndex, 0, moved);
+        return [...otherMessages, ...sessionMessages];
+      }),
+    clearSession: (sessionId: string) =>
+      update((queue) => queue.filter((m) => m.sessionId !== sessionId)),
+    getForSession: (queue: QueuedMessage[], sessionId: string) =>
+      queue.filter((m) => m.sessionId === sessionId),
+  };
+}
+
+export const messageQueue = createMessageQueueStore();
 export const sessionHistoryContext = writable<Map<string, string>>(new Map());
 export const todos = writable<TodoItem[]>([]);
 

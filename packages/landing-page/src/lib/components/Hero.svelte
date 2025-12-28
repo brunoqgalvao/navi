@@ -185,7 +185,7 @@
           <h3 class="text-xl font-bold text-gray-900 mb-2">You're on the list!</h3>
           <p class="text-gray-500 mb-6">Thanks for your interest. Download Navi below.</p>
           <a 
-            href="/downloads/Navi_0.1.2_aarch64.dmg" 
+            href="/downloads/Navi_0.2.0_aarch64.dmg" 
             download
             class="inline-flex items-center gap-2 px-6 py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-800 transition-all"
           >
@@ -194,7 +194,7 @@
             </svg>
             Download for macOS (Apple Silicon)
           </a>
-          <p class="text-xs text-gray-400 mt-4">v0.1.2 Alpha • macOS 12+</p>
+          <p class="text-xs text-gray-400 mt-4">v0.2.0 Alpha • macOS 12+</p>
           <div class="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-left">
             <p class="text-xs text-amber-800 font-medium mb-1">Alpha Build Notice</p>
             <p class="text-xs text-amber-700">macOS may show "app is damaged" for unsigned builds. To open, run in Terminal:</p>
