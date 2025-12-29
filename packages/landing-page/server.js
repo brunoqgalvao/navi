@@ -364,6 +364,52 @@ app.delete('/api/releases/:version', async (req, res) => {
   }
 });
 
+// Public endpoint - get app info (version, download links)
+app.get('/api/app-info', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+
+  if (!sql) {
+    // Fallback to package.json version
+    const packageJson = await import('./package.json', { assert: { type: 'json' } });
+    const version = packageJson.default.version;
+    return res.json({
+      version,
+      downloads: {
+        macosArm: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_aarch64.dmg`,
+        macosIntel: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_x64.dmg`,
+        linux: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_amd64.AppImage`,
+        windows: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_x64-setup.exe`
+      }
+    });
+  }
+
+  try {
+    const [release] = await sql`
+      SELECT version, pub_date
+      FROM releases
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    const version = release?.version || '0.2.1';
+
+    res.json({
+      version,
+      pubDate: release?.pub_date,
+      downloads: {
+        macosArm: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_aarch64.dmg`,
+        macosIntel: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_x64.dmg`,
+        linux: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_amd64.AppImage`,
+        windows: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_x64-setup.exe`
+      }
+    });
+  } catch (err) {
+    console.error('Failed to get app info:', err);
+    res.status(500).json({ error: 'Failed to get app info' });
+  }
+});
+
 app.get('/downloads/*', (req, res) => {
   const filePath = path.join(__dirname, 'dist', req.path);
   res.download(filePath);

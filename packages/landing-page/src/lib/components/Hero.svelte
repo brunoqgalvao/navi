@@ -1,14 +1,30 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  
+
   let visible = $state(false);
   let showEmailModal = $state(false);
   let email = $state('');
   let submitting = $state(false);
   let submitted = $state(false);
-  
-  onMount(() => {
+
+  // Dynamic app info
+  let appVersion = $state('0.2.1');
+  let downloadUrl = $state('https://github.com/brunoqgalvao/navi/releases/latest');
+
+  onMount(async () => {
     setTimeout(() => visible = true, 100);
+
+    // Fetch latest app info
+    try {
+      const res = await fetch('/api/app-info');
+      if (res.ok) {
+        const info = await res.json();
+        appVersion = info.version;
+        downloadUrl = info.downloads?.macosArm || downloadUrl;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch app info:', e);
+    }
   });
 
   async function handleSubmit(e: Event) {
@@ -184,8 +200,8 @@
           </div>
           <h3 class="text-xl font-bold text-gray-900 mb-2">You're on the list!</h3>
           <p class="text-gray-500 mb-6">Thanks for your interest. Download Navi below.</p>
-          <a 
-            href="https://storage.googleapis.com/navi-downloads/Navi_0.2.1_aarch64.dmg" 
+          <a
+            href={downloadUrl}
             download
             class="inline-flex items-center gap-2 px-6 py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-800 transition-all"
           >
@@ -194,7 +210,7 @@
             </svg>
             Download for macOS (Apple Silicon)
           </a>
-          <p class="text-xs text-gray-400 mt-4">v0.2 Alpha • macOS 12+</p>
+          <p class="text-xs text-gray-400 mt-4">v{appVersion} Alpha • macOS 12+</p>
           <div class="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-left">
             <p class="text-xs text-amber-800 font-medium mb-1">Alpha Build Notice</p>
             <p class="text-xs text-amber-700">macOS may show "app is damaged" for unsigned builds. To open, run in Terminal:</p>
