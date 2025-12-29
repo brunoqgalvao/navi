@@ -25,7 +25,7 @@ fn get_server_ports(state: tauri::State<ServerPorts>) -> (u16, u16) {
     (state.server, state.pty)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn open_project_in_new_window(
     app: tauri::AppHandle,
     project_id: String,

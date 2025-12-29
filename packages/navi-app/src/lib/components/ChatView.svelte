@@ -109,7 +109,12 @@
   }
 
   function getSubagentMessages(): ChatMessage[] {
-    return messages.filter(m => m.parentToolUseId);
+    const subagentMsgs = messages.filter(m => m.parentToolUseId);
+    if (subagentMsgs.length > 0) {
+      console.log("[ChatView] Found", subagentMsgs.length, "subagent messages:",
+        subagentMsgs.map(m => ({ id: m.id, role: m.role, parentToolUseId: m.parentToolUseId })));
+    }
+    return subagentMsgs;
   }
 
   function isToolResultMessage(msg: ChatMessage): boolean {

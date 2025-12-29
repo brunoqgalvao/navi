@@ -1,0 +1,11 @@
+{
+  "version": "0.2.1",
+  "notes": "Release v0.2.1 ",
+  "pub_date": "2025-12-28T20:58:28Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "url": "https://github.com/brunogalvao/navi-releases/releases/download/v0.2.1/Navi.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUWEZnZzU3S1ZaZmxFQTFHMnhNRW5uYzlRQjZYUVJqODN5TEtrY1NqSWs5Y3Vidm9kSStPMS9kUVBxNm5vS3lRVWFpajhrSU9EeXJ6Q3hGSDVVelR5cFp1UFhPLzJaS0FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY2OTU1NTA4CWZpbGU6TmF2aS5hcHAudGFyLmd6CkFHNlNpTVhnRFJOa20wQ3IyRHNIYkM1U29la1Fsb05JMEloSTJDWk5Na21UeWNKRmpkYzJxT2NIWDBRdWNrTUJXdnhoTDFhVC9Mc1V6ZHRJUjdNQ0RRPT0K"
+    }
+  }
+}

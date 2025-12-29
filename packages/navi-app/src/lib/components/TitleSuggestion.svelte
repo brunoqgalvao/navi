@@ -157,7 +157,7 @@ Bad responses: "Debug React", Current title: ..., The new title should be...`,
 {#if showSuggestion && suggestedTitle}
   <div 
     bind:this={tooltipEl}
-    class="fixed left-72 z-[100] animate-fade-in pointer-events-auto"
+    class="fixed left-72 z-[9999] animate-fade-in pointer-events-auto"
     style="top: {tooltipTop}px;"
   >
     <div class="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 w-72">

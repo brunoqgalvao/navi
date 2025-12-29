@@ -15,4 +15,5 @@ export interface HandlerCallbacks {
   onSubagentProgress?: (sessionId: string, toolUseId: string, elapsed: number) => void;
   onUICommand?: (command: UICommand) => void;
   scrollToBottom?: () => void;
+  onNewContent?: () => void;
 }

@@ -73,6 +73,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         callbacks.onMessageUpdate?.(uiSessionId);
         if (uiSessionId === currentSessionId) {
           callbacks.scrollToBottom?.();
+          callbacks.onNewContent?.();
         }
         break;
 
@@ -95,6 +96,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           callbacks.onMessageUpdate?.(uiSessionId);
           if (uiSessionId === currentSessionId) {
             callbacks.scrollToBottom?.();
+            callbacks.onNewContent?.();
           }
         }
         break;

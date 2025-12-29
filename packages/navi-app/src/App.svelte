@@ -243,11 +243,13 @@
   let editSessionTitle = $state("");
   let messagesContainer: HTMLElement;
   let userIsNearBottom = $state(true);
+  let newMessagesWhileAway = $state(0);
   let modelSelection = $state("");
   let lastSessionModel = $state("");
   let showSettings = $state(false);
   let settingsInitialTab = $state<"api" | "permissions" | "claude-md" | "skills" | "features" | "analytics" | undefined>(undefined);
   let showProjectSettings = $state(false);
+  let projectSettingsInitialTab = $state<"instructions" | "model" | "permissions" | "skills" | undefined>(undefined);
   let showDebugInfo = $state(false);
   let sidebarCollapsed = $state(false);
   let messageMenuId: string | null = $state(null);
@@ -330,6 +332,7 @@
       }
     },
     scrollToBottom,
+    onNewContent: notifyNewContent,
     onClaudeSessionInit: (claudeSessionId, model) => {
       session.setClaudeSession(claudeSessionId);
       session.setModel(model);
@@ -1338,10 +1341,11 @@
   let isProgrammaticScroll = false;
 
   function scrollToBottom(instant = false) {
-    // Only auto-scroll if user is near the bottom, or if it's an instant scroll (session switch)
+    // Only auto-scroll if user is near the bottom, or if it's an instant scroll
     if (!instant && !userIsNearBottom) return;
 
     isProgrammaticScroll = true;
+    newMessagesWhileAway = 0;
     setTimeout(() => {
       messagesContainer?.scrollTo({
         top: messagesContainer.scrollHeight,
@@ -1352,6 +1356,24 @@
     }, instant ? 0 : 50);
   }
 
+  function jumpToBottom() {
+    isProgrammaticScroll = true;
+    newMessagesWhileAway = 0;
+    userIsNearBottom = true;
+    messagesContainer?.scrollTo({
+      top: messagesContainer.scrollHeight,
+      behavior: "smooth",
+    });
+    setTimeout(() => { isProgrammaticScroll = false; }, 300);
+  }
+
+  function notifyNewContent() {
+    // Only increment if user is scrolled away - called for actual new messages, not stream chunks
+    if (!userIsNearBottom) {
+      newMessagesWhileAway++;
+    }
+  }
+
   function handleMessagesScroll() {
     if (!messagesContainer) return;
     // Ignore scroll events triggered by our own scrollToBottom
@@ -1359,7 +1381,13 @@
 
     const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
     // User scrolled - are they at the very bottom? (within 20px tolerance for rounding)
+    const wasNearBottom = userIsNearBottom;
     userIsNearBottom = scrollHeight - scrollTop - clientHeight < 20;
+
+    // If user scrolled back to bottom, reset the counter
+    if (!wasNearBottom && userIsNearBottom) {
+      newMessagesWhileAway = 0;
+    }
   }
 
   function processMessageQueue(sessionId: string) {
@@ -2145,23 +2173,24 @@
         </div>
 
         <!-- Scroll to Bottom Button -->
-        {#if !userIsNearBottom && currentMessages.length > 0}
+        <div
+          class="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 transition-all duration-300 ease-out {!userIsNearBottom && currentMessages.length > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}"
+        >
           <button
-            onclick={() => {
-              messagesContainer?.scrollTo({
-                top: messagesContainer.scrollHeight,
-                behavior: "smooth",
-              });
-              userIsNearBottom = true;
-            }}
-            class="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 p-2 bg-white/90 backdrop-blur border border-gray-200 rounded-full shadow-lg hover:bg-gray-50 transition-all hover:shadow-xl group"
-            title="Scroll to bottom"
+            onclick={jumpToBottom}
+            class="relative p-2 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-full shadow-lg hover:bg-gray-50 transition-all hover:shadow-xl hover:scale-105 group"
+            title={newMessagesWhileAway > 0 ? `${newMessagesWhileAway} new update${newMessagesWhileAway > 1 ? 's' : ''} below` : 'Scroll to bottom'}
           >
-            <svg class="w-5 h-5 text-gray-500 group-hover:text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-5 h-5 text-gray-500 group-hover:text-gray-700 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
             </svg>
+            {#if newMessagesWhileAway > 0}
+              <span class="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-medium text-white bg-blue-500 rounded-full shadow-sm animate-pulse">
+                {newMessagesWhileAway > 99 ? '99+' : newMessagesWhileAway}
+              </span>
+            {/if}
           </button>
-        {/if}
+        </div>
 
         <!-- Input Area (hidden on project home via CSS) -->
         <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}" data-tour="chat-input">
@@ -2188,7 +2217,7 @@
                     onStop={stopGeneration}
                     onPreview={openPreview}
                     onExecCommand={handleExecCommand}
-                    onManageSkills={() => { settingsInitialTab = "skills"; showSettings = true; }}
+                    onManageSkills={() => { projectSettingsInitialTab = "skills"; showProjectSettings = true; }}
                 />
 
                 <div class="text-center mt-2">
@@ -2321,7 +2350,7 @@
   />
 
   {#if showProjectSettings && currentProject}
-    <ProjectSettings project={currentProject} onClose={() => showProjectSettings = false} />
+    <ProjectSettings project={currentProject} onClose={() => { showProjectSettings = false; projectSettingsInitialTab = undefined; }} initialTab={projectSettingsInitialTab} />
   {/if}
 
   <SearchModal 

@@ -647,8 +647,9 @@
                         ondrop={(e) => !proj.pinned && handleProjectDrop(e, proj)}
                         ondragend={handleProjectDragEnd}
                       >
-                        <button 
+                        <button
                           onclick={() => onSelectProject(proj)}
+                          oncontextmenu={(e) => { e.preventDefault(); projectMenuId = proj.id; }}
                           class="w-full text-left px-2.5 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
                         >
                           <div class="flex items-center gap-2">
@@ -665,13 +666,39 @@
                         </button>
                         <div class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
                           <StarButton active={!!proj.pinned} onclick={(e) => onToggleProjectPin(proj, e)} size="sm" />
-                          <button 
-                            onclick={(e) => { e.stopPropagation(); onProjectSetFolder(proj.id, null); }}
-                            class="p-1 text-gray-400 hover:text-gray-600 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity"
-                            title="Remove from folder"
-                          >
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
-                          </button>
+                          <div class="relative">
+                            <button
+                              onclick={(e) => { e.stopPropagation(); projectMenuId = projectMenuId === proj.id ? null : proj.id; }}
+                              class="p-1 text-gray-400 hover:text-gray-600 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity"
+                            >
+                              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
+                            </button>
+                            {#if projectMenuId === proj.id}
+                              <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[160px] z-50">
+                                <button onclick={(e) => { onEditProject(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
+                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                  Rename
+                                </button>
+                                <button onclick={(e) => { e.stopPropagation(); onProjectPermissions(proj); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
+                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                                  Permissions
+                                </button>
+                                <button onclick={(e) => { e.stopPropagation(); onOpenProjectInNewWindow(proj); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
+                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                  Open in New Window
+                                </button>
+                                <button onclick={(e) => { onToggleProjectArchive(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
+                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                                  {proj.archived ? 'Unarchive' : 'Archive'}
+                                </button>
+                                <div class="border-t border-gray-100 my-1"></div>
+                                <button onclick={(e) => { onDeleteProject(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                  Delete
+                                </button>
+                              </div>
+                            {/if}
+                          </div>
                         </div>
                       </div>
                     {/each}
@@ -703,8 +730,9 @@
                   ondrop={(e) => !proj.pinned && handleProjectDrop(e, proj)}
                   ondragend={handleProjectDragEnd}
                 >
-                  <button 
+                  <button
                     onclick={() => onSelectProject(proj)}
+                    oncontextmenu={(e) => { e.preventDefault(); projectMenuId = proj.id; }}
                     class="w-full text-left px-2.5 py-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
                   >
                     <div class="flex items-center gap-2">
@@ -735,17 +763,6 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                             Rename
                           </button>
-                          {#if folders.length > 0}
-                            <div class="border-t border-gray-100 my-1"></div>
-                            <div class="px-3 py-1 text-[10px] font-medium text-gray-400 uppercase">Move to folder</div>
-                            {#each folders as folder}
-                              <button onclick={(e) => { e.stopPropagation(); onProjectSetFolder(proj.id, folder.id); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                                {folder.name}
-                              </button>
-                            {/each}
-                            <div class="border-t border-gray-100 my-1"></div>
-                          {/if}
                           <button onclick={(e) => { e.stopPropagation(); onProjectPermissions(proj); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                             Permissions
@@ -930,7 +947,7 @@
           </div>
         </div>
 
-        <div class="flex-1 overflow-y-auto space-y-0.5">
+        <div class="flex-1 overflow-y-auto space-y-0.5 sidebar-scroll pr-1">
           {#if sessions.length === 0}
             <div class="text-xs text-gray-400 italic text-center py-8">No chats yet</div>
           {:else if filteredSessions.length === 0}
@@ -948,11 +965,14 @@
                 ondrop={(e) => !sess.pinned && handleSessionDrop(e, sess)}
                 ondragend={handleSessionDragEnd}
               >
-                <button 
+                <button
                   onclick={() => onSelectSession(sess)}
                   class={`w-full text-left px-2.5 py-2 rounded-lg text-[13px] transition-all border sidebar-item-glow ${sess.pinned ? '' : 'cursor-grab active:cursor-grabbing'} ${$session.sessionId === sess.id ? 'bg-white border-gray-200 shadow-sm text-gray-900 z-10 relative' : 'border-transparent text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
                 >
-                  <div class="truncate pr-20 font-medium flex items-center gap-1.5">
+                  <div class="truncate pr-16 font-medium flex items-center gap-1">
+                    <span class="shrink-0 -ml-1">
+                      <StarButton active={!!sess.favorite} onclick={(e) => onToggleSessionFavorite(sess, e)} size="sm" showOnHover={false} />
+                    </span>
                     <EditableText
                         value={sess.title}
                         onSave={(newTitle) => onRenameSession(sess.id, newTitle)}
@@ -995,8 +1015,6 @@
                       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                     </button>
                   {/if}
-
-                  <StarButton active={!!sess.favorite} onclick={(e) => onToggleSessionFavorite(sess, e)} />
 
                   <div class="relative">
                     <button 

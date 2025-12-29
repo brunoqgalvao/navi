@@ -7,15 +7,24 @@
   import SkillEditor from "./SkillEditor.svelte";
   import SkillLibrary from "./SkillLibrary.svelte";
 
+  type Tab = "instructions" | "model" | "permissions" | "skills";
+
   interface Props {
     project: Project;
     onClose: () => void;
+    initialTab?: Tab;
   }
 
-  let { project, onClose }: Props = $props();
+  let { project, onClose, initialTab }: Props = $props();
 
-  type Tab = "instructions" | "model" | "permissions" | "skills";
-  let activeTab: Tab = $state("instructions");
+  let activeTab: Tab = $state(initialTab || "instructions");
+
+  // Reset to initialTab when opening with a specific tab
+  $effect(() => {
+    if (initialTab) {
+      activeTab = initialTab;
+    }
+  });
 
   let claudeMd = $state("");
   let claudeMdExists = $state(false);

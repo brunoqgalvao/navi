@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+SCRIPTS="$(dirname "$0")"
+if [ -f "$SCRIPTS/../.env" ]; then
+  set -a
+  source "$SCRIPTS/../.env"
+  set +a
+fi
+
 if [ -z "$1" ]; then
   echo "Usage: ./release.sh <version>"
   echo "Example: ./release.sh 0.2.0"
@@ -8,7 +15,6 @@ if [ -z "$1" ]; then
 fi
 
 VERSION=$1
-SCRIPTS="$(dirname "$0")"
 
 echo "=== Releasing v$VERSION ==="
 echo ""

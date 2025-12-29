@@ -339,6 +339,46 @@
       rows="1"
     ></textarea>
 
+    <!-- Action buttons - positioned inside textarea area -->
+    <div class="absolute right-2 bottom-2 flex items-center gap-1">
+      <AudioRecorder
+        bind:this={audioRecorderRef}
+        onTranscript={(text) => { value = value ? value + " " + text : text; }}
+        {disabled}
+      />
+      {#if loading}
+        {#if queuedCount > 0}
+          <span class="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg font-medium">
+            {queuedCount} queued
+          </span>
+        {/if}
+        <button
+          onclick={onStop}
+          class="p-1.5 text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-all"
+          title="Stop generation"
+        >
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+        </button>
+      {:else}
+        <button
+          onclick={handleSubmit}
+          disabled={disabled || !value.trim()}
+          class="p-1.5 rounded-lg transition-all disabled:opacity-30 {isShellCommand(value) ? 'text-[#9ece6a] hover:bg-[#9ece6a]/20' : 'text-gray-400 bg-transparent hover:bg-gray-100 hover:text-gray-900 disabled:hover:bg-transparent'}"
+          title={isShellCommand(value) ? "Run command (Enter)" : "Send message"}
+        >
+          {#if isShellCommand(value)}
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+            </svg>
+          {:else}
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path>
+            </svg>
+          {/if}
+        </button>
+      {/if}
+    </div>
+
     {#if showFilePicker}
       <div class="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
         <div class="px-3 py-2 border-b border-gray-100 text-xs text-gray-500 font-medium">
@@ -366,128 +406,85 @@
       </div>
     {/if}
   </div>
-  
-  <div class="absolute right-2 bottom-2 flex items-center gap-1">
-    <AudioRecorder 
-      bind:this={audioRecorderRef}
-      onTranscript={(text) => { value = value ? value + " " + text : text; }}
-      {disabled}
-    />
-    {#if loading}
-      {#if queuedCount > 0}
-        <span class="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg font-medium">
-          {queuedCount} queued
-        </span>
-      {/if}
-      <button
-        onclick={onStop}
-        class="p-1.5 text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-all"
-        title="Stop generation"
-      >
-        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
-      </button>
-    {:else}
-      <button
-        onclick={handleSubmit}
-        disabled={disabled || !value.trim()}
-        class="p-1.5 rounded-lg transition-all disabled:opacity-30 {isShellCommand(value) ? 'text-[#9ece6a] hover:bg-[#9ece6a]/20' : 'text-gray-400 bg-transparent hover:bg-gray-100 hover:text-gray-900 disabled:hover:bg-transparent'}"
-        title={isShellCommand(value) ? "Run command (Enter)" : "Send message"}
-      >
-        {#if isShellCommand(value)}
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-          </svg>
-        {:else}
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path>
-          </svg>
-        {/if}
-      </button>
-    {/if}
-  </div>
 
-  <!-- Skills bar -->
-  <div class="absolute -bottom-7 left-0 right-0 px-3 flex items-center">
-    {#if activeSkills.length > 0}
-      <div class="flex items-center gap-1.5">
-        <svg class="w-3 h-3 text-purple-500" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
-        </svg>
-        {#each activeSkills.slice(0, 3) as skill}
-          <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded font-medium">{skill.name}</span>
-        {/each}
-        {#if activeSkills.length > 3}
-          <span class="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">(+{activeSkills.length - 3})</span>
+  <!-- Skills bar - inside input box -->
+  {#if activeSkills.length > 0 || !isShellCommand(value)}
+    <div class="border-t {isShellCommand(value) ? 'border-[#3d59a1]/30' : 'border-gray-100'} px-3 py-1.5 flex items-center justify-between">
+      <div class="flex items-center gap-1.5 flex-wrap">
+        {#if activeSkills.length > 0}
+          <svg class="w-3 h-3 text-purple-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          {#each activeSkills.slice(0, 4) as skill}
+            <span class="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded font-medium border border-purple-100">{skill.name}</span>
+          {/each}
+          {#if activeSkills.length > 4}
+            <span class="text-[10px] px-1.5 py-0.5 bg-gray-50 text-gray-500 rounded border border-gray-100">+{activeSkills.length - 4}</span>
+          {/if}
+        {:else}
+          <svg class="w-3 h-3 text-gray-300 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          <span class="text-[10px] text-gray-400">No skills active</span>
         {/if}
-        <!-- Add button inline with skills -->
+      </div>
+
+      <div class="flex items-center gap-1">
         <button
           onclick={() => onManageSkills?.()}
-          class="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] text-purple-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors font-medium"
-          title="Add skill"
+          class="flex items-center gap-1 px-2 py-0.5 text-[10px] text-purple-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors font-medium"
+          title="Manage skills"
         >
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
           </svg>
-          Add
+          {activeSkills.length > 0 ? 'Edit' : 'Add'}
         </button>
-        <!-- Menu button -->
-        <div class="relative">
-          <button
-            onclick={() => showSkillsMenu = !showSkillsMenu}
-            class="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-            title="Manage skills"
-          >
-            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-              <circle cx="12" cy="5" r="2"/>
-              <circle cx="12" cy="12" r="2"/>
-              <circle cx="12" cy="19" r="2"/>
-            </svg>
-          </button>
-          {#if showSkillsMenu}
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div
-              class="fixed inset-0 z-40"
-              onclick={() => showSkillsMenu = false}
-            ></div>
-            <div class="absolute bottom-full left-0 mb-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
-              <button
-                onclick={() => { showSkillsMenu = false; onManageSkills?.(); }}
-                class="w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-              >
-                <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                </svg>
-                Manage Skills
-              </button>
-              <div class="border-t border-gray-100 my-1"></div>
-              <div class="px-3 py-1.5 text-[10px] text-gray-400 font-medium uppercase tracking-wide">Active ({activeSkills.length})</div>
-              {#each activeSkills.slice(0, 5) as skill}
-                <div class="px-3 py-1.5 text-xs text-gray-600 flex items-center gap-2">
-                  <span class="w-1.5 h-1.5 bg-purple-400 rounded-full"></span>
-                  {skill.name}
+
+        {#if activeSkills.length > 0}
+          <div class="relative">
+            <button
+              onclick={() => showSkillsMenu = !showSkillsMenu}
+              class="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+              title="View all skills"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </button>
+            {#if showSkillsMenu}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div
+                class="fixed inset-0 z-40"
+                onclick={() => showSkillsMenu = false}
+              ></div>
+              <div class="absolute bottom-full right-0 mb-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
+                <div class="px-3 py-1.5 text-[10px] text-gray-400 font-medium uppercase tracking-wide border-b border-gray-100">
+                  Active Skills ({activeSkills.length})
                 </div>
-              {/each}
-              {#if activeSkills.length > 5}
-                <div class="px-3 py-1.5 text-[10px] text-gray-400">
-                  +{activeSkills.length - 5} more
+                {#each activeSkills as skill}
+                  <div class="px-3 py-1.5 text-xs text-gray-600 flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 bg-purple-400 rounded-full flex-shrink-0"></span>
+                    <span class="truncate">{skill.name}</span>
+                  </div>
+                {/each}
+                <div class="border-t border-gray-100 mt-1 pt-1">
+                  <button
+                    onclick={() => { showSkillsMenu = false; onManageSkills?.(); }}
+                    class="w-full px-3 py-1.5 text-left text-xs text-purple-600 hover:bg-purple-50 flex items-center gap-2"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    Manage Skills
+                  </button>
                 </div>
-              {/if}
-            </div>
-          {/if}
-        </div>
+              </div>
+            {/if}
+          </div>
+        {/if}
       </div>
-    {:else}
-      <button
-        onclick={() => onManageSkills?.()}
-        class="flex items-center gap-1.5 text-[10px] text-gray-400 hover:text-gray-600 transition-colors"
-      >
-        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
-        </svg>
-        <span>Add skills to customize Claude</span>
-        <span class="text-purple-500 font-medium hover:text-purple-600">+ Add</span>
-      </button>
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>

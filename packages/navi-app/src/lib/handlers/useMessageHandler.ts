@@ -21,6 +21,7 @@ export interface UseMessageHandlerOptions {
   onSubagentProgress?: (sessionId: string, toolUseId: string, elapsed: number) => void;
   onUICommand?: (command: UICommand) => void;
   scrollToBottom?: () => void;
+  onNewContent?: () => void;
   onClaudeSessionInit?: (claudeSessionId: string, model: string) => void;
   onStreamingEnd?: (sessionId: string, reason: "done" | "aborted" | "error") => void;
 }
@@ -68,6 +69,7 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     onSubagentProgress,
     onUICommand,
     scrollToBottom,
+    onNewContent,
     onClaudeSessionInit,
     onStreamingEnd: onStreamingEndCallback,
   } = options;
@@ -167,6 +169,7 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
       },
 
       scrollToBottom,
+      onNewContent,
     },
   };
 

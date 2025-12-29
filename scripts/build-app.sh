@@ -1,7 +1,20 @@
 #!/bin/bash
 set -e
 
-cd "$(dirname "$0")/../packages/navi-app"
+SCRIPT_DIR="$(dirname "$0")"
+cd "$SCRIPT_DIR/../packages/navi-app"
+
+if [ -f "$SCRIPT_DIR/../.env" ]; then
+  set -a
+  source "$SCRIPT_DIR/../.env"
+  set +a
+fi
+
+export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/navi.key)"
+if [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
+  echo "Error: TAURI_SIGNING_PRIVATE_KEY_PASSWORD not set" >&2
+  exit 1
+fi
 
 ARCH="$(uname -m)"
 case "$ARCH" in
