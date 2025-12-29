@@ -1,0 +1,427 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+          - none
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  SERVICE_NAME: navi-landing
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+jobs:
+  # Check if we need to bump version
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_bump: ${{ steps.check.outputs.should_bump }}
+      current_version: ${{ steps.check.outputs.current_version }}
+      new_version: ${{ steps.check.outputs.new_version }}
+      bump_type: ${{ steps.check.outputs.bump_type }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version bump
+        id: check
+        run: |
+          CURRENT_VERSION=$(jq -r '.version' packages/navi-app/package.json)
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          # Get the commit message
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+
+          # Determine bump type
+          BUMP_TYPE="${{ github.event.inputs.bump_type || 'auto' }}"
+
+          if [ "$BUMP_TYPE" = "none" ]; then
+            echo "should_bump=false" >> $GITHUB_OUTPUT
+            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+            echo "bump_type=none" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if commit already bumped version
+          if echo "$COMMIT_MSG" | grep -qE "^(chore|release).*bump.*version|^v[0-9]"; then
+            echo "Version already bumped in this commit, skipping"
+            echo "should_bump=false" >> $GITHUB_OUTPUT
+            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+            echo "bump_type=none" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Determine bump type from commit message or default to minor
+          if [ "$BUMP_TYPE" = "auto" ]; then
+            if echo "$COMMIT_MSG" | grep -qiE "BREAKING|major"; then
+              BUMP_TYPE="major"
+            elif echo "$COMMIT_MSG" | grep -qiE "^fix|patch|hotfix"; then
+              BUMP_TYPE="patch"
+            else
+              BUMP_TYPE="minor"
+            fi
+          fi
+
+          # Calculate new version
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          case "$BUMP_TYPE" in
+            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+            minor) NEW_VERSION="$MAJOR.$((MINOR + 1)).0" ;;
+            patch) NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+          esac
+
+          echo "should_bump=true" >> $GITHUB_OUTPUT
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "Bumping version: $CURRENT_VERSION -> $NEW_VERSION ($BUMP_TYPE)"
+
+  # Bump version and create tag
+  bump-version:
+    needs: check-version
+    if: needs.check-version.outputs.should_bump == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ needs.check-version.outputs.new_version }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Update version in all package.json files
+        run: |
+          NEW_VERSION="${{ needs.check-version.outputs.new_version }}"
+
+          # Update root package.json
+          jq ".version = \"$NEW_VERSION\"" package.json > tmp.json && mv tmp.json package.json
+
+          # Update navi-app package.json
+          jq ".version = \"$NEW_VERSION\"" packages/navi-app/package.json > tmp.json && mv tmp.json packages/navi-app/package.json
+
+          # Update landing-page package.json
+          jq ".version = \"$NEW_VERSION\"" packages/landing-page/package.json > tmp.json && mv tmp.json packages/landing-page/package.json
+
+          # Update tauri.conf.json
+          jq ".version = \"$NEW_VERSION\"" packages/navi-app/src-tauri/tauri.conf.json > tmp.json && mv tmp.json packages/navi-app/src-tauri/tauri.conf.json
+
+      - name: Commit version bump
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .
+          git commit -m "chore: bump version to ${{ needs.check-version.outputs.new_version }}"
+          git tag "v${{ needs.check-version.outputs.new_version }}"
+          git push
+          git push --tags
+
+  # Build Tauri app for all platforms
+  build-tauri:
+    needs: [check-version, bump-version]
+    if: always() && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: macos-arm64
+          - platform: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: macos-x64
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_name: linux-x64
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: windows-x64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pull latest changes
+        run: git pull origin main
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        working-directory: packages/navi-app
+        run: bun install
+
+      - name: Build Tauri
+        working-directory: packages/navi-app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bun run tauri build --target ${{ matrix.target }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: navi-${{ matrix.artifact_name }}
+          path: |
+            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.tar.gz
+            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.tar.gz.sig
+            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage.sig
+            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi.sig
+            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe.sig
+
+  # Create GitHub Release
+  create-release:
+    needs: [check-version, bump-version, build-tauri]
+    if: always() && needs.build-tauri.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pull latest
+        run: git pull origin main
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' packages/navi-app/package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: find artifacts -type f
+
+      - name: Prepare release assets
+        id: prepare
+        run: |
+          mkdir -p release-assets
+
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Find and copy all release files with proper names
+          find artifacts -name "*.dmg" -exec cp {} release-assets/ \;
+          find artifacts -name "*.tar.gz" -exec cp {} release-assets/ \;
+          find artifacts -name "*.tar.gz.sig" -exec cp {} release-assets/ \;
+          find artifacts -name "*.AppImage" -exec cp {} release-assets/ \;
+          find artifacts -name "*.AppImage.sig" -exec cp {} release-assets/ \;
+          find artifacts -name "*.msi" -exec cp {} release-assets/ \;
+          find artifacts -name "*.msi.sig" -exec cp {} release-assets/ \;
+          find artifacts -name "*-setup.exe" -exec cp {} release-assets/ \;
+          find artifacts -name "*-setup.exe.sig" -exec cp {} release-assets/ \;
+
+          ls -la release-assets/
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Navi v${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Deploy landing page and publish update manifest
+  deploy:
+    needs: [check-version, bump-version, build-tauri, create-release]
+    if: always() && needs.build-tauri.result == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pull latest
+        run: git pull origin main
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' packages/navi-app/package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Organize downloads for landing page
+        run: |
+          mkdir -p packages/landing-page/public/downloads
+          find artifacts -type f \( -name "*.dmg" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" \) -exec cp {} packages/landing-page/public/downloads/ \;
+          ls -la packages/landing-page/public/downloads/
+
+      - name: Generate update manifest
+        id: manifest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/v$VERSION"
+
+          # Initialize platforms JSON
+          PLATFORMS="{}"
+
+          # Check for macOS ARM64 signature
+          MACOS_ARM_SIG=$(find artifacts -path "*aarch64*" -name "*.tar.gz.sig" -exec cat {} \; 2>/dev/null || echo "")
+          if [ -n "$MACOS_ARM_SIG" ]; then
+            PLATFORMS=$(echo "$PLATFORMS" | jq --arg url "$BASE_URL/Navi.app.tar.gz" --arg sig "$MACOS_ARM_SIG" '. + {"darwin-aarch64": {"url": $url, "signature": $sig}}')
+          fi
+
+          # Check for macOS x64 signature
+          MACOS_X64_SIG=$(find artifacts -path "*x86_64-apple*" -name "*.tar.gz.sig" -exec cat {} \; 2>/dev/null || echo "")
+          if [ -n "$MACOS_X64_SIG" ]; then
+            PLATFORMS=$(echo "$PLATFORMS" | jq --arg url "$BASE_URL/Navi-x86_64.app.tar.gz" --arg sig "$MACOS_X64_SIG" '. + {"darwin-x86_64": {"url": $url, "signature": $sig}}')
+          fi
+
+          # Check for Windows signature
+          WINDOWS_SIG=$(find artifacts -name "*-setup.exe.sig" -exec cat {} \; 2>/dev/null || echo "")
+          if [ -n "$WINDOWS_SIG" ]; then
+            PLATFORMS=$(echo "$PLATFORMS" | jq --arg url "$BASE_URL/Navi_${VERSION}_x64-setup.exe" --arg sig "$WINDOWS_SIG" '. + {"windows-x86_64": {"url": $url, "signature": $sig}}')
+          fi
+
+          # Check for Linux signature
+          LINUX_SIG=$(find artifacts -name "*.AppImage.sig" -exec cat {} \; 2>/dev/null || echo "")
+          if [ -n "$LINUX_SIG" ]; then
+            PLATFORMS=$(echo "$PLATFORMS" | jq --arg url "$BASE_URL/Navi_${VERSION}_amd64.AppImage" --arg sig "$LINUX_SIG" '. + {"linux-x86_64": {"url": $url, "signature": $sig}}')
+          fi
+
+          # Create the manifest
+          MANIFEST=$(jq -n \
+            --arg version "$VERSION" \
+            --arg notes "Release v$VERSION" \
+            --arg pub_date "$PUB_DATE" \
+            --argjson platforms "$PLATFORMS" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}')
+
+          echo "$MANIFEST" > update-manifest.json
+          cat update-manifest.json
+
+          # Save for later step
+          echo "manifest<<EOF" >> $GITHUB_OUTPUT
+          echo "$MANIFEST" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Auth to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build landing page
+        working-directory: packages/landing-page
+        run: |
+          bun install
+          bun run build
+
+      - name: Build and push Docker image
+        working-directory: packages/landing-page
+        run: |
+          IMAGE=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/navi/landing:${{ github.sha }}
+          docker build -t $IMAGE .
+          docker push $IMAGE
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/navi/landing:${{ github.sha }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --memory 256Mi \
+            --cpu 1 \
+            --min-instances 0 \
+            --max-instances 10
+
+      - name: Publish update manifest
+        run: |
+          API_URL="https://navi-landing-639638599480.us-central1.run.app/api/releases"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL" \
+            -H "Authorization: Bearer ${{ secrets.NAVI_ADMIN_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @update-manifest.json)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 201 ]; then
+            echo "Successfully published update manifest"
+            echo "Response: $BODY"
+          else
+            echo "Warning: Failed to publish update manifest: HTTP $HTTP_CODE"
+            echo "Response: $BODY"
+            # Don't fail the job, landing page is already deployed
+          fi
+
+      - name: Verify update endpoint
+        run: |
+          echo "Verifying update endpoint..."
+          curl -s "https://navi-landing-639638599480.us-central1.run.app/api/updates/latest.json" | jq .
