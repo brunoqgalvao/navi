@@ -132,7 +132,10 @@ jobs:
           git add .
           git commit -m "chore: bump version to ${{ needs.check-version.outputs.new_version }}"
           git tag "v${{ needs.check-version.outputs.new_version }}"
-          git push
+
+          # Pull any concurrent changes and push
+          git pull --rebase origin main || true
+          git push origin main
           git push --tags
 
   # Build Tauri app for all platforms

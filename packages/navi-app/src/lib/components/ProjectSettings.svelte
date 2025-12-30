@@ -6,8 +6,9 @@
   import ProjectSkillSelector from "./ProjectSkillSelector.svelte";
   import SkillEditor from "./SkillEditor.svelte";
   import SkillLibrary from "./SkillLibrary.svelte";
+  import ProjectAnalytics from "./ProjectAnalytics.svelte";
 
-  type Tab = "instructions" | "model" | "permissions" | "skills";
+  type Tab = "instructions" | "model" | "permissions" | "skills" | "analytics";
 
   interface Props {
     project: Project;
@@ -284,6 +285,15 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
           Skills
+        </button>
+        <button
+          onclick={() => activeTab = "analytics"}
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors {activeTab === 'analytics' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'}"
+        >
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          Analytics
         </button>
       </div>
 
