@@ -1,7 +1,7 @@
 {
   "name": "claude-code-local-ui",
   "private": true,
-  "version": "1.0.4",
+  "version": "1.0.5",
   "scripts": {
     "dev": "concurrently \"bun run --cwd packages/navi-app dev:all\" \"bun run --cwd packages/landing-page dev\"",
     "dev:app": "bun run --cwd packages/navi-app dev:all",
