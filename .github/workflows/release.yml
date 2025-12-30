@@ -251,17 +251,11 @@ jobs:
 
       - name: Build Tauri
         working-directory: packages/navi-app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          # Build without signing if secrets are not set or invalid
-          bun run tauri build --target ${{ matrix.target }} || {
-            echo "Build with signing failed, trying without..."
-            unset TAURI_SIGNING_PRIVATE_KEY
-            unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-            bun run tauri build --target ${{ matrix.target }}
-          }
+          # Build without updater signing for now (secrets need to be reconfigured)
+          # TODO: Re-enable when TAURI_SIGNING_PRIVATE_KEY is properly set in GitHub Secrets
+          echo "Building Tauri app (without updater signing)..."
+          bun run tauri build --target ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
