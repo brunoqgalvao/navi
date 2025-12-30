@@ -209,6 +209,16 @@ jobs:
           echo "Copied bun to binaries/bun-$TARGET"
           ls -la binaries/
 
+      - name: Copy claude-agent-sdk resources
+        working-directory: packages/navi-app
+        shell: bash
+        run: |
+          # Copy claude-agent-sdk from node_modules to resources
+          mkdir -p src-tauri/resources/claude-agent-sdk
+          cp -r node_modules/@anthropic-ai/claude-agent-sdk/* src-tauri/resources/claude-agent-sdk/
+          echo "Copied claude-agent-sdk to resources"
+          ls -la src-tauri/resources/
+
       - name: Build Tauri
         working-directory: packages/navi-app
         env:
