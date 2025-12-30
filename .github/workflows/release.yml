@@ -209,14 +209,44 @@ jobs:
           echo "Copied bun to binaries/bun-$TARGET"
           ls -la binaries/
 
-      - name: Copy claude-agent-sdk resources
+      - name: Prepare Tauri resources
         working-directory: packages/navi-app
         shell: bash
         run: |
+          TARGET="${{ matrix.target }}"
+
           # Copy claude-agent-sdk from node_modules to resources
           mkdir -p src-tauri/resources/claude-agent-sdk
           cp -r node_modules/@anthropic-ai/claude-agent-sdk/* src-tauri/resources/claude-agent-sdk/
-          echo "Copied claude-agent-sdk to resources"
+          echo "✓ Copied claude-agent-sdk to resources"
+
+          # Build query worker
+          bun build ./server/query-worker.ts --outfile src-tauri/resources/query-worker.js --target bun
+          echo "✓ Built query-worker.js"
+
+          # Build navi-server sidecar
+          case "$TARGET" in
+            aarch64-apple-darwin)
+              BUN_TARGET="bun-darwin-arm64"
+              ;;
+            x86_64-apple-darwin)
+              BUN_TARGET="bun-darwin-x64"
+              ;;
+            x86_64-unknown-linux-gnu)
+              BUN_TARGET="bun-linux-x64"
+              ;;
+            x86_64-pc-windows-msvc)
+              BUN_TARGET="bun-windows-x64"
+              ;;
+          esac
+          bun build ./server/index.ts --compile --outfile "src-tauri/binaries/navi-server-$TARGET" --target "$BUN_TARGET"
+          echo "✓ Built navi-server-$TARGET"
+
+          echo ""
+          echo "=== Binaries ==="
+          ls -la src-tauri/binaries/
+          echo ""
+          echo "=== Resources ==="
           ls -la src-tauri/resources/
 
       - name: Build Tauri
