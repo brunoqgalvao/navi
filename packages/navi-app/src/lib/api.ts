@@ -840,3 +840,40 @@ export const processApi = {
       body: JSON.stringify({ type }),
     }),
 };
+
+// Project Analytics (parsed from Claude session transcripts)
+export interface ToolUsage {
+  name: string;
+  count: number;
+}
+
+export interface FileAccess {
+  path: string;
+  reads: number;
+  writes: number;
+  edits: number;
+  lineRanges: Array<{ offset?: number; limit?: number }>;
+}
+
+export interface ProjectAnalytics {
+  projectPath: string;
+  totalSessions: number;
+  analyzedSessions: number;
+  dateRange: { start: number; end: number } | null;
+  toolUsage: ToolUsage[];
+  topFiles: FileAccess[];
+  hotspots: Array<{ file: string; range: string; accessCount: number }>;
+  totalReads: number;
+  totalWrites: number;
+  totalEdits: number;
+}
+
+export const analyticsApi = {
+  getProjectAnalytics: (projectId: string, days?: number, limit?: number) => {
+    const params = new URLSearchParams();
+    if (days) params.set("days", String(days));
+    if (limit) params.set("limit", String(limit));
+    const query = params.toString();
+    return request<ProjectAnalytics>(`/projects/${projectId}/analytics${query ? `?${query}` : ""}`);
+  },
+};

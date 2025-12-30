@@ -19,6 +19,7 @@ import { handleAgentRoutes } from "./routes/agents";
 import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal";
 import { handleProxyRoutes } from "./routes/proxy";
 import { handleProcessRoutes } from "./routes/processes";
+import { handleAnalyticsRoutes } from "./routes/analytics";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -189,6 +190,10 @@ const server = Bun.serve({
 
     // Process management routes
     response = await handleProcessRoutes(url, method, req);
+    if (response) return response;
+
+    // Analytics routes
+    response = await handleAnalyticsRoutes(url, method);
     if (response) return response;
 
     // Ephemeral chat
