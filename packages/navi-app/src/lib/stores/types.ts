@@ -144,6 +144,24 @@ export interface SessionWorkspace {
   browser: BrowserState;
 }
 
+// Text reference from preview selection
+export interface TextReference {
+  id: string;
+  text: string;
+  truncatedText: string;
+  source: {
+    type: "code" | "csv" | "xlsx" | "json" | "markdown" | "text" | "url";
+    path?: string;
+    startLine?: number;
+    endLine?: number;
+    rows?: [number, number];
+    columns?: string[];
+    sheet?: string;
+    jsonPath?: string;
+    url?: string;
+  };
+}
+
 // SDK Event types for debug/timeline view
 export type SDKEventType =
   | "system_init"

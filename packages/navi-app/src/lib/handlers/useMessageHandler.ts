@@ -26,7 +26,7 @@ export interface UseMessageHandlerOptions {
   onStreamingEnd?: (sessionId: string, reason: "done" | "aborted" | "error") => void;
   onCompactStart?: (sessionId: string) => void;
   onCompactEnd?: (sessionId: string, metadata?: CompactMetadata) => void;
-  onContextOverflow?: (sessionId: string) => void;
+  onContextOverflow?: (sessionId: string, autoRetry: boolean) => void;
 }
 
 /**
@@ -213,8 +213,8 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
         onCompactEnd?.(sessionId, metadata);
       },
 
-      onContextOverflow: (sessionId) => {
-        onContextOverflow?.(sessionId);
+      onContextOverflow: (sessionId, autoRetry) => {
+        onContextOverflow?.(sessionId, autoRetry);
       },
 
       scrollToBottom,

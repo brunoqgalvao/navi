@@ -24,6 +24,7 @@ export type {
   TerminalTab,
   BrowserState,
   SessionWorkspace,
+  TextReference,
 } from "./types";
 
 // Session stores
@@ -75,6 +76,9 @@ export {
   projectStatus,
   fileBrowserState,
 } from "./ui";
+
+// References store
+export { textReferences } from "./references";
 
 export type { UIScaleLevel, FileBrowserState } from "./ui";
 

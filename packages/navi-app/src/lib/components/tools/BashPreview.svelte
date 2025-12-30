@@ -201,7 +201,7 @@
     align-items: center;
     gap: 8px;
     background: #f3e8ff;
-    padding: 6px 10px;
+    padding: 10px 14px;
     border-radius: 6px;
     overflow-x: auto;
   }
@@ -265,7 +265,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 10px;
+    padding: 8px 14px;
     background: #f9fafb;
     border-bottom: 1px solid #e5e7eb;
   }
@@ -326,7 +326,7 @@
   }
 
   .output-content {
-    padding: 10px;
+    padding: 12px 14px;
     background: #1a1b26;
     max-height: 200px;
     overflow-y: auto;

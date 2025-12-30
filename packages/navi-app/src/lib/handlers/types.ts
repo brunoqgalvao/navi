@@ -23,7 +23,7 @@ export interface HandlerCallbacks {
   onStreamingStart?: (sessionId: string) => void;
   onStreamingEnd?: (sessionId: string, reason: "done" | "aborted" | "error") => void;
   onError?: (sessionId: string, error: string) => void;
-  onContextOverflow?: (sessionId: string) => void;
+  onContextOverflow?: (sessionId: string, autoRetry: boolean) => void;
   onComplete?: (sessionId: string, data: { costUsd: number; usage?: MessageUsage }) => void;
   onPermissionRequest?: (data: { requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string }) => void;
   onTodoUpdate?: (sessionId: string, todos: TodoItem[]) => void;

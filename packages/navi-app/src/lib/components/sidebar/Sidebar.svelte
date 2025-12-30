@@ -316,10 +316,11 @@
 
   async function handleFolderDrop(e: DragEvent, folderId: string | null) {
     e.preventDefault();
+    // Only handle project drops - folder reorder is handled by handleFolderReorderDrop
     if (draggedProjectId) {
       onProjectSetFolder(draggedProjectId, folderId);
+      resetDragState();
     }
-    resetDragState();
   }
 
   function handleProjectDragEnd() {

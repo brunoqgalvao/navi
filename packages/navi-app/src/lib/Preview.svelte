@@ -5,8 +5,11 @@
   import * as XLSX from "xlsx";
   import MermaidRenderer from "./components/MermaidRenderer.svelte";
   import JsonTreeViewer from "./components/JsonTreeViewer.svelte";
+  import ContextMenu from "./components/ContextMenu.svelte";
   import { api } from "./api";
   import { getApiBase } from "./config";
+  import { textReferences } from "./stores";
+  import type { TextReference } from "./stores/types";
 
   type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "xlsx" | "json" | "none";
 
@@ -60,6 +63,19 @@
   let showDebug = $state(false);
   let showBackHistory = $state(false);
   let showForwardHistory = $state(false);
+
+  // Context menu state for text references
+  interface SelectionInfo {
+    text: string;
+    type: "code" | "csv" | "xlsx" | "json" | "markdown" | "text" | "url";
+    startLine?: number;
+    endLine?: number;
+    rows?: [number, number];
+    columns?: string[];
+    jsonPath?: string;
+    sheet?: string;
+  }
+  let contextMenu = $state<{ x: number; y: number; selection: SelectionInfo } | null>(null);
 
   const imageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp"];
   const audioExtensions = ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma"];
@@ -391,6 +407,170 @@
     showForwardHistory = false;
   }
 
+  // Selection detection for text references
+  function getSelection(): SelectionInfo | null {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) return null;
+
+    const text = selection.toString().trim();
+    if (!text) return null;
+
+    switch (detectedType) {
+      case "code":
+      case "file":
+        return getCodeSelection(selection, text);
+      case "markdown":
+        return { text, type: "markdown", ...getLineNumbers(selection, text) };
+      case "csv":
+        return getCsvSelection(selection, text);
+      case "xlsx":
+        return getXlsxSelection(selection, text);
+      case "json":
+        return getJsonSelection(selection, text);
+      case "url":
+        return { text, type: "url" };
+      default:
+        return { text, type: "text" };
+    }
+  }
+
+  function getLineNumbers(selection: Selection, text: string): { startLine?: number; endLine?: number } {
+    try {
+      const range = selection.getRangeAt(0);
+      const container = range.commonAncestorContainer;
+      const preElement = container instanceof Element
+        ? container.closest("pre")
+        : container.parentElement?.closest("pre");
+
+      if (!preElement) return {};
+
+      const fullContent = preElement.textContent || "";
+      const selectionStart = fullContent.indexOf(text);
+      if (selectionStart === -1) return {};
+
+      const beforeSelection = fullContent.slice(0, selectionStart);
+      const startLine = (beforeSelection.match(/\n/g) || []).length + 1;
+      const endLine = startLine + (text.match(/\n/g) || []).length;
+
+      return {
+        startLine,
+        endLine: endLine > startLine ? endLine : undefined,
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  function getCodeSelection(selection: Selection, text: string): SelectionInfo {
+    const ext = source.split(".").pop()?.toLowerCase() || "";
+    const codeType = codeExtensions.includes(ext) ? "code" : "text";
+    return {
+      text,
+      type: codeType as "code" | "text",
+      ...getLineNumbers(selection, text),
+    };
+  }
+
+  function getCsvSelection(selection: Selection, text: string): SelectionInfo {
+    try {
+      const range = selection.getRangeAt(0);
+      const container = range.commonAncestorContainer;
+      const cell = container instanceof Element
+        ? container.closest("td")
+        : container.parentElement?.closest("td");
+
+      if (!cell) return { text, type: "csv" };
+
+      const row = cell.closest("tr");
+      const table = cell.closest("table");
+      if (!row || !table) return { text, type: "csv" };
+
+      const rows = Array.from(table.querySelectorAll("tbody tr"));
+      const rowIndex = rows.indexOf(row as HTMLTableRowElement) + 1;
+
+      const cellIndex = Array.from(row.cells).indexOf(cell as HTMLTableCellElement);
+      const headerCell = table.querySelector(`thead th:nth-child(${cellIndex + 1})`);
+      const columnName = headerCell?.textContent || `Column ${cellIndex}`;
+
+      return {
+        text,
+        type: "csv",
+        rows: [rowIndex, rowIndex],
+        columns: [columnName],
+      };
+    } catch {
+      return { text, type: "csv" };
+    }
+  }
+
+  function getXlsxSelection(selection: Selection, text: string): SelectionInfo {
+    const result = getCsvSelection(selection, text);
+    return {
+      ...result,
+      type: "xlsx",
+      sheet: xlsxActiveSheet || undefined,
+    };
+  }
+
+  function getJsonSelection(selection: Selection, text: string): SelectionInfo {
+    // JSON path detection is complex - for now just capture the text
+    // Could enhance later to walk DOM and build path
+    return { text, type: "json" };
+  }
+
+  function handlePreviewContextMenu(e: MouseEvent) {
+    const selection = getSelection();
+    if (selection) {
+      e.preventDefault();
+      contextMenu = { x: e.clientX, y: e.clientY, selection };
+    }
+  }
+
+  function handleReferenceInChat() {
+    if (!contextMenu) return;
+
+    const ref: TextReference = {
+      id: crypto.randomUUID(),
+      text: contextMenu.selection.text,
+      truncatedText:
+        contextMenu.selection.text.slice(0, 50) +
+        (contextMenu.selection.text.length > 50 ? "..." : ""),
+      source: {
+        type: contextMenu.selection.type,
+        path: detectedType === "url" ? undefined : source,
+        startLine: contextMenu.selection.startLine,
+        endLine: contextMenu.selection.endLine,
+        rows: contextMenu.selection.rows,
+        columns: contextMenu.selection.columns,
+        jsonPath: contextMenu.selection.jsonPath,
+        sheet: contextMenu.selection.sheet,
+        url: detectedType === "url" ? currentUrl : undefined,
+      },
+    };
+
+    textReferences.add(ref);
+    contextMenu = null;
+    window.getSelection()?.removeAllRanges();
+  }
+
+  function getContextMenuItems() {
+    return [
+      {
+        label: "Reference in Chat",
+        icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>`,
+        onclick: handleReferenceInChat,
+      },
+      {
+        label: "Copy",
+        icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>`,
+        onclick: () => {
+          navigator.clipboard.writeText(contextMenu?.selection.text || "");
+          contextMenu = null;
+        },
+      },
+    ];
+  }
+
   function getDisplayUrl(url: string): string {
     try {
       const parsed = new URL(url);
@@ -642,7 +822,8 @@
     </div>
   {/if}
 
-  <div class="flex-1 overflow-auto min-h-0 flex flex-col">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="flex-1 overflow-auto min-h-0 flex flex-col" oncontextmenu={handlePreviewContextMenu}>
     {#if loading}
       <div class="flex items-center justify-center h-full">
         <div class="flex items-center gap-2 text-gray-400">
@@ -861,6 +1042,15 @@
     {/if}
   </div>
 </div>
+
+{#if contextMenu}
+  <ContextMenu
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={getContextMenuItems()}
+    onclose={() => contextMenu = null}
+  />
+{/if}
 
 <style>
   :global(.hljs) {

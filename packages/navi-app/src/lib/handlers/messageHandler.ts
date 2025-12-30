@@ -16,6 +16,7 @@ import type { HandlerCallbacks, UICommand } from "./types";
 import type { TodoItem } from "../stores/types";
 import { sessionMessages } from "../stores";
 import { handleStreamEvent } from "./streamHandler";
+import { get } from "svelte/store";
 
 export interface MessageHandlerConfig {
   callbacks: HandlerCallbacks;
@@ -182,15 +183,59 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           const errorText = errorMsg.error || "";
 
           // Check for context overflow errors
+          // Also check the last assistant message for "prompt is too long" text
+          const messagesMap = get(sessionMessages);
+          const lastMessages = messagesMap.get(uiSessionId) || [];
+          const lastAssistantContent = lastMessages
+            .filter(m => m.role === "assistant")
+            .slice(-1)
+            .map(m => {
+              if (typeof m.content === "string") return m.content;
+              if (Array.isArray(m.content)) {
+                return m.content
+                  .filter((b): b is { type: "text"; text: string } => b.type === "text")
+                  .map(b => b.text)
+                  .join(" ");
+              }
+              return "";
+            })
+            .join(" ")
+            .toLowerCase();
+
           const isContextOverflow =
             errorText.toLowerCase().includes("prompt is too long") ||
             errorText.toLowerCase().includes("context length") ||
             errorText.toLowerCase().includes("maximum context") ||
-            errorText.toLowerCase().includes("token limit");
+            errorText.toLowerCase().includes("token limit") ||
+            lastAssistantContent.includes("prompt is too long");
 
           if (isContextOverflow) {
-            // Don't add a scary error message - let the callback handle it gracefully
-            callbacks.onContextOverflow?.(uiSessionId);
+            // Find the last user message to rollback to
+            const lastUserMsgIndex = lastMessages.findLastIndex(m => m.role === "user");
+
+            if (lastUserMsgIndex >= 0) {
+              // Rollback: keep messages up to and including the last user message
+              const rolledBackMessages = lastMessages.slice(0, lastUserMsgIndex + 1);
+
+              // Add a system message explaining what happened
+              rolledBackMessages.push({
+                id: crypto.randomUUID(),
+                role: "system",
+                content: "⚠️ Context limit reached - the previous response was too long. Retrying with a more concise approach...",
+                timestamp: new Date(),
+              });
+
+              sessionMessages.setMessages(uiSessionId, rolledBackMessages);
+
+              // Signal that we should auto-retry
+              callbacks.onContextOverflow?.(uiSessionId, true);
+            } else {
+              // No user message to rollback to, just show the modal
+              callbacks.onContextOverflow?.(uiSessionId, false);
+            }
+
+            // Don't call onError or onStreamingEnd - let the retry handle it
+            return;
           } else {
             // Regular error handling
             sessionMessages.addMessage(uiSessionId, {

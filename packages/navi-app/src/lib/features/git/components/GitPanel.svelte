@@ -30,6 +30,8 @@
   let loadingDiff = $state(false);
   let showDiff = $state(false);
   let showCommitModal = $state(false);
+  let summarizing = $state(false);
+  let changeSummary = $state<{ type: "semantic" | "file"; items: string[] } | null>(null);
 
   // Computed
   let totalChanges = $derived(
@@ -250,6 +252,287 @@
     }
   }
 
+  // Semantic diff analysis - extracts meaningful feature descriptions
+  interface SemanticPattern {
+    pattern: RegExp;
+    extract: (match: RegExpMatchArray, file: string) => string | null;
+    category: string;
+  }
+
+  const semanticPatterns: SemanticPattern[] = [
+    // New component/module detection
+    {
+      pattern: /^\+.*export\s+(default\s+)?(function|const|class)\s+(\w+)/gm,
+      extract: (m, file) => {
+        const name = m[3];
+        if (file.endsWith(".svelte")) return `New component: ${name}`;
+        if (file.includes("store")) return `New store: ${name}`;
+        if (file.includes("api")) return `New API: ${name}`;
+        return `New export: ${name}`;
+      },
+      category: "additions"
+    },
+    // New interface/type
+    {
+      pattern: /^\+.*export\s+(interface|type)\s+(\w+)/gm,
+      extract: (m) => `New type: ${m[2]}`,
+      category: "types"
+    },
+    // New function
+    {
+      pattern: /^\+\s*(async\s+)?function\s+(\w+)/gm,
+      extract: (m) => `New function: ${m[2]}`,
+      category: "additions"
+    },
+    // Event handler additions
+    {
+      pattern: /^\+.*on(\w+)\s*[=:]\s*(?:\(\)|{|async|\()/gm,
+      extract: (m) => `Added ${m[1].toLowerCase()} handler`,
+      category: "handlers"
+    },
+    // Import additions (grouped)
+    {
+      pattern: /^\+\s*import\s+.*from\s+["']([^"']+)["']/gm,
+      extract: (m) => {
+        const pkg = m[1];
+        if (pkg.startsWith(".")) return null; // Skip relative imports
+        return `Added dependency: ${pkg}`;
+      },
+      category: "dependencies"
+    },
+    // State additions
+    {
+      pattern: /^\+.*let\s+(\w+)\s*=\s*\$state/gm,
+      extract: (m) => `New state: ${m[1]}`,
+      category: "state"
+    },
+    // Store additions
+    {
+      pattern: /^\+.*(?:writable|readable|derived)\s*[<(]/gm,
+      extract: () => `New reactive store`,
+      category: "state"
+    },
+    // API endpoint additions
+    {
+      pattern: /^\+.*(?:fetch|axios|get|post|put|delete)\s*\(\s*[`"']([^`"']*)/gm,
+      extract: (m) => {
+        const url = m[1];
+        if (url.includes("${")) return null; // Skip template strings
+        return `API call: ${url.split("/").pop() || url}`;
+      },
+      category: "api"
+    },
+    // Error handling
+    {
+      pattern: /^\+.*catch\s*\(/gm,
+      extract: () => `Added error handling`,
+      category: "robustness"
+    },
+    // Feature flags / conditions
+    {
+      pattern: /^\+.*if\s*\(\s*(\w+(?:\.\w+)*)\s*(?:===?|!==?|&&|\|\|)/gm,
+      extract: (m) => {
+        const condition = m[1];
+        if (condition.includes("error") || condition.includes("Error")) return "Added error check";
+        if (condition.includes("loading")) return "Added loading state handling";
+        if (condition.includes("auth") || condition.includes("user")) return "Added auth check";
+        return null;
+      },
+      category: "logic"
+    },
+  ];
+
+  function analyzeFileDiff(diff: string, filePath: string): string[] {
+    const insights: string[] = [];
+    const fileName = filePath.split("/").pop() || filePath;
+    const seenInsights = new Set<string>();
+
+    // Check for new file
+    if (diff.includes("new file mode") || diff.startsWith("diff --git a/") && !diff.includes("---")) {
+      if (filePath.endsWith(".svelte")) {
+        insights.push(`New component: ${fileName.replace(".svelte", "")}`);
+      } else if (filePath.endsWith(".ts") || filePath.endsWith(".js")) {
+        insights.push(`New module: ${fileName}`);
+      } else {
+        insights.push(`New file: ${fileName}`);
+      }
+      return insights;
+    }
+
+    // Apply semantic patterns
+    for (const { pattern, extract, category } of semanticPatterns) {
+      pattern.lastIndex = 0; // Reset regex state
+      let match;
+      while ((match = pattern.exec(diff)) !== null) {
+        const insight = extract(match, filePath);
+        if (insight && !seenInsights.has(insight)) {
+          seenInsights.add(insight);
+          insights.push(insight);
+        }
+      }
+    }
+
+    // If no semantic insights, provide file-level summary
+    if (insights.length === 0) {
+      const addedLines = (diff.match(/^\+[^+]/gm) || []).length;
+      const removedLines = (diff.match(/^-[^-]/gm) || []).length;
+
+      if (addedLines > 0 || removedLines > 0) {
+        const parts: string[] = [];
+        if (addedLines > 0) parts.push(`+${addedLines}`);
+        if (removedLines > 0) parts.push(`-${removedLines}`);
+        insights.push(`${fileName}: ${parts.join("/")}`);
+      }
+    }
+
+    return insights;
+  }
+
+  function groupAndDedupeInsights(allInsights: string[]): string[] {
+    // Group by semantic category
+    const categories: Record<string, Set<string>> = {
+      components: new Set(),
+      features: new Set(),
+      state: new Set(),
+      handlers: new Set(),
+      types: new Set(),
+      api: new Set(),
+      other: new Set(),
+    };
+
+    for (const insight of allInsights) {
+      if (insight.includes("component") || insight.includes("Component")) {
+        categories.components.add(insight);
+      } else if (insight.includes("function") || insight.includes("handler") || insight.includes("Handler")) {
+        categories.handlers.add(insight);
+      } else if (insight.includes("state") || insight.includes("store")) {
+        categories.state.add(insight);
+      } else if (insight.includes("type") || insight.includes("interface")) {
+        categories.types.add(insight);
+      } else if (insight.includes("API") || insight.includes("api") || insight.includes("fetch")) {
+        categories.api.add(insight);
+      } else {
+        categories.other.add(insight);
+      }
+    }
+
+    // Build final summary - prioritize semantic over file-level
+    const result: string[] = [];
+
+    if (categories.components.size > 0) {
+      result.push(...Array.from(categories.components).slice(0, 3));
+    }
+    if (categories.handlers.size > 0) {
+      if (categories.handlers.size <= 3) {
+        result.push(...Array.from(categories.handlers));
+      } else {
+        result.push(`Added ${categories.handlers.size} new handlers/functions`);
+      }
+    }
+    if (categories.state.size > 0) {
+      if (categories.state.size <= 2) {
+        result.push(...Array.from(categories.state));
+      } else {
+        result.push(`Added ${categories.state.size} new state variables`);
+      }
+    }
+    if (categories.types.size > 0) {
+      if (categories.types.size <= 2) {
+        result.push(...Array.from(categories.types));
+      } else {
+        result.push(`Added ${categories.types.size} new types`);
+      }
+    }
+    if (categories.api.size > 0) {
+      result.push(...Array.from(categories.api).slice(0, 2));
+    }
+    if (categories.other.size > 0 && result.length < 8) {
+      result.push(...Array.from(categories.other).slice(0, 8 - result.length));
+    }
+
+    return result;
+  }
+
+  async function handleSummarizeChanges() {
+    if (!status) return;
+
+    summarizing = true;
+    changeSummary = null;
+
+    try {
+      // Get all changed files
+      const allFiles = [
+        ...status.staged.map(f => ({ path: f.path, staged: true })),
+        ...status.modified.map(f => ({ path: f.path, staged: false })),
+      ];
+
+      if (allFiles.length === 0 && status.untracked.length > 0) {
+        // Only untracked files - show file-based summary
+        const untrackedSummary = status.untracked.map(f => {
+          const fileName = f.path.split("/").pop() || f.path;
+          if (f.path.endsWith(".svelte")) return `New component: ${fileName.replace(".svelte", "")}`;
+          if (f.path.endsWith(".ts") || f.path.endsWith(".js")) return `New module: ${fileName}`;
+          return `New file: ${fileName}`;
+        });
+        changeSummary = { type: "semantic", items: untrackedSummary.slice(0, 8) };
+        return;
+      }
+
+      // Fetch diffs and analyze semantically
+      const allInsights: string[] = [];
+
+      // Fetch diff for all changes at once (more efficient)
+      const fullDiff = await gitApi.getDiff(rootPath);
+
+      // Split by file and analyze each
+      const fileDiffs = fullDiff.split(/(?=^diff --git)/m);
+
+      for (const fileDiff of fileDiffs) {
+        if (!fileDiff.trim()) continue;
+
+        // Extract file path from diff header
+        const pathMatch = fileDiff.match(/^diff --git a\/(.+?) b\//m);
+        if (!pathMatch) continue;
+
+        const filePath = pathMatch[1];
+        const insights = analyzeFileDiff(fileDiff, filePath);
+        allInsights.push(...insights);
+      }
+
+      // Add untracked files
+      for (const f of status.untracked) {
+        const fileName = f.path.split("/").pop() || f.path;
+        if (f.path.endsWith(".svelte")) allInsights.push(`New component: ${fileName.replace(".svelte", "")}`);
+        else if (f.path.endsWith(".ts") || f.path.endsWith(".js")) allInsights.push(`New module: ${fileName}`);
+        else allInsights.push(`New file: ${fileName}`);
+      }
+
+      // Group and dedupe
+      const summary = groupAndDedupeInsights(allInsights);
+
+      // If still empty, fall back to file count
+      if (summary.length === 0) {
+        const total = status.staged.length + status.modified.length + status.untracked.length;
+        summary.push(`${total} files changed`);
+      }
+
+      changeSummary = { type: "semantic", items: summary };
+    } catch (e) {
+      console.error("Failed to generate semantic summary:", e);
+      // Fall back to simple file-based summary
+      changeSummary = {
+        type: "file",
+        items: [`${status.staged.length + status.modified.length + status.untracked.length} files changed`]
+      };
+    } finally {
+      summarizing = false;
+    }
+  }
+
+  function clearSummary() {
+    changeSummary = null;
+  }
+
   $effect(() => {
     if (rootPath) {
       refresh();
@@ -354,6 +637,50 @@
       </svg>
     </button>
   </div>
+
+  <!-- Summarize Section -->
+  {#if totalChanges > 0}
+    <div class="px-3 py-2 border-b border-gray-200 bg-gray-50/50">
+      {#if summarizing}
+        <div class="flex items-center gap-2 text-sm text-gray-500">
+          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          <span>Generating summary...</span>
+        </div>
+      {:else if changeSummary}
+        <div class="space-y-1">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-medium text-gray-500 uppercase">
+              {changeSummary.type === "semantic" ? "What Changed" : "Summary"}
+            </span>
+            <button
+              onclick={clearSummary}
+              class="text-xs text-gray-400 hover:text-gray-600"
+              title="Close summary"
+            >✕</button>
+          </div>
+          {#each changeSummary.items as bullet}
+            <div class="flex items-start gap-2 text-sm text-gray-700">
+              <span class="text-gray-400 mt-0.5">•</span>
+              <span>{bullet}</span>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <button
+          onclick={handleSummarizeChanges}
+          class="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded transition-colors"
+        >
+          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+          </svg>
+          <span>Summarize Changes</span>
+        </button>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Tabs -->
   <div class="flex border-b border-gray-200 shrink-0">

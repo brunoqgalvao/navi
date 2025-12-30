@@ -53,11 +53,12 @@
     onTerminalSendToClaude,
   }: Props = $props();
 
-  // File list resizable width
+  // File list resizable width and collapse state
   const MIN_FILE_LIST_WIDTH = 180;
   const MAX_FILE_LIST_WIDTH = 500;
   const DEFAULT_FILE_LIST_WIDTH = 280;
   let fileListWidth = $state(DEFAULT_FILE_LIST_WIDTH);
+  let fileListCollapsed = $state(false);
   let isResizingFileList = $state(false);
 
   // Handle initial command for terminal - use $state so $effect reacts to changes
@@ -78,6 +79,8 @@
   let showSplitView = $derived(mode === "files" || mode === "preview");
 
   // File list resize handling
+  const COLLAPSE_THRESHOLD = 40; // Collapse immediately if dragged below this width
+
   function startFileListResize(e: MouseEvent) {
     e.preventDefault();
     isResizingFileList = true;
@@ -87,8 +90,18 @@
 
     function onMouseMove(e: MouseEvent) {
       const delta = e.clientX - startX;
-      const newWidth = Math.min(MAX_FILE_LIST_WIDTH, Math.max(MIN_FILE_LIST_WIDTH, startWidth + delta));
-      fileListWidth = newWidth;
+      const rawWidth = startWidth + delta;
+
+      // Collapse immediately if dragged below threshold
+      if (rawWidth < COLLAPSE_THRESHOLD) {
+        fileListCollapsed = true;
+        fileListWidth = DEFAULT_FILE_LIST_WIDTH; // Reset for when expanded again
+        isResizingFileList = false;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      } else {
+        fileListWidth = Math.min(MAX_FILE_LIST_WIDTH, Math.max(MIN_FILE_LIST_WIDTH, rawWidth));
+      }
     }
 
     function onMouseUp() {
@@ -151,22 +164,44 @@
   <div class="flex-1 overflow-hidden flex flex-col relative">
     {#if showSplitView && projectPath}
       <!-- Split view for Files + Preview -->
-      <div class="flex-1 flex overflow-hidden">
-        <!-- File list (full width when no preview, resizable when preview open) -->
+      <div class="flex-1 flex overflow-hidden relative">
+        <!-- File list (full width when no preview, resizable when preview open, collapsible) -->
         <div
-          class="flex flex-col bg-white shrink-0 overflow-hidden {previewSource ? 'border-r border-gray-200' : ''}"
-          style="width: {previewSource ? `${fileListWidth}px` : '100%'}"
+          class="flex flex-col bg-white shrink-0 overflow-hidden transition-all duration-200 {previewSource && !fileListCollapsed ? 'border-r border-gray-200' : ''}"
+          style="width: {fileListCollapsed ? '0px' : (previewSource ? `${fileListWidth}px` : '100%')}"
         >
-          <FileBrowser rootPath={projectPath} onPreview={onFileSelect} />
+          {#if !fileListCollapsed}
+            <FileBrowser rootPath={projectPath} onPreview={onFileSelect} />
+          {/if}
         </div>
 
         {#if previewSource}
-          <!-- Resize handle for file list -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div
-            class="w-1 bg-transparent hover:bg-blue-400 cursor-col-resize z-20 transition-colors flex-shrink-0 {isResizingFileList ? 'bg-blue-400' : ''}"
-            onmousedown={startFileListResize}
-          ></div>
+          <!-- Collapse/expand toggle button -->
+          <button
+            onclick={() => fileListCollapsed = !fileListCollapsed}
+            class="absolute top-1/2 -translate-y-1/2 z-30 w-5 h-10 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-r flex items-center justify-center transition-all duration-200 shadow-sm"
+            style="left: {fileListCollapsed ? '0px' : `${fileListWidth}px`}"
+            title={fileListCollapsed ? 'Show file list' : 'Hide file list'}
+          >
+            <svg
+              class="w-3 h-3 text-gray-500 transition-transform duration-200"
+              style="transform: rotate({fileListCollapsed ? '0deg' : '180deg'})"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+          </button>
+
+          {#if !fileListCollapsed}
+            <!-- Resize handle for file list -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="w-1 bg-transparent hover:bg-blue-400 cursor-col-resize z-20 transition-colors flex-shrink-0 {isResizingFileList ? 'bg-blue-400' : ''}"
+              onmousedown={startFileListResize}
+            ></div>
+          {/if}
 
           <!-- Preview area -->
           <div class="flex-1 flex flex-col overflow-hidden min-w-[200px]">

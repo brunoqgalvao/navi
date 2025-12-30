@@ -64,7 +64,7 @@
         const formData = new FormData();
         formData.append("file", file);
         formData.append("targetDir", rootPath);
-        
+
         try {
           const res = await fetch(`${getApiBase()}/fs/upload`, {
             method: "POST",
@@ -97,7 +97,7 @@
   let error = $state("");
   let expandedDirs = $state<Set<string>>(new Set());
   let dirContents = $state<Map<string, FileEntry[]>>(new Map());
-  
+
   let contextMenu = $state<{ x: number; y: number; entry: FileEntry } | null>(null);
 
   const icons = {
@@ -246,8 +246,56 @@
   });
 </script>
 
+{#snippet fileEntry(entry: FileEntry, depth: number)}
+  {@const isExpanded = expandedDirs.has(entry.path)}
+  {@const contents = dirContents.get(entry.path) || []}
+  {@const indent = Math.min(depth, 8)}
+
+  <div>
+    <button
+      onclick={() => handleFileClick(entry)}
+      oncontextmenu={(e) => handleContextMenu(e, entry)}
+      ondragstart={(e) => handleDragStart(e, entry)}
+      draggable="true"
+      class="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-100 transition-colors text-left group cursor-grab active:cursor-grabbing"
+      style="padding-left: {8 + indent * 12}px"
+    >
+      {#if entry.type === "directory"}
+        <svg class={`w-3 h-3 text-gray-400 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+        <svg class="w-4 h-4 text-yellow-500 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"></path>
+        </svg>
+      {:else}
+        <span class="w-3 shrink-0"></span>
+        <svg class={`w-4 h-4 shrink-0 ${getFileIcon(entry.name)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+        </svg>
+      {/if}
+      <span class="text-[13px] text-gray-700 truncate flex-1">{entry.name}</span>
+
+      {#if entry.type === "file"}
+        <span class="text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          preview
+        </span>
+      {/if}
+    </button>
+
+    {#if entry.type === "directory" && isExpanded}
+      {#if contents.length === 0}
+        <div class="text-xs text-gray-400 py-1" style="padding-left: {20 + indent * 12}px">Empty</div>
+      {:else}
+        {#each contents as child}
+          {@render fileEntry(child, depth + 1)}
+        {/each}
+      {/if}
+    {/if}
+  </div>
+{/snippet}
+
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div 
+<div
   class="h-full flex flex-col bg-white relative {isDraggingOver ? 'ring-2 ring-inset ring-blue-400' : ''}"
   ondragenter={handleFileBrowserDragEnter}
   ondragleave={handleFileBrowserDragLeave}
@@ -263,7 +311,7 @@
     </div>
   {/if}
   <div class="h-10 px-3 border-b border-gray-200 flex items-center gap-2 bg-gray-50/50 shrink-0">
-    <button 
+    <button
       onclick={goUp}
       disabled={currentPath === "/" || currentPath === rootPath}
       class="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:hover:text-gray-400 transition-colors"
@@ -271,7 +319,7 @@
     >
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
     </button>
-    <button 
+    <button
       onclick={loadRoot}
       class="p-1 text-gray-400 hover:text-gray-600 transition-colors"
       title="Refresh"
@@ -298,106 +346,7 @@
     {:else}
       <div class="space-y-px">
         {#each entries as entry}
-          {@const isExpanded = expandedDirs.has(entry.path)}
-          {@const contents = dirContents.get(entry.path) || []}
-          
-          <div>
-            <button
-              onclick={() => handleFileClick(entry)}
-              oncontextmenu={(e) => handleContextMenu(e, entry)}
-              ondragstart={(e) => handleDragStart(e, entry)}
-              draggable="true"
-              class="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-100 transition-colors text-left group cursor-grab active:cursor-grabbing"
-            >
-              {#if entry.type === "directory"}
-                <svg class={`w-3.5 h-3.5 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                </svg>
-                <svg class="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"></path>
-                </svg>
-              {:else}
-                <span class="w-3.5"></span>
-                <svg class={`w-4 h-4 ${getFileIcon(entry.name)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                </svg>
-              {/if}
-              <span class="text-[13px] text-gray-700 truncate flex-1">{entry.name}</span>
-              
-              {#if entry.type === "file"}
-                <span class="text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                  preview
-                </span>
-              {/if}
-            </button>
-
-            {#if entry.type === "directory" && isExpanded}
-              <div class="ml-4 pl-2 border-l border-gray-200">
-                {#if contents.length === 0}
-                  <div class="text-xs text-gray-400 py-1 px-2">Empty</div>
-                {:else}
-                  {#each contents as child}
-                    {@const childExpanded = expandedDirs.has(child.path)}
-                    {@const childContents = dirContents.get(child.path) || []}
-                    
-                    <div>
-                      <button
-                        onclick={() => handleFileClick(child)}
-                        oncontextmenu={(e) => handleContextMenu(e, child)}
-                        ondragstart={(e) => handleDragStart(e, child)}
-                        draggable="true"
-                        class="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-100 transition-colors text-left group cursor-grab active:cursor-grabbing"
-                      >
-                        {#if child.type === "directory"}
-                          <svg class={`w-3 h-3 text-gray-400 transition-transform ${childExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                          </svg>
-                          <svg class="w-3.5 h-3.5 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"></path>
-                          </svg>
-                        {:else}
-                          <span class="w-3"></span>
-                          <svg class={`w-3.5 h-3.5 ${getFileIcon(child.name)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                          </svg>
-                        {/if}
-                        <span class="text-[12px] text-gray-600 truncate flex-1">{child.name}</span>
-                      </button>
-
-                      {#if child.type === "directory" && childExpanded && childContents.length > 0}
-                        <div class="ml-3 pl-2 border-l border-gray-100">
-                          {#each childContents as grandchild}
-                            <button
-                              onclick={() => handleFileClick(grandchild)}
-                              oncontextmenu={(e) => handleContextMenu(e, grandchild)}
-                              ondragstart={(e) => handleDragStart(e, grandchild)}
-                              draggable="true"
-                              class="w-full flex items-center gap-2 px-2 py-0.5 rounded hover:bg-gray-100 transition-colors text-left cursor-grab active:cursor-grabbing"
-                            >
-                              {#if grandchild.type === "directory"}
-                                <svg class="w-2.5 h-2.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                </svg>
-                                <svg class="w-3 h-3 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"></path>
-                                </svg>
-                              {:else}
-                                <span class="w-2.5"></span>
-                                <svg class={`w-3 h-3 ${getFileIcon(grandchild.name)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                                </svg>
-                              {/if}
-                              <span class="text-[11px] text-gray-500 truncate">{grandchild.name}</span>
-                            </button>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {/each}
-                {/if}
-              </div>
-            {/if}
-          </div>
+          {@render fileEntry(entry, 0)}
         {/each}
       </div>
     {/if}

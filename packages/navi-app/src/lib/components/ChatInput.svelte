@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { attachedFiles, type AttachedFile } from "../stores";
+  import { attachedFiles, textReferences, type AttachedFile } from "../stores";
   import FileAttachment from "./FileAttachment.svelte";
+  import ReferenceChip from "./ReferenceChip.svelte";
   import AudioRecorder from "./AudioRecorder.svelte";
   import { getApiBase } from "../config";
 
@@ -308,15 +309,23 @@
     </div>
   {/if}
 
-  {#if $attachedFiles.length > 0}
-    <div class="px-3 pt-2 pb-1">
-      <FileAttachment
-        files={$attachedFiles}
-        removable={true}
-        onRemove={removeAttachedFile}
-        {onPreview}
-        size="sm"
-      />
+  {#if $attachedFiles.length > 0 || $textReferences.length > 0}
+    <div class="px-3 pt-2 pb-1 flex flex-wrap gap-1.5">
+      {#if $attachedFiles.length > 0}
+        <FileAttachment
+          files={$attachedFiles}
+          removable={true}
+          onRemove={removeAttachedFile}
+          {onPreview}
+          size="sm"
+        />
+      {/if}
+      {#each $textReferences as ref (ref.id)}
+        <ReferenceChip
+          reference={ref}
+          onRemove={() => textReferences.remove(ref.id)}
+        />
+      {/each}
     </div>
   {/if}
 
@@ -347,11 +356,6 @@
         {disabled}
       />
       {#if loading}
-        {#if queuedCount > 0}
-          <span class="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg font-medium">
-            {queuedCount} queued
-          </span>
-        {/if}
         <button
           onclick={onStop}
           class="p-1.5 text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-all"

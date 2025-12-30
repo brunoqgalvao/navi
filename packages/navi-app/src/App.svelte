@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, type ChatMessage, type AttachedFile, type NavHistoryEntry } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference } from "./lib/stores";
   import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
   import { parseHash, onHashChange } from "./lib/router";
   import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts } from "./lib/config";
@@ -381,9 +381,26 @@
         message: saved,
       });
     },
-    onContextOverflow: (sessionId) => {
-      // Show a friendly modal instead of a scary error
-      showContextOverflowModal = true;
+    onContextOverflow: async (sessionId, autoRetry) => {
+      if (autoRetry) {
+        // Auto-retry: prune tool results first, then continue
+        notifications.add({
+          type: "warning",
+          title: "Context limit reached",
+          message: "Pruning old outputs and retrying with a more concise approach...",
+        });
+
+        // Prune tool results to make space
+        await pruneToolResults(sessionId);
+
+        // Small delay to let the UI update, then send a follow-up
+        setTimeout(() => {
+          sendMessage("Continue from where you left off, but be more concise. Avoid reading entire large files - use targeted grep/search instead. Summarize findings rather than showing full content.");
+        }, 500);
+      } else {
+        // No auto-retry possible, show modal
+        showContextOverflowModal = true;
+      }
     },
   });
 
@@ -1368,6 +1385,38 @@
   }
   let isProgrammaticScroll = false;
 
+  function formatReference(ref: TextReference): string {
+    const { source } = ref;
+    let annotation = "";
+
+    if (source.path) {
+      const filename = source.path.split("/").pop();
+      annotation = `Source: \`${filename}\``;
+
+      if (source.startLine) {
+        annotation += source.endLine && source.endLine !== source.startLine
+          ? ` (lines ${source.startLine}-${source.endLine})`
+          : ` (line ${source.startLine})`;
+      }
+      if (source.jsonPath) {
+        annotation += ` at ${source.jsonPath}`;
+      }
+      if (source.rows && source.columns) {
+        const sheetPrefix = source.sheet ? `[${source.sheet}] ` : "";
+        annotation += ` ${sheetPrefix}Row ${source.rows[0]}, Column: ${source.columns.join(", ")}`;
+      }
+    } else if (source.url) {
+      annotation = `Source: ${source.url}`;
+    }
+
+    const quotedText = ref.text
+      .split("\n")
+      .map(line => `> ${line}`)
+      .join("\n");
+
+    return `${quotedText}\n> *${annotation}*`;
+  }
+
   function scrollToBottom(instant = false) {
     // Only auto-scroll if user is near the bottom, or if it's an instant scroll
     if (!instant && !userIsNearBottom) return;
@@ -1497,24 +1546,34 @@
 
     const currentInput = inputText;
     const currentAttachedFiles = get(attachedFiles);
+    const currentReferences = get(textReferences);
     inputText = "";
     sessionDrafts.clearDraft(currentSessionId);
     attachedFiles.clear();
-    
+    textReferences.clear();
+
     const currentTodos = get(todos);
     if (currentTodos.length > 0 && currentTodos.every(t => t.status === "completed")) {
       todos.set([]);
     }
-    
+
     const thanksPatterns = /\b(thanks|thank you|thx|ty|awesome|perfect|great job|well done|amazing|love it)\b/i;
     if (thanksPatterns.test(currentInput)) {
       showConfetti = true;
     }
 
     let messageContent = currentInput;
+
+    // Add text references as markdown blockquotes
+    if (currentReferences.length > 0) {
+      const referenceBlocks = currentReferences.map(formatReference).join("\n\n");
+      messageContent = `${referenceBlocks}\n\n${messageContent}`;
+    }
+
+    // Add file references
     if (currentAttachedFiles.length > 0) {
       const fileRefs = currentAttachedFiles.map(f => `[File: ${f.path}]`).join("\n");
-      messageContent = `${fileRefs}\n\n${currentInput}`;
+      messageContent = `${fileRefs}\n\n${messageContent}`;
     }
 
     sessionMessages.addMessage(currentSessionId, {
@@ -1957,14 +2016,21 @@
   }
 
   async function forkFromMessage(msgId: string) {
-    if (!$session.sessionId) return;
-    
+    console.log("[Fork] Starting fork from message:", msgId, "session:", $session.sessionId);
+    if (!$session.sessionId) {
+      console.warn("[Fork] No session ID, aborting");
+      return;
+    }
+
     try {
+      console.log("[Fork] Calling API...");
       const forkedSession = await api.sessions.fork($session.sessionId, { fromMessageId: msgId });
+      console.log("[Fork] API returned:", forkedSession);
       sidebarSessions = [forkedSession, ...sidebarSessions];
       selectSession(forkedSession);
+      console.log("[Fork] Session selected");
     } catch (e) {
-      console.error("Failed to fork session:", e);
+      console.error("[Fork] Failed to fork session:", e);
     }
     closeMessageMenu();
   }
