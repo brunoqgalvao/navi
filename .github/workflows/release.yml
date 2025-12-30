@@ -143,18 +143,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Only macOS ARM64 for now - other platforms need navi-server binaries
           - platform: macos-latest
             target: aarch64-apple-darwin
             artifact_name: macos-arm64
-          - platform: macos-15
-            target: x86_64-apple-darwin
-            artifact_name: macos-x64
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            artifact_name: linux-x64
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: windows-x64
+          # TODO: Add these when we have cross-platform navi-server binaries
+          # - platform: macos-15
+          #   target: x86_64-apple-darwin
+          #   artifact_name: macos-x64
+          # - platform: ubuntu-22.04
+          #   target: x86_64-unknown-linux-gnu
+          #   artifact_name: linux-x64
+          # - platform: windows-latest
+          #   target: x86_64-pc-windows-msvc
+          #   artifact_name: windows-x64
 
     runs-on: ${{ matrix.platform }}
 
@@ -188,6 +190,24 @@ jobs:
       - name: Install dependencies
         working-directory: packages/navi-app
         run: bun install
+
+      - name: Copy bun binary for Tauri
+        working-directory: packages/navi-app/src-tauri
+        shell: bash
+        run: |
+          # Create binaries directory if it doesn't exist
+          mkdir -p binaries
+
+          # Get the bun binary path and copy it with the correct target name
+          BUN_PATH=$(which bun)
+          TARGET="${{ matrix.target }}"
+
+          # Copy bun with the target-specific name
+          cp "$BUN_PATH" "binaries/bun-$TARGET"
+          chmod +x "binaries/bun-$TARGET"
+
+          echo "Copied bun to binaries/bun-$TARGET"
+          ls -la binaries/
 
       - name: Build Tauri
         working-directory: packages/navi-app

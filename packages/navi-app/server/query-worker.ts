@@ -573,6 +573,7 @@ async function runQuery(input: WorkerInput) {
   // Debug: confirm what's being passed to Claude Code subprocess
   console.error(`[Worker] claudeEnv.ANTHROPIC_API_KEY: ${claudeEnv.ANTHROPIC_API_KEY ? claudeEnv.ANTHROPIC_API_KEY.slice(0, 8) + "..." : "NOT SET"}`);
   console.error(`[Worker] claudeEnv.ANTHROPIC_BASE_URL: ${claudeEnv.ANTHROPIC_BASE_URL || "NOT SET"}`);
+  console.error(`[Worker] claudeEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS: ${claudeEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS || "NOT SET"}`);
   console.error(`[Worker] Model requested: ${model || "default"}`);
   const runtimeOptions = getClaudeCodeRuntimeOptions();
 

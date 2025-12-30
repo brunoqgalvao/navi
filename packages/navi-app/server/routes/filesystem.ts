@@ -55,6 +55,30 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
     }
   }
 
+  // Binary file read endpoint (for xlsx, etc.)
+  if (url.pathname === "/api/fs/read-binary") {
+    const filePath = url.searchParams.get("path");
+    if (!filePath) {
+      return json({ error: "Path required" }, 400);
+    }
+    try {
+      const file = Bun.file(filePath);
+      const exists = await file.exists();
+      if (!exists) {
+        return json({ error: "File not found" }, 404);
+      }
+      const arrayBuffer = await file.arrayBuffer();
+      return new Response(arrayBuffer, {
+        headers: {
+          "Content-Type": "application/octet-stream",
+          ...corsHeaders,
+        },
+      });
+    } catch (e) {
+      return json({ error: "Failed to read binary file" }, 500);
+    }
+  }
+
   if (url.pathname === "/api/fs/list") {
     const dirPath = url.searchParams.get("path") || process.cwd();
     try {

@@ -2,12 +2,13 @@
   import { onMount } from "svelte";
   import { marked } from "marked";
   import hljs from "highlight.js";
+  import * as XLSX from "xlsx";
   import MermaidRenderer from "./components/MermaidRenderer.svelte";
   import JsonTreeViewer from "./components/JsonTreeViewer.svelte";
   import { api } from "./api";
   import { getApiBase } from "./config";
 
-  type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "json" | "none";
+  type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "xlsx" | "json" | "none";
 
   interface Props {
     source: string;
@@ -64,6 +65,7 @@
   const audioExtensions = ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma"];
   const videoExtensions = ["mp4", "webm", "mov", "avi", "mkv", "m4v", "ogv"];
   const csvExtensions = ["csv", "tsv"];
+  const xlsxExtensions = ["xlsx", "xls", "xlsm", "xlsb"];
   const codeExtensions = ["js", "ts", "jsx", "tsx", "svelte", "vue", "py", "rs", "go", "java", "c", "cpp", "h", "css", "scss", "sass", "less", "html", "xml", "yaml", "yml", "toml", "sh", "bash", "zsh", "sql", "graphql", "prisma"];
   const jsonExtensions = ["json"];
   const markdownExtensions = ["md", "mdx", "markdown"];
@@ -82,6 +84,7 @@
     if (audioExtensions.includes(ext)) return "audio";
     if (videoExtensions.includes(ext)) return "video";
     if (csvExtensions.includes(ext)) return "csv";
+    if (xlsxExtensions.includes(ext)) return "xlsx";
     if (pdfExtensions.includes(ext)) return "pdf";
     if (markdownExtensions.includes(ext)) return "markdown";
     if (jsonExtensions.includes(ext)) return "json";
@@ -206,6 +209,65 @@
 
   let csvData = $state<string[][]>([]);
   let csvHeaders = $state<string[]>([]);
+
+  // Excel/XLSX support
+  let xlsxData = $state<string[][]>([]);
+  let xlsxHeaders = $state<string[]>([]);
+  let xlsxSheets = $state<string[]>([]);
+  let xlsxActiveSheet = $state<string>("");
+
+  async function loadXlsxFile(path: string) {
+    loading = true;
+    error = "";
+    try {
+      // Fetch the file as binary
+      const res = await fetch(`${getApiBase()}/fs/read-binary?path=${encodeURIComponent(path)}`);
+      const arrayBuffer = await res.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: "array" });
+
+      xlsxSheets = workbook.SheetNames;
+      xlsxActiveSheet = workbook.SheetNames[0] || "";
+
+      if (xlsxActiveSheet) {
+        parseXlsxSheet(workbook, xlsxActiveSheet);
+      }
+    } catch (e) {
+      error = "Failed to load Excel file";
+      console.error("XLSX load error:", e);
+    } finally {
+      loading = false;
+    }
+  }
+
+  function parseXlsxSheet(workbook: XLSX.WorkBook, sheetName: string) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) return;
+
+    const jsonData = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });
+    if (jsonData.length > 0) {
+      xlsxHeaders = (jsonData[0] || []).map((h, i) => String(h || `Column ${i + 1}`));
+      xlsxData = jsonData.slice(1).map(row =>
+        Array.isArray(row) ? row.map(cell => String(cell ?? "")) : []
+      );
+    } else {
+      xlsxHeaders = [];
+      xlsxData = [];
+    }
+  }
+
+  function switchXlsxSheet(sheetName: string) {
+    xlsxActiveSheet = sheetName;
+    // Re-parse the sheet - need to reload the workbook
+    loading = true;
+    fetch(`${getApiBase()}/fs/read-binary?path=${encodeURIComponent(source)}`)
+      .then(res => res.arrayBuffer())
+      .then(arrayBuffer => {
+        const workbook = XLSX.read(arrayBuffer, { type: "array" });
+        parseXlsxSheet(workbook, sheetName);
+      })
+      .catch(() => { error = "Failed to switch sheet"; })
+      .finally(() => { loading = false; });
+  }
 
   function parseCSV(text: string, delimiter = ","): { headers: string[]; rows: string[][] } {
     const lines = text.trim().split("\n");
@@ -425,6 +487,11 @@
           })
           .catch(() => { error = "Failed to load file"; })
           .finally(() => { loading = false; });
+      }
+    } else if (detectedType === "xlsx") {
+      if (source !== lastSource) {
+        lastSource = source;
+        loadXlsxFile(source);
       }
     } else if (detectedType === "markdown" || detectedType === "code" || detectedType === "json" || detectedType === "file") {
       if (source !== lastSource) {
@@ -721,6 +788,53 @@
           </table>
         </div>
         {#if csvData.length === 0 && !loading}
+          <div class="flex items-center justify-center h-32 text-gray-400 text-sm">No data</div>
+        {/if}
+      </div>
+    {:else if detectedType === "xlsx"}
+      <div class="h-full overflow-auto">
+        <div class="p-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between sticky top-0 z-10">
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-500">{xlsxData.length} rows × {xlsxHeaders.length} columns</span>
+            {#if xlsxSheets.length > 1}
+              <select
+                class="text-xs border border-gray-300 rounded px-2 py-1 bg-white"
+                value={xlsxActiveSheet}
+                onchange={(e) => switchXlsxSheet((e.target as HTMLSelectElement).value)}
+              >
+                {#each xlsxSheets as sheet}
+                  <option value={sheet}>{sheet}</option>
+                {/each}
+              </select>
+            {:else if xlsxSheets.length === 1}
+              <span class="text-xs text-gray-400">Sheet: {xlsxActiveSheet}</span>
+            {/if}
+          </div>
+          <span class="text-xs text-green-600 font-medium">Excel</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead class="bg-gray-50 sticky top-[41px]">
+              <tr>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b border-gray-200 bg-gray-100 w-12">#</th>
+                {#each xlsxHeaders as header, i}
+                  <th class="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200 bg-gray-50 whitespace-nowrap">{header || `Column ${i + 1}`}</th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              {#each xlsxData as row, rowIndex}
+                <tr class="hover:bg-green-50/50 transition-colors {rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}">
+                  <td class="px-3 py-1.5 text-xs text-gray-400 border-b border-gray-100 font-mono">{rowIndex + 1}</td>
+                  {#each row as cell}
+                    <td class="px-3 py-1.5 text-gray-700 border-b border-gray-100 whitespace-nowrap max-w-xs truncate" title={cell}>{cell}</td>
+                  {/each}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        {#if xlsxData.length === 0 && !loading}
           <div class="flex items-center justify-center h-32 text-gray-400 text-sm">No data</div>
         {/if}
       </div>

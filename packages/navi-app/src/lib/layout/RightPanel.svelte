@@ -53,9 +53,12 @@
     onTerminalSendToClaude,
   }: Props = $props();
 
-  // File list collapsed state for split view
-  let fileListCollapsed = $state(false);
-  const FILE_LIST_WIDTH = 240;
+  // File list resizable width
+  const MIN_FILE_LIST_WIDTH = 180;
+  const MAX_FILE_LIST_WIDTH = 500;
+  const DEFAULT_FILE_LIST_WIDTH = 280;
+  let fileListWidth = $state(DEFAULT_FILE_LIST_WIDTH);
+  let isResizingFileList = $state(false);
 
   // Handle initial command for terminal - use $state so $effect reacts to changes
   let terminalRef = $state<{ pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null>(null);
@@ -73,6 +76,30 @@
 
   // Show split view when in files or preview mode
   let showSplitView = $derived(mode === "files" || mode === "preview");
+
+  // File list resize handling
+  function startFileListResize(e: MouseEvent) {
+    e.preventDefault();
+    isResizingFileList = true;
+
+    const startX = e.clientX;
+    const startWidth = fileListWidth;
+
+    function onMouseMove(e: MouseEvent) {
+      const delta = e.clientX - startX;
+      const newWidth = Math.min(MAX_FILE_LIST_WIDTH, Math.max(MIN_FILE_LIST_WIDTH, startWidth + delta));
+      fileListWidth = newWidth;
+    }
+
+    function onMouseUp() {
+      isResizingFileList = false;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    }
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }
 </script>
 
 <!-- Resizer Handle -->
@@ -125,50 +152,27 @@
     {#if showSplitView && projectPath}
       <!-- Split view for Files + Preview -->
       <div class="flex-1 flex overflow-hidden">
-        <!-- File list (collapsible) -->
+        <!-- File list (full width when no preview, resizable when preview open) -->
         <div
-          class="flex flex-col border-r border-gray-200 bg-white shrink-0 transition-all duration-200 overflow-hidden"
-          style="width: {fileListCollapsed ? '0px' : `${FILE_LIST_WIDTH}px`}"
+          class="flex flex-col bg-white shrink-0 overflow-hidden {previewSource ? 'border-r border-gray-200' : ''}"
+          style="width: {previewSource ? `${fileListWidth}px` : '100%'}"
         >
-          {#if !fileListCollapsed}
-            <FileBrowser rootPath={projectPath} onPreview={onFileSelect} />
-          {/if}
+          <FileBrowser rootPath={projectPath} onPreview={onFileSelect} />
         </div>
 
-        <!-- Collapse/expand toggle button -->
-        <button
-          onclick={() => fileListCollapsed = !fileListCollapsed}
-          class="absolute left-0 top-1/2 -translate-y-1/2 z-20 w-4 h-12 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-r-md flex items-center justify-center transition-all duration-200"
-          style="left: {fileListCollapsed ? '0px' : `${FILE_LIST_WIDTH}px`}"
-          title={fileListCollapsed ? 'Show file list' : 'Hide file list'}
-        >
-          <svg
-            class="w-3 h-3 text-gray-500 transition-transform duration-200"
-            style="transform: rotate({fileListCollapsed ? '0deg' : '180deg'})"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-          </svg>
-        </button>
+        {#if previewSource}
+          <!-- Resize handle for file list -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="w-1 bg-transparent hover:bg-blue-400 cursor-col-resize z-20 transition-colors flex-shrink-0 {isResizingFileList ? 'bg-blue-400' : ''}"
+            onmousedown={startFileListResize}
+          ></div>
 
-        <!-- Preview area -->
-        <div class="flex-1 flex flex-col overflow-hidden">
-          {#if previewSource}
+          <!-- Preview area -->
+          <div class="flex-1 flex flex-col overflow-hidden min-w-[200px]">
             <Preview source={previewSource} />
-          {:else}
-            <div class="flex-1 flex items-center justify-center text-gray-400 text-sm">
-              <div class="text-center">
-                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                </svg>
-                <p>Select a file to preview</p>
-              </div>
-            </div>
-          {/if}
-        </div>
+          </div>
+        {/if}
       </div>
     {:else if mode === "browser"}
       <!-- Browser panel - full width -->

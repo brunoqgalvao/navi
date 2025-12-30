@@ -54,6 +54,9 @@ export function buildClaudeCodeEnv(baseEnv: NodeJS.ProcessEnv, overrides?: Claud
   if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
   if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
 
+  // Set max output tokens (64k is the SDK's hard cap - values above this get capped)
+  env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "64000";
+
   return env;
 }
 
