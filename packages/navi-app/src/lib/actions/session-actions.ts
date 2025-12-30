@@ -7,6 +7,7 @@ import {
   sessionModels,
   type ChatMessage,
 } from "../stores";
+import { streamingStore } from "../handlers";
 import { get } from "svelte/store";
 import { getDefaultModel } from "./data-loaders";
 import { showError } from "../errorHandler";
@@ -94,7 +95,9 @@ export async function selectSession(s: Session) {
         sessionModels.setModel(s.id, freshSession.model);
       }
     }
-  } catch {}
+  } catch (e) {
+    console.warn("[Session] Failed to refresh session data:", e);
+  }
 
   // Load messages if not already loaded
   const messages = get(sessionMessages);
@@ -104,7 +107,7 @@ export async function selectSession(s: Session) {
       const loadedMsgs: ChatMessage[] = msgs.map(m => {
         let content = m.content;
         if (typeof content === "string") {
-          try { content = JSON.parse(content); } catch {}
+          try { content = JSON.parse(content); } catch { /* content is already in expected format */ }
         }
         return {
           id: m.id,
@@ -132,6 +135,8 @@ export async function deleteSession(id: string): Promise<boolean> {
     callbacks?.setSidebarSessions(sessions.filter(s => s.id !== id));
     callbacks?.loadRecentChats();
     sessionMessages.clearSession(id);
+    // Clean up streaming state to prevent memory leaks
+    streamingStore.stop(id);
     const session = get(currentSession);
     if (session.sessionId === id) {
       currentSession.setSession(null);

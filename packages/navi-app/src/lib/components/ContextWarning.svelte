@@ -12,7 +12,9 @@
     inputTokens: number;
     contextWindow: number;
     isPruned?: boolean;
+    isCompacting?: boolean;
     onPruneToolResults: () => void;
+    onSDKCompact?: () => void;
     onStartNewChat: () => void;
   }
 
@@ -21,7 +23,9 @@
     inputTokens,
     contextWindow,
     isPruned = false,
+    isCompacting = false,
     onPruneToolResults,
+    onSDKCompact,
     onStartNewChat,
   }: Props = $props();
 
@@ -30,11 +34,21 @@
   const options: ContextReductionOption[] = [
     {
       id: "prune-tool-results",
-      name: "Prune old tool results",
-      description: "Remove content from old file reads, bash outputs, etc.",
+      name: "Prune tool outputs",
+      description: "Truncate old file reads & bash outputs to save tokens",
       icon: "✂️",
       action: () => {
         onPruneToolResults();
+        showOptions = false;
+      },
+    },
+    {
+      id: "sdk-compact",
+      name: "Compact context",
+      description: "Let Claude intelligently summarize the conversation",
+      icon: "🧠",
+      action: () => {
+        onSDKCompact?.();
         showOptions = false;
       },
     },
@@ -48,7 +62,7 @@
         showOptions = false;
       },
     },
-  ];
+  ].filter(opt => opt.id !== "sdk-compact" || onSDKCompact);
 
   function handleClickOutside(e: MouseEvent) {
     const target = e.target as HTMLElement;
@@ -66,7 +80,16 @@
   });
 </script>
 
-{#if isPruned}
+{#if isCompacting}
+  <!-- Compacting indicator -->
+  <div class="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-700">
+    <svg class="w-4 h-4 text-purple-500 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+    <span>Compacting context...</span>
+    <span class="text-purple-500 text-xs">Claude is summarizing</span>
+  </div>
+{:else if isPruned}
   <!-- Pruned context indicator -->
   <div class="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
     <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

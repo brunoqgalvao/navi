@@ -46,6 +46,7 @@ export interface SystemMessage {
   type: "system";
   sessionId?: string;
   claudeSessionId?: string;
+  uiSessionId?: string;
   subtype: SystemSubtype;
   uuid?: string;
   timestamp?: number;
@@ -74,6 +75,7 @@ export interface AssistantMessage {
   type: "assistant";
   sessionId?: string;
   claudeSessionId?: string;
+  uiSessionId?: string;
   content: ContentBlock[];
   parentToolUseId: string | null;
   uuid?: string;
@@ -90,6 +92,7 @@ export interface AssistantMessage {
 export interface UserMessage {
   type: "user";
   sessionId?: string;
+  uiSessionId?: string;
   content: ContentBlock[];
   parentToolUseId: string | null;
   uuid?: string;
@@ -118,6 +121,7 @@ export interface ResultMessage {
   type: "result";
   sessionId?: string;
   claudeSessionId?: string;
+  uiSessionId?: string;
   subtype?: "success" | "error_during_execution" | "error_max_turns" | "error_max_budget_usd" | "error_max_structured_output_retries";
   costUsd: number;
   durationMs: number;
@@ -141,6 +145,7 @@ export interface ResultMessage {
 
 export interface ErrorMessage {
   type: "error";
+  uiSessionId?: string;
   error: string;
   uuid?: string;
   timestamp?: number;
@@ -148,12 +153,21 @@ export interface ErrorMessage {
 
 export interface DoneMessage {
   type: "done";
+  uiSessionId?: string;
+  finalMessageId?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
   uuid?: string;
   timestamp?: number;
 }
 
 export interface ToolProgressMessage {
   type: "tool_progress";
+  uiSessionId?: string;
   toolUseId: string;
   toolName: string;
   parentToolUseId: string | null;
@@ -177,6 +191,7 @@ export interface StreamEventMessage {
   type: "stream_event";
   sessionId?: string;
   claudeSessionId?: string;
+  uiSessionId?: string;
   event: StreamEvent;
   parentToolUseId: string | null;
   uuid?: string;
@@ -250,7 +265,7 @@ export type ClaudeMessage =
   | AuthStatusMessage
   | UnknownMessage
   | { type: "connected" }
-  | { type: "aborted"; sessionId?: string }
+  | { type: "aborted"; sessionId?: string; uiSessionId?: string }
   | { type: "ui_command"; command: string; payload: Record<string, unknown> };
 
 export class ClaudeClient {

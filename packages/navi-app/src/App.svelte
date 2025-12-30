@@ -3,10 +3,10 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, type ChatMessage, type AttachedFile, type NavHistoryEntry } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, type ChatMessage, type AttachedFile, type NavHistoryEntry } from "./lib/stores";
   import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
   import { parseHash, onHashChange } from "./lib/router";
-  import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT } from "./lib/config";
+  import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts } from "./lib/config";
   import { setupGlobalErrorHandlers, pendingErrorReport, type ErrorReport } from "./lib/errorHandler";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
@@ -103,6 +103,7 @@
   import NewProjectModal from "./lib/components/NewProjectModal.svelte";
   import ProjectPermissionsModal from "./lib/components/ProjectPermissionsModal.svelte";
   import FeedbackModal from "./lib/components/FeedbackModal.svelte";
+  import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
@@ -147,12 +148,10 @@
 
   async function startSidecar(): Promise<number> {
     if (!isTauri()) {
-      const port = DEV_SERVER_PORT;
-      setServerPort(port);
-
       try {
-        const res = await fetch(`http://localhost:${port}/health`);
-        if (res.ok) return port;
+        const ports = await discoverPorts();
+        const res = await fetch(`http://localhost:${ports.server}/health`);
+        if (res.ok) return ports.server;
       } catch {
       }
       serverError = "Server not running. Start with: bun run dev:all";
@@ -359,6 +358,33 @@
         }
       }
     },
+    onCompactStart: (sessionId) => {
+      compactingSessionsStore.update(set => {
+        set.add(sessionId);
+        return new Set(set);
+      });
+      notifications.add({
+        type: "info",
+        title: "Compacting context",
+        message: "Claude is summarizing the conversation to free up space...",
+      });
+    },
+    onCompactEnd: (sessionId, metadata) => {
+      compactingSessionsStore.update(set => {
+        set.delete(sessionId);
+        return new Set(set);
+      });
+      const saved = metadata?.pre_tokens ? `Freed ~${Math.round(metadata.pre_tokens / 1000)}k tokens` : "Context compacted";
+      notifications.add({
+        type: "success",
+        title: "Context compacted",
+        message: saved,
+      });
+    },
+    onContextOverflow: (sessionId) => {
+      // Show a friendly modal instead of a scary error
+      showContextOverflowModal = true;
+    },
   });
 
   let showPreview = $state(false);
@@ -401,6 +427,7 @@
   });
   let inputRef: HTMLTextAreaElement | undefined = $state(undefined);
   let showSearchModal = $state(false);
+  let showContextOverflowModal = $state(false);
 
   let showConfetti = $state(false);
   let showWelcome = $state(false);
@@ -616,6 +643,28 @@
 
     startSidecar().then(() => {
       serverReady = true;
+      
+      loadProjects();
+      loadRecentChatsAction();
+      loadFolders();
+      loadConfigAction();
+      loadModelsAction();
+      loadPermissionsAction();
+      loadCostsAction();
+
+      client = new ClaudeClient();
+      client.connect().then(() => {
+        isConnected.set(true);
+      }).catch(e => {
+        console.error("Failed to connect:", e);
+      });
+      
+      loadActiveSessionsAction();
+      activeSessionsPoll = setInterval(loadActiveSessionsAction, 5000);
+
+      client.onMessage((msg) => {
+        messageHandler.handleMessage(msg);
+      });
     }).catch(() => {
       // Error already set in startSidecar
     });
@@ -623,27 +672,6 @@
     if ($onboardingComplete) {
       showWelcome = true;
     }
-
-    loadProjects();
-    loadRecentChatsAction();
-    loadFolders();
-    loadConfigAction();
-    loadModelsAction();
-    loadPermissionsAction();
-    loadCostsAction();
-
-    client = new ClaudeClient();
-    client.connect().then(() => {
-      isConnected.set(true);
-    }).catch(e => {
-      console.error("Failed to connect:", e);
-    });
-    loadActiveSessionsAction();
-    activeSessionsPoll = setInterval(loadActiveSessionsAction, 5000);
-
-    client.onMessage((msg) => {
-      messageHandler.handleMessage(msg);
-    });
 
     // Restore state from URL hash on load (e.g., when opening in new window)
     const initialRoute = parseHash();
@@ -2049,7 +2077,7 @@
   <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-white relative overflow-hidden">
 
     <!-- Navigation History (top-left) -->
-    <div class="absolute top-3 left-3 z-20 bg-white/80 backdrop-blur border border-gray-200 rounded-lg shadow-sm">
+    <div class="absolute top-3 left-3 z-20 bg-white/95 border border-gray-200 rounded-lg shadow-sm">
       <NavHistoryButton onNavigate={handleNavHistoryNavigate} />
     </div>
 
@@ -2108,7 +2136,7 @@
 
         <!-- Header (Mobile/Simplified) -->
 
-        <header class="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white/80 backdrop-blur md:hidden z-10 sticky top-0">
+        <header class="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white/95 md:hidden z-10 sticky top-0">
 
             <button onclick={() => session.setProject(null)} class="text-gray-500">
 
@@ -2165,7 +2193,9 @@
               inputTokens={$session.inputTokens}
               contextWindow={currentProject?.context_window || 200000}
               isPruned={hasPrunedContext($session.sessionId || '')}
+              isCompacting={$compactingSessionsStore.has($session.sessionId || '')}
               onPruneToolResults={() => pruneToolResults($session.sessionId || '')}
+              onSDKCompact={() => sendMessage("/compact")}
               onStartNewChat={() => startNewChatWithSummary($session.sessionId || '')}
             />
           {/if}
@@ -2178,7 +2208,7 @@
         >
           <button
             onclick={jumpToBottom}
-            class="relative p-2 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-full shadow-lg hover:bg-gray-50 transition-all hover:shadow-xl hover:scale-105 group"
+            class="relative p-2 bg-white border border-gray-200 rounded-full shadow-lg hover:bg-gray-50 transition-all hover:shadow-xl hover:scale-105 group"
             title={newMessagesWhileAway > 0 ? `${newMessagesWhileAway} new update${newMessagesWhileAway > 1 ? 's' : ''} below` : 'Scroll to bottom'}
           >
             <svg class="w-5 h-5 text-gray-500 group-hover:text-gray-700 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2381,8 +2411,24 @@
     }}
   />
 
+  <ContextOverflowModal
+    open={showContextOverflowModal}
+    onClose={() => showContextOverflowModal = false}
+    onPrune={() => pruneToolResults($session.sessionId || '')}
+    onCompact={() => sendMessage("/compact")}
+    onNewChat={async () => {
+      const newSessionId = await createNewChatAction();
+      if (newSessionId) {
+        const newSession = sidebarSessions.find(s => s.id === newSessionId);
+        if (newSession) {
+          selectSession(newSession);
+        }
+      }
+    }}
+  />
+
   {#if showHotkeysHelp}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/20 backdrop-blur-sm" onclick={() => showHotkeysHelp = false} role="dialog" aria-modal="true" tabindex="-1">
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30" onclick={() => showHotkeysHelp = false} role="dialog" aria-modal="true" tabindex="-1">
       <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200" onclick={(e) => e.stopPropagation()}>
         <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <div class="flex items-center gap-3">
@@ -2418,7 +2464,7 @@
   <!-- CLAUDE.md Modal -->
   {#if showClaudeMdModal}
     <div 
-      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/20 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30"
       onclick={() => showClaudeMdModal = false}
       role="dialog"
       aria-modal="true"

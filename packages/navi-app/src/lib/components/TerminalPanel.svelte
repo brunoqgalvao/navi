@@ -724,7 +724,7 @@
       // Also try REST API (for SSE exec mode fallback)
       try {
         await terminalApi.killExec(execId);
-      } catch {}
+      } catch { /* REST API fallback - ignore if not found */ }
       execId = null;
     }
   }

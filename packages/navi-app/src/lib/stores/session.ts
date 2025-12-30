@@ -300,6 +300,9 @@ export const messageQueue = createMessageQueueStore();
 export const sessionHistoryContext = writable<Map<string, string>>(new Map());
 export const todos = writable<TodoItem[]>([]);
 
+// Compacting state store - tracks which sessions are currently compacting
+export const compactingSessionsStore = writable<Set<string>>(new Set());
+
 // Session events store (for debug/timeline view)
 function createSessionEventsStore() {
   const { subscribe, set, update } = writable<Map<string, SDKEvent[]>>(new Map());

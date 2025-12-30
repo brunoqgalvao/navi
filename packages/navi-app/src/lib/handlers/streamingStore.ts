@@ -1,5 +1,6 @@
 import { writable, get } from "svelte/store";
 import type { ContentBlock } from "../claude";
+import { STREAMING_THROTTLE_MS } from "../constants";
 
 export interface StreamingState {
   isStreaming: boolean;
@@ -16,8 +17,6 @@ interface ThrottleState {
   timer: ReturnType<typeof setTimeout> | null;
   lastUpdate: number;
 }
-
-const THROTTLE_MS = 500;
 
 function createStreamingStore() {
   const state = writable<Map<string, StreamingState>>(new Map());
@@ -98,16 +97,16 @@ function createStreamingStore() {
     if (delta.text) throttle.pendingText += delta.text;
     if (delta.thinking) throttle.pendingThinking += delta.thinking;
     if (delta.partial_json) throttle.pendingJson += delta.partial_json;
-    
+
     const now = Date.now();
     const timeSinceLastUpdate = now - throttle.lastUpdate;
-    
-    if (timeSinceLastUpdate >= THROTTLE_MS) {
+
+    if (timeSinceLastUpdate >= STREAMING_THROTTLE_MS) {
       flushThrottledUpdates(sessionId);
     } else if (!throttle.timer) {
       throttle.timer = setTimeout(() => {
         flushThrottledUpdates(sessionId);
-      }, THROTTLE_MS - timeSinceLastUpdate);
+      }, STREAMING_THROTTLE_MS - timeSinceLastUpdate);
     }
   }
 
@@ -128,7 +127,9 @@ function createStreamingStore() {
           try {
             const input = JSON.parse(s.partialJson);
             blocks[blocks.length - 1] = { ...lastBlock, input } as any;
-          } catch {}
+          } catch (e) {
+            console.warn("[StreamingStore] Failed to parse partial JSON for tool_use block:", e);
+          }
         }
         
         map.set(sessionId, {
@@ -165,6 +166,23 @@ function createStreamingStore() {
     return get(state).has(sessionId);
   }
 
+  /**
+   * Clean up all streaming sessions and throttle states.
+   * Call this when the app is being unloaded or reset.
+   */
+  function clearAll(): void {
+    // Clear all timers and throttle states
+    for (const [sessionId, throttle] of throttleStates) {
+      if (throttle.timer) {
+        clearTimeout(throttle.timer);
+      }
+    }
+    throttleStates.clear();
+
+    // Clear the store state
+    state.set(new Map());
+  }
+
   return {
     subscribe: state.subscribe,
     start,
@@ -174,6 +192,7 @@ function createStreamingStore() {
     stop,
     get: get_,
     isStreaming,
+    clearAll,
   };
 }
 

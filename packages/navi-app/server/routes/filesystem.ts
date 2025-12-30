@@ -112,8 +112,9 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
       const fs = await import("fs/promises");
       await fs.mkdir(dirPath, { recursive: true });
       return json({ success: true, path: dirPath });
-    } catch (e) {
-      return json({ error: "Failed to create directory" }, 500);
+    } catch (e: any) {
+      console.error("[fs/mkdir] Failed:", e);
+      return json({ error: e.message || "Failed to create directory" }, 500);
     }
   }
 

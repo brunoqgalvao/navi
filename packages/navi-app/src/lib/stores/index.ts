@@ -38,6 +38,7 @@ export {
   availableModels,
   messageQueue,
   sessionHistoryContext,
+  compactingSessionsStore,
   todos,
   sessionEvents,
   sessionWorkspaces,
@@ -100,3 +101,21 @@ export {
 
 // Error handling (re-export for convenience)
 export { showError, showWarning, showSuccess, showInfo, pendingErrorReport } from "../errorHandler";
+
+// Workspace stores (centralized state for action modules)
+export {
+  sidebarProjects,
+  sidebarSessions,
+  recentChats,
+  projectFileIndex,
+  projectContext,
+  projectContextError,
+  claudeMdContent,
+  defaultProjectsDir,
+  workspaceFolders,
+  globalPermissionSettings,
+  permissionDefaults,
+  resetWorkspaceState,
+  type WorkspaceFolder,
+  type PermissionSettings,
+} from "./workspace";

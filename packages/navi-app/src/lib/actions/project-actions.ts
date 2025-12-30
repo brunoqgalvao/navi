@@ -1,8 +1,21 @@
 import { api, costsApi, type Project } from "../api";
-import { currentSession, costStore, sessionMessages, sessionStatus, tour } from "../stores";
+import { currentSession, costStore, sessionMessages, sessionStatus, tour, showArchivedWorkspaces } from "../stores";
 import { get } from "svelte/store";
 import { getApiBase } from "../config";
 import { showError } from "../errorHandler";
+import { PROJECT_SUMMARY_CACHE_MAX_AGE_MS, TOUR_START_DELAY_MS } from "../constants";
+import {
+  sidebarProjects,
+  sidebarSessions,
+  projectFileIndex,
+  projectContext,
+  projectContextError,
+  claudeMdContent,
+} from "../stores/workspace";
+
+// =============================================================================
+// LEGACY CALLBACK SUPPORT (for gradual migration)
+// =============================================================================
 
 export interface ProjectActionCallbacks {
   setSidebarProjects: (projects: Project[]) => void;
@@ -19,15 +32,61 @@ export interface ProjectActionCallbacks {
 
 let callbacks: ProjectActionCallbacks | null = null;
 
+/**
+ * @deprecated Use stores directly instead of callbacks
+ * This function is kept for backward compatibility during migration
+ */
 export function initProjectActions(cb: ProjectActionCallbacks) {
   callbacks = cb;
 }
 
+// =============================================================================
+// HELPER FUNCTIONS (use stores or callbacks based on availability)
+// =============================================================================
+
+function setSidebarProjectsValue(projects: Project[]) {
+  sidebarProjects.set(projects);
+  callbacks?.setSidebarProjects(projects);
+}
+
+function setSidebarSessionsValue(sessions: any[]) {
+  sidebarSessions.set(sessions);
+  callbacks?.setSidebarSessions(sessions);
+}
+
+function setProjectFileIndexValue(index: Map<string, string>) {
+  projectFileIndex.set(index);
+  callbacks?.setProjectFileIndex(index);
+}
+
+function setProjectContextValue(ctx: { summary: string; suggestions: string[] } | null) {
+  projectContext.set(ctx);
+  callbacks?.setProjectContext(ctx);
+}
+
+function setProjectContextErrorValue(error: string | null) {
+  projectContextError.set(error);
+  callbacks?.setProjectContextError(error);
+}
+
+function setClaudeMdContentValue(content: string | null) {
+  claudeMdContent.set(content);
+  callbacks?.setClaudeMdContent(content);
+}
+
+function getSidebarProjectsValue(): Project[] {
+  return callbacks?.getSidebarProjects() ?? get(sidebarProjects);
+}
+
+function getShowArchivedValue(): boolean {
+  return callbacks?.getShowArchivedWorkspaces() ?? get(showArchivedWorkspaces);
+}
+
 export async function loadProjects(showArchived?: boolean): Promise<Project[]> {
   try {
-    const archived = showArchived ?? callbacks?.getShowArchivedWorkspaces() ?? false;
+    const archived = showArchived ?? getShowArchivedValue();
     const projectsList = await api.projects.list(archived);
-    callbacks?.setSidebarProjects(projectsList);
+    setSidebarProjectsValue(projectsList);
     return projectsList;
   } catch (e) {
     showError({ title: "Projects Error", message: "Failed to load projects", error: e });
@@ -45,29 +104,27 @@ export async function loadProjectCost(projectId: string) {
 }
 
 export async function selectProject(project: Project) {
-  if (!callbacks) return;
-
   const session = get(currentSession);
   const prevSessionId = session.sessionId;
-  const inputText = callbacks.getInputText();
+  const inputText = callbacks?.getInputText() ?? "";
 
   // Save draft if switching away from a session
   if (prevSessionId && inputText.trim()) {
     // This would need sessionDrafts - keeping in App.svelte for now
   }
 
-  callbacks.setInputText("");
+  callbacks?.setInputText("");
   currentSession.setProject(project.id);
   currentSession.setSession(null);
-  callbacks.setSidebarSessions([]);
-  callbacks.setProjectFileIndex(new Map());
-  callbacks.setProjectContext(null);
-  callbacks.setProjectContextError(null);
-  callbacks.setClaudeMdContent(null);
+  setSidebarSessionsValue([]);
+  setProjectFileIndexValue(new Map());
+  setProjectContextValue(null);
+  setProjectContextErrorValue(null);
+  setClaudeMdContentValue(null);
 
   try {
-    const sessionsList = await api.sessions.list(project.id, callbacks.getShowArchivedWorkspaces());
-    callbacks.setSidebarSessions(sessionsList);
+    const sessionsList = await api.sessions.list(project.id, getShowArchivedValue());
+    setSidebarSessionsValue(sessionsList);
   } catch (e) {
     showError({ title: "Sessions Error", message: "Failed to load sessions", error: e });
   }
@@ -84,7 +141,7 @@ export async function selectProject(project: Project) {
 
   const tourState = get(tour);
   if (!tourState.completedTours.includes("project")) {
-    setTimeout(() => tour.start("project"), 500);
+    setTimeout(() => tour.start("project"), TOUR_START_DELAY_MS);
   }
 }
 
@@ -93,34 +150,31 @@ export async function loadClaudeMd(projectPath: string) {
     const res = await fetch(`${getApiBase()}/fs/read?path=${encodeURIComponent(projectPath + "/CLAUDE.md")}`);
     const data = await res.json();
     if (!data.error && data.content) {
-      callbacks?.setClaudeMdContent(data.content);
+      setClaudeMdContentValue(data.content);
     } else {
-      callbacks?.setClaudeMdContent(null);
+      setClaudeMdContentValue(null);
     }
   } catch (e) {
-    callbacks?.setClaudeMdContent(null);
+    setClaudeMdContentValue(null);
   }
 }
 
 export async function loadProjectContext(project: Project) {
-  if (!callbacks) return;
-
   const cached = project.summary || project.description;
   const cacheAge = project.summary_updated_at ? Date.now() - project.summary_updated_at : Infinity;
-  const maxAge = 24 * 60 * 60 * 1000; // 1 day cache
 
-  if (cached && cacheAge < maxAge) {
+  if (cached && cacheAge < PROJECT_SUMMARY_CACHE_MAX_AGE_MS) {
     try {
       const parsed = JSON.parse(cached);
       if (parsed.summary) {
-        callbacks.setProjectContext(parsed);
+        setProjectContextValue(parsed);
         return;
       }
-    } catch {}
+    } catch { /* cached data is not valid JSON, will regenerate */ }
   }
 
-  callbacks.setProjectContext(null);
-  callbacks.setProjectContextError(null);
+  setProjectContextValue(null);
+  setProjectContextErrorValue(null);
 
   api.ephemeral.chat({
     prompt: `Analyze this project directory and provide:
@@ -135,7 +189,7 @@ Respond in this exact JSON format only, no other text:
   }).then(async response => {
     try {
       if (!response.result) {
-        callbacks?.setProjectContext({
+        setProjectContextValue({
           summary: "New project ready for development.",
           suggestions: ["Create a package.json or project configuration", "Add source code files", "Set up version control with git"]
         });
@@ -144,30 +198,31 @@ Respond in this exact JSON format only, no other text:
       const jsonMatch = response.result.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
-        callbacks?.setProjectContext(parsed);
+        setProjectContextValue(parsed);
         // Save to DB for caching
         try {
           await api.projects.update(project.id, {
             summary: JSON.stringify(parsed),
             summary_updated_at: Date.now()
           });
-        } catch {}
+        } catch (e) {
+          console.warn("[Project] Failed to cache project summary:", e);
+        }
       } else {
-        callbacks?.setProjectContext({ summary: response.result.slice(0, 500), suggestions: [] });
+        setProjectContextValue({ summary: response.result.slice(0, 500), suggestions: [] });
       }
-    } catch {
-      callbacks?.setProjectContext({ summary: response.result?.slice(0, 500) || "Project loaded.", suggestions: [] });
+    } catch (e) {
+      console.warn("[Project] Failed to parse project context response:", e);
+      setProjectContextValue({ summary: response.result?.slice(0, 500) || "Project loaded.", suggestions: [] });
     }
   }).catch(e => {
     console.error("Project context error:", e);
-    callbacks?.setProjectContext({ summary: "Project ready.", suggestions: ["Start coding", "Add dependencies", "Create project structure"] });
+    setProjectContextValue({ summary: "Project ready.", suggestions: ["Start coding", "Add dependencies", "Create project structure"] });
   });
 }
 
 export async function indexProjectFiles(rootPath: string, currentPath: string = rootPath) {
-  if (!callbacks) return;
-
-  const projectFileIndex = new Map<string, string>();
+  const fileIndex = new Map<string, string>();
 
   async function indexDir(path: string) {
     try {
@@ -178,9 +233,9 @@ export async function indexProjectFiles(rootPath: string, currentPath: string = 
           if (entry.type === "file") {
             const relativePath = entry.path.replace(rootPath + "/", "");
             const fileName = entry.name;
-            projectFileIndex.set(fileName, entry.path);
-            projectFileIndex.set(relativePath, entry.path);
-            projectFileIndex.set("./" + relativePath, entry.path);
+            fileIndex.set(fileName, entry.path);
+            fileIndex.set(relativePath, entry.path);
+            fileIndex.set("./" + relativePath, entry.path);
           } else if (
             entry.type === "directory" &&
             !entry.name.startsWith(".") &&
@@ -195,12 +250,12 @@ export async function indexProjectFiles(rootPath: string, currentPath: string = 
         }
       }
     } catch (e) {
-      // Ignore errors
+      // Ignore errors - file listing is non-critical
     }
   }
 
   await indexDir(currentPath);
-  callbacks.setProjectFileIndex(projectFileIndex);
+  setProjectFileIndexValue(fileIndex);
 }
 
 export async function createProject(
@@ -267,7 +322,7 @@ export async function deleteProject(projectId: string): Promise<boolean> {
     const session = get(currentSession);
     if (session.projectId === projectId) {
       currentSession.setProject(null);
-      callbacks?.setSidebarSessions([]);
+      setSidebarSessionsValue([]);
     }
     return true;
   } catch (e) {
@@ -280,14 +335,14 @@ export async function toggleProjectPin(project: Project): Promise<boolean> {
   const newPinned = !project.pinned;
   try {
     await api.projects.togglePin(project.id, newPinned);
-    const projects = callbacks?.getSidebarProjects() || [];
+    const projects = getSidebarProjectsValue();
     const updated = projects
       .map(p => p.id === project.id ? { ...p, pinned: newPinned ? 1 : 0 } : p)
       .sort((a, b) => {
         if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
         return (a.sort_order || 0) - (b.sort_order || 0);
       });
-    callbacks?.setSidebarProjects(updated);
+    setSidebarProjectsValue(updated);
     return true;
   } catch (e) {
     showError({ title: "Pin Failed", message: "Failed to toggle project pin", error: e });

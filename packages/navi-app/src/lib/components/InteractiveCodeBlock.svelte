@@ -139,7 +139,7 @@
     
     {#if isCollapsed && shouldCollapse}
       <div class="fade-overlay absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#11111b] to-transparent pointer-events-none"></div>
-      <div class="expand-hint absolute bottom-3 right-3 text-xs text-gray-500 bg-[#1e1e2e]/80 px-2 py-1 rounded pointer-events-none backdrop-blur-sm">
+      <div class="expand-hint absolute bottom-3 right-3 text-xs text-gray-500 bg-[#1e1e2e]/95 px-2 py-1 rounded pointer-events-none">
         +{code.split('\n').length - maxLines} more lines
       </div>
     {/if}

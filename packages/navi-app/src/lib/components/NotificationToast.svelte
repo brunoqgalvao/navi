@@ -53,7 +53,7 @@
       out:fade={{ duration: 150 }}
     >
       <!-- Glass background - light mode -->
-      <div class="absolute inset-0 bg-white/95 backdrop-blur-xl"></div>
+      <div class="absolute inset-0 bg-white"></div>
 
       <!-- Accent gradient bar -->
       <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r {style.accent}"></div>

@@ -1,5 +1,19 @@
-import type { ClaudeMessage, StreamEventMessage, ToolProgressMessage, PermissionRequestMessage, ContentBlock, ToolUseBlock } from "../claude";
+import type {
+  ClaudeMessage,
+  StreamEventMessage,
+  ToolProgressMessage,
+  PermissionRequestMessage,
+  ContentBlock,
+  ToolUseBlock,
+  SystemMessage,
+  AssistantMessage,
+  UserMessage,
+  ResultMessage,
+  ErrorMessage,
+  DoneMessage
+} from "../claude";
 import type { HandlerCallbacks, UICommand } from "./types";
+import type { TodoItem } from "../stores/types";
 import { sessionMessages } from "../stores";
 import { handleStreamEvent } from "./streamHandler";
 
@@ -9,52 +23,91 @@ export interface MessageHandlerConfig {
   getProjectId: () => string | null;
 }
 
-function extractTodos(content: ContentBlock[]): any[] | null {
+/**
+ * Type guard to check if a message has a uiSessionId property
+ */
+function hasUiSessionId(msg: ClaudeMessage): msg is ClaudeMessage & { uiSessionId: string } {
+  return "uiSessionId" in msg && typeof (msg as { uiSessionId?: unknown }).uiSessionId === "string";
+}
+
+/**
+ * Get the uiSessionId from a message if present
+ */
+function getUiSessionId(msg: ClaudeMessage): string | undefined {
+  if (hasUiSessionId(msg)) {
+    return msg.uiSessionId;
+  }
+  return undefined;
+}
+
+/**
+ * Extract todo items from assistant message content
+ */
+function extractTodos(content: ContentBlock[]): TodoItem[] | null {
   const todoTool = content.find(
     (b): b is ToolUseBlock => b.type === "tool_use" && b.name === "TodoWrite"
   );
-  return todoTool?.input?.todos || null;
+  if (!todoTool?.input?.todos) return null;
+
+  // Validate the todo structure
+  const todos = todoTool.input.todos;
+  if (!Array.isArray(todos)) return null;
+
+  return todos as TodoItem[];
 }
 
 export function createMessageHandler(config: MessageHandlerConfig) {
-  const { callbacks, getCurrentSessionId, getProjectId } = config;
+  const { callbacks, getCurrentSessionId } = config;
 
   function handle(msg: ClaudeMessage): void {
-    const uiSessionId = (msg as any).uiSessionId;
+    const uiSessionId = getUiSessionId(msg);
     const currentSessionId = getCurrentSessionId();
-    
+
     switch (msg.type) {
-      case "system":
-        if ((msg as any).subtype === "init" && uiSessionId && uiSessionId === currentSessionId) {
+      case "system": {
+        const systemMsg = msg as SystemMessage;
+        if (systemMsg.subtype === "init" && uiSessionId && uiSessionId === currentSessionId) {
           callbacks.onSessionInit?.(uiSessionId, {
-            model: (msg as any).model,
-            cwd: (msg as any).cwd,
-            tools: (msg as any).tools,
-            skills: (msg as any).skills,
+            model: systemMsg.model,
+            cwd: systemMsg.cwd,
+            tools: systemMsg.tools,
+            skills: systemMsg.skills,
           });
         }
+        // Handle compacting status
+        if (systemMsg.status === "compacting" && uiSessionId) {
+          callbacks.onCompactStart?.(uiSessionId);
+        }
+        // Handle compact_boundary (compaction complete)
+        if (systemMsg.subtype === "compact_boundary" && uiSessionId) {
+          callbacks.onCompactEnd?.(uiSessionId, systemMsg.compactMetadata);
+        }
         break;
+      }
 
-      case "stream_event":
+      case "stream_event": {
         if (uiSessionId) {
-          const eventType = (msg as StreamEventMessage).event?.type;
+          const streamMsg = msg as StreamEventMessage;
+          const eventType = streamMsg.event?.type;
           if (eventType === "message_start") {
             callbacks.onStreamingStart?.(uiSessionId);
           }
-          handleStreamEvent(uiSessionId, msg as StreamEventMessage);
+          handleStreamEvent(uiSessionId, streamMsg);
           callbacks.onMessageUpdate?.(uiSessionId);
           if (uiSessionId === currentSessionId) {
             callbacks.scrollToBottom?.();
           }
         }
         break;
+      }
 
-      case "assistant":
+      case "assistant": {
         if (!uiSessionId) break;
-        const parentId = (msg as any).parentToolUseId || null;
-        const content = (msg as any).content as ContentBlock[];
-        const msgUuid = (msg as any).uuid || crypto.randomUUID();
-        
+        const assistantMsg = msg as AssistantMessage;
+        const parentId = assistantMsg.parentToolUseId || null;
+        const content = assistantMsg.content;
+        const msgUuid = assistantMsg.uuid || crypto.randomUUID();
+
         if (content && content.length > 0) {
           sessionMessages.addMessage(uiSessionId, {
             id: msgUuid,
@@ -64,7 +117,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
             parentToolUseId: parentId,
           });
         }
-        
+
         const todos = extractTodos(content);
         if (todos) {
           callbacks.onTodoUpdate?.(uiSessionId, todos);
@@ -76,11 +129,13 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           callbacks.onNewContent?.();
         }
         break;
+      }
 
-      case "user":
+      case "user": {
         if (!uiSessionId) break;
-        const userContent = (msg as any).content as ContentBlock[] | string;
-        const isSynthetic = !!(msg as any).isSynthetic;
+        const userMsg = msg as UserMessage;
+        const userContent = userMsg.content;
+        const isSynthetic = !!userMsg.isSynthetic;
         const hasToolResult = Array.isArray(userContent)
           ? userContent.some((block) => block.type === "tool_result")
           : false;
@@ -90,7 +145,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
             role: "user",
             content: userContent,
             timestamp: new Date(),
-            parentToolUseId: (msg as any).parentToolUseId ?? undefined,
+            parentToolUseId: userMsg.parentToolUseId ?? undefined,
             isSynthetic,
           });
           callbacks.onMessageUpdate?.(uiSessionId);
@@ -100,8 +155,9 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           }
         }
         break;
+      }
 
-      case "tool_progress":
+      case "tool_progress": {
         if (uiSessionId && uiSessionId === currentSessionId) {
           const progressMsg = msg as ToolProgressMessage;
           if (progressMsg.parentToolUseId) {
@@ -109,42 +165,63 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           }
         }
         break;
+      }
 
-      case "result":
-        const resultCost = (msg as any).costUsd || 0;
+      case "result": {
+        const resultMsg = msg as ResultMessage;
+        const resultCost = resultMsg.costUsd || 0;
         if (uiSessionId && resultCost) {
           callbacks.onComplete?.(uiSessionId, { costUsd: resultCost });
         }
         break;
+      }
 
-      case "error":
+      case "error": {
         if (uiSessionId) {
-          sessionMessages.addMessage(uiSessionId, {
-            id: crypto.randomUUID(),
-            role: "system",
-            content: `Error: ${(msg as any).error}`,
-            timestamp: new Date(),
-          });
-          callbacks.onError?.(uiSessionId, (msg as any).error);
+          const errorMsg = msg as ErrorMessage;
+          const errorText = errorMsg.error || "";
+
+          // Check for context overflow errors
+          const isContextOverflow =
+            errorText.toLowerCase().includes("prompt is too long") ||
+            errorText.toLowerCase().includes("context length") ||
+            errorText.toLowerCase().includes("maximum context") ||
+            errorText.toLowerCase().includes("token limit");
+
+          if (isContextOverflow) {
+            // Don't add a scary error message - let the callback handle it gracefully
+            callbacks.onContextOverflow?.(uiSessionId);
+          } else {
+            // Regular error handling
+            sessionMessages.addMessage(uiSessionId, {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: `Error: ${errorMsg.error}`,
+              timestamp: new Date(),
+            });
+          }
+
+          callbacks.onError?.(uiSessionId, errorMsg.error);
           callbacks.onStreamingEnd?.(uiSessionId, "error");
         }
         break;
+      }
 
-      case "done":
+      case "done": {
         if (uiSessionId) {
-          const finalMessageId = (msg as any).finalMessageId;
-          if (finalMessageId) {
-            sessionMessages.markFinal(uiSessionId, finalMessageId);
+          const doneMsg = msg as DoneMessage;
+          if (doneMsg.finalMessageId) {
+            sessionMessages.markFinal(uiSessionId, doneMsg.finalMessageId);
           }
-          const usage = (msg as any).usage;
-          if (usage) {
-            callbacks.onComplete?.(uiSessionId, { costUsd: 0, usage });
+          if (doneMsg.usage) {
+            callbacks.onComplete?.(uiSessionId, { costUsd: 0, usage: doneMsg.usage });
           }
           callbacks.onStreamingEnd?.(uiSessionId, "done");
         }
         break;
+      }
 
-      case "aborted":
+      case "aborted": {
         if (uiSessionId) {
           sessionMessages.addMessage(uiSessionId, {
             id: crypto.randomUUID(),
@@ -155,8 +232,9 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           callbacks.onStreamingEnd?.(uiSessionId, "aborted");
         }
         break;
+      }
 
-      case "permission_request":
+      case "permission_request": {
         const permMsg = msg as PermissionRequestMessage;
         callbacks.onPermissionRequest?.({
           requestId: permMsg.requestId,
@@ -165,14 +243,17 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           message: permMsg.message,
         });
         break;
+      }
 
-      case "ui_command":
-        const uiCommand = msg as unknown as { type: "ui_command"; command: string; payload: Record<string, unknown> };
+      case "ui_command": {
+        // ui_command is an inline type in ClaudeMessage union
+        const uiCommand = msg as { type: "ui_command"; command: string; payload: Record<string, unknown> };
         callbacks.onUICommand?.({
           command: uiCommand.command as UICommand["command"],
           payload: uiCommand.payload,
         });
         break;
+      }
     }
   }
 

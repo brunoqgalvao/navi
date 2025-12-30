@@ -573,17 +573,23 @@ export function createWebSocketHandlers() {
     },
 
     close(ws: any) {
-      console.log("Client disconnected");
+      console.log("[WebSocket] Client disconnected, starting cleanup...");
       connectedClients.delete(ws);
       // Detach from all terminals and cleanup exec processes
       detachFromAllTerminals(ws);
       cleanupWsExec(ws);
-      // Update active processes
+      // Update active processes - set ws to null so they can be reattached
+      let detachedSessions = 0;
       for (const [sessionId, active] of activeProcesses.entries()) {
         if (active.ws === ws) {
           activeProcesses.set(sessionId, { ...active, ws: null });
+          detachedSessions++;
         }
       }
+      if (detachedSessions > 0) {
+        console.log(`[WebSocket] Detached ${detachedSessions} active session(s) from disconnected client`);
+      }
+      console.log(`[WebSocket] Cleanup complete. Connected clients: ${connectedClients.size}`);
     },
   };
 }

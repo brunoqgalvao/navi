@@ -1,26 +1,23 @@
 /**
  * Context management actions
- * Handles pruning strategies and context reduction
+ * Handles two pruning strategies:
+ * 1. Tool result pruning (Option B): Prunes tool results in SDK JSONL + marks in UI
+ * 2. SDK compact (Option A): Triggers the SDK's built-in /compact command
  */
 
 import { get } from "svelte/store";
-import { sessionMessages, sessionHistoryContext, notifications, currentSession } from "../stores";
-import { api } from "../api";
+import { sessionMessages, sessionHistoryContext, notifications } from "../stores";
 import type { ChatMessage } from "../stores/types";
-import type { ContentBlock, ToolUseBlock, ToolResultBlock } from "../claude";
-
-// How many recent user/assistant exchanges to keep
-const RECENT_EXCHANGES_TO_KEEP = 3;
-
-// Max chars for user message in recent context
-const MAX_USER_MSG_LENGTH = 500;
-
-// Max chars for assistant text in recent context
-const MAX_ASSISTANT_TEXT_LENGTH = 1000;
+import type { ContentBlock, ToolResultBlock } from "../claude";
+import { api } from "../api";
+import {
+  TOOL_RESULT_PRESERVE_RECENT_COUNT,
+  TOOL_RESULT_PRUNED_MAX_LENGTH,
+} from "../constants";
 
 /**
  * Check if a session has pruned context active
- * Uses sessionHistoryContext as source of truth (not a separate Set)
+ * Uses sessionHistoryContext as source of truth
  */
 export function hasPrunedContext(sessionId: string): boolean {
   if (!sessionId) return false;
@@ -39,192 +36,132 @@ export function clearPrunedState(sessionId: string): void {
 }
 
 /**
- * Truncate text with ellipsis
+ * Mark specific tool results as pruned in the UI store
+ * This doesn't modify the content, just adds a visual indicator
  */
-function truncate(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength - 3) + "...";
-}
+function markToolResultsAsPruned(sessionId: string, prunedToolUseIds: string[]): void {
+  if (prunedToolUseIds.length === 0) return;
 
-/**
- * Extract just text content from a message
- */
-function extractText(msg: ChatMessage): string {
-  if (typeof msg.content === "string") return msg.content;
-  if (!Array.isArray(msg.content)) return "";
+  const prunedSet = new Set(prunedToolUseIds);
+  const currentMsgs = get(sessionMessages).get(sessionId) || [];
 
-  return (msg.content as ContentBlock[])
-    .filter(b => b.type === "text")
-    .map(b => (b as { text: string }).text)
-    .join("\n");
-}
+  const updatedMessages = currentMsgs.map(msg => {
+    if (!Array.isArray(msg.content)) return msg;
 
-/**
- * Get a minimal summary of what tools were used
- */
-function getToolSummary(msg: ChatMessage): string {
-  if (!Array.isArray(msg.content)) return "";
+    const content = msg.content as ContentBlock[];
+    let hasPrunedResult = false;
 
-  const tools = (msg.content as ContentBlock[])
-    .filter(b => b.type === "tool_use")
-    .map(b => (b as ToolUseBlock).name);
-
-  if (tools.length === 0) return "";
-
-  // Dedupe and limit
-  const uniqueTools = [...new Set(tools)];
-  if (uniqueTools.length <= 3) {
-    return `[Tools: ${uniqueTools.join(", ")}]`;
-  }
-  return `[Tools: ${uniqueTools.slice(0, 3).join(", ")} +${uniqueTools.length - 3} more]`;
-}
-
-/**
- * Format minimal history - VERY aggressive compression
- * Only keeps last few exchanges, heavily truncated
- */
-function formatMinimalHistory(messages: ChatMessage[]): string {
-  if (messages.length === 0) return "";
-
-  // Filter to main thread only (no subagent messages)
-  const mainMessages = messages.filter(m => !m.parentToolUseId && m.role !== "system");
-
-  // Find user/assistant pairs from the end
-  const exchanges: { user: ChatMessage; assistant: ChatMessage }[] = [];
-
-  for (let i = mainMessages.length - 1; i >= 0 && exchanges.length < RECENT_EXCHANGES_TO_KEEP; i--) {
-    const msg = mainMessages[i];
-    if (msg.role === "assistant") {
-      // Look for preceding user message
-      for (let j = i - 1; j >= 0; j--) {
-        if (mainMessages[j].role === "user") {
-          exchanges.unshift({ user: mainMessages[j], assistant: msg });
-          i = j; // Skip to before this user message
+    // Check if any tool_result in this message was pruned
+    for (const block of content) {
+      if (block.type === "tool_result") {
+        const toolResult = block as ToolResultBlock;
+        if (prunedSet.has(toolResult.tool_use_id)) {
+          hasPrunedResult = true;
           break;
         }
       }
     }
-  }
 
-  if (exchanges.length === 0) {
-    // Fallback: just get last message
-    const lastMsg = mainMessages[mainMessages.length - 1];
-    if (lastMsg) {
-      const text = truncate(extractText(lastMsg), MAX_USER_MSG_LENGTH);
-      return `<context>\nLast message (${lastMsg.role}): ${text}\n</context>\n\nContinue the conversation.`;
-    }
-    return "";
-  }
-
-  // Build minimal context
-  let history = "<recent_context>\n";
-
-  for (const { user, assistant } of exchanges) {
-    // User message - truncated
-    const userText = truncate(extractText(user), MAX_USER_MSG_LENGTH);
-    if (userText) {
-      history += `User: ${userText}\n`;
+    if (hasPrunedResult) {
+      return { ...msg, pruned: true };
     }
 
-    // Assistant - just text summary + tool list, no details
-    const assistantText = truncate(extractText(assistant), MAX_ASSISTANT_TEXT_LENGTH);
-    const toolSummary = getToolSummary(assistant);
+    return msg;
+  });
 
-    if (assistantText || toolSummary) {
-      history += `Assistant: ${assistantText}`;
-      if (toolSummary) {
-        history += ` ${toolSummary}`;
-      }
-      history += "\n";
-    }
-
-    history += "\n";
-  }
-
-  history += "</recent_context>\n\n";
-  history += "Continue from this context. Earlier conversation history has been compressed.";
-
-  return history;
+  sessionMessages.setMessages(sessionId, updatedMessages);
 }
 
 /**
- * Estimate original context size
- */
-function estimateOriginalSize(messages: ChatMessage[]): number {
-  let size = 0;
-  for (const msg of messages) {
-    if (Array.isArray(msg.content)) {
-      for (const block of msg.content as ContentBlock[]) {
-        if (block.type === "tool_result") {
-          size += (block as ToolResultBlock).content.length;
-        } else if (block.type === "text") {
-          size += (block as { text: string }).text.length;
-        } else if (block.type === "tool_use") {
-          size += JSON.stringify((block as ToolUseBlock).input).length;
-        }
-      }
-    } else if (typeof msg.content === "string") {
-      size += msg.content.length;
-    }
-  }
-  return size;
-}
-
-/**
- * Prune context aggressively
- * - Generates minimal history (only last few exchanges, heavily truncated)
- * - Clears claudeSessionId in BOTH client store AND server database
- * - Sets historyContext for next query
+ * Prune tool results in the SDK's JSONL session file
+ *
+ * This function:
+ * - Calls the server to prune tool results in ~/.claude/projects/PROJECT/SESSION.jsonl
+ * - Keeps recent messages (last N turns) with full tool results intact
+ * - Prunes older tool results to short summaries
+ * - Marks affected messages in the UI as pruned (for visual indicator)
  */
 export async function pruneToolResults(sessionId: string): Promise<{ success: boolean; prunedCount: number; tokensSaved: number }> {
   if (!sessionId) {
     return { success: false, prunedCount: 0, tokensSaved: 0 };
   }
 
-  const currentMsgs = get(sessionMessages).get(sessionId) || [];
+  try {
+    // Call server to prune the SDK session file
+    const result = await api.sessions.pruneToolResults(sessionId, {
+      preserveRecentCount: TOOL_RESULT_PRESERVE_RECENT_COUNT,
+      maxPrunedLength: TOOL_RESULT_PRUNED_MAX_LENGTH,
+    });
 
-  if (currentMsgs.length === 0) {
+    if (!result.success) {
+      notifications.add({
+        type: "warning",
+        title: "Nothing to prune",
+        message: "No large tool results found or no Claude session exists",
+      });
+      return { success: false, prunedCount: 0, tokensSaved: 0 };
+    }
+
+    // Mark the affected messages in the UI
+    if (result.prunedToolUseIds && result.prunedToolUseIds.length > 0) {
+      markToolResultsAsPruned(sessionId, result.prunedToolUseIds);
+    }
+
+    // Mark session as having pruned context (for UI indicator)
+    sessionHistoryContext.update(map => {
+      map.set(sessionId, "pruned");
+      return new Map(map);
+    });
+
     notifications.add({
-      type: "info",
-      title: "Nothing to prune",
-      message: "No messages in this conversation",
+      type: "success",
+      title: "Tool results pruned",
+      message: `Pruned ${result.prunedCount} tool outputs, saved ~${Math.round(result.tokensSaved / 1000)}k tokens`,
+    });
+
+    return {
+      success: true,
+      prunedCount: result.prunedCount,
+      tokensSaved: result.tokensSaved,
+    };
+  } catch (e) {
+    console.error("Failed to prune tool results:", e);
+    const errorMsg = e instanceof Error ? e.message : "Unknown error";
+
+    // Provide more helpful error messages
+    let userMessage = errorMsg;
+    if (errorMsg.includes("Not found") || errorMsg.includes("404")) {
+      userMessage = "Server may need restart, or no Claude session exists yet";
+    } else if (errorMsg.includes("No Claude session")) {
+      userMessage = "No conversation with Claude yet - nothing to prune";
+    }
+
+    notifications.add({
+      type: "error",
+      title: "Prune failed",
+      message: userMessage,
     });
     return { success: false, prunedCount: 0, tokensSaved: 0 };
   }
+}
 
-  const originalSize = estimateOriginalSize(currentMsgs);
-
-  // Generate minimal history
-  const minimalHistory = formatMinimalHistory(currentMsgs);
-  const newSize = minimalHistory.length;
-
-  // Set history context for next query
-  sessionHistoryContext.update(map => {
-    map.set(sessionId, minimalHistory);
-    return new Map(map);
-  });
-
-  // Clear claudeSessionId in client store
-  currentSession.clearClaudeSession();
-
-  // CRITICAL: Also reset in the database so server doesn't try to resume old session
-  try {
-    await api.sessions.resetContext(sessionId);
-  } catch (e) {
-    console.error("Failed to reset context on server:", e);
-    // Continue anyway - client-side historyContext will still work
-  }
-
-  const reduction = originalSize > 0 ? Math.round((1 - newSize / originalSize) * 100) : 0;
-  const tokensSaved = Math.round((originalSize - newSize) / 4);
+/**
+ * Trigger SDK's built-in /compact command
+ *
+ * This sends a special message that triggers the SDK's intelligent
+ * context compaction. The SDK will use Claude to summarize the conversation.
+ */
+export async function triggerSDKCompact(
+  sendMessage: (text: string) => void
+): Promise<void> {
+  // The SDK recognizes /compact as a special command
+  sendMessage("/compact");
 
   notifications.add({
-    type: "success",
-    title: "Context compressed",
-    message: `Reduced by ~${reduction}% (~${Math.round(tokensSaved / 1000)}k tokens). Kept last ${RECENT_EXCHANGES_TO_KEEP} exchanges.`,
+    type: "info",
+    title: "Compacting context",
+    message: "SDK is intelligently summarizing the conversation...",
   });
-
-  return { success: true, prunedCount: currentMsgs.length, tokensSaved };
 }
 
 /**
@@ -247,3 +184,6 @@ export function getMessagesForApi(sessionId: string): ChatMessage[] {
 export function clearPrunedCache(sessionId: string): void {
   clearPrunedState(sessionId);
 }
+
+// Re-export constants for backward compatibility
+export { TOOL_RESULT_PRESERVE_RECENT_COUNT as RECENT_EXCHANGES_TO_KEEP } from "../constants";

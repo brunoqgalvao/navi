@@ -1,6 +1,6 @@
-import type { ClaudeMessage } from "../claude";
+import type { ClaudeMessage, SystemMessage, AssistantMessage, UserMessage } from "../claude";
 import { createMessageHandler, type MessageHandlerConfig } from "./messageHandler";
-import type { UICommand } from "./types";
+import type { UICommand, CompactMetadata } from "./types";
 import {
   sessionMessages,
   loadingSessions,
@@ -24,16 +24,36 @@ export interface UseMessageHandlerOptions {
   onNewContent?: () => void;
   onClaudeSessionInit?: (claudeSessionId: string, model: string) => void;
   onStreamingEnd?: (sessionId: string, reason: "done" | "aborted" | "error") => void;
+  onCompactStart?: (sessionId: string) => void;
+  onCompactEnd?: (sessionId: string, metadata?: CompactMetadata) => void;
+  onContextOverflow?: (sessionId: string) => void;
+}
+
+/**
+ * Type guard to check if a message has a uiSessionId property
+ */
+function hasUiSessionId(msg: ClaudeMessage): msg is ClaudeMessage & { uiSessionId: string } {
+  return "uiSessionId" in msg && typeof (msg as { uiSessionId?: unknown }).uiSessionId === "string";
+}
+
+/**
+ * Get the uiSessionId from a message if present
+ */
+function getUiSessionId(msg: ClaudeMessage): string | undefined {
+  if (hasUiSessionId(msg)) {
+    return msg.uiSessionId;
+  }
+  return undefined;
 }
 
 function getEventType(msg: ClaudeMessage): SDKEventType {
   switch (msg.type) {
     case "system":
-      const subtype = (msg as any).subtype;
-      if (subtype === "init") return "system_init";
-      if (subtype === "status") return "system_status";
-      if (subtype === "compact_boundary") return "system_compact";
-      if (subtype === "hook_response") return "system_hook";
+      const systemMsg = msg as SystemMessage;
+      if (systemMsg.subtype === "init") return "system_init";
+      if (systemMsg.subtype === "status") return "system_status";
+      if (systemMsg.subtype === "compact_boundary") return "system_compact";
+      if (systemMsg.subtype === "hook_response") return "system_hook";
       return "system_init";
     case "assistant": return "assistant";
     case "user": return "user";
@@ -47,13 +67,29 @@ function getEventType(msg: ClaudeMessage): SDKEventType {
   }
 }
 
+/**
+ * Get common message properties for event logging
+ */
+function getMessageEventProps(msg: ClaudeMessage): { uuid?: string; timestamp?: number; parentToolUseId?: string | null } {
+  if ("uuid" in msg) {
+    const m = msg as { uuid?: string; timestamp?: number; parentToolUseId?: string | null };
+    return {
+      uuid: m.uuid,
+      timestamp: m.timestamp,
+      parentToolUseId: m.parentToolUseId ?? null,
+    };
+  }
+  return { parentToolUseId: null };
+}
+
 function logEvent(sessionId: string, msg: ClaudeMessage) {
+  const props = getMessageEventProps(msg);
   const event: SDKEvent = {
-    id: (msg as any).uuid || crypto.randomUUID(),
+    id: props.uuid || crypto.randomUUID(),
     type: getEventType(msg),
-    timestamp: (msg as any).timestamp || Date.now(),
+    timestamp: props.timestamp || Date.now(),
     sessionId,
-    parentToolUseId: (msg as any).parentToolUseId || null,
+    parentToolUseId: props.parentToolUseId,
     data: msg,
   };
   sessionEvents.addEvent(sessionId, event);
@@ -72,6 +108,9 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     onNewContent,
     onClaudeSessionInit,
     onStreamingEnd: onStreamingEndCallback,
+    onCompactStart,
+    onCompactEnd,
+    onContextOverflow,
   } = options;
 
   const activeSubagents = new Map<string, { elapsed: number }>();
@@ -81,10 +120,8 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     getProjectId,
     callbacks: {
       onSessionInit: (sessionId, data) => {
-        const claudeSessionId = (data as any).claudeSessionId;
-        if (claudeSessionId && data.model) {
-          onClaudeSessionInit?.(claudeSessionId, data.model);
-        }
+        // Note: claudeSessionId is set separately via SystemMessage's claudeSessionId field
+        // The onSessionInit callback only receives model/cwd/tools/skills
         sessionDebugInfo.setForSession(sessionId, {
           cwd: data.cwd || "",
           model: data.model || "",
@@ -168,6 +205,18 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
         onUICommand?.(command);
       },
 
+      onCompactStart: (sessionId) => {
+        onCompactStart?.(sessionId);
+      },
+
+      onCompactEnd: (sessionId, metadata) => {
+        onCompactEnd?.(sessionId, metadata);
+      },
+
+      onContextOverflow: (sessionId) => {
+        onContextOverflow?.(sessionId);
+      },
+
       scrollToBottom,
       onNewContent,
     },
@@ -176,12 +225,12 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
   const handler = createMessageHandler(config);
 
   function handleMessage(msg: ClaudeMessage) {
-    const uiSessionId = (msg as any).uiSessionId;
-    
+    const uiSessionId = getUiSessionId(msg);
+
     if (uiSessionId) {
       logEvent(uiSessionId, msg);
     }
-    
+
     handler.handle(msg);
   }
 

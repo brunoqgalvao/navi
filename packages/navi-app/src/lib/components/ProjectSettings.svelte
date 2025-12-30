@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type Project, type PermissionSettings } from "../api";
   import { onMount } from "svelte";
+  import { get } from "svelte/store";
   import { availableModels, type ModelInfo } from "../stores";
   import { marked } from "marked";
   import ProjectSkillSelector from "./ProjectSkillSelector.svelte";
@@ -67,9 +68,8 @@
       defaultTools = perms.defaults.tools;
       dangerousTools = perms.defaults.dangerous;
       
-      availableModels.subscribe(m => {
-        models = m;
-      })();
+      // Get current value without creating a subscription (avoids memory leaks)
+      models = get(availableModels);
     } catch (e) {
       console.error("Failed to load project settings:", e);
     } finally {
@@ -569,6 +569,8 @@ Write instructions for Claude here. This file tells Claude:
           onEditSkill={(skill) => { editingSkill = skill; showSkillEditor = true; }}
           onOpenLibrary={() => showSkillLibrary = true}
         />
+      {:else if activeTab === "analytics"}
+        <ProjectAnalytics projectId={project.id} projectPath={project.path} />
       {/if}
     </main>
   </div>

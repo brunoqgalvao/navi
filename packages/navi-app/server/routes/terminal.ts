@@ -3,6 +3,37 @@ import { spawn, type ChildProcess } from "child_process";
 import { homedir } from "os";
 import WebSocket from "ws";
 
+// Terminal constants
+const TERMINAL_MAX_BUFFER_LINES = 500;
+const PTY_SERVER_RECONNECT_INTERVAL_MS = 3000;
+const PTY_SERVER_CREATION_TIMEOUT_MS = 5000;
+const TERMINAL_DEFAULT_COLS = 80;
+const TERMINAL_DEFAULT_ROWS = 24;
+const DEFAULT_PTY_SERVER_WS_URL = "ws://localhost:3002";
+const DEFAULT_PTY_SERVER_HTTP_URL = "http://localhost:3002";
+
+// Stale process timeout (30 minutes of inactivity)
+const STALE_PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
+// Cleanup interval (check every 5 minutes)
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Patterns to detect errors in terminal output */
+const TERMINAL_ERROR_PATTERNS = [
+  /error:/i,
+  /ERR!/,
+  /failed/i,
+  /exception/i,
+  /ENOENT/,
+  /Cannot find module/,
+  /command not found/,
+  /permission denied/i,
+  /EACCES/,
+  /ECONNREFUSED/,
+  /TypeError:/,
+  /SyntaxError:/,
+  /ReferenceError:/,
+] as const;
+
 interface TerminalProcess {
   process: ChildProcess;
   cwd: string;
@@ -25,35 +56,25 @@ interface WsExecProcess {
   process: ChildProcess;
   cwd: string;
   startedAt: number;
+  lastActivityAt: number;
   ws: any;
 }
 const wsExecProcesses = new Map<string, WsExecProcess>();
 
+// Track last activity for HTTP SSE exec processes too
+interface ExecProcessActivity {
+  lastActivityAt: number;
+}
+const execProcessActivity = new Map<string, ExecProcessActivity>();
+
 const proxiedTerminals = new Map<string, ProxiedTerminal>();
 
-const PTY_SERVER_URL = process.env.PTY_SERVER_URL || "ws://localhost:3002";
-const PTY_SERVER_HTTP = process.env.PTY_SERVER_HTTP || "http://localhost:3002";
+const PTY_SERVER_URL = process.env.PTY_SERVER_URL || DEFAULT_PTY_SERVER_WS_URL;
+const PTY_SERVER_HTTP = process.env.PTY_SERVER_HTTP || DEFAULT_PTY_SERVER_HTTP_URL;
 
 let ptyServerWs: WebSocket | null = null;
 let ptyServerConnected = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-const MAX_BUFFER_LINES = 500;
-const ERROR_PATTERNS = [
-  /error:/i,
-  /ERR!/,
-  /failed/i,
-  /exception/i,
-  /ENOENT/,
-  /Cannot find module/,
-  /command not found/,
-  /permission denied/i,
-  /EACCES/,
-  /ECONNREFUSED/,
-  /TypeError:/,
-  /SyntaxError:/,
-  /ReferenceError:/,
-];
 
 function connectToPtyServer() {
   if (ptyServerWs?.readyState === WebSocket.OPEN) return;
@@ -93,7 +114,7 @@ function scheduleReconnect() {
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connectToPtyServer();
-  }, 3000);
+  }, PTY_SERVER_RECONNECT_INTERVAL_MS);
 }
 
 function handlePtyServerMessage(msg: any) {
@@ -105,7 +126,7 @@ function handlePtyServerMessage(msg: any) {
       if (terminal) {
         const lines = (msg.data || "").split('\n');
         terminal.outputBuffer.push(...lines);
-        while (terminal.outputBuffer.length > MAX_BUFFER_LINES) {
+        while (terminal.outputBuffer.length > TERMINAL_MAX_BUFFER_LINES) {
           terminal.outputBuffer.shift();
         }
 
@@ -122,7 +143,7 @@ function handlePtyServerMessage(msg: any) {
           }
         }
 
-        if (ERROR_PATTERNS.some(p => p.test(msg.data || ""))) {
+        if (TERMINAL_ERROR_PATTERNS.some(p => p.test(msg.data || ""))) {
           const errMsg = JSON.stringify({
             type: "terminal_error_detected",
             terminalId,
@@ -191,7 +212,7 @@ async function createPtyViaServer(cwd: string, cols: number, rows: number, sessi
     const timeout = setTimeout(() => {
       ptyServerWs?.off("message", handler);
       resolve(null);
-    }, 5000);
+    }, PTY_SERVER_CREATION_TIMEOUT_MS);
 
     const handler = (data: Buffer) => {
       try {
@@ -295,40 +316,57 @@ export async function handleTerminalRoutes(
             stdio: ["ignore", "pipe", "pipe"],
           });
 
+          const now = Date.now();
           execProcesses.set(execId, {
             process: proc,
             cwd,
-            startedAt: Date.now(),
+            startedAt: now,
           });
+          execProcessActivity.set(execId, { lastActivityAt: now });
 
+          console.log(`[Terminal] Started HTTP exec process ${execId} (pid: ${proc.pid})`);
           safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: "started", execId })}\n\n`));
 
           proc.stdout?.on("data", (data: Buffer) => {
+            // Update last activity on output
+            const activity = execProcessActivity.get(execId);
+            if (activity) {
+              activity.lastActivityAt = Date.now();
+            }
             safeEnqueue(
               encoder.encode(`data: ${JSON.stringify({ type: "stdout", data: data.toString() })}\n\n`)
             );
           });
 
           proc.stderr?.on("data", (data: Buffer) => {
+            // Update last activity on output
+            const activity = execProcessActivity.get(execId);
+            if (activity) {
+              activity.lastActivityAt = Date.now();
+            }
             safeEnqueue(
               encoder.encode(`data: ${JSON.stringify({ type: "stderr", data: data.toString() })}\n\n`)
             );
           });
 
           proc.on("close", (code) => {
+            console.log(`[Terminal] HTTP exec process ${execId} exited with code ${code}`);
             safeEnqueue(
               encoder.encode(`data: ${JSON.stringify({ type: "exit", code })}\n\n`)
             );
             safeClose();
             execProcesses.delete(execId);
+            execProcessActivity.delete(execId);
           });
 
           proc.on("error", (err) => {
+            console.log(`[Terminal] HTTP exec process ${execId} error: ${err.message}`);
             safeEnqueue(
               encoder.encode(`data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`)
             );
             safeClose();
             execProcesses.delete(execId);
+            execProcessActivity.delete(execId);
           });
         } catch (err: any) {
           safeEnqueue(
@@ -357,8 +395,10 @@ export async function handleTerminalRoutes(
       return json({ error: "Process not found" }, 404);
     }
 
+    console.log(`[Terminal] Killing HTTP exec process ${execId} (pid: ${termProcess.process.pid}) via DELETE request`);
     termProcess.process.kill("SIGTERM");
     execProcesses.delete(execId);
+    execProcessActivity.delete(execId);
     return json({ success: true, execId });
   }
 
@@ -374,9 +414,9 @@ export async function handleTerminalRoutes(
 
   if (url.pathname === "/api/terminal/pty" && method === "POST") {
     const body = await req.json();
-    const { cwd = homedir(), cols = 80, rows = 24, sessionId } = body;
-    const safeCols = Number.isFinite(cols) && cols > 1 ? Math.floor(cols) : 80;
-    const safeRows = Number.isFinite(rows) && rows > 1 ? Math.floor(rows) : 24;
+    const { cwd = homedir(), cols = TERMINAL_DEFAULT_COLS, rows = TERMINAL_DEFAULT_ROWS, sessionId } = body;
+    const safeCols = Number.isFinite(cols) && cols > 1 ? Math.floor(cols) : TERMINAL_DEFAULT_COLS;
+    const safeRows = Number.isFinite(rows) && rows > 1 ? Math.floor(rows) : TERMINAL_DEFAULT_ROWS;
 
     const terminal = await createPtyViaServer(cwd, safeCols, safeRows, sessionId);
 
@@ -483,10 +523,10 @@ export async function handleTerminalRoutes(
     }
 
     const recentLines = terminal.outputBuffer.slice(-50).join('\n');
-    const hasErrors = ERROR_PATTERNS.some(pattern => pattern.test(recentLines));
+    const hasErrors = TERMINAL_ERROR_PATTERNS.some(pattern => pattern.test(recentLines));
     const errorLines = terminal.outputBuffer
       .slice(-50)
-      .filter(line => ERROR_PATTERNS.some(pattern => pattern.test(line)));
+      .filter(line => TERMINAL_ERROR_PATTERNS.some(pattern => pattern.test(line)));
 
     return json({
       terminalId,
@@ -521,28 +561,42 @@ export function startWsExec(ws: any, command: string, cwd: string = homedir()): 
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+  const now = Date.now();
   wsExecProcesses.set(execId, {
     process: proc,
     cwd,
-    startedAt: Date.now(),
+    startedAt: now,
+    lastActivityAt: now,
     ws,
   });
 
+  console.log(`[Terminal] Started WS exec process ${execId} (pid: ${proc.pid})`);
   ws.send(JSON.stringify({ type: "exec_started", execId }));
 
   proc.stdout?.on("data", (data: Buffer) => {
+    // Update last activity on output
+    const execProc = wsExecProcesses.get(execId);
+    if (execProc) {
+      execProc.lastActivityAt = Date.now();
+    }
     try {
       ws.send(JSON.stringify({ type: "exec_stdout", execId, data: data.toString() }));
     } catch {}
   });
 
   proc.stderr?.on("data", (data: Buffer) => {
+    // Update last activity on output
+    const execProc = wsExecProcesses.get(execId);
+    if (execProc) {
+      execProc.lastActivityAt = Date.now();
+    }
     try {
       ws.send(JSON.stringify({ type: "exec_stderr", execId, data: data.toString() }));
     } catch {}
   });
 
   proc.on("close", (code) => {
+    console.log(`[Terminal] WS exec process ${execId} exited with code ${code}`);
     try {
       ws.send(JSON.stringify({ type: "exec_exit", execId, code }));
     } catch {}
@@ -550,6 +604,7 @@ export function startWsExec(ws: any, command: string, cwd: string = homedir()): 
   });
 
   proc.on("error", (err) => {
+    console.log(`[Terminal] WS exec process ${execId} error: ${err.message}`);
     try {
       ws.send(JSON.stringify({ type: "exec_error", execId, message: err.message }));
     } catch {}
@@ -562,9 +617,11 @@ export function startWsExec(ws: any, command: string, cwd: string = homedir()): 
 export function killWsExec(execId: string): boolean {
   const proc = wsExecProcesses.get(execId);
   if (proc) {
+    console.log(`[Terminal] Killing WS exec process ${execId} (pid: ${proc.process.pid}) via kill request`);
     proc.process.kill("SIGTERM");
     setTimeout(() => {
       if (wsExecProcesses.has(execId)) {
+        console.log(`[Terminal] Force killing WS exec process ${execId} (SIGKILL) after timeout`);
         proc.process.kill("SIGKILL");
         wsExecProcesses.delete(execId);
       }
@@ -575,11 +632,17 @@ export function killWsExec(execId: string): boolean {
 }
 
 export function cleanupWsExec(ws: any) {
+  let cleanedCount = 0;
   for (const [execId, proc] of wsExecProcesses.entries()) {
     if (proc.ws === ws) {
+      console.log(`[Terminal] Cleaning up exec process ${execId} (pid: ${proc.process.pid}) on WS disconnect`);
       proc.process.kill("SIGTERM");
       wsExecProcesses.delete(execId);
+      cleanedCount++;
     }
+  }
+  if (cleanedCount > 0) {
+    console.log(`[Terminal] Cleaned up ${cleanedCount} exec process(es) for disconnected WebSocket`);
   }
 }
 
@@ -684,3 +747,84 @@ export function handlePtyWebSocket(ws: any, message: PtyMessage) {
 export function installPtyErrorHandler() {}
 export function setupPtyBroadcast(_terminalId: string) {}
 export function setupPtyOutput(_terminalId: string, _ws: any) {}
+
+/**
+ * Clean up stale processes that have been running without activity for too long.
+ * This prevents orphaned processes from accumulating.
+ */
+export function cleanupStaleProcesses(): { wsExecCleaned: number; httpExecCleaned: number } {
+  const now = Date.now();
+  let wsExecCleaned = 0;
+  let httpExecCleaned = 0;
+
+  // Clean up stale WebSocket exec processes
+  for (const [execId, proc] of wsExecProcesses.entries()) {
+    const idleTime = now - proc.lastActivityAt;
+    if (idleTime > STALE_PROCESS_TIMEOUT_MS) {
+      console.log(`[Terminal] Cleaning up stale WS exec process ${execId} (pid: ${proc.process.pid}, idle: ${Math.round(idleTime / 1000 / 60)}min)`);
+      proc.process.kill("SIGTERM");
+      wsExecProcesses.delete(execId);
+      wsExecCleaned++;
+    }
+  }
+
+  // Clean up stale HTTP SSE exec processes
+  for (const [execId, proc] of execProcesses.entries()) {
+    const activity = execProcessActivity.get(execId);
+    const lastActivity = activity?.lastActivityAt ?? proc.startedAt;
+    const idleTime = now - lastActivity;
+
+    if (idleTime > STALE_PROCESS_TIMEOUT_MS) {
+      console.log(`[Terminal] Cleaning up stale HTTP exec process ${execId} (pid: ${proc.process.pid}, idle: ${Math.round(idleTime / 1000 / 60)}min)`);
+      proc.process.kill("SIGTERM");
+      execProcesses.delete(execId);
+      execProcessActivity.delete(execId);
+      httpExecCleaned++;
+    }
+  }
+
+  if (wsExecCleaned > 0 || httpExecCleaned > 0) {
+    console.log(`[Terminal] Stale process cleanup complete: ${wsExecCleaned} WS exec, ${httpExecCleaned} HTTP exec`);
+  }
+
+  return { wsExecCleaned, httpExecCleaned };
+}
+
+/**
+ * Get current process counts for monitoring
+ */
+export function getProcessStats(): {
+  wsExecCount: number;
+  httpExecCount: number;
+  proxiedTerminalCount: number;
+} {
+  return {
+    wsExecCount: wsExecProcesses.size,
+    httpExecCount: execProcesses.size,
+    proxiedTerminalCount: proxiedTerminals.size,
+  };
+}
+
+// Start periodic cleanup timer
+let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startPeriodicCleanup() {
+  if (cleanupTimer) {
+    return; // Already running
+  }
+  console.log(`[Terminal] Starting periodic stale process cleanup (interval: ${CLEANUP_INTERVAL_MS / 1000 / 60}min, timeout: ${STALE_PROCESS_TIMEOUT_MS / 1000 / 60}min)`);
+  cleanupTimer = setInterval(() => {
+    cleanupStaleProcesses();
+  }, CLEANUP_INTERVAL_MS);
+}
+
+export function stopPeriodicCleanup() {
+  if (cleanupTimer) {
+    clearInterval(cleanupTimer);
+    cleanupTimer = null;
+    console.log("[Terminal] Stopped periodic stale process cleanup");
+  }
+}
+
+// Auto-start periodic cleanup when module loads
+startPeriodicCleanup();

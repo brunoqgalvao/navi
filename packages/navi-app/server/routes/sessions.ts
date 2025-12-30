@@ -306,5 +306,157 @@ export async function handleSessionRoutes(
     });
   }
 
+  // Prune tool results in SDK session file
+  const pruneMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prune-tool-results$/);
+  if (pruneMatch && method === "POST") {
+    const sessionId = pruneMatch[1];
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (!session.claude_session_id) {
+      return json({ error: "No Claude session to prune", prunedCount: 0 }, 400);
+    }
+
+    const project = projects.get(session.project_id);
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
+    try {
+      const { homedir } = await import("os");
+      const { join } = await import("path");
+      const fs = await import("fs/promises");
+
+      const projectDirName = project.path.replace(/\//g, "-");
+      const claudeProjectDir = join(homedir(), ".claude", "projects", projectDirName);
+      const sessionFile = join(claudeProjectDir, `${session.claude_session_id}.jsonl`);
+
+      // Read and parse body for options
+      const body = await req.json().catch(() => ({}));
+      const preserveRecentCount = body.preserveRecentCount ?? 5;
+      const maxPrunedLength = body.maxPrunedLength ?? 200;
+
+      // Read the JSONL file
+      let content: string;
+      try {
+        content = await fs.readFile(sessionFile, "utf-8");
+      } catch (e) {
+        return json({ error: "Claude session file not found", prunedCount: 0 }, 404);
+      }
+
+      const lines = content.trim().split("\n");
+      let prunedCount = 0;
+      let charsSaved = 0;
+      const prunedToolUseIds: string[] = [];
+
+      // Find which messages to preserve (from the end)
+      // Count user messages to determine how many "turns" to preserve
+      let userMessageCount = 0;
+      const userMessageIndices: number[] = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        try {
+          const entry = JSON.parse(lines[i]);
+          if (entry.type === "user") {
+            userMessageCount++;
+            userMessageIndices.push(i);
+          }
+        } catch {}
+      }
+
+      // Preserve messages from the Nth-to-last user message onwards
+      const preserveFromIndex = userMessageIndices.length > preserveRecentCount
+        ? userMessageIndices[userMessageIndices.length - preserveRecentCount]
+        : 0;
+
+      // Process each line, pruning tool results in older messages
+      const prunedLines = lines.map((line, index) => {
+        // Don't prune recent messages
+        if (index >= preserveFromIndex) {
+          return line;
+        }
+
+        try {
+          const entry = JSON.parse(line);
+
+          // Only process user messages (which contain tool_result blocks)
+          if (entry.type !== "user" || !entry.message?.content) {
+            return line;
+          }
+
+          const content = entry.message.content;
+          if (!Array.isArray(content)) {
+            return line;
+          }
+
+          let modified = false;
+          const prunedContent = content.map((block: any) => {
+            if (block.type !== "tool_result") {
+              return block;
+            }
+
+            const originalContent = typeof block.content === "string"
+              ? block.content
+              : JSON.stringify(block.content);
+
+            // Skip if already small
+            if (originalContent.length <= maxPrunedLength) {
+              return block;
+            }
+
+            modified = true;
+            prunedCount++;
+            charsSaved += originalContent.length - maxPrunedLength;
+            prunedToolUseIds.push(block.tool_use_id);
+
+            // Create pruned summary
+            const lines = originalContent.split("\n");
+            const lineCount = lines.length;
+            let summary: string;
+
+            if (lineCount > 3) {
+              summary = lines.slice(0, 2).join("\n") + `\n... [${lineCount - 2} lines, ${originalContent.length} chars pruned]`;
+            } else {
+              summary = originalContent.slice(0, maxPrunedLength - 30) + `... [${originalContent.length} chars pruned]`;
+            }
+
+            return {
+              ...block,
+              content: summary,
+            };
+          });
+
+          if (modified) {
+            entry.message.content = prunedContent;
+            return JSON.stringify(entry);
+          }
+
+          return line;
+        } catch {
+          return line;
+        }
+      });
+
+      // Write back the pruned file
+      await fs.writeFile(sessionFile, prunedLines.join("\n") + "\n");
+
+      const tokensSaved = Math.round(charsSaved / 4);
+
+      console.log(`Pruned ${prunedCount} tool results in session ${sessionId}, saved ~${tokensSaved} tokens`);
+
+      return json({
+        success: true,
+        prunedCount,
+        tokensSaved,
+        prunedToolUseIds,
+      });
+    } catch (e) {
+      console.error("Failed to prune tool results:", e);
+      return json({ error: "Failed to prune tool results", details: String(e) }, 500);
+    }
+  }
+
   return null;
 }

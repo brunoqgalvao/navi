@@ -3,6 +3,7 @@
   import ContextMenu from "./components/ContextMenu.svelte";
   import { attachedFiles } from "./stores";
   import { getApiBase } from "./config";
+  import { showError } from "./errorHandler";
 
   interface FileEntry {
     name: string;
@@ -74,10 +75,17 @@
             attachedFiles.add({ path: data.path, name: data.name, type: "file" });
             loadRoot();
           } else {
-            console.error("Upload failed:", data.error);
+            showError({
+              title: "Upload Failed",
+              message: data.error || `Failed to upload ${file.name}`
+            });
           }
         } catch (err) {
-          console.error("Failed to upload file:", err);
+          showError({
+            title: "Upload Error",
+            message: `Failed to upload ${file.name}`,
+            error: err
+          });
         }
       }
     }
@@ -178,7 +186,11 @@
         expandedDirs.add(entry.path);
         expandedDirs = new Set(expandedDirs);
       } catch (e) {
-        console.error("Failed to load directory:", e);
+        showError({
+          title: "Directory Error",
+          message: `Failed to load ${entry.name}`,
+          error: e
+        });
       }
     }
   }
@@ -209,7 +221,11 @@
         body: JSON.stringify({ path }),
       });
     } catch (e) {
-      console.error("Failed to reveal file:", e);
+      showError({
+        title: "Reveal Failed",
+        message: "Failed to reveal file in Finder",
+        error: e
+      });
     }
   }
 

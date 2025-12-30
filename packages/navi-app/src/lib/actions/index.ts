@@ -60,6 +60,7 @@ export {
 // Context management
 export {
   pruneToolResults,
+  triggerSDKCompact,
   startNewChatWithSummary,
   getMessagesForApi,
   hasPrunedContext,

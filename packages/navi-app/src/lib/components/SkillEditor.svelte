@@ -222,7 +222,7 @@ Describe when this skill should be activated.
 
 {#if open}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/20 backdrop-blur-sm"
+    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30"
     onclick={(e) => { handleBackdropClick(e); handleClickOutsideMenu(e); }}
     role="dialog"
     aria-modal="true"

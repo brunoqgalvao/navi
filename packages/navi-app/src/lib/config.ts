@@ -29,6 +29,71 @@ export const DEV_SERVER_PORT = 3001;
 export const DEV_PTY_PORT = 3002;
 export const BUNDLED_SERVER_PORT = 3011;
 export const BUNDLED_PTY_PORT = 3012;
+const PORT_SCAN_RANGE = 10;
+
+let portsDiscovered = false;
+
+async function probeServerPort(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://localhost:${port}/health`, {
+      signal: AbortSignal.timeout(500),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.status === "ok" && data.port !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+async function probePtyPort(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://localhost:${port}/health`, {
+      signal: AbortSignal.timeout(500),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.status === "ok" && data.terminals !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+export async function discoverPorts(): Promise<{ server: number; pty: number }> {
+  if (portsDiscovered) {
+    return { server: getServerPort(), pty: getPtyServerPort() };
+  }
+
+  const baseServerPort = isTauri() ? BUNDLED_SERVER_PORT : DEV_SERVER_PORT;
+  const basePtyPort = isTauri() ? BUNDLED_PTY_PORT : DEV_PTY_PORT;
+
+  let serverPort = baseServerPort;
+  let ptyPort = basePtyPort;
+
+  for (let i = 0; i < PORT_SCAN_RANGE; i++) {
+    if (await probeServerPort(baseServerPort + i)) {
+      serverPort = baseServerPort + i;
+      break;
+    }
+  }
+
+  for (let i = 0; i < PORT_SCAN_RANGE; i++) {
+    if (await probePtyPort(basePtyPort + i)) {
+      ptyPort = basePtyPort + i;
+      break;
+    }
+  }
+
+  setServerPort(serverPort);
+  setPtyServerPort(ptyPort);
+  portsDiscovered = true;
+
+  if (serverPort !== baseServerPort || ptyPort !== basePtyPort) {
+    console.log(`[Config] Discovered ports: server=${serverPort}, pty=${ptyPort}`);
+  }
+
+  return { server: serverPort, pty: ptyPort };
+}
 
 function getServerPort(): number {
   if (typeof window !== "undefined" && window.__NAVI_SERVER_PORT__) {
@@ -88,3 +153,4 @@ export function setPtyServerPort(port: number): void {
 }
 
 export { isTauri };
+export { portsDiscovered };

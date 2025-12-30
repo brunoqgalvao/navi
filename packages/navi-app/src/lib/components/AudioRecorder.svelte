@@ -290,7 +290,7 @@
 </div>
 
 {#if showApiKeyModal}
-  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/20 backdrop-blur-sm">
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30">
     <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
       <div class="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
         <div class="flex items-center gap-3">

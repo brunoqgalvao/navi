@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import UserMessage from "./UserMessage.svelte";
   import UserCommandMessage from "./UserCommandMessage.svelte";
   import AssistantMessage from "./AssistantMessage.svelte";
@@ -42,11 +43,13 @@
     inputTokens?: number;
     contextWindow?: number;
     isPruned?: boolean;
+    isCompacting?: boolean;
     onPruneToolResults?: () => void;
+    onSDKCompact?: () => void;
     onStartNewChat?: () => void;
   }
 
-  let { 
+  let {
     sessionId,
     projectPath = "",
     activeSubagents = new Map(),
@@ -71,7 +74,9 @@
     inputTokens = 0,
     contextWindow = 200000,
     isPruned = false,
+    isCompacting = false,
     onPruneToolResults,
+    onSDKCompact,
     onStartNewChat,
   }: Props = $props();
 
@@ -81,10 +86,17 @@
 
   let messagesMap = $state<Map<string, ChatMessage[]>>(new Map());
   let streamingMap = $state<Map<string, StreamingState>>(new Map());
-  
-  sessionMessages.subscribe(v => messagesMap = v);
-  streamingStore.subscribe(v => streamingMap = v);
-  
+
+  // Store unsubscribe functions to prevent memory leaks
+  const unsubMessages = sessionMessages.subscribe(v => messagesMap = v);
+  const unsubStreaming = streamingStore.subscribe(v => streamingMap = v);
+
+  // Clean up subscriptions when component is destroyed
+  onDestroy(() => {
+    unsubMessages();
+    unsubStreaming();
+  });
+
   const messages = $derived(sessionId ? (messagesMap.get(sessionId) || []) : []);
   const streamingState = $derived(sessionId ? streamingMap.get(sessionId) : undefined);
   const isLoading = $derived(sessionId ? $loadingSessions.has(sessionId) : false);
@@ -256,14 +268,16 @@
     </div>
     {/if}
 
-    {#if (usagePercent >= 80 || isPruned) && onPruneToolResults && onStartNewChat}
+    {#if (usagePercent >= 80 || isPruned || isCompacting) && onPruneToolResults && onStartNewChat}
       <div class="mt-4">
         <ContextWarning
           {usagePercent}
           {inputTokens}
           {contextWindow}
           {isPruned}
+          {isCompacting}
           {onPruneToolResults}
+          {onSDKCompact}
           {onStartNewChat}
         />
       </div>

@@ -106,7 +106,7 @@
                   execId = null;
                   break;
               }
-            } catch {}
+            } catch { /* SSE event parse error - skip malformed event */ }
           }
         }
       }

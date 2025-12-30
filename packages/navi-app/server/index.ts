@@ -32,6 +32,7 @@ import {
   getSessionApprovedAll,
   getActiveProcesses,
 } from "./websocket/handler";
+import { findAvailablePort } from "./utils/port";
 
 // Initialize database
 await initDb();
@@ -71,7 +72,12 @@ if (stats.total === 0) {
   console.log("Search index built:", searchIndex.getStats());
 }
 
-const PORT = parseInt(process.argv[2] || Bun.env.PORT || "3001", 10);
+const PREFERRED_PORT = parseInt(process.argv[2] || Bun.env.PORT || "3001", 10);
+const PORT = await findAvailablePort(PREFERRED_PORT);
+
+if (PORT !== PREFERRED_PORT) {
+  console.log(`Port ${PREFERRED_PORT} in use, using ${PORT} instead`);
+}
 
 // Get shared state for routes that need it
 const pendingPermissions = getPendingPermissions();
@@ -101,7 +107,12 @@ const server = Bun.serve({
 
     // Health check
     if (url.pathname === "/health") {
-      return json({ status: "ok" });
+      return json({ status: "ok", port: PORT });
+    }
+
+    // Ports discovery endpoint
+    if (url.pathname === "/ports") {
+      return json({ server: PORT, pty: PORT + 1 });
     }
 
     // Try each route handler in order

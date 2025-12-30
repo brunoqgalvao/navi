@@ -9,11 +9,35 @@
  */
 
 const http = require('http');
+const net = require('net');
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 const os = require('os');
 
-const PORT = parseInt(process.env.PTY_PORT || '3002', 10);
+const PREFERRED_PORT = parseInt(process.env.PTY_PORT || '3002', 10);
+let PORT = PREFERRED_PORT;
+
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close();
+      resolve(true);
+    });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+async function findAvailablePort(preferredPort, maxAttempts = 10) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const port = preferredPort + i;
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+  throw new Error(`Could not find available port starting from ${preferredPort}`);
+}
 
 // Active PTY sessions
 const terminals = new Map();
@@ -39,10 +63,22 @@ const ERROR_PATTERNS = [
   /ReferenceError:/,
 ];
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
 // Create HTTP server for health checks
 const httpServer = http.createServer((req, res) => {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, corsHeaders);
+    res.end();
+    return;
+  }
+
   if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
     res.end(JSON.stringify({
       status: 'ok',
       terminals: terminals.size,
@@ -55,7 +91,7 @@ const httpServer = http.createServer((req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     const projectId = url.searchParams.get('projectId');
     
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
     
     let terminalList;
     if (projectId) {
@@ -426,7 +462,18 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`[PTY] Server running on http://localhost:${PORT}`);
-  console.log(`[PTY] WebSocket endpoint: ws://localhost:${PORT}`);
+async function start() {
+  PORT = await findAvailablePort(PREFERRED_PORT);
+  if (PORT !== PREFERRED_PORT) {
+    console.log(`[PTY] Port ${PREFERRED_PORT} in use, using ${PORT} instead`);
+  }
+  httpServer.listen(PORT, () => {
+    console.log(`[PTY] Server running on http://localhost:${PORT}`);
+    console.log(`[PTY] WebSocket endpoint: ws://localhost:${PORT}`);
+  });
+}
+
+start().catch(err => {
+  console.error('[PTY] Failed to start:', err);
+  process.exit(1);
 });

@@ -1,4 +1,5 @@
 import { getApiBase, getPtyApiUrl } from "./config";
+import type { ContentBlock } from "./claude";
 
 const getApiBaseUrl = () => getApiBase();
 const getPtyBaseUrl = () => getPtyApiUrl();
@@ -59,11 +60,18 @@ export interface ActiveSessionStatus {
   status: "running" | "permission";
 }
 
+/**
+ * Message content can be:
+ * - ContentBlock[] for structured content (assistant/user messages with tools)
+ * - string for simple text content (legacy or system messages)
+ */
+export type MessageContent = ContentBlock[] | string;
+
 export interface Message {
   id: string;
   session_id: string;
-  role: string;
-  content: any;
+  role: "user" | "assistant" | "system";
+  content: MessageContent;
   timestamp: number;
   parent_tool_use_id?: string | null;
   is_synthetic?: number;
@@ -79,7 +87,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch((parseError) => {
+      console.error("[API] Failed to parse error response:", parseError);
+      return {};
+    });
     throw new Error(data.error || `API error: ${res.status}`);
   }
   return res.json();
@@ -233,12 +244,20 @@ export const api = {
       request<{ success: boolean }>(`/sessions/${id}/reset-tokens`, {
         method: "POST",
       }),
+    pruneToolResults: (id: string, options?: { preserveRecentCount?: number; maxPrunedLength?: number }) =>
+      request<{ success: boolean; prunedCount: number; tokensSaved: number; prunedToolUseIds: string[] }>(
+        `/sessions/${id}/prune-tool-results`,
+        {
+          method: "POST",
+          body: JSON.stringify(options || {}),
+        }
+      ),
   },
 
   messages: {
     list: (sessionId: string) => request<Message[]>(`/sessions/${sessionId}/messages`),
     get: (id: string) => request<Message>(`/messages/${id}`),
-    update: (id: string, content: any) =>
+    update: (id: string, content: MessageContent) =>
       request<{ success: boolean; sessionReset?: boolean; historyContext?: string }>(`/messages/${id}`, {
         method: "PUT",
         body: JSON.stringify({ content }),
@@ -355,7 +374,10 @@ export const api = {
     });
     
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch((parseError) => {
+        console.error("[API] Failed to parse transcription error:", parseError);
+        return {};
+      });
       throw new Error(data.error || `Transcription failed: ${res.status}`);
     }
     
@@ -372,7 +394,10 @@ export const api = {
     });
     
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch((parseError) => {
+        console.error("[API] Failed to parse audio save error:", parseError);
+        return {};
+      });
       throw new Error(data.error || `Failed to save audio: ${res.status}`);
     }
     
@@ -560,7 +585,10 @@ export const skillsApi = {
       body: formData,
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch((parseError) => {
+        console.error("[API] Failed to parse skill import error:", parseError);
+        return {};
+      });
       throw new Error(data.error || `Import failed: ${res.status}`);
     }
     return res.json();
@@ -573,7 +601,10 @@ export const skillsApi = {
   async exportZip(id: string, slug: string): Promise<void> {
     const res = await fetch(`${getApiBaseUrl()}/skills/${id}/export`);
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch((parseError) => {
+        console.error("[API] Failed to parse skill export error:", parseError);
+        return {};
+      });
       throw new Error(data.error || `Export failed: ${res.status}`);
     }
     const blob = await res.blob();
