@@ -115,6 +115,17 @@ export async function generateCommitMessage(repoPath: string): Promise<string> {
   return data.message;
 }
 
+export async function summarizeChanges(repoPath: string): Promise<string[]> {
+  const res = await fetch(`${getGitApiBase()}/summarize-changes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.summary;
+}
+
 export async function initRepo(repoPath: string): Promise<void> {
   const res = await fetch(`${getGitApiBase()}/init`, {
     method: "POST",

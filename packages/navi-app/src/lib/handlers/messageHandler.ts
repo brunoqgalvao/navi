@@ -1,4 +1,18 @@
-import type { ClaudeMessage, StreamEventMessage, ToolProgressMessage, PermissionRequestMessage, ContentBlock, ToolUseBlock } from "../claude";
+import type {
+  ClaudeMessage,
+  StreamEventMessage,
+  ToolProgressMessage,
+  PermissionRequestMessage,
+  AskUserQuestionMessage,
+  ContentBlock,
+  ToolUseBlock,
+  SystemMessage,
+  AssistantMessage,
+  UserMessage,
+  ResultMessage,
+  ErrorMessage,
+  DoneMessage
+} from "../claude";
 import type { HandlerCallbacks, UICommand } from "./types";
 import { sessionMessages } from "../stores";
 import { handleStreamEvent } from "./streamHandler";
@@ -51,10 +65,15 @@ export function createMessageHandler(config: MessageHandlerConfig) {
 
       case "assistant":
         if (!uiSessionId) break;
-        const parentId = (msg as any).parentToolUseId || null;
-        const content = (msg as any).content as ContentBlock[];
-        const msgUuid = (msg as any).uuid || crypto.randomUUID();
-        
+        const assistantMsg = msg as AssistantMessage;
+        const parentId = assistantMsg.parentToolUseId || null;
+        const content = assistantMsg.content;
+        const msgUuid = assistantMsg.uuid || crypto.randomUUID();
+
+        if (parentId) {
+          console.log("[MessageHandler] Assistant message with parentToolUseId:", parentId, "content types:", content?.map((b: any) => b.type));
+        }
+
         if (content && content.length > 0) {
           sessionMessages.addMessage(uiSessionId, {
             id: msgUuid,
@@ -166,8 +185,18 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         });
         break;
 
-      case "ui_command":
-        const uiCommand = msg as unknown as { type: "ui_command"; command: string; payload: Record<string, unknown> };
+      case "ask_user_question": {
+        const questionMsg = msg as AskUserQuestionMessage;
+        callbacks.onAskUserQuestion?.({
+          requestId: questionMsg.requestId,
+          sessionId: questionMsg.sessionId,
+          questions: questionMsg.questions,
+        });
+        break;
+      }
+
+      case "ui_command": {
+        const uiCommand = msg as { type: "ui_command"; command: string; payload: Record<string, unknown> };
         callbacks.onUICommand?.({
           command: uiCommand.command as UICommand["command"],
           payload: uiCommand.payload,

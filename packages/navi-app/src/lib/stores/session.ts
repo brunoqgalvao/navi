@@ -216,6 +216,7 @@ function createSessionStatusStore() {
     subscribe,
     setRunning: (sessionId: string, projectId: string) => setStatus(sessionId, projectId, "running"),
     setPermissionRequired: (sessionId: string, projectId: string) => setStatus(sessionId, projectId, "permission"),
+    setAwaitingInput: (sessionId: string, projectId: string) => setStatus(sessionId, projectId, "awaiting_input"),
     setUnread: (sessionId: string, projectId: string) => setStatus(sessionId, projectId, "unread"),
     markSeen: (sessionId: string) => {
       update(map => {

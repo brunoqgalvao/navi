@@ -1,6 +1,6 @@
 import type { ClaudeMessage } from "../claude";
 import { createMessageHandler, type MessageHandlerConfig } from "./messageHandler";
-import type { UICommand } from "./types";
+import type { UICommand, CompactMetadata, AskUserQuestionData } from "./types";
 import {
   sessionMessages,
   loadingSessions,
@@ -18,6 +18,7 @@ export interface UseMessageHandlerOptions {
   onCostUpdate?: (sessionId: string, costUsd: number) => void;
   onUsageUpdate?: (inputTokens: number, outputTokens: number) => void;
   onPermissionRequest?: (data: { requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string }) => void;
+  onAskUserQuestion?: (data: AskUserQuestionData) => void;
   onSubagentProgress?: (sessionId: string, toolUseId: string, elapsed: number) => void;
   onUICommand?: (command: UICommand) => void;
   scrollToBottom?: () => void;
@@ -66,6 +67,7 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     onCostUpdate,
     onUsageUpdate,
     onPermissionRequest,
+    onAskUserQuestion,
     onSubagentProgress,
     onUICommand,
     scrollToBottom,
@@ -154,7 +156,16 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
         }
         onPermissionRequest?.(data);
       },
-      
+
+      onAskUserQuestion: (data) => {
+        const projectId = getProjectId();
+        const sessionId = getCurrentSessionId();
+        if (projectId && sessionId) {
+          sessionStatus.setAwaitingInput(sessionId, projectId);
+        }
+        onAskUserQuestion?.(data);
+      },
+
       onTodoUpdate: (sessionId, todos) => {
         sessionTodos.setForSession(sessionId, todos);
       },

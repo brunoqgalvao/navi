@@ -121,7 +121,10 @@
 
   function getSubagentForTool(toolUseId: string): ChatMessage[] {
     const filtered = subagentUpdates.filter(u => u.parentToolUseId === toolUseId);
-    console.log("[AssistantMessage] getSubagentForTool:", toolUseId, "subagentUpdates:", subagentUpdates.length, "filtered:", filtered.length);
+    console.log("[AssistantMessage] getSubagentForTool:", toolUseId);
+    console.log("  subagentUpdates total:", subagentUpdates.length);
+    console.log("  unique parentToolUseIds:", [...new Set(subagentUpdates.map(u => u.parentToolUseId))]);
+    console.log("  filtered for this tool:", filtered.length);
     return filtered;
   }
 
@@ -215,6 +218,7 @@
         {#if isTaskTool(tool)}
           {@const taskDescription = tool.input?.description || tool.input?.prompt?.slice(0, 100) || "Subagent task"}
           {@const taskSubagentType = tool.input?.subagent_type || "general-purpose"}
+          {@const _ = console.log("[AssistantMessage] Task tool found, id:", tool.id)}
           <SubagentBlock
             toolUseId={tool.id}
             description={taskDescription}

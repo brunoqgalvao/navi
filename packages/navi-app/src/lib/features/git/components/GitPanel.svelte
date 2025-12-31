@@ -250,6 +250,31 @@
     }
   }
 
+  async function handleSummarizeChanges() {
+    if (!status) return;
+
+    summarizing = true;
+    changeSummary = null;
+
+    try {
+      // Use Claude to analyze the diff and generate feature descriptions
+      const summary = await gitApi.summarizeChanges(rootPath);
+      changeSummary = { type: "semantic", items: summary };
+    } catch (e) {
+      console.error("Failed to generate summary:", e);
+      changeSummary = {
+        type: "file",
+        items: ["Failed to generate summary - check console for details"]
+      };
+    } finally {
+      summarizing = false;
+    }
+  }
+
+  function clearSummary() {
+    changeSummary = null;
+  }
+
   $effect(() => {
     if (rootPath) {
       refresh();
