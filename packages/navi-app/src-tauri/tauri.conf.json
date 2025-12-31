@@ -51,7 +51,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ3MzIzREU5QzA0QkVGMjgKUldRbzcwdkE2VDB5UjhGakUrZi9WVDNKTU5UbkhOT0UzUGg4cU52a3ltLzNHcG5BZUxoaXdmbnIK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyNkY2M0Y0REVFNTNDMEUKUldRT1BPWGU5R052WW5NWUx0K2phVEhSaHE5dEMyZyszMi9JeDR6VDlhM3FXNU9qVzd1YmM0NUwK",
       "endpoints": [
         "https://navi-landing-639638599480.us-central1.run.app/api/updates/latest.json"
       ]
