@@ -58,6 +58,9 @@
     onToggleFolderPin: (folder: WorkspaceFolder, e: Event) => void;
     onNewProjectInFolder: (folderId: string) => void;
     onOpenProjectInNewWindow: (project: Project) => void;
+    onOpenAgentBuilder?: () => void;
+    agents?: { id: string; name: string; type: "agent" | "skill"; description?: string }[];
+    onSelectAgent?: (agent: { id: string; name: string; type: "agent" | "skill"; description?: string }) => void;
     titleSuggestionRef?: TitleSuggestion | null;
   }
 
@@ -110,8 +113,14 @@
     onToggleFolderPin,
     onNewProjectInFolder,
     onOpenProjectInNewWindow,
+    onOpenAgentBuilder,
+    agents = [],
+    onSelectAgent,
     titleSuggestionRef = $bindable(null),
   }: Props = $props();
+
+  // Agent section collapsed state
+  let agentsSectionCollapsed = $state(true);
 
   let sidebarSearchQuery = $state("");
   let filteredSessions = $derived(
@@ -806,6 +815,8 @@
                     <svg class="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                   {:else if $sessionStatus.get(chat.id)?.status === "permission"}
                     <span class="w-2 h-2 bg-amber-500 rounded-full animate-pulse shrink-0" title="Permission required"></span>
+                  {:else if $sessionStatus.get(chat.id)?.status === "awaiting_input"}
+                    <span class="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shrink-0" title="Awaiting your input"></span>
                   {/if}
                 </button>
               {/each}
@@ -850,12 +861,61 @@
                     <svg class="w-3.5 h-3.5 text-gray-400 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                   {:else if $sessionStatus.get(chat.id)?.status === "permission"}
                     <span class="w-2 h-2 bg-[#D97706] rounded-full animate-pulse shrink-0" title="Permission required"></span>
+                  {:else if $sessionStatus.get(chat.id)?.status === "awaiting_input"}
+                    <span class="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shrink-0" title="Awaiting your input"></span>
                   {:else if $sessionStatus.get(chat.id)?.status === "unread"}
                     <span class="w-1.5 h-1.5 bg-gray-400 rounded-full shrink-0" title="New results"></span>
                   {/if}
                 </button>
               {/each}
             </div>
+          </div>
+        {/if}
+
+        <!-- Agents Section -->
+        {#if onSelectAgent}
+          <div class="mt-4 pt-4 border-t border-gray-100">
+            <button
+              onclick={() => agentsSectionCollapsed = !agentsSectionCollapsed}
+              class="w-full flex items-center justify-between px-2 mb-1 group"
+            >
+              <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                Agents
+              </h3>
+              <svg class="w-3 h-3 text-gray-400 transition-transform {agentsSectionCollapsed ? '' : 'rotate-180'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+            </button>
+
+            {#if !agentsSectionCollapsed}
+              <div class="space-y-0.5">
+                {#if agents.length === 0}
+                  <p class="text-[11px] text-gray-400 italic px-2 py-2">No agents yet</p>
+                {:else}
+                  {#each agents as agent}
+                    <button
+                      onclick={() => onSelectAgent(agent)}
+                      class="w-full text-left px-2 py-1.5 rounded-lg text-gray-600 hover:bg-indigo-50 hover:text-indigo-700 transition-colors flex items-center gap-2"
+                    >
+                      {#if agent.type === "skill"}
+                        <svg class="w-3 h-3 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                      {:else}
+                        <svg class="w-3 h-3 text-indigo-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                      {/if}
+                      <span class="text-[12px] font-medium truncate">{agent.name}</span>
+                    </button>
+                  {/each}
+                {/if}
+                {#if onOpenAgentBuilder}
+                  <button
+                    onclick={onOpenAgentBuilder}
+                    class="w-full text-left px-2 py-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors flex items-center gap-2 text-[11px]"
+                  >
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                    View all agents...
+                  </button>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
@@ -1003,6 +1063,8 @@
                     <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                   {:else if $sessionStatus.get(sess.id)?.status === "permission"}
                     <span class="w-2.5 h-2.5 bg-[#D97706] rounded-full animate-pulse" title="Permission required"></span>
+                  {:else if $sessionStatus.get(sess.id)?.status === "awaiting_input"}
+                    <span class="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse" title="Awaiting your input"></span>
                   {:else if $sessionStatus.get(sess.id)?.status === "unread"}
                     <span class="w-2 h-2 bg-gray-400 rounded-full" title="New results"></span>
                   {/if}

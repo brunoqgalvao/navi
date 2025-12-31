@@ -4,6 +4,7 @@
   import UserCommandMessage from "./UserCommandMessage.svelte";
   import AssistantMessage from "./AssistantMessage.svelte";
   import PermissionRequest from "./PermissionRequest.svelte";
+  import QuestionPrompt from "./QuestionPrompt.svelte";
   import TodoProgress from "./TodoProgress.svelte";
   import StreamingPreview from "./StreamingPreview.svelte";
   import WorkingIndicator from "./WorkingIndicator.svelte";
@@ -22,6 +23,15 @@
       toolInput?: Record<string, unknown>;
       message: string;
     } | null;
+    pendingQuestion?: {
+      requestId: string;
+      questions: Array<{
+        question: string;
+        header: string;
+        options: Array<{ label: string; description: string }>;
+        multiSelect: boolean;
+      }>;
+    } | null;
     emptyState?: "start" | "continue" | "none";
     jsonBlocksMap?: Map<string, any>;
     shellBlocksMap?: Map<string, { code: string; language: string }>;
@@ -37,6 +47,7 @@
     onMessageClick?: (e: MouseEvent) => void;
     onPermissionApprove?: (approveAll?: boolean) => void;
     onPermissionDeny?: () => void;
+    onQuestionAnswer?: (answers: Record<string, string | string[]>) => void;
     editingMessageId?: string | null;
     editingMessageContent?: string;
     // Context management
@@ -54,6 +65,7 @@
     projectPath = "",
     activeSubagents = new Map(),
     pendingPermissionRequest = null,
+    pendingQuestion = null,
     emptyState = "start",
     jsonBlocksMap = new Map(),
     shellBlocksMap = new Map(),
@@ -69,6 +81,7 @@
     onMessageClick,
     onPermissionApprove,
     onPermissionDeny,
+    onQuestionAnswer,
     editingMessageId = null,
     editingMessageContent = $bindable(""),
     inputTokens = 0,
@@ -257,6 +270,14 @@
         message={pendingPermissionRequest.message}
         onApprove={(approveAll) => onPermissionApprove?.(approveAll)}
         onDeny={() => onPermissionDeny?.()}
+      />
+    {/if}
+
+    {#if pendingQuestion}
+      <QuestionPrompt
+        requestId={pendingQuestion.requestId}
+        questions={pendingQuestion.questions}
+        onAnswer={(answers) => onQuestionAnswer?.(answers)}
       />
     {/if}
 

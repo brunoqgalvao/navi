@@ -252,6 +252,16 @@ export const api = {
           body: JSON.stringify(options || {}),
         }
       ),
+    getPendingQuestion: (id: string) =>
+      request<{
+        id: string;
+        session_id: string;
+        request_id: string;
+        questions: Array<{ question: string; header: string; options: Array<{ label: string; description: string }>; multiSelect: boolean }>;
+        created_at: number;
+      } | null>(`/sessions/${id}/pending-question`),
+    clearPendingQuestion: (id: string) =>
+      request<{ success: boolean }>(`/sessions/${id}/pending-question`, { method: "DELETE" }),
   },
 
   messages: {

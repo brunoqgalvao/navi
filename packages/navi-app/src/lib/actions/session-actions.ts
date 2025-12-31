@@ -119,6 +119,10 @@ export async function selectSession(s: Session) {
           isFinal: !!m.is_final,
         };
       });
+      const subagentMsgs = loadedMsgs.filter(m => m.parentToolUseId);
+      if (subagentMsgs.length > 0) {
+        console.log("[session-actions] Loaded", subagentMsgs.length, "subagent messages from DB");
+      }
       sessionMessages.setMessages(s.id, loadedMsgs);
     } catch (e) {
       showError({ title: "Messages Error", message: "Failed to load chat messages", error: e });

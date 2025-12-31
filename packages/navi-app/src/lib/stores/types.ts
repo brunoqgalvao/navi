@@ -95,7 +95,7 @@ export interface NotificationOptions {
   sound?: boolean;
 }
 
-export type SessionStatusType = "idle" | "running" | "permission" | "unread";
+export type SessionStatusType = "idle" | "running" | "permission" | "awaiting_input" | "unread";
 
 export interface SessionStatus {
   sessionId: string;

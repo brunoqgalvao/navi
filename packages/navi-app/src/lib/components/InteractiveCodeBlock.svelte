@@ -135,7 +135,7 @@
 
   <!-- Code content -->
   <div class="code-content relative">
-    <pre class="hljs bg-[#11111b] text-gray-200 overflow-x-auto text-sm leading-relaxed {isCollapsed && shouldCollapse ? 'max-h-96' : ''}"><code bind:this={codeElement}>{@html displayCode}</code></pre>
+    <pre class="hljs overflow-x-auto text-sm leading-relaxed {isCollapsed && shouldCollapse ? 'max-h-96' : ''}" style="background: #11111b; color: #cdd6f4; padding: 1rem 1.25rem; margin: 0;"><code bind:this={codeElement}>{@html displayCode}</code></pre>
     
     {#if isCollapsed && shouldCollapse}
       <div class="fade-overlay absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#11111b] to-transparent pointer-events-none"></div>
@@ -147,10 +147,6 @@
 </div>
 
 <style>
-  .interactive-code-block :global(.hljs) {
-    background: transparent !important;
-  }
-
   .interactive-code-block {
     margin: 1rem 0;
   }
@@ -165,11 +161,14 @@
 
   .code-content pre {
     margin: 0;
-    padding: 1rem 1.25rem;
+    padding: 1rem 1.25rem !important;
+    background: #11111b !important;
+    color: #cdd6f4 !important;
   }
 
   .code-content pre code {
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    background: transparent !important;
   }
 
   .expand-hint {

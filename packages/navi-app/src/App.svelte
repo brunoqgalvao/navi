@@ -105,6 +105,7 @@
   import FeedbackModal from "./lib/components/FeedbackModal.svelte";
   import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
+  import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings, WorkspaceFolder } from "./lib/api";
@@ -232,7 +233,7 @@
   let newProjectPath = $state("");
   let newProjectQuickName = $state("");
   let defaultProjectsDir = $state("");
-  let projectCreationMode = $state<"quick" | "browse">("quick");
+  let projectCreationMode = $state<"quick" | "browse" | "agent">("quick");
   let editingProject = $state<Project | null>(null);
   let editProjectName = $state("");
   let editProjectPath = $state("");
@@ -246,6 +247,10 @@
   let modelSelection = $state("");
   let lastSessionModel = $state("");
   let showSettings = $state(false);
+  let showAgentBuilder = $state(false);
+
+  // Derived agents list for sidebar (combine agents + skills from stores)
+  let sidebarAgents = $derived([...$agentLibrary, ...$skillLibraryForBuilder].slice(0, 10));
   let settingsInitialTab = $state<"api" | "permissions" | "claude-md" | "skills" | "features" | "analytics" | undefined>(undefined);
   let showProjectSettings = $state(false);
   let projectSettingsInitialTab = $state<"instructions" | "model" | "permissions" | "skills" | undefined>(undefined);
@@ -297,6 +302,17 @@
           toolInput: data.toolInput,
         },
       });
+    },
+    onAskUserQuestion: (data) => {
+      // Only show question if it's for the current session
+      if (data.sessionId && data.sessionId !== $session.sessionId) {
+        console.warn(`[AskUserQuestion] Ignoring question for different session: ${data.sessionId} (current: ${$session.sessionId})`);
+        return;
+      }
+      pendingQuestion = {
+        requestId: data.requestId,
+        questions: data.questions,
+      };
     },
     onSubagentProgress: (sessionId, toolUseId, elapsed) => {
       activeSubagents = new Map(activeSubagents.set(toolUseId, { elapsed }));
@@ -508,6 +524,7 @@
   }
 
   let pendingPermissionRequest = $state<{ requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string } | null>(null);
+  let pendingQuestion = $state<{ requestId: string; questions: Array<{ question: string; header: string; options: Array<{ label: string; description: string }>; multiSelect: boolean }> } | null>(null);
 
   function handlePermissionApprove(approveAll: boolean = false) {
     if (pendingPermissionRequest && client) {
@@ -535,6 +552,17 @@
         sessionTodos.clearSession($session.sessionId);
       }
       pendingPermissionRequest = null;
+    }
+  }
+
+  function handleQuestionAnswer(answers: Record<string, string | string[]>) {
+    if (pendingQuestion && client) {
+      client.respondToQuestion(pendingQuestion.requestId, answers);
+      pendingQuestion = null;
+      // Set status back to running since the agent will continue
+      if ($session.sessionId && $session.projectId) {
+        sessionStatus.setRunning($session.sessionId, $session.projectId);
+      }
     }
   }
 
@@ -668,6 +696,7 @@
       loadModelsAction();
       loadPermissionsAction();
       loadCostsAction();
+      loadLibrary(); // Load agents for sidebar
 
       client = new ClaudeClient();
       client.connect().then(() => {
@@ -897,7 +926,11 @@
       sessionDrafts.setDraft(prevSessionId, inputText);
     }
     inputText = "";
-    
+
+    // Clear session-specific UI state when switching projects
+    pendingPermissionRequest = null;
+    pendingQuestion = null;
+
     session.setProject(project.id);
     session.setSession(null);
     sidebarSessions = [];
@@ -1115,6 +1148,26 @@
     if (prevSessionId && inputText.trim()) {
       sessionDrafts.setDraft(prevSessionId, inputText);
     }
+
+    // Clear session-specific UI state when switching sessions
+    pendingPermissionRequest = null;
+    pendingQuestion = null;
+
+    // Load any pending question for this session from the database
+    api.sessions.getPendingQuestion(s.id).then((pending) => {
+      if (pending && pending.questions) {
+        pendingQuestion = {
+          requestId: pending.request_id,
+          questions: pending.questions,
+        };
+        // Set the awaiting_input status
+        if ($session.projectId) {
+          sessionStatus.setAwaitingInput(s.id, $session.projectId);
+        }
+      }
+    }).catch((e) => {
+      console.warn("Failed to load pending question:", e);
+    });
 
     inputText = $sessionDrafts.get(s.id) || "";
 
@@ -2131,6 +2184,12 @@
     onToggleFolderPin={toggleFolderPin}
     onNewProjectInFolder={(folderId) => { newProjectTargetFolderId = folderId; showNewProjectModal = true; }}
     onOpenProjectInNewWindow={openProjectInNewWindow}
+    onOpenAgentBuilder={() => showAgentBuilder = true}
+    agents={sidebarAgents}
+    onSelectAgent={(agent) => {
+      openAgent(agent as AgentDefinition);
+      showAgentBuilder = true;
+    }}
     bind:titleSuggestionRef
   />
 
@@ -2239,6 +2298,7 @@
               projectPath={currentProject?.path || ''}
               activeSubagents={activeSubagents}
               pendingPermissionRequest={pendingPermissionRequest}
+              pendingQuestion={pendingQuestion}
               editingMessageId={editingMessageId}
               bind:editingMessageContent={editingMessageContent}
               renderMarkdown={renderMarkdown}
@@ -2255,6 +2315,7 @@
               onMessageClick={handleMessageClick}
               onPermissionApprove={handlePermissionApprove}
               onPermissionDeny={handlePermissionDeny}
+              onQuestionAnswer={handleQuestionAnswer}
               emptyState="continue"
               inputTokens={$session.inputTokens}
               contextWindow={currentProject?.context_window || 200000}
@@ -2360,9 +2421,18 @@
   <NewProjectModal
     open={showNewProjectModal}
     {defaultProjectsDir}
-    onClose={() => { showNewProjectModal = false; newProjectTargetFolderId = null; }}
+    onClose={() => { showNewProjectModal = false; newProjectTargetFolderId = null; projectCreationMode = "quick"; }}
     onCreate={createProject}
     onPickDirectory={pickDirectory}
+    onCreateAgent={async (name, description) => {
+      const agent = await createAgent(name, description, "agent");
+      if (agent) {
+        showNewProjectModal = false;
+        projectCreationMode = "quick";
+        openAgent(agent);
+        showAgentBuilder = true;
+      }
+    }}
     {projectCreationMode}
     {newProjectQuickName}
     {newProjectPath}
@@ -2436,6 +2506,12 @@
   </Modal>
 
   <Settings open={showSettings} onClose={() => { showSettings = false; settingsInitialTab = undefined; }} initialTab={settingsInitialTab} />
+
+  {#if showAgentBuilder}
+    <div class="fixed inset-0 z-50 bg-white">
+      <AgentBuilder onClose={() => showAgentBuilder = false} />
+    </div>
+  {/if}
   <FeedbackModal
     open={showFeedbackModal}
     onClose={() => {

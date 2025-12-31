@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries } from "../db";
+import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb } from "../db";
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
 import { generateChatTitle } from "../services/title-generator";
 import { hasMessageContent, shouldPersistUserMessage, safeSend } from "../services/message-helpers";
@@ -54,7 +54,7 @@ function logBunSpawnDiagnostics(
 }
 
 export interface ClientMessage {
-  type: "query" | "cancel" | "abort" | "permission_response" | "attach" | "terminal_input" | "terminal_resize" | "terminal_attach" | "terminal_detach" | "exec_start" | "exec_kill";
+  type: "query" | "cancel" | "abort" | "permission_response" | "question_response" | "attach" | "terminal_input" | "terminal_resize" | "terminal_attach" | "terminal_detach" | "exec_start" | "exec_kill";
   prompt?: string;
   projectId?: string;
   sessionId?: string;
@@ -65,6 +65,9 @@ export interface ClientMessage {
   permissionRequestId?: string;
   approved?: boolean;
   approveAll?: boolean;
+  // Question response fields
+  questionRequestId?: string;
+  answers?: Record<string, string | string[]>;
   // Terminal-related fields
   terminalId?: string;
   execId?: string;
@@ -83,6 +86,7 @@ interface ActiveProcess {
 
 const activeProcesses = new Map<string, ActiveProcess>();
 const pendingPermissions = new Map<string, { sessionId: string; payload: any }>();
+const pendingQuestions = new Map<string, { sessionId: string; payload: any }>();
 const sessionApprovedAll = new Set<string>();
 const connectedClients = new Set<any>();
 
@@ -92,6 +96,10 @@ export function getActiveProcesses() {
 
 export function getPendingPermissions() {
   return pendingPermissions;
+}
+
+export function getPendingQuestions() {
+  return pendingQuestions;
 }
 
 export function getSessionApprovedAll() {
@@ -381,6 +389,25 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
             pendingPermissions.set(msg.requestId, { sessionId, payload });
           }
           sendToSession(sessionId, payload);
+        } else if (msg.type === "ask_user_question") {
+          const payload = {
+            type: "ask_user_question",
+            requestId: msg.requestId,
+            sessionId, // Include sessionId so frontend can verify
+            questions: msg.questions,
+          };
+          if (sessionId) {
+            // Store in memory for websocket routing
+            pendingQuestions.set(msg.requestId, { sessionId, payload });
+            // Persist to database so it survives page reloads
+            pendingQuestionsDb.create(
+              crypto.randomUUID(),
+              sessionId,
+              msg.requestId,
+              JSON.stringify(msg.questions)
+            );
+          }
+          sendToSession(sessionId, payload);
         } else if (msg.type === "complete") {
           if (lastMainAssistantMsgId) {
             messages.markFinal(lastMainAssistantMsgId);
@@ -525,7 +552,14 @@ export function createWebSocketHandlers() {
                 uuid: crypto.randomUUID(),
                 timestamp: Date.now(),
               });
+              // Resend any pending permission requests
               for (const pending of pendingPermissions.values()) {
+                if (pending.sessionId === data.sessionId) {
+                  sendToSession(data.sessionId, pending.payload);
+                }
+              }
+              // Resend any pending questions
+              for (const pending of pendingQuestions.values()) {
                 if (pending.sessionId === data.sessionId) {
                   sendToSession(data.sessionId, pending.payload);
                 }
@@ -550,6 +584,22 @@ export function createWebSocketHandlers() {
               active.process.stdin.write(response + "\n");
             }
             pendingPermissions.delete(data.permissionRequestId);
+          }
+        } else if (data.type === "question_response" && data.questionRequestId) {
+          const pending = pendingQuestions.get(data.questionRequestId);
+          if (pending) {
+            const active = activeProcesses.get(pending.sessionId);
+            if (active && active.process.stdin) {
+              const response = JSON.stringify({
+                type: "question_response",
+                requestId: data.questionRequestId,
+                answers: data.answers,
+              });
+              active.process.stdin.write(response + "\n");
+            }
+            // Remove from memory and database
+            pendingQuestions.delete(data.questionRequestId);
+            pendingQuestionsDb.deleteByRequestId(data.questionRequestId);
           }
         } else if (data.type.startsWith("terminal_") || data.type.startsWith("exec_")) {
           // Route terminal/exec messages to handler

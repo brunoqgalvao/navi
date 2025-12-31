@@ -1,5 +1,5 @@
 import { json } from "../utils/response";
-import { projects, sessions, messages, searchIndex, type Message } from "../db";
+import { projects, sessions, messages, searchIndex, pendingQuestions, type Message } from "../db";
 
 export function createSessionApprovedAllSet(): Set<string> {
   return new Set<string>();
@@ -304,6 +304,28 @@ export async function handleSessionRoutes(
         "Access-Control-Allow-Origin": "*",
       },
     });
+  }
+
+  // Pending questions for ask_user_question tool
+  const pendingQuestionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/pending-question$/);
+  if (pendingQuestionMatch) {
+    const sessionId = pendingQuestionMatch[1];
+
+    if (method === "GET") {
+      const pending = pendingQuestions.getBySession(sessionId);
+      if (pending) {
+        return json({
+          ...pending,
+          questions: JSON.parse(pending.questions),
+        });
+      }
+      return json(null);
+    }
+
+    if (method === "DELETE") {
+      pendingQuestions.deleteBySession(sessionId);
+      return json({ success: true });
+    }
   }
 
   // Prune tool results in SDK session file

@@ -187,6 +187,27 @@ export interface PermissionRequestMessage {
   timestamp?: number;
 }
 
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface QuestionItem {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multiSelect: boolean;
+}
+
+export interface AskUserQuestionMessage {
+  type: "ask_user_question";
+  requestId: string;
+  sessionId?: string;
+  questions: QuestionItem[];
+  uuid?: string;
+  timestamp?: number;
+}
+
 export interface StreamEventMessage {
   type: "stream_event";
   sessionId?: string;
@@ -261,6 +282,7 @@ export type ClaudeMessage =
   | DoneMessage
   | ToolProgressMessage
   | PermissionRequestMessage
+  | AskUserQuestionMessage
   | StreamEventMessage
   | AuthStatusMessage
   | UnknownMessage
@@ -381,6 +403,20 @@ export class ClaudeClient {
         permissionRequestId: requestId,
         approved,
         approveAll,
+      })
+    );
+  }
+
+  respondToQuestion(requestId: string, answers: Record<string, string | string[]>) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error("Not connected to server");
+    }
+
+    this.ws.send(
+      JSON.stringify({
+        type: "question_response",
+        questionRequestId: requestId,
+        answers,
       })
     );
   }

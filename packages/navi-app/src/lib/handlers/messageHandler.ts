@@ -3,6 +3,7 @@ import type {
   StreamEventMessage,
   ToolProgressMessage,
   PermissionRequestMessage,
+  AskUserQuestionMessage,
   ContentBlock,
   ToolUseBlock,
   SystemMessage,
@@ -108,6 +109,10 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         const parentId = assistantMsg.parentToolUseId || null;
         const content = assistantMsg.content;
         const msgUuid = assistantMsg.uuid || crypto.randomUUID();
+
+        if (parentId) {
+          console.log("[MessageHandler] Assistant message with parentToolUseId:", parentId, "content types:", content?.map((b: any) => b.type));
+        }
 
         if (content && content.length > 0) {
           sessionMessages.addMessage(uiSessionId, {
@@ -290,8 +295,17 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         break;
       }
 
+      case "ask_user_question": {
+        const questionMsg = msg as AskUserQuestionMessage;
+        callbacks.onAskUserQuestion?.({
+          requestId: questionMsg.requestId,
+          sessionId: questionMsg.sessionId,
+          questions: questionMsg.questions,
+        });
+        break;
+      }
+
       case "ui_command": {
-        // ui_command is an inline type in ClaudeMessage union
         const uiCommand = msg as { type: "ui_command"; command: string; payload: Record<string, unknown> };
         callbacks.onUICommand?.({
           command: uiCommand.command as UICommand["command"],

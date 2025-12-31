@@ -1,4 +1,5 @@
-import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, createSdkMcpServer, tool, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
@@ -387,6 +388,66 @@ interface WorkerInput {
 }
 
 const pendingPermissions = new Map<string, (result: { approved: boolean; approveAll?: boolean }) => void>();
+const pendingQuestions = new Map<string, (result: { answers: Record<string, string | string[]> }) => void>();
+
+// Define the question option schema
+const questionOptionSchema = z.object({
+  label: z.string().describe("Short label for the option (e.g., 'TypeScript')"),
+  description: z.string().describe("Description of this option"),
+});
+
+// Define the question schema
+const questionSchema = z.object({
+  question: z.string().describe("The question to ask the user"),
+  header: z.string().max(12).describe("Short header/category for the question (max 12 chars)"),
+  options: z.array(questionOptionSchema).min(2).max(4).describe("2-4 options for the user to choose from"),
+  multiSelect: z.boolean().describe("Whether the user can select multiple options"),
+});
+
+// Create MCP server with ask_user_question tool
+const userInteractionServer = createSdkMcpServer({
+  name: "user-interaction",
+  version: "1.0.0",
+  tools: [
+    tool(
+      "ask_user_question",
+      "Ask the user one or more questions and wait for their response. Use this when you need clarification or user input before proceeding.",
+      {
+        questions: z.array(questionSchema).min(1).max(4).describe("1-4 questions to ask the user"),
+      },
+      async (args) => {
+        const requestId = crypto.randomUUID();
+
+        // Send question to UI
+        send({
+          type: "ask_user_question",
+          requestId,
+          questions: args.questions,
+        });
+
+        // Wait for user response
+        const result = await new Promise<{ answers: Record<string, string | string[]> }>((resolve) => {
+          pendingQuestions.set(requestId, resolve);
+        });
+
+        // Format the response
+        const answerText = Object.entries(result.answers)
+          .map(([header, answer]) => {
+            const answerStr = Array.isArray(answer) ? answer.join(", ") : answer;
+            return `${header}: ${answerStr}`;
+          })
+          .join("\n");
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: `User answered:\n${answerText}`,
+          }],
+        };
+      }
+    ),
+  ],
+});
 
 function send(msg: any) {
   console.log(JSON.stringify(msg));
@@ -582,6 +643,11 @@ async function runQuery(input: WorkerInput) {
     toolInput: Record<string, unknown>,
     options: { signal: AbortSignal; toolUseID: string }
   ): Promise<{ behavior: 'allow'; updatedInput: Record<string, unknown> } | { behavior: 'deny'; message: string; interrupt?: boolean }> => {
+    // MCP tools (like ask_user_question) are auto-allowed - they handle their own interaction
+    if (toolName.startsWith("mcp__")) {
+      return { behavior: 'allow', updatedInput: toolInput };
+    }
+
     if (permissionSettings?.autoAcceptAll) {
       return { behavior: 'allow', updatedInput: toolInput };
     }
@@ -650,6 +716,7 @@ async function runQuery(input: WorkerInput) {
       "TodoWrite",
       "Task",
       "TaskOutput",
+      // Note: ask_user_question is exposed via MCP server (mcp__user-interaction__ask_user_question)
     ];
     
     const requireConfirmation = permissionSettings?.requireConfirmation || [];
@@ -674,6 +741,10 @@ async function runQuery(input: WorkerInput) {
         settingSources: ['user', 'project', 'local'] as const,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
         includePartialMessages: true,
+        // MCP server for user interaction (ask_user_question tool)
+        mcpServers: {
+          "user-interaction": userInteractionServer,
+        },
         // Pass custom agents from .claude/agents/
         ...(Object.keys(agents).length > 0 && { agents }),
       },
@@ -749,6 +820,12 @@ rl.on("line", (line) => {
       if (resolve) {
         resolve({ approved: msg.approved, approveAll: msg.approveAll });
         pendingPermissions.delete(msg.requestId);
+      }
+    } else if (msg.type === "question_response" && msg.requestId) {
+      const resolve = pendingQuestions.get(msg.requestId);
+      if (resolve) {
+        resolve({ answers: msg.answers });
+        pendingQuestions.delete(msg.requestId);
       }
     }
   } catch {}

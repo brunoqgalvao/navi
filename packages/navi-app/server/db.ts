@@ -223,7 +223,21 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_search_project ON search_index(project_id);
     CREATE INDEX IF NOT EXISTS idx_search_session ON search_index(session_id);
   `);
-  
+
+  // Pending questions table for ask_user_question tool
+  db.run(`
+    CREATE TABLE IF NOT EXISTS pending_questions (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      request_id TEXT NOT NULL UNIQUE,
+      questions TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_questions_session ON pending_questions(session_id);
+    CREATE INDEX IF NOT EXISTS idx_pending_questions_request ON pending_questions(request_id);
+  `);
+
   saveDb()
   return db;
 }
@@ -500,6 +514,40 @@ export const messages = {
   deleteBySession: (sessionId: string) => run("DELETE FROM messages WHERE session_id = ?", [sessionId]),
   deleteAfter: (sessionId: string, timestamp: number) =>
     run("DELETE FROM messages WHERE session_id = ? AND timestamp > ?", [sessionId, timestamp]),
+};
+
+// Pending Questions for ask_user_question tool
+export interface PendingQuestion {
+  id: string;
+  session_id: string;
+  request_id: string;
+  questions: string; // JSON string of QuestionItem[]
+  created_at: number;
+}
+
+export const pendingQuestions = {
+  create: (id: string, sessionId: string, requestId: string, questions: string) =>
+    run(
+      "INSERT INTO pending_questions (id, session_id, request_id, questions, created_at) VALUES (?, ?, ?, ?, ?)",
+      [id, sessionId, requestId, questions, Date.now()]
+    ),
+  getBySession: (sessionId: string): PendingQuestion | null => {
+    const results = queryAll<PendingQuestion>(
+      "SELECT * FROM pending_questions WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
+      [sessionId]
+    );
+    return results[0] || null;
+  },
+  getByRequestId: (requestId: string): PendingQuestion | null => {
+    const results = queryAll<PendingQuestion>(
+      "SELECT * FROM pending_questions WHERE request_id = ?",
+      [requestId]
+    );
+    return results[0] || null;
+  },
+  delete: (id: string) => run("DELETE FROM pending_questions WHERE id = ?", [id]),
+  deleteByRequestId: (requestId: string) => run("DELETE FROM pending_questions WHERE request_id = ?", [requestId]),
+  deleteBySession: (sessionId: string) => run("DELETE FROM pending_questions WHERE session_id = ?", [sessionId]),
 };
 
 export interface SearchIndexEntry {

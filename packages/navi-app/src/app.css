@@ -249,12 +249,17 @@ pre.hljs {
 
 .interactive-code-block .code-content pre {
   margin: 0;
-  background: #111827;
-  color: #f9fafb;
-  padding: 1rem 1.25rem;
+  background: #11111b !important;
+  color: #cdd6f4 !important;
+  padding: 1rem 1.25rem !important;
   overflow-x: auto;
   font-size: 0.875rem;
   line-height: 1.6;
+}
+
+.interactive-code-block .code-content pre code {
+  background: transparent !important;
+  color: inherit !important;
 }
 
 @keyframes welcome-scale {

@@ -17,6 +17,24 @@ export interface CompactMetadata {
   pre_tokens: number;
 }
 
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface QuestionItem {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multiSelect: boolean;
+}
+
+export interface AskUserQuestionData {
+  requestId: string;
+  sessionId?: string;
+  questions: QuestionItem[];
+}
+
 export interface HandlerCallbacks {
   onSessionInit?: (sessionId: string, data: { model?: string; cwd?: string; tools?: string[]; skills?: string[] }) => void;
   onMessageUpdate?: (sessionId: string) => void;
@@ -26,6 +44,7 @@ export interface HandlerCallbacks {
   onContextOverflow?: (sessionId: string, autoRetry: boolean) => void;
   onComplete?: (sessionId: string, data: { costUsd: number; usage?: MessageUsage }) => void;
   onPermissionRequest?: (data: { requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string }) => void;
+  onAskUserQuestion?: (data: AskUserQuestionData) => void;
   onTodoUpdate?: (sessionId: string, todos: TodoItem[]) => void;
   onSubagentProgress?: (sessionId: string, toolUseId: string, elapsed: number) => void;
   onUICommand?: (command: UICommand) => void;

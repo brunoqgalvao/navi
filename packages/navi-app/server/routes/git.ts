@@ -249,6 +249,93 @@ export async function handleGitRoutes(url: URL, method: string, req: Request): P
     }
   }
 
+  if (url.pathname === "/api/git/summarize-changes" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath } = body;
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      // Get working tree diff (both staged and unstaged)
+      const workingDiff = execSync("git diff HEAD", { cwd, encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 });
+
+      // Also get untracked files
+      const untrackedFiles = execSync("git ls-files --others --exclude-standard", { cwd, encoding: "utf-8" }).trim();
+
+      if (!workingDiff.trim() && !untrackedFiles) {
+        return json({ summary: ["No changes to summarize"] });
+      }
+
+      // Truncate diff if too large
+      const truncatedDiff = workingDiff.length > 10000
+        ? workingDiff.slice(0, 10000) + "\n\n... (diff truncated)"
+        : workingDiff;
+
+      // Get list of changed files
+      const changedFiles = execSync("git diff HEAD --name-only", { cwd, encoding: "utf-8" }).trim();
+
+      const prompt = `Analyze this git diff and summarize WHAT FEATURES/CHANGES are being implemented.
+
+Changed files:
+${changedFiles}
+${untrackedFiles ? `\nNew files:\n${untrackedFiles}` : ""}
+
+Diff:
+\`\`\`diff
+${truncatedDiff}
+\`\`\`
+
+## Instructions
+
+1. Identify the HIGH-LEVEL features or changes being made
+2. Focus on WHAT the user gains or what functionality changes - NOT code details
+3. Group related changes together into single feature descriptions
+4. Use clear, non-technical language where possible
+5. Each bullet should describe a distinct feature or change
+
+## Output Format
+
+Return ONLY a bulleted list (3-6 items max), one feature/change per line:
+• Implemented X feature that does Y
+• Added ability to Z
+• Fixed issue where A happened
+• Improved B by doing C
+
+NO explanations, NO code references, NO file names. Just the feature descriptions.`;
+
+      const systemPrompt = "You are an expert at understanding code changes and explaining them in terms of features and functionality. Focus on WHAT changes, not HOW. Be concise.";
+
+      const response = await fetch("http://localhost:3001/api/ephemeral", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          systemPrompt,
+          maxTokens: 500,
+          projectPath: cwd,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Parse bullets from response
+      const result = data.result?.trim() || "";
+      const bullets = result
+        .split("\n")
+        .map((line: string) => line.replace(/^[•\-\*]\s*/, "").trim())
+        .filter((line: string) => line.length > 0);
+
+      return json({ summary: bullets, usage: data.usage, costUsd: data.costUsd });
+    } catch (e: any) {
+      console.error("Summarize changes error:", e);
+      return json({ error: e.message || "Failed to summarize changes" }, 500);
+    }
+  }
+
   if (url.pathname === "/api/git/generate-commit-message" && method === "POST") {
     const body = await req.json();
     const { path: repoPath } = body;
