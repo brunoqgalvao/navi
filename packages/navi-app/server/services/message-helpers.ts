@@ -11,7 +11,10 @@ export function isToolResultContent(content: unknown): boolean {
 
 export function shouldPersistUserMessage(data: any): boolean {
   if (!data || data.type !== "user") {
-    console.log(`[Persist] Skipping non-user message: type=${data?.type}`);
+    // Skip verbose logging for stream_event - fires too frequently
+    if (data?.type !== "stream_event") {
+      console.log(`[Persist] Skipping non-user message: type=${data?.type}`);
+    }
     return false;
   }
   if (data.isReplay) {
