@@ -1,118 +1,27 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { writable } from 'svelte/store';
-
-  interface UpdateInfo {
-    version: string;
-    notes: string;
-    date: string;
-  }
-
-  let updateAvailable = writable<UpdateInfo | null>(null);
-  let isChecking = writable(false);
-  let isDownloading = writable(false);
-  let downloadProgress = writable(0);
-  let error = writable<string | null>(null);
-  let showBanner = writable(false);
-  let dismissed = writable(false);
+  import {
+    updateStore,
+    updateAvailable,
+    isCheckingUpdate,
+    isDownloadingUpdate,
+    updateDownloadProgress,
+    updateError,
+    showUpdateBanner,
+  } from '../stores/update';
 
   // Check for updates on mount and periodically
   let checkInterval: ReturnType<typeof setInterval>;
 
-  async function checkForUpdates() {
-    // Only run in Tauri environment
-    if (typeof window === 'undefined' || !('__TAURI__' in window)) {
-      return;
-    }
-
-    try {
-      isChecking.set(true);
-      error.set(null);
-
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const update = await check();
-
-      if (update) {
-        updateAvailable.set({
-          version: update.version,
-          notes: update.body || 'No release notes available',
-          date: update.date || new Date().toISOString()
-        });
-        showBanner.set(true);
-        dismissed.set(false);
-      } else {
-        updateAvailable.set(null);
-      }
-    } catch (e) {
-      console.error('Failed to check for updates:', e);
-      // Don't show error to user for background checks
-    } finally {
-      isChecking.set(false);
-    }
-  }
-
-  async function downloadAndInstall() {
-    if (typeof window === 'undefined' || !('__TAURI__' in window)) {
-      return;
-    }
-
-    try {
-      isDownloading.set(true);
-      error.set(null);
-      downloadProgress.set(0);
-
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const { relaunch } = await import('@tauri-apps/plugin-process');
-
-      const update = await check();
-      if (!update) {
-        error.set('Update no longer available');
-        return;
-      }
-
-      let downloaded = 0;
-      let contentLength = 0;
-
-      await update.downloadAndInstall((event) => {
-        switch (event.event) {
-          case 'Started':
-            contentLength = event.data.contentLength || 0;
-            console.log(`Download started, size: ${contentLength} bytes`);
-            break;
-          case 'Progress':
-            downloaded += event.data.chunkLength;
-            if (contentLength > 0) {
-              downloadProgress.set(Math.round((downloaded / contentLength) * 100));
-            }
-            break;
-          case 'Finished':
-            console.log('Download finished');
-            downloadProgress.set(100);
-            break;
-        }
-      });
-
-      // Relaunch the app to apply the update
-      await relaunch();
-    } catch (e) {
-      console.error('Failed to download/install update:', e);
-      error.set(e instanceof Error ? e.message : 'Failed to install update');
-    } finally {
-      isDownloading.set(false);
-    }
-  }
-
-  function dismissUpdate() {
-    dismissed.set(true);
-    showBanner.set(false);
-  }
-
   onMount(() => {
+    // Get current version on startup
+    updateStore.getCurrentVersion();
+
     // Check on startup after a short delay
-    setTimeout(checkForUpdates, 5000);
+    setTimeout(() => updateStore.checkForUpdates(), 5000);
 
     // Check every 6 hours
-    checkInterval = setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
+    checkInterval = setInterval(() => updateStore.checkForUpdates(), 6 * 60 * 60 * 1000);
   });
 
   onDestroy(() => {
@@ -122,7 +31,7 @@
   });
 </script>
 
-{#if $showBanner && $updateAvailable && !$dismissed}
+{#if $showUpdateBanner && $updateAvailable}
   <div class="update-banner">
     <div class="update-content">
       <div class="update-icon">
@@ -136,16 +45,16 @@
         <strong>Update Available</strong>
         <span class="version">v{$updateAvailable.version}</span>
       </div>
-      {#if $isDownloading}
+      {#if $isDownloadingUpdate}
         <div class="progress-container">
-          <div class="progress-bar" style="width: {$downloadProgress}%"></div>
-          <span class="progress-text">{$downloadProgress}%</span>
+          <div class="progress-bar" style="width: {$updateDownloadProgress}%"></div>
+          <span class="progress-text">{$updateDownloadProgress}%</span>
         </div>
       {:else}
-        <button class="update-button" on:click={downloadAndInstall}>
+        <button class="update-button" on:click={() => updateStore.downloadAndInstall()}>
           Install & Restart
         </button>
-        <button class="dismiss-button" on:click={dismissUpdate} title="Dismiss">
+        <button class="dismiss-button" on:click={() => updateStore.dismiss()} title="Dismiss">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"/>
             <line x1="6" y1="6" x2="18" y2="18"/>
@@ -153,8 +62,8 @@
         </button>
       {/if}
     </div>
-    {#if $error}
-      <div class="error-message">{$error}</div>
+    {#if $updateError}
+      <div class="error-message">{$updateError}</div>
     {/if}
   </div>
 {/if}

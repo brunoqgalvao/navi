@@ -918,3 +918,100 @@ export const analyticsApi = {
     return request<ProjectAnalytics>(`/projects/${projectId}/analytics${query ? `?${query}` : ""}`);
   },
 };
+
+// Background Process Management API
+export type BackgroundProcessStatus = "running" | "completed" | "failed" | "killed";
+
+export interface BackgroundProcess {
+  id: string;
+  type: "bash" | "task" | "dev_server";
+  command: string;
+  cwd: string;
+  pid?: number;
+  sessionId?: string;
+  projectId?: string;
+  startedAt: number;
+  status: BackgroundProcessStatus;
+  exitCode?: number;
+  output: string[];
+  outputSize: number;
+  ports: number[];
+  label?: string;
+}
+
+export interface BackgroundProcessEvent {
+  type: "process_started" | "process_output" | "process_status" | "process_port_detected" | "process_removed";
+  processId: string;
+  data?: string;
+  status?: BackgroundProcessStatus;
+  exitCode?: number;
+  port?: number;
+  process?: BackgroundProcess;
+}
+
+export interface DetectedProcess {
+  pid: number;
+  port: number;
+  command: string;
+}
+
+export const backgroundProcessApi = {
+  // List all background processes
+  list: (filter?: { sessionId?: string; projectId?: string; status?: BackgroundProcessStatus }) => {
+    const params = new URLSearchParams();
+    if (filter?.sessionId) params.set("sessionId", filter.sessionId);
+    if (filter?.projectId) params.set("projectId", filter.projectId);
+    if (filter?.status) params.set("status", filter.status);
+    const query = params.toString();
+    return request<BackgroundProcess[]>(`/background-processes${query ? `?${query}` : ""}`);
+  },
+
+  // Get a specific process
+  get: (id: string) => request<BackgroundProcess>(`/background-processes/${id}`),
+
+  // Start a new background process
+  start: (options: {
+    command: string;
+    cwd?: string;
+    sessionId?: string;
+    projectId?: string;
+    type?: "bash" | "task" | "dev_server";
+    label?: string;
+  }) =>
+    request<BackgroundProcess>("/background-processes", {
+      method: "POST",
+      body: JSON.stringify(options),
+    }),
+
+  // Get process output
+  getOutput: (id: string, lines?: number) =>
+    request<{ output: string[]; totalLines: number }>(
+      `/background-processes/${id}/output${lines ? `?lines=${lines}` : ""}`
+    ),
+
+  // Kill a process
+  kill: (id: string, signal: string = "SIGTERM") =>
+    request<{ success: boolean; killed: boolean }>(`/background-processes/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ signal }),
+    }),
+
+  // Remove a process from tracking
+  remove: (id: string) =>
+    request<{ success: boolean; removed: boolean }>(`/background-processes/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ remove: true }),
+    }),
+
+  // Restart a process
+  restart: (id: string) =>
+    request<BackgroundProcess>(`/background-processes/${id}/restart`, {
+      method: "POST",
+    }),
+
+  // Detect existing processes (dev servers, etc.)
+  detect: (projectPath?: string) => {
+    const params = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : "";
+    return request<DetectedProcess[]>(`/background-processes/detect${params}`);
+  },
+};

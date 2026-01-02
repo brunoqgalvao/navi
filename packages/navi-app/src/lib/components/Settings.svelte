@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, onboardingComplete, tour, showArchivedWorkspaces, uiScale } from "../stores";
+  import { advancedMode, debugMode, onboardingComplete, tour, showArchivedWorkspaces, uiScale, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
 
@@ -73,6 +73,10 @@
   let claudeMdDraft = $state("");
   let savingClaudeMd = $state(false);
 
+  // Update check state
+  let updateCheckResult = $state<"up-to-date" | "available" | null>(null);
+  let updateCheckError = $state<string | null>(null);
+
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: "api", label: "API Keys", icon: "M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" },
     { id: "permissions", label: "Permissions", icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" },
@@ -84,6 +88,8 @@
 
   onMount(() => {
     if (open) loadStatus();
+    // Ensure we have the current app version
+    updateStore.getCurrentVersion();
   });
 
   $effect(() => {
@@ -335,6 +341,19 @@
       console.error("Failed to save CLAUDE.md:", e);
     } finally {
       savingClaudeMd = false;
+    }
+  }
+
+  async function handleCheckForUpdates() {
+    updateCheckResult = null;
+    updateCheckError = null;
+    const result = await updateStore.checkForUpdates();
+    if (result.error) {
+      updateCheckError = result.error;
+    } else if (result.hasUpdate) {
+      updateCheckResult = "available";
+    } else {
+      updateCheckResult = "up-to-date";
     }
   }
 </script>
@@ -888,6 +907,97 @@
               </div>
 
               <div class="space-y-4">
+                <!-- Check for Updates -->
+                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900">Software Updates</h5>
+                      <p class="text-sm text-gray-500">
+                        {#if $currentAppVersion}
+                          Current version: v{$currentAppVersion}
+                        {:else}
+                          Check for new versions of Navi
+                        {/if}
+                      </p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                      {#if $updateAvailable}
+                        <span class="text-xs font-medium text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full">
+                          v{$updateAvailable.version} available
+                        </span>
+                      {:else if updateCheckResult === "up-to-date"}
+                        <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">
+                          Up to date
+                        </span>
+                      {/if}
+                    </div>
+                  </div>
+
+                  <div class="mt-4 space-y-3">
+                    {#if $isDownloadingUpdate}
+                      <div class="flex items-center gap-3">
+                        <div class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            class="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
+                            style="width: {$updateDownloadProgress}%"
+                          ></div>
+                        </div>
+                        <span class="text-sm font-medium text-gray-600">{$updateDownloadProgress}%</span>
+                      </div>
+                      <p class="text-sm text-gray-500">Downloading update... App will restart automatically.</p>
+                    {:else if $updateAvailable}
+                      <div class="flex items-center gap-3">
+                        <button
+                          onclick={() => updateStore.downloadAndInstall()}
+                          class="text-sm font-medium bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg px-4 py-2 hover:from-blue-600 hover:to-purple-600 transition-all"
+                        >
+                          Install v{$updateAvailable.version} & Restart
+                        </button>
+                        <button
+                          onclick={handleCheckForUpdates}
+                          disabled={$isCheckingUpdate}
+                          class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors disabled:opacity-50"
+                        >
+                          {$isCheckingUpdate ? "Checking..." : "Check Again"}
+                        </button>
+                      </div>
+                      {#if $updateAvailable.notes && $updateAvailable.notes !== "No release notes available"}
+                        <div class="bg-white border border-gray-200 rounded-lg p-3 mt-2">
+                          <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">What's New</p>
+                          <p class="text-sm text-gray-700">{$updateAvailable.notes}</p>
+                        </div>
+                      {/if}
+                    {:else}
+                      <button
+                        onclick={handleCheckForUpdates}
+                        disabled={$isCheckingUpdate}
+                        class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {#if $isCheckingUpdate}
+                          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Checking...
+                        {:else}
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Check for Updates
+                        {/if}
+                      </button>
+                    {/if}
+
+                    {#if updateCheckError}
+                      <p class="text-sm text-red-600">{updateCheckError}</p>
+                    {/if}
+
+                    {#if $updateError}
+                      <p class="text-sm text-red-600">{$updateError}</p>
+                    {/if}
+                  </div>
+                </div>
+
                 <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
                   <div class="flex items-center justify-between">
                     <div>

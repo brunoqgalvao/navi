@@ -33,6 +33,13 @@
   let summarizing = $state(false);
   let changeSummary = $state<{ type: "semantic" | "file"; items: string[] } | null>(null);
 
+  // Remote state
+  let remotes = $state<gitApi.GitRemote[]>([]);
+  let pushing = $state(false);
+  let pulling = $state(false);
+  let syncError = $state("");
+  let hasRemote = $derived(remotes.some(r => r.type === "push"));
+
   // Computed
   let totalChanges = $derived(
     status ? status.staged.length + status.modified.length + status.untracked.length : 0
@@ -134,15 +141,61 @@
     }
   }
 
+  async function fetchRemotes() {
+    if (!rootPath) return;
+    if (status && !status.isGitRepo) {
+      remotes = [];
+      return;
+    }
+    try {
+      remotes = await gitApi.getRemotes(rootPath);
+    } catch (e) {
+      console.error("Failed to fetch remotes:", e);
+      remotes = [];
+    }
+  }
+
+  async function handlePush() {
+    if (!rootPath || pushing) return;
+    pushing = true;
+    syncError = "";
+    try {
+      // If no upstream is set, push with -u flag
+      const needsUpstream = status?.ahead === 0 && status?.behind === 0;
+      await gitApi.push(rootPath, "origin", undefined, needsUpstream);
+      refresh();
+    } catch (e) {
+      syncError = e instanceof Error ? e.message : "Push failed";
+    } finally {
+      pushing = false;
+    }
+  }
+
+  async function handlePull() {
+    if (!rootPath || pulling) return;
+    pulling = true;
+    syncError = "";
+    try {
+      await gitApi.pull(rootPath);
+      refresh();
+    } catch (e) {
+      syncError = e instanceof Error ? e.message : "Pull failed";
+    } finally {
+      pulling = false;
+    }
+  }
+
   async function refresh() {
     await fetchStatus();
     // Only fetch commits and branches if it's a git repo
     if (status?.isGitRepo) {
       fetchCommits();
       fetchBranches();
+      fetchRemotes();
     } else {
       commits = [];
       branches = null;
+      remotes = [];
     }
   }
 
@@ -290,8 +343,30 @@
 </script>
 
 <div class="h-full flex flex-col bg-white">
+  <!-- Git not installed state -->
+  {#if status?.gitNotInstalled}
+    <div class="flex-1 flex flex-col items-center justify-center p-6 text-center">
+      <div class="w-12 h-12 mb-4 rounded-full bg-red-50 flex items-center justify-center">
+        <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      </div>
+      <h3 class="text-sm font-medium text-gray-900 mb-1">Git Not Installed</h3>
+      <p class="text-xs text-gray-500 mb-4">Git is not available on this system.</p>
+      <a
+        href="https://git-scm.com/downloads"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Download Git
+      </a>
+    </div>
   <!-- Not a git repo state -->
-  {#if status && !status.isGitRepo}
+  {:else if status && !status.isGitRepo}
     <div class="flex-1 flex flex-col items-center justify-center p-6 text-center">
       <div class="w-12 h-12 mb-4 rounded-full bg-gray-100 flex items-center justify-center">
         <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -360,8 +435,45 @@
         {/if}
       </div>
 
-      <!-- Ahead/behind -->
-      {#if status.ahead > 0 || status.behind > 0}
+      <!-- Ahead/behind with push/pull -->
+      {#if hasRemote}
+        <div class="flex items-center gap-1">
+          {#if status.behind > 0}
+            <button
+              onclick={handlePull}
+              disabled={pulling}
+              class="flex items-center gap-0.5 px-1.5 py-0.5 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 rounded transition-colors disabled:opacity-50"
+              title="Pull {status.behind} commit{status.behind > 1 ? 's' : ''}"
+            >
+              {#if pulling}
+                <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+              {:else}
+                <span>↓{status.behind}</span>
+              {/if}
+            </button>
+          {/if}
+          {#if status.ahead > 0}
+            <button
+              onclick={handlePush}
+              disabled={pushing}
+              class="flex items-center gap-0.5 px-1.5 py-0.5 text-xs text-green-600 bg-green-50 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
+              title="Push {status.ahead} commit{status.ahead > 1 ? 's' : ''}"
+            >
+              {#if pushing}
+                <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+              {:else}
+                <span>↑{status.ahead}</span>
+              {/if}
+            </button>
+          {/if}
+        </div>
+      {:else if status.ahead > 0 || status.behind > 0}
         <div class="flex items-center gap-1 text-xs text-gray-500">
           {#if status.ahead > 0}
             <span class="flex items-center gap-0.5">↑{status.ahead}</span>
@@ -375,12 +487,58 @@
 
     <div class="flex-1"></div>
 
+    <!-- Sync buttons when remote exists -->
+    {#if hasRemote}
+      <button
+        onclick={handlePull}
+        disabled={pulling || status?.behind === 0}
+        class="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Pull from remote"
+      >
+        {#if pulling}
+          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+        {:else}
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+        {/if}
+      </button>
+      <button
+        onclick={handlePush}
+        disabled={pushing || status?.ahead === 0}
+        class="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Push to remote"
+      >
+        {#if pushing}
+          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+        {:else}
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m4-8l-4-4m0 0L16 8m4-4v12" />
+          </svg>
+        {/if}
+      </button>
+    {/if}
+
     <button onclick={refresh} class="p-1 text-gray-400 hover:text-gray-600" title="Refresh">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
       </svg>
     </button>
   </div>
+
+  <!-- Sync error message -->
+  {#if syncError}
+    <div class="px-3 py-2 bg-red-50 border-b border-red-100 text-xs text-red-600 flex items-center justify-between">
+      <span class="truncate">{syncError}</span>
+      <button onclick={() => syncError = ""} class="text-red-400 hover:text-red-600 ml-2">✕</button>
+    </div>
+  {/if}
 
   <!-- Summarize Section -->
   {#if totalChanges > 0}
@@ -482,9 +640,9 @@
       </div>
     {:else if activeTab === "changes"}
       <!-- Changes Tab -->
-      <div class="flex-1 min-h-0 flex flex-col">
+      <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
         <!-- File List -->
-        <div class="flex-1 overflow-y-auto">
+        <div class="flex-1 min-h-0 overflow-y-auto">
           {#if status}
             <!-- Staged -->
             {#if status.staged.length > 0}

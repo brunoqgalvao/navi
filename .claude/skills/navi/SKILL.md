@@ -9,13 +9,24 @@ Control the Navi GUI directly from Claude Code. This skill lets you manage sessi
 
 ## API Base
 
-All endpoints are at `http://localhost:3001/api`. Use `curl` for all requests.
+**Dynamic URL Discovery**: The API base URL varies depending on how Navi is running:
+- Dev mode: `http://localhost:3001/api`
+- Tauri app: `http://localhost:3011/api`
+
+To discover the correct URL programmatically:
+```bash
+# Try dev port first, fall back to app port
+NAVI_API=$(curl -s http://localhost:3001/api/navi-url 2>/dev/null | jq -r '.apiUrl' || echo "http://localhost:3011")
+```
+
+For simplicity in examples below, we use `http://localhost:3001` but substitute the correct URL for your environment.
 
 ## Quick Reference
 
 | Action | Endpoint | Method |
 |--------|----------|--------|
 | **Send message to chat** | `/sessions/{id}/messages` | POST |
+| **Inspect chat (lazy load)** | `/sessions/{id}/inspect` | GET |
 | Create new chat | `/projects/{id}/sessions` | POST |
 | Fork chat | `/sessions/{id}/fork` | POST |
 | **Open preview panel** | `/ui/preview` | POST |
@@ -112,6 +123,59 @@ curl -X DELETE http://localhost:3001/api/sessions/{sessionId}
 ```bash
 curl http://localhost:3001/api/sessions/{sessionId}/export
 ```
+
+### Inspect Session (Lazy Loading for Chat References)
+
+Inspect a session to get metadata or content on-demand. This is the key endpoint for implementing lazy-loaded chat references - you can reference a chat without loading its full content, then inspect it when needed.
+
+**Get metadata only (default):**
+```bash
+curl "http://localhost:3001/api/sessions/{sessionId}/inspect"
+# or explicitly: ?scope=metadata
+```
+
+Response:
+```json
+{
+  "metadata": {
+    "id": "session-uuid",
+    "title": "Chat about feature X",
+    "projectId": "project-uuid",
+    "projectName": "my-project",
+    "projectPath": "/path/to/project",
+    "messageCount": 42,
+    "createdAt": 1704067200000,
+    "updatedAt": 1704153600000,
+    "model": "sonnet",
+    "totalCostUsd": 0.0234
+  }
+}
+```
+
+**Get summary (first user message + last assistant message):**
+```bash
+curl "http://localhost:3001/api/sessions/{sessionId}/inspect?scope=summary"
+```
+
+**Get last N messages:**
+```bash
+curl "http://localhost:3001/api/sessions/{sessionId}/inspect?scope=last&last=5"
+```
+
+**Search within the chat:**
+```bash
+curl "http://localhost:3001/api/sessions/{sessionId}/inspect?scope=search&search=error+handling"
+```
+
+**Get full transcript:**
+```bash
+curl "http://localhost:3001/api/sessions/{sessionId}/inspect?scope=full"
+```
+
+This allows Claude to reference chats efficiently:
+1. User attaches `@chat:session-id` reference
+2. Claude receives only metadata (title, message count)
+3. Claude inspects with appropriate scope when it needs context
 
 ---
 
@@ -335,6 +399,30 @@ Notification types: `info`, `success`, `warning`, `error`
 - Apostrophes or special quotes
 - Escape characters like `\'`
 - Keep the JSON compact (no spaces after colons/commas works best)
+
+### Open Terminal Panel
+
+Open the terminal panel and optionally create a new terminal tab:
+
+```bash
+curl -X POST http://localhost:3001/api/ui/terminal \
+  -H "Content-Type: application/json" \
+  -d '{"cwd": "/path/to/project"}'
+```
+
+With an initial command to run:
+
+```bash
+curl -X POST http://localhost:3001/api/ui/terminal \
+  -H "Content-Type: application/json" \
+  -d '{"cwd": "/path/to/project", "command": "npm run dev"}'
+```
+
+Parameters:
+- `cwd` - Working directory for the terminal
+- `command` - Optional command to run when terminal opens
+- `projectId` - Target project (uses current if not specified)
+- `terminalId` - Attach to existing terminal by ID
 
 ---
 
@@ -585,6 +673,152 @@ curl -X POST http://localhost:3001/api/projects/{projectId}/folder \
 
 ---
 
+## Terminal Control
+
+Navi has full terminal control capabilities. You can create, manage, and interact with PTY terminals.
+
+### List Active Terminals
+
+```bash
+curl http://localhost:3001/api/terminal/pty
+# Filter by session:
+curl "http://localhost:3001/api/terminal/pty?sessionId=session_123"
+```
+
+### Create New Terminal
+
+```bash
+curl -X POST http://localhost:3001/api/terminal/pty \
+  -H "Content-Type: application/json" \
+  -d '{"cwd": "/path/to/project", "sessionId": "session_123"}'
+```
+
+Response:
+```json
+{
+  "terminalId": "pty_abc123",
+  "pid": 12345
+}
+```
+
+### Get Terminal Output Buffer
+
+Retrieve recent output from a terminal (up to 500 lines):
+
+```bash
+curl http://localhost:3001/api/terminal/pty/{terminalId}/buffer
+```
+
+Response:
+```json
+{
+  "buffer": ["$ npm run build", "Building...", "Done!"],
+  "lineCount": 3
+}
+```
+
+### Check Terminal for Errors
+
+Detect common error patterns in terminal output:
+
+```bash
+curl http://localhost:3001/api/terminal/pty/{terminalId}/errors
+```
+
+Response:
+```json
+{
+  "hasErrors": true,
+  "errors": ["command not found: foobar"],
+  "patterns": ["command not found"]
+}
+```
+
+### Resize Terminal
+
+```bash
+curl -X POST http://localhost:3001/api/terminal/pty/{terminalId}/resize \
+  -H "Content-Type: application/json" \
+  -d '{"cols": 120, "rows": 40}'
+```
+
+### Kill Terminal
+
+```bash
+curl -X DELETE http://localhost:3001/api/terminal/pty/{terminalId}
+```
+
+### Run Command (Simple Execution)
+
+For one-off commands without a full PTY:
+
+```bash
+# Start command (returns SSE stream)
+curl -X POST http://localhost:3001/api/terminal/exec \
+  -H "Content-Type: application/json" \
+  -d '{"command": "npm run build", "cwd": "/path/to/project"}'
+
+# List active exec processes
+curl http://localhost:3001/api/terminal/exec
+
+# Kill exec process
+curl -X DELETE http://localhost:3001/api/terminal/exec/{execId}
+```
+
+### WebSocket Terminal Control
+
+For real-time terminal interaction, connect via WebSocket and send these messages:
+
+```typescript
+// Connect to WebSocket
+const ws = new WebSocket("ws://localhost:3001/ws");
+
+// Send input to terminal
+ws.send(JSON.stringify({
+  type: "terminal_input",
+  terminalId: "pty_abc123",
+  data: "npm run dev\n"
+}));
+
+// Attach to existing terminal
+ws.send(JSON.stringify({
+  type: "terminal_attach",
+  terminalId: "pty_abc123"
+}));
+
+// Resize terminal
+ws.send(JSON.stringify({
+  type: "terminal_resize",
+  terminalId: "pty_abc123",
+  cols: 120,
+  rows: 40
+}));
+```
+
+### Terminal Control Workflow
+
+Typical workflow for running commands from Claude Code:
+
+```bash
+# 1. Create a terminal
+TERM_ID=$(curl -s -X POST http://localhost:3001/api/terminal/pty \
+  -H "Content-Type: application/json" \
+  -d '{"cwd": "/path/to/project"}' | jq -r '.terminalId')
+
+# 2. Send command via WebSocket (or use exec endpoint for simple commands)
+
+# 3. Check output buffer
+curl http://localhost:3001/api/terminal/pty/$TERM_ID/buffer
+
+# 4. Check for errors
+curl http://localhost:3001/api/terminal/pty/$TERM_ID/errors
+
+# 5. Optionally kill when done
+curl -X DELETE http://localhost:3001/api/terminal/pty/$TERM_ID
+```
+
+---
+
 ## Tips
 
 1. **Use jq** for parsing JSON responses: `curl ... | jq '.id'`
@@ -592,6 +826,7 @@ curl -X POST http://localhost:3001/api/projects/{projectId}/folder \
 3. **Forking** is non-destructive - original session remains unchanged
 4. **Auto-accept** settings cascade: Session > Project > Global
 5. **Search** is full-text across all sessions and messages
+6. **Terminal buffer** stores up to 500 lines of output per terminal
 
 ## Guidelines
 
@@ -600,3 +835,4 @@ curl -X POST http://localhost:3001/api/projects/{projectId}/folder \
 3. Prefer forking over rollback when exploring alternatives
 4. Clean up test sessions/projects when done experimenting
 5. Use the preview panel for visual content rather than terminal output
+6. Use terminal buffer to get context from running processes

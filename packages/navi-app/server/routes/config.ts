@@ -18,6 +18,13 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
     return json({ defaultProjectsDir, hasOpenAIKey, openAIKeyPreview, autoTitleEnabled });
   }
 
+  // Navi API URL endpoint - used by skills and external tools to discover the API
+  if (url.pathname === "/api/navi-url") {
+    const port = process.env.PORT || Bun.env.PORT || "3001";
+    const apiUrl = `http://localhost:${port}`;
+    return json({ apiUrl, port: parseInt(port, 10) });
+  }
+
   if (url.pathname === "/api/permissions") {
     if (method === "GET") {
       return json({

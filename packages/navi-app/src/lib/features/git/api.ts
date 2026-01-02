@@ -7,6 +7,19 @@ export async function getStatus(repoPath: string): Promise<GitStatus> {
   const res = await fetch(`${getGitApiBase()}/status?path=${encodeURIComponent(repoPath)}`);
   const data = await res.json();
   if (data.error) throw new Error(data.error);
+  // Handle git not installed
+  if (data.gitNotInstalled) {
+    return {
+      isGitRepo: false,
+      gitNotInstalled: true,
+      branch: "",
+      staged: [],
+      modified: [],
+      untracked: [],
+      ahead: 0,
+      behind: 0,
+    };
+  }
   // Handle non-git repo response
   if (data.isGitRepo === false) {
     return {
@@ -134,4 +147,47 @@ export async function initRepo(repoPath: string): Promise<void> {
   });
   const data = await res.json();
   if (!data.success) throw new Error(data.error || "Failed to init repository");
+}
+
+export interface GitRemote {
+  name: string;
+  url: string;
+  type: "fetch" | "push";
+}
+
+export async function getRemotes(repoPath: string): Promise<GitRemote[]> {
+  const res = await fetch(`${getGitApiBase()}/remotes?path=${encodeURIComponent(repoPath)}`);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.remotes;
+}
+
+export async function addRemote(repoPath: string, name: string, url: string): Promise<void> {
+  const res = await fetch(`${getGitApiBase()}/remote/add`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath, name, url }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to add remote");
+}
+
+export async function push(repoPath: string, remote = "origin", branch?: string, setUpstream = false): Promise<void> {
+  const res = await fetch(`${getGitApiBase()}/push`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath, remote, branch, setUpstream }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to push");
+}
+
+export async function pull(repoPath: string, remote = "origin", branch?: string): Promise<void> {
+  const res = await fetch(`${getGitApiBase()}/pull`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath, remote, branch }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to pull");
 }

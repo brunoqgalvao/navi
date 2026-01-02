@@ -1,0 +1,20 @@
+# Navi Cloud - Deploy API Worker
+name = "navi-cloud-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Account ID - set via CLOUDFLARE_ACCOUNT_ID env var
+# account_id = ""
+
+[vars]
+ENVIRONMENT = "production"
+
+# D1 Database for app registry
+[[d1_databases]]
+binding = "DB"
+database_name = "navi-cloud-registry"
+database_id = "" # Will be filled after `bun run db:create`
+
+# Secrets (set via `wrangler secret put`)
+# - CLOUDFLARE_API_TOKEN (for Pages/D1 API calls)
+# - DEPLOY_SECRET (auth for deploy API)

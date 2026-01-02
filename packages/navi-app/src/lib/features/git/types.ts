@@ -1,5 +1,6 @@
 export interface GitStatus {
   isGitRepo: boolean;
+  gitNotInstalled?: boolean;
   branch: string;
   staged: GitFileChange[];
   modified: GitFileChange[];

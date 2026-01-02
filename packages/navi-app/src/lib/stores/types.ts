@@ -150,7 +150,7 @@ export interface TextReference {
   text: string;
   truncatedText: string;
   source: {
-    type: "code" | "csv" | "xlsx" | "json" | "markdown" | "text" | "url";
+    type: "code" | "csv" | "xlsx" | "json" | "markdown" | "text" | "url" | "terminal";
     path?: string;
     startLine?: number;
     endLine?: number;
@@ -159,7 +159,28 @@ export interface TextReference {
     sheet?: string;
     jsonPath?: string;
     url?: string;
+    // Terminal-specific fields
+    terminalId?: string;
+    terminalName?: string;
   };
+}
+
+// Terminal reference for @terminal mentions
+export interface TerminalReference {
+  id: string;
+  terminalId: string;
+  name: string;
+  bufferLines: number;
+}
+
+// Chat reference for @chat mentions - lazy loaded
+export interface ChatReference {
+  id: string;
+  sessionId: string;
+  title: string;
+  messageCount: number;
+  projectName: string | null;
+  updatedAt: number;
 }
 
 // SDK Event types for debug/timeline view

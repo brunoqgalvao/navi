@@ -2,6 +2,7 @@
   import FileAttachment from "./FileAttachment.svelte";
   import CopyButton from "./CopyButton.svelte";
   import MediaDisplay from "./MediaDisplay.svelte";
+  import UserReferenceDisplay from "./UserReferenceDisplay.svelte";
   import { parseUserMediaContent, type MediaItem } from "../media-parser";
 
   interface Props {
@@ -38,50 +39,72 @@
     files: { path: string; name: string }[];
     segments: { type: 'text' | 'mention'; value: string; path?: string }[];
     mediaItems: MediaItem[];
+    hasReferences: boolean;
+    contentForReferences: string;
+  }
+
+  /**
+   * Check if content has blockquote references (> ... > *Source: ...*)
+   */
+  function hasBlockquoteReferences(text: string): boolean {
+    return /^>\s.*\n>\s\*Source:/m.test(text) || /^>\s.*\*Source:/m.test(text);
   }
 
   function parseContent(text: string): ParsedContent {
     const filePattern = /\[File: ([^\]]+)\]/g;
     const files: { path: string; name: string }[] = [];
     let match;
-    
+
     while ((match = filePattern.exec(text)) !== null) {
       const path = match[1];
       const name = path.split("/").pop() || path;
       files.push({ path, name });
     }
-    
+
     const { mediaItems, textContent: afterMedia } = parseUserMediaContent(text.replace(/\[File: [^\]]+\]\n*/g, ""));
     const cleanText = afterMedia.trim();
-    
+
+    // Check if this content has blockquote references
+    const hasRefs = hasBlockquoteReferences(cleanText);
+
     const segments: { type: 'text' | 'mention'; value: string; path?: string }[] = [];
     const mentionPattern = /@([\w./-]+)/g;
     let lastIndex = 0;
     let mentionMatch;
-    
-    while ((mentionMatch = mentionPattern.exec(cleanText)) !== null) {
-      if (mentionMatch.index > lastIndex) {
-        segments.push({ type: 'text', value: cleanText.slice(lastIndex, mentionMatch.index) });
+
+    // Only parse @mentions if there are no blockquote references
+    // (The UserReferenceDisplay will handle the full content including remaining text)
+    if (!hasRefs) {
+      while ((mentionMatch = mentionPattern.exec(cleanText)) !== null) {
+        if (mentionMatch.index > lastIndex) {
+          segments.push({ type: 'text', value: cleanText.slice(lastIndex, mentionMatch.index) });
+        }
+        const mentionValue = mentionMatch[1];
+        const matchedFile = files.find(f => f.name === mentionValue || f.path.endsWith(mentionValue) || f.path.includes(mentionValue));
+        segments.push({
+          type: 'mention',
+          value: mentionValue,
+          path: matchedFile?.path || mentionValue
+        });
+        lastIndex = mentionPattern.lastIndex;
       }
-      const mentionValue = mentionMatch[1];
-      const matchedFile = files.find(f => f.name === mentionValue || f.path.endsWith(mentionValue) || f.path.includes(mentionValue));
-      segments.push({ 
-        type: 'mention', 
-        value: mentionValue,
-        path: matchedFile?.path || mentionValue
-      });
-      lastIndex = mentionPattern.lastIndex;
+
+      if (lastIndex < cleanText.length) {
+        segments.push({ type: 'text', value: cleanText.slice(lastIndex) });
+      }
+
+      if (segments.length === 0 && cleanText) {
+        segments.push({ type: 'text', value: cleanText });
+      }
     }
-    
-    if (lastIndex < cleanText.length) {
-      segments.push({ type: 'text', value: cleanText.slice(lastIndex) });
-    }
-    
-    if (segments.length === 0 && cleanText) {
-      segments.push({ type: 'text', value: cleanText });
-    }
-    
-    return { files, segments, mediaItems };
+
+    return {
+      files,
+      segments,
+      mediaItems,
+      hasReferences: hasRefs,
+      contentForReferences: cleanText
+    };
   }
 
   const parsed = $derived(parseContent(content));
@@ -118,7 +141,14 @@
           <MediaDisplay items={parsed.mediaItems} layout={parsed.mediaItems.length === 1 ? 'single' : 'grid'} {basePath} />
         </div>
       {/if}
-      {#if parsed.segments.length > 0}
+      {#if parsed.hasReferences}
+        <!-- Use the new reference display for messages with blockquote references -->
+        <UserReferenceDisplay
+          content={parsed.contentForReferences}
+          {basePath}
+          {onPreview}
+        />
+      {:else if parsed.segments.length > 0}
         <div class="break-words whitespace-pre-wrap">{#each parsed.segments as segment}{#if segment.type === 'mention'}<button onclick={() => onPreview?.(segment.path || segment.value)} class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-sm font-medium hover:bg-blue-200 transition-colors"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>{segment.value}</button>{:else}{segment.value}{/if}{/each}</div>
       {/if}
     </div>

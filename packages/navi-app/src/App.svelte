@@ -344,6 +344,26 @@
             message,
           });
           break;
+        case "open_terminal":
+          const { terminalId: openTermId, projectId: openTermProjId, cwd: openTermCwd, command: openTermCmd } = command.payload as { terminalId?: string; projectId?: string; cwd?: string; command?: string };
+          // Open the terminal panel
+          showTerminal = true;
+          rightPanelMode = "terminal";
+          // If a specific project was provided and we're not in it, navigate to it
+          if (openTermProjId && openTermProjId !== $session.projectId) {
+            const foundProject = $projects.find(p => p.id === openTermProjId);
+            if (foundProject) selectProject(foundProject);
+          }
+          // Add a new terminal tab for this project
+          const targetProjId = openTermProjId || $session.projectId;
+          if (targetProjId) {
+            projectWorkspaces.addTerminalTab(targetProjId, {
+              terminalId: openTermId,
+              cwd: openTermCwd || selectedProject?.path,
+              initialCommand: openTermCmd,
+            });
+          }
+          break;
       }
     },
     scrollToBottom,
@@ -427,7 +447,7 @@
   let showGitPanel = $state(false);
   let showTerminal = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes">("preview");
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
   let projectFileIndex = $state<Map<string, string>>(new Map());

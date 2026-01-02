@@ -209,37 +209,28 @@ export function createMessageHandler(config: MessageHandlerConfig) {
 
           const isContextOverflow =
             errorText.toLowerCase().includes("prompt is too long") ||
+            errorText.toLowerCase().includes("request too large") ||
             errorText.toLowerCase().includes("context length") ||
             errorText.toLowerCase().includes("maximum context") ||
             errorText.toLowerCase().includes("token limit") ||
-            lastAssistantContent.includes("prompt is too long");
+            errorText.toLowerCase().includes("exceeds the model") ||
+            lastAssistantContent.includes("prompt is too long") ||
+            lastAssistantContent.includes("request too large");
 
           if (isContextOverflow) {
-            // Find the last user message to rollback to
-            const lastUserMsgIndex = lastMessages.findLastIndex(m => m.role === "user");
+            // Add a friendly system message explaining the situation
+            sessionMessages.addMessage(uiSessionId, {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: "⚠️ **Context limit reached** — The conversation is too long. You can:\n• Type `/compact` to summarize and continue\n• Start a new chat\n• Ask a shorter question",
+              timestamp: new Date(),
+            });
 
-            if (lastUserMsgIndex >= 0) {
-              // Rollback: keep messages up to and including the last user message
-              const rolledBackMessages = lastMessages.slice(0, lastUserMsgIndex + 1);
+            // Signal context overflow (don't auto-retry - let user decide)
+            callbacks.onContextOverflow?.(uiSessionId, false);
 
-              // Add a system message explaining what happened
-              rolledBackMessages.push({
-                id: crypto.randomUUID(),
-                role: "system",
-                content: "⚠️ Context limit reached - the previous response was too long. Retrying with a more concise approach...",
-                timestamp: new Date(),
-              });
-
-              sessionMessages.setMessages(uiSessionId, rolledBackMessages);
-
-              // Signal that we should auto-retry
-              callbacks.onContextOverflow?.(uiSessionId, true);
-            } else {
-              // No user message to rollback to, just show the modal
-              callbacks.onContextOverflow?.(uiSessionId, false);
-            }
-
-            // Don't call onError or onStreamingEnd - let the retry handle it
+            // IMPORTANT: End streaming state so chat isn't stuck
+            callbacks.onStreamingEnd?.(uiSessionId, "error");
             return;
           } else {
             // Regular error handling

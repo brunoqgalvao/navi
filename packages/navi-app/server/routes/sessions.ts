@@ -261,6 +261,125 @@ export async function handleSessionRoutes(
     }
   }
 
+  // Inspect endpoint for lazy-loading chat references
+  // Returns metadata by default, or full content based on scope parameter
+  const inspectMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/inspect$/);
+  if (inspectMatch && method === "GET") {
+    const sessionId = inspectMatch[1];
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    const scope = url.searchParams.get("scope") || "metadata";
+    const lastN = parseInt(url.searchParams.get("last") || "5", 10);
+    const searchQuery = url.searchParams.get("search");
+
+    const project = projects.get(session.project_id);
+    const allMessages = messages.listBySession(sessionId);
+
+    // Base metadata always included
+    const metadata = {
+      id: session.id,
+      title: session.title,
+      projectId: session.project_id,
+      projectName: project?.name || null,
+      projectPath: project?.path || null,
+      messageCount: allMessages.length,
+      createdAt: session.created_at,
+      updatedAt: session.updated_at,
+      model: session.model,
+      totalCostUsd: session.total_cost_usd,
+    };
+
+    if (scope === "metadata") {
+      return json({ metadata });
+    }
+
+    // Helper to extract text from message content
+    const extractText = (content: string): string => {
+      try {
+        const parsed = JSON.parse(content);
+        if (typeof parsed === "string") return parsed;
+        if (Array.isArray(parsed)) {
+          return parsed
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join("\n");
+        }
+        return "";
+      } catch {
+        return content;
+      }
+    };
+
+    if (scope === "summary") {
+      // Return first user message + last assistant message as summary
+      const firstUser = allMessages.find(m => m.role === "user");
+      const lastAssistant = [...allMessages].reverse().find(m => m.role === "assistant");
+
+      return json({
+        metadata,
+        summary: {
+          firstUserMessage: firstUser ? extractText(firstUser.content).slice(0, 500) : null,
+          lastAssistantMessage: lastAssistant ? extractText(lastAssistant.content).slice(0, 500) : null,
+        },
+      });
+    }
+
+    if (scope === "last") {
+      // Return last N messages
+      const recentMessages = allMessages.slice(-lastN).map(m => ({
+        id: m.id,
+        role: m.role,
+        text: extractText(m.content),
+        timestamp: m.timestamp,
+      }));
+
+      return json({
+        metadata,
+        messages: recentMessages,
+      });
+    }
+
+    if (scope === "search" && searchQuery) {
+      // Search within this chat's messages
+      const query = searchQuery.toLowerCase();
+      const matches = allMessages
+        .filter(m => extractText(m.content).toLowerCase().includes(query))
+        .slice(0, 10)
+        .map(m => ({
+          id: m.id,
+          role: m.role,
+          text: extractText(m.content).slice(0, 300),
+          timestamp: m.timestamp,
+        }));
+
+      return json({
+        metadata,
+        searchQuery,
+        matches,
+      });
+    }
+
+    if (scope === "full") {
+      // Return full transcript
+      const fullMessages = allMessages.map(m => ({
+        id: m.id,
+        role: m.role,
+        text: extractText(m.content),
+        timestamp: m.timestamp,
+      }));
+
+      return json({
+        metadata,
+        messages: fullMessages,
+      });
+    }
+
+    return json({ error: "Invalid scope. Use: metadata, summary, last, search, full" }, 400);
+  }
+
   const exportMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/export$/);
   if (exportMatch && method === "GET") {
     const sessionId = exportMatch[1];

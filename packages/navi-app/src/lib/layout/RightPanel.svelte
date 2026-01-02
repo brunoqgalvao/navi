@@ -14,8 +14,9 @@
   import Preview from "../Preview.svelte";
   import { GitPanel } from "../features/git";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
+  import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes";
 
   interface Props {
     mode: PanelMode;
@@ -154,6 +155,13 @@
       <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
       Terminal
     </button>
+    <button
+      onclick={() => onModeChange("processes")}
+      class={`px-3 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${mode === 'processes' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
+    >
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+      Processes
+    </button>
     <div class="flex-1"></div>
     <button onclick={onClose} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Close">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -223,7 +231,7 @@
       </div>
     {:else if mode === "git" && projectPath}
       <!-- Git panel - full width -->
-      <div class="flex-1 flex flex-col w-full">
+      <div class="flex-1 min-h-0 flex flex-col w-full overflow-hidden">
         <GitPanel rootPath={projectPath} />
       </div>
     {:else if mode === "terminal"}
@@ -235,6 +243,17 @@
           {projectPath}
           onTerminalRef={handleTerminalRef}
           onTerminalSendToClaude={onTerminalSendToClaude}
+        />
+      </div>
+    {:else if mode === "processes"}
+      <!-- Processes panel - full width -->
+      <div class="flex-1 flex flex-col w-full overflow-hidden">
+        <BackgroundProcessPanel
+          {projectId}
+          onOpenPreview={(url) => {
+            onBrowserUrlChange(url);
+            onModeChange("browser");
+          }}
         />
       </div>
     {/if}

@@ -21,6 +21,8 @@ import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal"
 import { handleProxyRoutes } from "./routes/proxy";
 import { handleProcessRoutes } from "./routes/processes";
 import { handleAnalyticsRoutes } from "./routes/analytics";
+import { handleDeployRoutes } from "./routes/deploy";
+import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -212,6 +214,14 @@ const server = Bun.serve({
     response = await handleAnalyticsRoutes(url, method);
     if (response) return response;
 
+    // Deploy routes (Navi Cloud)
+    response = await handleDeployRoutes(url, method, req);
+    if (response) return response;
+
+    // Background process routes
+    response = await handleBackgroundProcessRoutes(url, method, req);
+    if (response) return response;
+
     // Ephemeral chat
     if (url.pathname === "/api/ephemeral" && method === "POST") {
       return handleEphemeralChat(req);
@@ -222,6 +232,14 @@ const server = Bun.serve({
   },
 
   websocket: createWebSocketHandlers(),
+});
+
+// Set up background process event broadcasting
+addProcessEventListener((event: ProcessEvent) => {
+  broadcastToClients({
+    type: "background_process_event",
+    ...event,
+  });
 });
 
 console.log(`Claude Code UI Server running on http://localhost:${PORT}`);

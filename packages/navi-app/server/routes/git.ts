@@ -1,9 +1,26 @@
 import { json } from "../utils/response";
 
+// Check if git is installed and available
+async function isGitInstalled(): Promise<boolean> {
+  try {
+    const { execSync } = await import("child_process");
+    execSync("git --version", { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function handleGitRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
+  // Check git installation for status endpoint (initial load)
   if (url.pathname === "/api/git/status") {
     const repoPath = url.searchParams.get("path") || process.cwd();
     try {
+      // First check if git is even installed
+      if (!(await isGitInstalled())) {
+        return json({ gitNotInstalled: true, isGitRepo: false });
+      }
+
       const { execSync } = await import("child_process");
 
       try {
@@ -434,6 +451,107 @@ IMPORTANT: Output ONLY the list of commit lines, one per line. No explanations, 
     } catch (e: any) {
       console.error("Generate commit message error:", e);
       return json({ error: e.message || "Failed to generate commit message" }, 500);
+    }
+  }
+
+  // Get remotes
+  if (url.pathname === "/api/git/remotes") {
+    const repoPath = url.searchParams.get("path") || process.cwd();
+    try {
+      const { execSync } = await import("child_process");
+
+      // Check if it's a git repo first
+      try {
+        execSync("git rev-parse --git-dir", { cwd: repoPath, stdio: "pipe" });
+      } catch {
+        return json({ remotes: [] });
+      }
+
+      const output = execSync("git remote -v", { cwd: repoPath, encoding: "utf-8" });
+      const remotes: { name: string; url: string; type: "fetch" | "push" }[] = [];
+      const seen = new Set<string>();
+
+      for (const line of output.split("\n").filter(Boolean)) {
+        const match = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
+        if (match) {
+          const key = `${match[1]}-${match[3]}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            remotes.push({
+              name: match[1],
+              url: match[2],
+              type: match[3] as "fetch" | "push",
+            });
+          }
+        }
+      }
+
+      return json({ remotes });
+    } catch (e) {
+      console.error("Git remotes error:", e);
+      return json({ error: "Failed to get remotes" }, 500);
+    }
+  }
+
+  // Add remote
+  if (url.pathname === "/api/git/remote/add" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath, name, url: remoteUrl } = body;
+    if (!name || !remoteUrl) {
+      return json({ error: "name and url required" }, 400);
+    }
+    try {
+      const { execSync } = await import("child_process");
+      execSync(`git remote add "${name}" "${remoteUrl}"`, { cwd: repoPath || process.cwd() });
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Git remote add error:", e);
+      return json({ error: e.message || "Failed to add remote" }, 500);
+    }
+  }
+
+  // Push
+  if (url.pathname === "/api/git/push" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath, remote = "origin", branch, setUpstream = false } = body;
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      // Get current branch if not specified
+      const targetBranch = branch || execSync("git branch --show-current", { cwd, encoding: "utf-8" }).trim();
+
+      let cmd = `git push ${remote} ${targetBranch}`;
+      if (setUpstream) {
+        cmd = `git push -u ${remote} ${targetBranch}`;
+      }
+
+      execSync(cmd, { cwd, encoding: "utf-8", stdio: "pipe" });
+      return json({ success: true, branch: targetBranch });
+    } catch (e: any) {
+      console.error("Git push error:", e);
+      const errorMsg = e.stderr?.toString() || e.message || "Failed to push";
+      return json({ error: errorMsg }, 500);
+    }
+  }
+
+  // Pull
+  if (url.pathname === "/api/git/pull" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath, remote = "origin", branch } = body;
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      // Get current branch if not specified
+      const targetBranch = branch || execSync("git branch --show-current", { cwd, encoding: "utf-8" }).trim();
+
+      execSync(`git pull ${remote} ${targetBranch}`, { cwd, encoding: "utf-8", stdio: "pipe" });
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Git pull error:", e);
+      const errorMsg = e.stderr?.toString() || e.message || "Failed to pull";
+      return json({ error: errorMsg }, 500);
     }
   }
 

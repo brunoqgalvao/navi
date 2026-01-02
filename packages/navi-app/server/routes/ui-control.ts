@@ -65,5 +65,22 @@ export async function handleUiControlRoutes(
     return json({ success: true });
   }
 
+  if (url.pathname === "/api/ui/terminal" && method === "POST") {
+    let body;
+    try {
+      const text = await req.text();
+      body = JSON.parse(text);
+    } catch (e) {
+      return json({ error: "Invalid JSON body", details: String(e) }, 400);
+    }
+    const { terminalId, projectId, cwd, command } = body;
+    broadcastToClients({
+      type: "ui_command",
+      command: "open_terminal",
+      payload: { terminalId, projectId, cwd, command },
+    });
+    return json({ success: true, terminalId, projectId });
+  }
+
   return null;
 }

@@ -10,3 +10,7 @@ export function json(data: unknown, status = 200) {
     headers: { "Content-Type": "application/json", ...corsHeaders },
   });
 }
+
+export function error(message: string, status = 500) {
+  return json({ error: message }, status);
+}
