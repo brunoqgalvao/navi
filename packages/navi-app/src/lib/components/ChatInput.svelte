@@ -280,8 +280,8 @@
     const cursorPos = target.selectionStart;
     const textBeforeCursor = value.slice(0, cursorPos);
 
-    // Check for @chat mention
-    const chatMatch = textBeforeCursor.match(/@chat([^\s@]*)$/i);
+    // Check for @chat mention (must be at start or preceded by whitespace, not part of email)
+    const chatMatch = textBeforeCursor.match(/(?:^|[\s])@chat([^\s@]*)$/i);
     if (chatMatch) {
       chatPickerQuery = chatMatch[1];
       chatPickerIndex = 0;
@@ -296,8 +296,8 @@
       return;
     }
 
-    // Check for @terminal mention
-    const terminalMatch = textBeforeCursor.match(/@terminal([^\s@]*)$/i);
+    // Check for @terminal mention (must be at start or preceded by whitespace, not part of email)
+    const terminalMatch = textBeforeCursor.match(/(?:^|[\s])@terminal([^\s@]*)$/i);
     if (terminalMatch) {
       terminalPickerQuery = terminalMatch[1];
       terminalPickerIndex = 0;
@@ -312,8 +312,8 @@
       return;
     }
 
-    // Check for regular @ mention (files + special options)
-    const atMatch = textBeforeCursor.match(/@([^\s@]*)$/);
+    // Check for regular @ mention (files + special options) - must be at start or preceded by whitespace
+    const atMatch = textBeforeCursor.match(/(?:^|[\s])@([^\s@]*)$/);
     if (atMatch) {
       const query = atMatch[1].toLowerCase();
       // Show file picker with special options for terminal/chat
@@ -539,8 +539,8 @@
 
   function parseHighlights(text: string): HighlightSegment[] {
     const segments: HighlightSegment[] = [];
-    // Match @chat:"..." @terminal:"..." and @path/to/file
-    const mentionRegex = /(@chat:"[^"]*"|@terminal:"[^"]*"|@[\w./\-]+)/g;
+    // Match @chat:"..." @terminal:"..." and @path/to/file - must be at start or preceded by whitespace (not email)
+    const mentionRegex = /(?:^|(?<=\s))(@chat:"[^"]*"|@terminal:"[^"]*"|@[\w./\-]+)/g;
     let lastIndex = 0;
     let match;
 
