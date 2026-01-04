@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:3001/api";
+export const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3002/api";
 
 export interface WorkspaceFolder {
   id: string;
@@ -431,6 +431,54 @@ export const api = {
     },
     reindex: () => request<{ success: boolean; stats: { total: number; byType: Array<{ entity_type: string; count: number }> } }>("/search/reindex", { method: "POST" }),
     stats: () => request<{ total: number; byType: Array<{ entity_type: string; count: number }> }>("/search/stats"),
+  },
+
+  git: {
+    status: (projectPath: string) =>
+      request<{
+        branch: string;
+        branches: string[];
+        staged: string[];
+        unstaged: string[];
+        untracked: string[];
+      }>(`/git/status?path=${encodeURIComponent(projectPath)}`),
+    diff: (projectPath: string, file?: string) => {
+      const params = new URLSearchParams({ path: projectPath });
+      if (file) params.set("file", file);
+      return request<{
+        file: string;
+        additions: number;
+        deletions: number;
+        diff: string;
+      }>(`/git/diff?${params}`);
+    },
+    history: (projectPath: string, limit: number = 50) =>
+      request<Array<{
+        sha: string;
+        message: string;
+        author: string;
+        date: string;
+      }>>(`/git/history?path=${encodeURIComponent(projectPath)}&limit=${limit}`),
+    stage: (projectPath: string, files: string[]) =>
+      request<{ success: boolean }>("/git/stage", {
+        method: "POST",
+        body: JSON.stringify({ path: projectPath, files }),
+      }),
+    unstage: (projectPath: string, files: string[]) =>
+      request<{ success: boolean }>("/git/unstage", {
+        method: "POST",
+        body: JSON.stringify({ path: projectPath, files }),
+      }),
+    commit: (projectPath: string, message: string) =>
+      request<{ success: boolean; sha: string }>("/git/commit", {
+        method: "POST",
+        body: JSON.stringify({ path: projectPath, message }),
+      }),
+    checkout: (projectPath: string, branch: string) =>
+      request<{ success: boolean }>("/git/checkout", {
+        method: "POST",
+        body: JSON.stringify({ path: projectPath, branch }),
+      }),
   },
 };
 

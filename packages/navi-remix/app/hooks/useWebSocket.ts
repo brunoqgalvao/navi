@@ -11,7 +11,7 @@ interface UseWebSocketOptions {
 
 export function useWebSocket(options: UseWebSocketOptions = {}) {
   const {
-    url = "ws://localhost:3001/ws",
+    url = import.meta.env.VITE_WS_URL || "ws://localhost:3002/ws",
     onMessage,
     onConnect,
     onDisconnect,
@@ -23,6 +23,18 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const [error, setError] = useState<string | null>(null);
   const listenersRef = useRef<((msg: ClaudeMessage) => void)[]>([]);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Use refs for callbacks to avoid reconnection on callback change
+  const onConnectRef = useRef(onConnect);
+  const onDisconnectRef = useRef(onDisconnect);
+
+  useEffect(() => {
+    onConnectRef.current = onConnect;
+  }, [onConnect]);
+
+  useEffect(() => {
+    onDisconnectRef.current = onDisconnect;
+  }, [onDisconnect]);
 
   // Add onMessage to listeners
   useEffect(() => {
@@ -41,6 +53,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       return;
     }
 
+    // Also check if we're already connecting
+    if (wsRef.current?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
     try {
       const ws = new WebSocket(url);
       wsRef.current = ws;
@@ -49,7 +66,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         console.log("Connected to Claude server");
         setIsConnected(true);
         setError(null);
-        onConnect?.();
+        onConnectRef.current?.();
       };
 
       ws.onmessage = (event) => {
@@ -69,7 +86,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       ws.onclose = () => {
         console.log("Disconnected from Claude server");
         setIsConnected(false);
-        onDisconnect?.();
+        onDisconnectRef.current?.();
 
         // Auto-reconnect after 2 seconds
         reconnectTimeoutRef.current = setTimeout(() => {
@@ -82,7 +99,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       console.error("Failed to connect:", e);
       setError("Failed to connect");
     }
-  }, [url, onConnect, onDisconnect, autoConnect]);
+  }, [url, autoConnect]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {

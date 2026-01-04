@@ -11,6 +11,12 @@ import { useMessageStore } from "~/stores/messageStore";
 import { useStreamingStore } from "~/stores/streamingStore";
 import { useTodoStore } from "~/stores/todoStore";
 
+export interface ChildProcess {
+  pid: number;
+  command: string;
+  runtime: number;
+}
+
 export interface MessageHandlerCallbacks {
   onSessionInit?: (
     sessionId: string,
@@ -37,6 +43,7 @@ export interface MessageHandlerCallbacks {
     elapsedSeconds: number
   ) => void;
   onUICommand?: (command: { command: string; payload: Record<string, unknown> }) => void;
+  onChildProcesses?: (sessionId: string, processes: ChildProcess[]) => void;
   scrollToBottom?: () => void;
 }
 
@@ -247,6 +254,13 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
               timestamp: new Date(),
             });
             cbs.onStreamingEnd?.(uiSessionId);
+          }
+          break;
+
+        case "child_processes":
+          if (uiSessionId) {
+            const processes = (msg as any).processes as ChildProcess[];
+            cbs.onChildProcesses?.(uiSessionId, processes);
           }
           break;
 

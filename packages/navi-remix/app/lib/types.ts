@@ -61,3 +61,6 @@ export interface TodoItem {
   status: "pending" | "in_progress" | "completed";
   activeForm?: string;
 }
+
+// Alias for use in components
+export type Todo = TodoItem;

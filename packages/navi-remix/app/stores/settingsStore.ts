@@ -1,10 +1,21 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export interface Model {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 interface SettingsState {
   advancedMode: boolean;
   debugMode: boolean;
   onboardingComplete: boolean;
+  showArchivedItems: boolean;
+
+  // Models
+  availableModels: Model[];
+  selectedModel: string;
 
   // Actions
   toggleAdvancedMode: () => void;
@@ -13,6 +24,9 @@ interface SettingsState {
   setDebugMode: (value: boolean) => void;
   completeOnboarding: () => void;
   resetOnboarding: () => void;
+  setShowArchivedItems: (show: boolean) => void;
+  setAvailableModels: (models: Model[]) => void;
+  setSelectedModel: (model: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -21,6 +35,9 @@ export const useSettingsStore = create<SettingsState>()(
       advancedMode: false,
       debugMode: false,
       onboardingComplete: false,
+      showArchivedItems: false,
+      availableModels: [],
+      selectedModel: "claude-sonnet-4-20250514",
 
       toggleAdvancedMode: () =>
         set((state) => ({ advancedMode: !state.advancedMode })),
@@ -35,6 +52,12 @@ export const useSettingsStore = create<SettingsState>()(
       completeOnboarding: () => set({ onboardingComplete: true }),
 
       resetOnboarding: () => set({ onboardingComplete: false }),
+
+      setShowArchivedItems: (show) => set({ showArchivedItems: show }),
+
+      setAvailableModels: (models) => set({ availableModels: models }),
+
+      setSelectedModel: (model) => set({ selectedModel: model }),
     }),
     {
       name: "navi-settings",

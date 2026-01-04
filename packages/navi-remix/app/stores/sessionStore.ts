@@ -4,45 +4,67 @@ import { setHash } from "~/lib/router";
 import type { CurrentSessionState } from "~/lib/types";
 
 interface SessionState {
-  sessions: Session[];
-  setSessions: (sessions: Session[]) => void;
-  addSession: (session: Session) => void;
-  removeSession: (id: string) => void;
-  updateSession: (session: Session) => void;
-  getSession: (id: string) => Session | undefined;
+  sessions: Map<string, Session[]>; // Map<projectId, sessions[]>
+  setSessions: (projectId: string, sessions: Session[]) => void;
+  addSession: (projectId: string, session: Session) => void;
+  removeSession: (projectId: string, sessionId: string) => void;
+  updateSession: (projectId: string, session: Session) => void;
+  getSession: (projectId: string, sessionId: string) => Session | undefined;
   getProjectSessions: (projectId: string) => Session[];
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
-  sessions: [],
+  sessions: new Map(),
 
-  setSessions: (sessions) => set({ sessions }),
+  setSessions: (projectId, sessions) =>
+    set((state) => {
+      const newMap = new Map(state.sessions);
+      newMap.set(projectId, sessions);
+      return { sessions: newMap };
+    }),
 
-  addSession: (session) =>
-    set((state) => ({
-      sessions: [session, ...state.sessions],
-    })),
+  addSession: (projectId, session) =>
+    set((state) => {
+      const newMap = new Map(state.sessions);
+      const projectSessions = newMap.get(projectId) || [];
+      newMap.set(projectId, [session, ...projectSessions]);
+      return { sessions: newMap };
+    }),
 
-  removeSession: (id) =>
-    set((state) => ({
-      sessions: state.sessions.filter((s) => s.id !== id),
-    })),
+  removeSession: (projectId, sessionId) =>
+    set((state) => {
+      const newMap = new Map(state.sessions);
+      const projectSessions = newMap.get(projectId) || [];
+      newMap.set(
+        projectId,
+        projectSessions.filter((s) => s.id !== sessionId)
+      );
+      return { sessions: newMap };
+    }),
 
-  updateSession: (session) =>
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === session.id ? session : s
-      ),
-    })),
+  updateSession: (projectId, session) =>
+    set((state) => {
+      const newMap = new Map(state.sessions);
+      const projectSessions = newMap.get(projectId) || [];
+      newMap.set(
+        projectId,
+        projectSessions.map((s) => (s.id === session.id ? session : s))
+      );
+      return { sessions: newMap };
+    }),
 
-  getSession: (id) => get().sessions.find((s) => s.id === id),
+  getSession: (projectId, sessionId) => {
+    const projectSessions = get().sessions.get(projectId) || [];
+    return projectSessions.find((s) => s.id === sessionId);
+  },
 
-  getProjectSessions: (projectId) =>
-    get().sessions.filter((s) => s.project_id === projectId),
+  getProjectSessions: (projectId) => get().sessions.get(projectId) || [],
 }));
 
 // Current session state (which project/session is active)
 interface CurrentSessionStore extends CurrentSessionState {
+  setProjectId: (projectId: string | null) => void;
+  setSessionId: (sessionId: string | null) => void;
   setProject: (projectId: string | null) => void;
   setSession: (sessionId: string | null, claudeSessionId?: string | null) => void;
   setClaudeSession: (claudeSessionId: string) => void;
@@ -69,6 +91,10 @@ const initialCurrentSession: CurrentSessionState = {
 
 export const useCurrentSessionStore = create<CurrentSessionStore>((set, get) => ({
   ...initialCurrentSession,
+
+  setProjectId: (projectId) => set({ projectId }),
+
+  setSessionId: (sessionId) => set({ sessionId }),
 
   setProject: (projectId) => {
     setHash({ projectId, sessionId: null });

@@ -11,6 +11,7 @@ export {
 } from "./settingsStore";
 export { useNotificationStore } from "./notificationStore";
 export { useTodoStore } from "./todoStore";
+export { useGitStore } from "./gitStore";
 
 // Re-export types
 export type { ChatMessage, ContentBlock, StreamingState } from "~/lib/types";
