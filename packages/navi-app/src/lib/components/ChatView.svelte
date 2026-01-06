@@ -13,6 +13,7 @@
   import { sessionMessages, loadingSessions, sessionTodos, type ChatMessage } from "../stores";
   import type { ContentBlock } from "../claude";
   import BackgroundProcessBadge from "./BackgroundProcessBadge.svelte";
+  import EmptyStateWelcome from "./EmptyStateWelcome.svelte";
 
   interface Props {
     sessionId: string | null;
@@ -61,6 +62,7 @@
     onStartNewChat?: () => void;
     // Background processes
     onOpenProcesses?: () => void;
+    onSuggestionClick?: (prompt: string) => void;
   }
 
   let {
@@ -95,6 +97,7 @@
     onSDKCompact,
     onStartNewChat,
     onOpenProcesses,
+    onSuggestionClick,
   }: Props = $props();
 
   const usagePercent = $derived(
@@ -193,17 +196,7 @@
     </div>
 
     {#if messages.length === 0 && !isStreaming && emptyState !== "none"}
-      <div class="flex flex-col items-center justify-center text-gray-400 space-y-6 min-h-[40vh] animate-in fade-in duration-500">
-        <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center shadow-sm">
-          <svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
-          </svg>
-        </div>
-        <div class="text-center space-y-2">
-          <p class="text-xl font-medium text-gray-600">What would you like to build?</p>
-          <p class="text-sm text-gray-400">Ask a question, describe a feature, or paste some code</p>
-        </div>
-      </div>
+      <EmptyStateWelcome {onSuggestionClick} />
     {/if}
 
     {#each getVisibleMessages() as msg, idx (msg.id)}
