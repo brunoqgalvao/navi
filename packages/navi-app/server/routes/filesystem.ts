@@ -249,20 +249,35 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
         // CLAUDE.md doesn't exist in template, that's okay
       }
 
-      // Copy .claude directory recursively if it exists
-      const claudeDirSrc = path.join(templatePath, ".claude");
-      const claudeDirDest = path.join(targetPath, ".claude");
+      // Copy .claude/agents directory if it exists (but NOT skills - those come from library)
+      const agentsDirSrc = path.join(templatePath, ".claude", "agents");
+      const agentsDirDest = path.join(targetPath, ".claude", "agents");
       try {
-        await fs.access(claudeDirSrc);
-        await copyDirRecursive(claudeDirSrc, claudeDirDest);
+        await fs.access(agentsDirSrc);
+        await fs.mkdir(path.join(targetPath, ".claude"), { recursive: true });
+        await copyDirRecursive(agentsDirSrc, agentsDirDest);
       } catch {
-        // .claude dir doesn't exist in template, that's okay
+        // agents dir doesn't exist in template, that's okay
+      }
+
+      // Read skill slugs from template (we'll return these so frontend can enable them)
+      const skillsDirSrc = path.join(templatePath, ".claude", "skills");
+      let skillSlugs: string[] = [];
+      try {
+        await fs.access(skillsDirSrc);
+        const skillEntries = await fs.readdir(skillsDirSrc, { withFileTypes: true });
+        skillSlugs = skillEntries
+          .filter(e => e.isDirectory())
+          .map(e => e.name);
+      } catch {
+        // skills dir doesn't exist in template
       }
 
       return json({
         success: true,
         templateId,
         targetPath,
+        skillSlugs, // Frontend should enable these from the library
         message: `Template "${templateId}" applied successfully`
       });
     } catch (e: any) {

@@ -555,5 +555,192 @@ IMPORTANT: Output ONLY the list of commit lines, one per line. No explanations, 
     }
   }
 
+  // Create branch
+  if (url.pathname === "/api/git/branch/create" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath, name, checkout = true, startPoint } = body;
+    if (!name) {
+      return json({ error: "branch name required" }, 400);
+    }
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      // Validate branch name
+      const safeName = name.replace(/[^a-zA-Z0-9\-_\/]/g, "");
+      if (safeName !== name) {
+        return json({ error: "Invalid branch name. Use only letters, numbers, hyphens, underscores, and slashes." }, 400);
+      }
+
+      let cmd = checkout ? `git checkout -b "${safeName}"` : `git branch "${safeName}"`;
+      if (startPoint) {
+        cmd += ` "${startPoint}"`;
+      }
+
+      execSync(cmd, { cwd, encoding: "utf-8", stdio: "pipe" });
+      return json({ success: true, branch: safeName });
+    } catch (e: any) {
+      console.error("Git create branch error:", e);
+      const errorMsg = e.stderr?.toString() || e.message || "Failed to create branch";
+      return json({ error: errorMsg }, 500);
+    }
+  }
+
+  // Delete branch
+  if (url.pathname === "/api/git/branch/delete" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath, name, force = false } = body;
+    if (!name) {
+      return json({ error: "branch name required" }, 400);
+    }
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      // Prevent deleting current branch
+      const currentBranch = execSync("git branch --show-current", { cwd, encoding: "utf-8" }).trim();
+      if (currentBranch === name) {
+        return json({ error: "Cannot delete the currently checked out branch" }, 400);
+      }
+
+      const deleteFlag = force ? "-D" : "-d";
+      execSync(`git branch ${deleteFlag} "${name}"`, { cwd, encoding: "utf-8", stdio: "pipe" });
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Git delete branch error:", e);
+      const errorMsg = e.stderr?.toString() || e.message || "Failed to delete branch";
+      // Check if it's an unmerged branch error
+      if (errorMsg.includes("not fully merged")) {
+        return json({ error: "Branch is not fully merged. Use force delete to remove anyway.", needsForce: true }, 400);
+      }
+      return json({ error: errorMsg }, 500);
+    }
+  }
+
+  // Rename branch
+  if (url.pathname === "/api/git/branch/rename" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath, oldName, newName } = body;
+    if (!oldName || !newName) {
+      return json({ error: "oldName and newName required" }, 400);
+    }
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      // Validate new branch name
+      const safeName = newName.replace(/[^a-zA-Z0-9\-_\/]/g, "");
+      if (safeName !== newName) {
+        return json({ error: "Invalid branch name. Use only letters, numbers, hyphens, underscores, and slashes." }, 400);
+      }
+
+      execSync(`git branch -m "${oldName}" "${safeName}"`, { cwd, encoding: "utf-8", stdio: "pipe" });
+      return json({ success: true, branch: safeName });
+    } catch (e: any) {
+      console.error("Git rename branch error:", e);
+      const errorMsg = e.stderr?.toString() || e.message || "Failed to rename branch";
+      return json({ error: errorMsg }, 500);
+    }
+  }
+
+  // Merge branch
+  if (url.pathname === "/api/git/merge" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath, branch, noFf = false, squash = false } = body;
+    if (!branch) {
+      return json({ error: "branch name required" }, 400);
+    }
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      let cmd = `git merge "${branch}"`;
+      if (noFf) cmd += " --no-ff";
+      if (squash) cmd += " --squash";
+
+      const output = execSync(cmd, { cwd, encoding: "utf-8", stdio: "pipe" });
+
+      // Check if there were conflicts
+      const statusOutput = execSync("git status --porcelain", { cwd, encoding: "utf-8" });
+      const hasConflicts = statusOutput.split("\n").some(line => line.startsWith("UU") || line.startsWith("AA") || line.startsWith("DD"));
+
+      return json({ success: true, output, hasConflicts });
+    } catch (e: any) {
+      console.error("Git merge error:", e);
+      const errorMsg = e.stderr?.toString() || e.message || "Failed to merge";
+
+      // Check if it's a merge conflict
+      if (errorMsg.includes("CONFLICT") || errorMsg.includes("Automatic merge failed")) {
+        return json({ error: "Merge conflicts detected. Please resolve conflicts manually.", hasConflicts: true }, 409);
+      }
+      return json({ error: errorMsg }, 500);
+    }
+  }
+
+  // Abort merge
+  if (url.pathname === "/api/git/merge/abort" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath } = body;
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      execSync("git merge --abort", { cwd, encoding: "utf-8", stdio: "pipe" });
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Git merge abort error:", e);
+      const errorMsg = e.stderr?.toString() || e.message || "Failed to abort merge";
+      return json({ error: errorMsg }, 500);
+    }
+  }
+
+  // Fetch from remote
+  if (url.pathname === "/api/git/fetch" && method === "POST") {
+    const body = await req.json();
+    const { path: repoPath, remote = "origin", prune = false, all = false } = body;
+    try {
+      const { execSync } = await import("child_process");
+      const cwd = repoPath || process.cwd();
+
+      let cmd = all ? "git fetch --all" : `git fetch ${remote}`;
+      if (prune) cmd += " --prune";
+
+      execSync(cmd, { cwd, encoding: "utf-8", stdio: "pipe" });
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Git fetch error:", e);
+      const errorMsg = e.stderr?.toString() || e.message || "Failed to fetch";
+      return json({ error: errorMsg }, 500);
+    }
+  }
+
+  // Get merge status (check if in merge state)
+  if (url.pathname === "/api/git/merge/status") {
+    const repoPath = url.searchParams.get("path") || process.cwd();
+    try {
+      const { execSync } = await import("child_process");
+      const fs = await import("fs");
+      const path = await import("path");
+
+      // Check if .git/MERGE_HEAD exists
+      const gitDir = execSync("git rev-parse --git-dir", { cwd: repoPath, encoding: "utf-8" }).trim();
+      const mergeHeadPath = path.join(repoPath, gitDir, "MERGE_HEAD");
+      const isMerging = fs.existsSync(mergeHeadPath);
+
+      let conflictedFiles: string[] = [];
+      if (isMerging) {
+        const statusOutput = execSync("git status --porcelain", { cwd: repoPath, encoding: "utf-8" });
+        conflictedFiles = statusOutput.split("\n")
+          .filter(line => line.startsWith("UU") || line.startsWith("AA") || line.startsWith("DD") || line.startsWith("AU") || line.startsWith("UA"))
+          .map(line => line.slice(3));
+      }
+
+      return json({ isMerging, conflictedFiles });
+    } catch (e) {
+      console.error("Git merge status error:", e);
+      return json({ isMerging: false, conflictedFiles: [] });
+    }
+  }
+
   return null;
 }

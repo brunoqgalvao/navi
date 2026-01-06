@@ -1149,9 +1149,11 @@
       return;
     }
 
+    let skillSlugs: string[] = [];
     try {
-      // Apply the template
-      await api.fs.applyTemplate(templateId, fullPath);
+      // Apply the template (returns skill slugs to enable)
+      const result = await api.fs.applyTemplate(templateId, fullPath);
+      skillSlugs = result.skillSlugs || [];
     } catch (e: any) {
       console.error("Failed to apply template:", e);
       alert(`Failed to apply template: ${e.message}`);
@@ -1167,6 +1169,37 @@
       if (newProjectTargetFolderId) {
         await setProjectFolder(newProject.id, newProjectTargetFolderId);
       }
+
+      // Enable template skills for this project
+      console.log("[template] skillSlugs to enable:", skillSlugs);
+      if (skillSlugs.length > 0) {
+        try {
+          // Sync global skills first to ensure they're in the library
+          console.log("[template] syncing global skills...");
+          await skillsApi.syncGlobal();
+          // Get all skills to find IDs by slug
+          const allSkills = await skillsApi.list();
+          console.log("[template] all skills in library:", allSkills.map(s => s.slug));
+          for (const slug of skillSlugs) {
+            const skill = allSkills.find(s => s.slug === slug);
+            console.log(`[template] looking for skill "${slug}":`, skill ? `found (id: ${skill.id})` : "NOT FOUND");
+            if (skill) {
+              try {
+                console.log(`[template] enabling skill ${slug} for project ${newProject.id}...`);
+                await skillsApi.enableForProject(newProject.id, skill.id);
+                console.log(`[template] skill ${slug} enabled successfully`);
+              } catch (e) {
+                console.warn(`Failed to enable skill ${slug}:`, e);
+              }
+            } else {
+              console.warn(`Skill "${slug}" not found in library`);
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to enable template skills:", e);
+        }
+      }
+
       await loadProjects();
       selectProject(newProject);
       showNewProjectModal = false;

@@ -191,3 +191,112 @@ export async function pull(repoPath: string, remote = "origin", branch?: string)
   const data = await res.json();
   if (!data.success) throw new Error(data.error || "Failed to pull");
 }
+
+export async function createBranch(
+  repoPath: string,
+  name: string,
+  options: { checkout?: boolean; startPoint?: string } = {}
+): Promise<string> {
+  const res = await fetch(`${getGitApiBase()}/branch/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath, name, ...options }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to create branch");
+  return data.branch;
+}
+
+export async function deleteBranch(
+  repoPath: string,
+  name: string,
+  force = false
+): Promise<{ needsForce?: boolean }> {
+  const res = await fetch(`${getGitApiBase()}/branch/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath, name, force }),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    if (data.needsForce) {
+      return { needsForce: true };
+    }
+    throw new Error(data.error || "Failed to delete branch");
+  }
+  return {};
+}
+
+export async function renameBranch(
+  repoPath: string,
+  oldName: string,
+  newName: string
+): Promise<string> {
+  const res = await fetch(`${getGitApiBase()}/branch/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath, oldName, newName }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to rename branch");
+  return data.branch;
+}
+
+export interface MergeResult {
+  success: boolean;
+  output?: string;
+  hasConflicts?: boolean;
+  error?: string;
+}
+
+export async function mergeBranch(
+  repoPath: string,
+  branch: string,
+  options: { noFf?: boolean; squash?: boolean } = {}
+): Promise<MergeResult> {
+  const res = await fetch(`${getGitApiBase()}/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath, branch, ...options }),
+  });
+  const data = await res.json();
+  if (res.status === 409) {
+    return { success: false, hasConflicts: true, error: data.error };
+  }
+  if (!data.success) throw new Error(data.error || "Failed to merge");
+  return { success: true, output: data.output, hasConflicts: data.hasConflicts };
+}
+
+export async function abortMerge(repoPath: string): Promise<void> {
+  const res = await fetch(`${getGitApiBase()}/merge/abort`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to abort merge");
+}
+
+export interface MergeStatus {
+  isMerging: boolean;
+  conflictedFiles: string[];
+}
+
+export async function getMergeStatus(repoPath: string): Promise<MergeStatus> {
+  const res = await fetch(`${getGitApiBase()}/merge/status?path=${encodeURIComponent(repoPath)}`);
+  const data = await res.json();
+  return { isMerging: data.isMerging || false, conflictedFiles: data.conflictedFiles || [] };
+}
+
+export async function fetchRemote(
+  repoPath: string,
+  options: { remote?: string; prune?: boolean; all?: boolean } = {}
+): Promise<void> {
+  const res = await window.fetch(`${getGitApiBase()}/fetch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: repoPath, ...options }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to fetch");
+}
