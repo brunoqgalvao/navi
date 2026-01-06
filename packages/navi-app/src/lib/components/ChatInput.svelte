@@ -776,18 +776,6 @@
 
     <!-- Action buttons - positioned inside textarea area -->
     <div class="absolute right-2 bottom-2 flex items-center gap-1">
-      <!-- Until Done toggle -->
-      {#if onToggleUntilDone}
-        <button
-          onclick={onToggleUntilDone}
-          class="p-1.5 rounded-lg transition-all {untilDoneEnabled ? 'text-orange-500 bg-orange-50 hover:bg-orange-100' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}"
-          title={untilDoneEnabled ? "Until Done mode ON - will auto-continue until complete" : "Until Done mode OFF - click to enable"}
-        >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-          </svg>
-        </button>
-      {/if}
       <AudioRecorder
         bind:this={audioRecorderRef}
         onTranscript={(text) => { value = value ? value + " " + text : text; }}
