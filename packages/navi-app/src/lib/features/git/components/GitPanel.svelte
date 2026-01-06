@@ -34,6 +34,8 @@
   let showCommitModal = $state(false);
   let summarizing = $state(false);
   let changeSummary = $state<{ type: "semantic" | "file"; items: string[] } | null>(null);
+  let quickCommitting = $state(false);
+  let quickCommitError = $state("");
 
   // Remote state
   let remotes = $state<gitApi.GitRemote[]>([]);
@@ -304,6 +306,38 @@
       refresh();
     } catch (e) {
       console.error("Failed to stage all:", e);
+    }
+  }
+
+  async function handleQuickCommit() {
+    if (!status || quickCommitting) return;
+
+    quickCommitting = true;
+    quickCommitError = "";
+
+    try {
+      // Step 1: Stage all changes
+      await gitApi.stageAll(rootPath);
+
+      // Step 2: Generate commit message with AI
+      const message = await gitApi.generateCommitMessage(rootPath);
+
+      if (!message || !message.trim()) {
+        throw new Error("Failed to generate commit message");
+      }
+
+      // Step 3: Commit with the generated message
+      await gitApi.commit(rootPath, message);
+
+      // Refresh to show the new commit
+      refresh();
+    } catch (e) {
+      console.error("Quick commit failed:", e);
+      quickCommitError = e instanceof Error ? e.message : "Quick commit failed";
+      // Clear error after 5 seconds
+      setTimeout(() => quickCommitError = "", 5000);
+    } finally {
+      quickCommitting = false;
     }
   }
 
@@ -749,6 +783,14 @@
     {/if}
   </div>
 
+  <!-- Quick commit error -->
+  {#if quickCommitError}
+    <div class="px-3 py-2 bg-red-50 border-t border-red-100 text-xs text-red-600 flex items-center justify-between">
+      <span>{quickCommitError}</span>
+      <button onclick={() => quickCommitError = ""} class="text-red-400 hover:text-red-600">×</button>
+    </div>
+  {/if}
+
   <!-- Bottom Action Bar -->
   {#if status && status.isGitRepo && activeTab === "changes" && !showDiff}
     <div class="h-12 px-3 border-t border-gray-200 bg-gray-50 flex items-center gap-2 shrink-0">
@@ -761,6 +803,28 @@
         </button>
       {/if}
       <div class="flex-1"></div>
+      <!-- Quick Commit button - only show when there are changes -->
+      {#if totalChanges > 0}
+        <button
+          onclick={handleQuickCommit}
+          disabled={quickCommitting}
+          class="px-3 py-1.5 text-sm font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          title="Stage all, generate AI commit message, and commit"
+        >
+          {#if quickCommitting}
+            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <span>Committing...</span>
+          {:else}
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span>Quick Commit</span>
+          {/if}
+        </button>
+      {/if}
       <button
         onclick={() => showCommitModal = true}
         disabled={status.staged.length === 0}
