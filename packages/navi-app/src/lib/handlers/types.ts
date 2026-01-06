@@ -35,6 +35,19 @@ export interface AskUserQuestionData {
   questions: QuestionItem[];
 }
 
+export interface UntilDoneContinueData {
+  iteration: number;
+  maxIterations: number;
+  totalCost: number;
+  reason: string;
+}
+
+export interface UntilDoneCompleteData {
+  totalIterations: number;
+  totalCost: number;
+  reason: string;
+}
+
 export interface HandlerCallbacks {
   onSessionInit?: (sessionId: string, data: { model?: string; cwd?: string; tools?: string[]; skills?: string[] }) => void;
   onMessageUpdate?: (sessionId: string) => void;
@@ -50,6 +63,8 @@ export interface HandlerCallbacks {
   onUICommand?: (command: UICommand) => void;
   onCompactStart?: (sessionId: string) => void;
   onCompactEnd?: (sessionId: string, metadata?: CompactMetadata) => void;
+  onUntilDoneContinue?: (sessionId: string, data: UntilDoneContinueData) => void;
+  onUntilDoneComplete?: (sessionId: string, data: UntilDoneCompleteData) => void;
   scrollToBottom?: () => void;
   onNewContent?: () => void;
 }

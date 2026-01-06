@@ -1001,6 +1001,7 @@
     width: 100%;
     height: 100%;
     padding: 8px;
+    box-sizing: border-box;
     background: #1a1b26;
   }
 
@@ -1040,11 +1041,16 @@
   }
 
   :global(.terminal-container .xterm) {
-    height: 100%;
+    height: 100% !important;
+  }
+
+  :global(.terminal-container .xterm-screen) {
+    height: 100% !important;
   }
 
   :global(.terminal-container .xterm-viewport) {
     overflow-y: auto !important;
+    height: 100% !important;
   }
 
   :global(.terminal-container .xterm-viewport::-webkit-scrollbar) {

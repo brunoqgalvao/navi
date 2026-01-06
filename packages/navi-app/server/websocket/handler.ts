@@ -90,6 +90,94 @@ const pendingQuestions = new Map<string, { sessionId: string; payload: any }>();
 const sessionApprovedAll = new Set<string>();
 const connectedClients = new Set<any>();
 
+// Until Done mode tracking
+interface UntilDoneState {
+  enabled: boolean;
+  iteration: number;
+  maxIterations: number;
+  originalPrompt: string;
+  projectId: string;
+  model?: string;
+  totalCost: number;
+}
+const untilDoneSessions = new Map<string, UntilDoneState>();
+
+// Patterns that indicate work is incomplete
+const INCOMPLETE_PATTERNS = [
+  /\[ \]/i,                                    // Unchecked todo items
+  /TODO:/i,                                    // TODO comments
+  /I('ll| will) (continue|proceed|next|now)/i, // "I'll continue..."
+  /next,? I('ll| will| should)/i,              // "Next I'll..."
+  /let me (continue|proceed|finish)/i,         // "Let me continue..."
+  /remaining (tasks?|items?|steps?)/i,         // "Remaining tasks..."
+  /still need to/i,                            // "Still need to..."
+  /not yet (done|complete|finished)/i,         // "Not yet done..."
+  /in progress/i,                              // "In progress"
+  /working on/i,                               // "Working on..."
+  /incomplete/i,                               // "Incomplete"
+];
+
+// Patterns that indicate work is complete
+const COMPLETE_PATTERNS = [
+  /\ball (done|complete|finished|set)\b/i,     // "All done"
+  /task(s)? (is|are) complete/i,               // "Task is complete"
+  /successfully (completed|finished|done)/i,   // "Successfully completed"
+  /implementation (is )?complete/i,            // "Implementation complete"
+  /everything (is )?(done|complete|working)/i, // "Everything is done"
+  /\[x\].*\[x\].*\[x\]/i,                      // Multiple checked items
+];
+
+function isTaskLikelyComplete(content: any[]): { complete: boolean; reason: string } {
+  const contentStr = JSON.stringify(content);
+
+  // Check for explicit completion signals first
+  for (const pattern of COMPLETE_PATTERNS) {
+    if (pattern.test(contentStr)) {
+      return { complete: true, reason: "Explicit completion signal detected" };
+    }
+  }
+
+  // Check for incomplete signals
+  for (const pattern of INCOMPLETE_PATTERNS) {
+    if (pattern.test(contentStr)) {
+      return { complete: false, reason: `Incomplete signal: ${pattern.source}` };
+    }
+  }
+
+  // Check TodoWrite tool for incomplete items
+  const todoTool = content.find((b: any) => b?.type === "tool_use" && b?.name === "TodoWrite");
+  if (todoTool?.input?.todos) {
+    const todos = todoTool.input.todos;
+    const incomplete = todos.filter((t: any) => t.status !== "completed");
+    if (incomplete.length > 0) {
+      return { complete: false, reason: `${incomplete.length} incomplete todo items` };
+    }
+  }
+
+  // Default: assume complete if no incomplete signals
+  return { complete: true, reason: "No incomplete signals detected" };
+}
+
+export function getUntilDoneSessions() {
+  return untilDoneSessions;
+}
+
+export function enableUntilDone(sessionId: string, originalPrompt: string, projectId: string, model?: string, maxIterations: number = 10) {
+  untilDoneSessions.set(sessionId, {
+    enabled: true,
+    iteration: 1,
+    maxIterations,
+    originalPrompt,
+    projectId,
+    model,
+    totalCost: 0,
+  });
+}
+
+export function disableUntilDone(sessionId: string) {
+  untilDoneSessions.delete(sessionId);
+}
+
 export function getActiveProcesses() {
   return activeProcesses;
 }
@@ -455,6 +543,70 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
                 });
               }
             }
+          }
+
+          // ═══════════════════════════════════════════════════════════════
+          // UNTIL DONE: Check if we should auto-continue
+          // ═══════════════════════════════════════════════════════════════
+          const untilDoneState = sessionId ? untilDoneSessions.get(sessionId) : null;
+
+          if (untilDoneState?.enabled && sessionId) {
+            const costUsd = msg.resultData?.total_cost_usd || 0;
+            untilDoneState.totalCost += costUsd;
+
+            const { complete, reason } = isTaskLikelyComplete(msg.lastAssistantContent || []);
+
+            console.log(`[UntilDone] Session ${sessionId} iteration ${untilDoneState.iteration}/${untilDoneState.maxIterations}`);
+            console.log(`[UntilDone] Complete: ${complete}, Reason: ${reason}`);
+
+            if (!complete && untilDoneState.iteration < untilDoneState.maxIterations) {
+              // NOT DONE - Continue working
+              untilDoneState.iteration++;
+
+              // Notify UI about continuation
+              sendToSession(sessionId, {
+                type: "until_done_continue",
+                uiSessionId: sessionId,
+                iteration: untilDoneState.iteration,
+                maxIterations: untilDoneState.maxIterations,
+                totalCost: untilDoneState.totalCost,
+                reason,
+              });
+
+              // Clean up current process tracking
+              activeProcesses.delete(sessionId);
+              deleteStreamCapture(sessionId);
+
+              // Re-invoke with continuation prompt after a short delay
+              setTimeout(() => {
+                console.log(`[UntilDone] Auto-continuing session ${sessionId}, iteration ${untilDoneState.iteration}`);
+                handleQueryWithProcess(ws, {
+                  prompt: "Continue working on the task. Check your progress and keep going until everything is complete.",
+                  projectId: untilDoneState.projectId,
+                  sessionId,
+                  claudeSessionId: msg.resultData?.session_id,
+                  model: untilDoneState.model,
+                });
+              }, 500);
+
+              return; // Don't send "done" yet
+            }
+
+            // Task is complete OR max iterations reached
+            const finalReason = complete ? "Task completed" : `Max iterations (${untilDoneState.maxIterations}) reached`;
+            console.log(`[UntilDone] Finishing: ${finalReason}`);
+
+            // Send completion notification
+            sendToSession(sessionId, {
+              type: "until_done_complete",
+              uiSessionId: sessionId,
+              totalIterations: untilDoneState.iteration,
+              totalCost: untilDoneState.totalCost,
+              reason: finalReason,
+            });
+
+            // Clean up until done state
+            untilDoneSessions.delete(sessionId);
           }
 
           sendToSession(sessionId, { type: "done", uiSessionId: sessionId, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });

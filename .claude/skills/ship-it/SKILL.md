@@ -5,7 +5,7 @@ description: Deploy apps to Navi Cloud with one command. Use when the user says 
 
 # Ship It - Deploy to Navi Cloud
 
-Deploy apps to `*.usenavi.app` with zero configuration. Database included if needed.
+Deploy apps to `*.usenavi.app` with zero configuration.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -13,92 +13,85 @@ Deploy apps to `*.usenavi.app` with zero configuration. Database included if nee
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## How It Works
+## Stack
 
-1. User says "ship it" or "deploy this"
-2. You build the app for production
-3. You call the Navi Cloud deploy API
-4. User gets a live URL instantly
+- **Framework**: Vite + React (default)
+- **Hosting**: Cloudflare Workers for Platforms
+- **Database**: D1 (SQLite, optional)
+- **Auth**: Navi Auth (built-in, optional)
 
-## Supported Frameworks
+## The Flow
 
-| Framework | Build Command | Output Directory |
-|-----------|---------------|------------------|
-| Static HTML | (none) | project root |
-| SvelteKit | `bun run build` | `build/` or `.svelte-kit/output` |
-| Vite (React/Vue/Svelte) | `bun run build` | `dist/` |
-| Next.js (static) | `bun run build && bun run export` | `out/` |
-| Astro | `bun run build` | `dist/` |
+### Step 1: Check Project Type
 
-## Deployment Flow
-
-### Step 1: Determine Project Type
-
-Check for framework markers:
 ```bash
-# Check package.json for framework
-cat package.json | jq '.dependencies // {} | keys'
+# Check package.json
+cat package.json | jq -r '.dependencies | keys[]' 2>/dev/null
 ```
 
-**Framework Detection:**
-- `@sveltejs/kit` → SvelteKit
-- `next` → Next.js
-- `astro` → Astro
-- `vite` (without above) → Vite SPA
-- No package.json → Static HTML
+**Detection:**
+- Has `react` + `vite` → Vite React (default)
+- Has `@sveltejs/kit` → Not supported yet, build as static
+- No package.json or no framework → Static HTML
 
 ### Step 2: Build the Project
 
 ```bash
-# Install dependencies if needed
+# Install dependencies
 bun install
 
-# Build based on framework
+# Build
 bun run build
 ```
 
-### Step 3: Collect Build Output
+**Build output locations:**
+- Vite: `dist/`
+- Static: project root (`.html`, `.css`, `.js` files only)
 
-Determine output directory:
-- SvelteKit: `build/` (with adapter-static) or check `svelte.config.js`
-- Vite/React/Vue: `dist/`
-- Next.js: `out/` (with static export)
-- Astro: `dist/`
-- Static: project root (filter to .html, .css, .js, images)
+### Step 3: Generate Slug
 
-### Step 4: Generate Deploy Slug
+If user doesn't specify a name:
 
-If user doesn't specify a name, generate one:
 ```bash
-# Use project folder name, sanitized
-SLUG=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+# Use folder name, sanitized
+SLUG=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-' | head -c 30)
 ```
 
-Rules:
+**Rules:**
 - 3-30 characters
-- lowercase alphanumeric + hyphens
+- Lowercase alphanumeric + hyphens only
 - Must start/end with alphanumeric
 
-### Step 5: Deploy to Navi Cloud
-
-Use the deploy endpoint:
+### Step 4: Collect Files
 
 ```bash
-# Build file list with base64 content
-FILES=$(find BUILD_DIR -type f | while read f; do
-  REL_PATH="${f#BUILD_DIR/}"
+# Find build output
+BUILD_DIR="dist"  # or project root for static
+
+# Collect files with base64 content
+find "$BUILD_DIR" -type f | while read f; do
+  REL_PATH="${f#$BUILD_DIR/}"
   CONTENT=$(base64 < "$f" | tr -d '\n')
   echo "{\"path\": \"$REL_PATH\", \"content\": \"$CONTENT\"}"
-done | jq -s '.')
+done
+```
 
-# Deploy
+**Skip:**
+- Files > 10MB
+- `node_modules/`
+- Hidden files (`.git`, etc.)
+
+### Step 5: Deploy
+
+```bash
+# POST to Navi Cloud API
 curl -X POST http://localhost:3001/api/deploy \
   -H "Content-Type: application/json" \
   -d "{
     \"slug\": \"$SLUG\",
-    \"framework\": \"$FRAMEWORK\",
+    \"framework\": \"vite-react\",
     \"needsDatabase\": false,
-    \"files\": $FILES
+    \"files\": [...]
   }"
 ```
 
@@ -109,108 +102,115 @@ Shipped!
 
 Your app is live at: https://myapp.usenavi.app
 
-Deployment details:
-- Framework: SvelteKit
+Details:
+- Framework: Vite + React
 - Files: 23
-- Deploy time: 4.2s
+- Size: 1.2 MB
 ```
 
 ## Database Support
 
-If the app needs a database (detected by Drizzle/Prisma config, or user request):
+If user needs a database:
 
 ```bash
-# Set needsDatabase: true in deploy request
-# Navi Cloud creates a D1 database and returns connection info
+# Add needsDatabase: true
+{
+  "slug": "myapp",
+  "needsDatabase": true,
+  ...
+}
 ```
 
-The response includes:
+Response includes:
 ```json
 {
   "database": {
     "id": "abc123",
-    "name": "navi-myapp-db",
-    "connectionUrl": "..."
+    "name": "navi-myapp-db"
   }
 }
 ```
 
+The app can access it via `env.DB` in Workers.
+
 ## Example Conversations
 
 ### Simple Deploy
+
 ```
 User: ship it
-Claude: Building your SvelteKit app...
-        → bun run build
-        Deploying to Navi Cloud...
 
-        Shipped! Your app is live at: https://my-project.usenavi.app
+Claude: Building your Vite + React app...
+        → bun run build ✓
+
+        Deploying to Navi Cloud...
+        → 23 files, 1.2 MB
+
+        Shipped! Your app is live at:
+        https://my-project.usenavi.app
 ```
 
 ### With Custom Name
+
 ```
 User: deploy this as "habit-tracker"
+
 Claude: Building...
-        Shipped! Your app is live at: https://habit-tracker.usenavi.app
+        Deployed!
+
+        https://habit-tracker.usenavi.app
 ```
 
 ### With Database
+
 ```
 User: ship it, I need a database
+
 Claude: Building...
         Creating D1 database...
-        Shipped!
+        Deployed!
 
         App: https://my-project.usenavi.app
-        Database: navi-my-project-db (D1)
+        Database: navi-my-project-db
+
+        Access the database in your app:
+        - Workers: env.DB.prepare(...)
 ```
 
 ## Error Handling
 
 | Error | Solution |
 |-------|----------|
-| Build failed | Show error output, help fix |
-| Slug taken | Suggest alternatives with suffix |
-| No build output | Check framework detection, build command |
-| Deploy API error | Retry once, then report to user |
-
-## Important Notes
-
-1. **Build before deploy** - Always run the build command first
-2. **Check for errors** - Don't deploy if build fails
-3. **Sanitize slugs** - Enforce naming rules
-4. **Report progress** - Keep user informed during deploy
-5. **Show final URL prominently** - The whole point is the live link!
+| Build failed | Show error, help fix |
+| Slug taken | Suggest adding suffix: `myapp-2` |
+| No build output | Check build command, verify dist/ exists |
+| Files too large | Skip large files, warn user |
+| API error | Retry once, then report |
 
 ## API Reference
 
-### Deploy Endpoint (via Navi backend proxy)
+### Deploy Endpoint
 
 ```
 POST http://localhost:3001/api/deploy
-```
 
 Request:
-```json
 {
   "slug": "my-app",
   "name": "My App",
-  "framework": "sveltekit",
+  "framework": "vite-react",
   "needsDatabase": false,
   "files": [
-    { "path": "index.html", "content": "base64..." },
-    { "path": "app.js", "content": "base64..." }
+    { "path": "index.html", "content": "base64..." }
   ]
 }
-```
 
 Response:
-```json
 {
   "success": true,
   "url": "https://my-app.usenavi.app",
-  "pagesUrl": "https://navi-my-app-abc123.pages.dev",
-  "deploymentId": "xyz789",
+  "slug": "my-app",
+  "deployCount": 1,
   "database": null
 }
 ```
@@ -221,20 +221,46 @@ Response:
 GET http://localhost:3001/api/deploy/my-app
 ```
 
-### List Deployed Apps
+### List All Apps
 
 ```
-GET http://localhost:3001/api/deploy
+GET http://localhost:3001/api/deploys
 ```
 
----
+### Delete App
+
+```
+DELETE http://localhost:3001/api/deploy/my-app
+```
+
+## Supported Frameworks
+
+| Framework | Build Command | Output Dir | Status |
+|-----------|---------------|------------|--------|
+| Vite + React | `bun run build` | `dist/` | ✅ |
+| Static HTML | (none) | `.` | ✅ |
+| Vite + Vue | `bun run build` | `dist/` | ✅ |
+| Vite + Svelte | `bun run build` | `dist/` | ✅ |
+| Next.js | Not supported | - | ❌ |
+| SvelteKit | Not supported | - | ❌ |
+
+**Note:** SSR frameworks (Next.js, SvelteKit) are not supported yet. Only static builds work.
 
 ## Quick Reference
 
 When user says "ship it":
 
-1. `bun install && bun run build`
-2. Find build output directory
-3. Generate/validate slug
-4. POST to `/api/deploy` with files
-5. Show user their live URL
+1. Check for `package.json` and framework
+2. Run `bun install && bun run build`
+3. Find build output (`dist/` or root)
+4. Generate slug from folder name
+5. Collect files as base64
+6. POST to `/api/deploy`
+7. Show user their live URL
+
+## Important
+
+- **Always build first** - Don't deploy source files
+- **Check build success** - Don't deploy if build fails
+- **Show the URL prominently** - That's the whole point!
+- **Warn about large files** - Skip files > 10MB

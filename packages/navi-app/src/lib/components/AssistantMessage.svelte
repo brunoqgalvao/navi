@@ -11,6 +11,8 @@
   import TodoListPreview from "./tools/TodoListPreview.svelte";
   import { processGenerativeUIContent } from "../generative-ui";
   import { parseMediaContent } from "../media-parser";
+  import { parseCopyableContent } from "../copyable-parser";
+  import CopyableText from "./CopyableText.svelte";
 
   interface Props {
     content: ContentBlock[];
@@ -129,9 +131,10 @@
   }
 
   function renderTextContent(text: string) {
-    const mediaResult = parseMediaContent(text);
+    const copyableResult = parseCopyableContent(text);
+    const mediaResult = parseMediaContent(copyableResult.processedContent);
     const genuiResult = processGenerativeUIContent(mediaResult.processedContent);
-    return { mediaResult, genuiResult };
+    return { copyableResult, mediaResult, genuiResult };
   }
 
   const copyText = $derived(getCopyText());
@@ -303,6 +306,11 @@
           {#each rendered.genuiResult.blocks as genuiBlock (genuiBlock.id)}
             <div class="my-4">
               <GenerativeUI html={genuiBlock.html} id={genuiBlock.id} />
+            </div>
+          {/each}
+          {#each rendered.copyableResult.items as copyableItem (copyableItem.id)}
+            <div class="my-3">
+              <CopyableText text={copyableItem.text} label={copyableItem.label} />
             </div>
           {/each}
         </div>

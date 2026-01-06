@@ -82,6 +82,101 @@ if (PORT !== PREFERRED_PORT) {
   console.log(`Port ${PREFERRED_PORT} in use, using ${PORT} instead`);
 }
 
+// Spawn PTY server when running in Tauri (bundled) mode
+// The PTY server runs separately because node-pty has issues with Bun's file descriptor handling
+let ptyServerProcess: ReturnType<typeof import("child_process").spawn> | null = null;
+
+async function spawnPtyServer() {
+  const { spawn } = await import("child_process");
+  const { join, dirname } = await import("path");
+  const { existsSync } = await import("fs");
+
+  // Calculate PTY port (main server port + 1)
+  const ptyPort = PORT + 1;
+
+  // Find the PTY server script
+  let ptyServerPath: string | null = null;
+
+  // In Tauri bundled mode, look in resources directory
+  if (process.env.TAURI_RESOURCE_DIR) {
+    const resourcePath = join(process.env.TAURI_RESOURCE_DIR, "resources", "pty-server.cjs");
+    if (existsSync(resourcePath)) {
+      ptyServerPath = resourcePath;
+    }
+  }
+
+  // Also check relative to the server directory (for development with Tauri)
+  if (!ptyServerPath) {
+    const serverDir = dirname(import.meta.url.replace("file://", ""));
+    const devPath = join(serverDir, "pty-server.cjs");
+    if (existsSync(devPath)) {
+      ptyServerPath = devPath;
+    }
+  }
+
+  if (!ptyServerPath) {
+    console.warn("[Server] PTY server script not found, terminal functionality may be limited");
+    return;
+  }
+
+  console.log(`[Server] Spawning PTY server on port ${ptyPort}...`);
+
+  // Find node executable - check multiple locations
+  let nodePath = "node";
+  const nodeLocations = [
+    process.env.NAVI_NODE_PATH,
+    "/usr/local/bin/node",          // Homebrew Intel
+    "/opt/homebrew/bin/node",       // Homebrew ARM (Apple Silicon)
+    "/usr/bin/node",                // System node
+    `${process.env.HOME}/.nvm/current/bin/node`, // nvm
+  ].filter(Boolean) as string[];
+
+  for (const loc of nodeLocations) {
+    if (existsSync(loc)) {
+      nodePath = loc;
+      console.log(`[Server] Found Node.js at: ${nodePath}`);
+      break;
+    }
+  }
+
+  console.log(`[Server] Using PTY server: ${ptyServerPath}`);
+  ptyServerProcess = spawn(nodePath, [ptyServerPath], {
+    env: {
+      ...process.env,
+      PTY_PORT: String(ptyPort),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: false,
+  });
+
+  ptyServerProcess.stdout?.on("data", (data: Buffer) => {
+    console.log(`[PTY] ${data.toString().trim()}`);
+  });
+
+  ptyServerProcess.stderr?.on("data", (data: Buffer) => {
+    console.error(`[PTY] ${data.toString().trim()}`);
+  });
+
+  ptyServerProcess.on("error", (err) => {
+    console.error("[Server] Failed to spawn PTY server:", err.message);
+  });
+
+  ptyServerProcess.on("exit", (code, signal) => {
+    console.log(`[Server] PTY server exited with code ${code}, signal ${signal}`);
+    ptyServerProcess = null;
+  });
+}
+
+// Spawn PTY server if we're in Tauri mode (TAURI_RESOURCE_DIR is set)
+// This handles the bundled app case where PTY server isn't started separately
+console.log(`[Server] TAURI_RESOURCE_DIR=${process.env.TAURI_RESOURCE_DIR || "not set"}`);
+if (process.env.TAURI_RESOURCE_DIR) {
+  console.log("[Server] Running in Tauri mode, spawning PTY server...");
+  await spawnPtyServer();
+} else {
+  console.log("[Server] Not in Tauri mode, skipping PTY server spawn");
+}
+
 // Get shared state for routes that need it
 const pendingPermissions = getPendingPermissions();
 const sessionApprovedAll = getSessionApprovedAll();
@@ -244,3 +339,28 @@ addProcessEventListener((event: ProcessEvent) => {
 
 console.log(`Claude Code UI Server running on http://localhost:${PORT}`);
 console.log(`WebSocket endpoint: ws://localhost:${PORT}/ws`);
+
+// Cleanup PTY server on exit
+function cleanupPtyServer() {
+  if (ptyServerProcess) {
+    console.log("[Server] Killing PTY server process...");
+    ptyServerProcess.kill("SIGTERM");
+    ptyServerProcess = null;
+  }
+}
+
+process.on("SIGINT", () => {
+  console.log("[Server] Received SIGINT, shutting down...");
+  cleanupPtyServer();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  console.log("[Server] Received SIGTERM, shutting down...");
+  cleanupPtyServer();
+  process.exit(0);
+});
+
+process.on("exit", () => {
+  cleanupPtyServer();
+});

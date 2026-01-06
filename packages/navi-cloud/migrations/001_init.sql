@@ -1,35 +1,56 @@
 -- Navi Cloud Registry Schema
--- Tracks all deployed apps and their Cloudflare resources
+-- Central database tracking all deployed apps and their resources
 
+-- Deployed apps registry
 CREATE TABLE IF NOT EXISTS apps (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY,                    -- nanoid
   slug TEXT UNIQUE NOT NULL,              -- subdomain: myapp → myapp.usenavi.app
   name TEXT,                               -- display name
-  cf_pages_project TEXT NOT NULL,          -- Cloudflare Pages project name
-  cf_pages_url TEXT,                       -- e.g., myapp-abc123.pages.dev
-  cf_d1_database_id TEXT,                  -- D1 database ID (optional)
-  cf_d1_database_name TEXT,                -- D1 database name
-  framework TEXT DEFAULT 'static',         -- static, sveltekit, nextjs, remix
-  status TEXT DEFAULT 'deploying',         -- deploying, live, failed, deleted
+
+  -- Worker info
+  worker_name TEXT NOT NULL,               -- name in dispatch namespace
+
+  -- Database info (D1 per app)
+  d1_database_id TEXT,                     -- D1 database UUID
+  d1_database_name TEXT,                   -- D1 database name
+
+  -- App metadata
+  framework TEXT DEFAULT 'vite-react',     -- vite-react, static
+  has_auth BOOLEAN DEFAULT FALSE,          -- uses Navi Auth
+
+  -- Status
+  status TEXT DEFAULT 'deploying',         -- deploying, live, failed, suspended, deleted
+
+  -- Stats
   deploy_count INTEGER DEFAULT 1,
-  last_deployed_at TEXT,                   -- ISO timestamp
+  last_deployed_at TEXT,
+
+  -- Timestamps
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
 -- Deployment history
 CREATE TABLE IF NOT EXISTS deployments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  app_id INTEGER NOT NULL REFERENCES apps(id),
-  cf_deployment_id TEXT,                   -- Cloudflare deployment ID
-  status TEXT DEFAULT 'pending',           -- pending, building, success, failed
-  commit_message TEXT,
+  id TEXT PRIMARY KEY,
+  app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+
+  status TEXT DEFAULT 'pending',           -- pending, uploading, live, failed
+
+  -- Deployment details
+  files_count INTEGER DEFAULT 0,
+  total_size INTEGER DEFAULT 0,            -- bytes
+
+  -- Error tracking
   error_message TEXT,
+
+  -- Timestamps
   started_at TEXT DEFAULT (datetime('now')),
   completed_at TEXT
 );
 
--- Indexes for common queries
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_apps_slug ON apps(slug);
 CREATE INDEX IF NOT EXISTS idx_apps_status ON apps(status);
 CREATE INDEX IF NOT EXISTS idx_deployments_app_id ON deployments(app_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_status ON deployments(status);

@@ -1,6 +1,6 @@
 import type { ClaudeMessage, SystemMessage, AssistantMessage, UserMessage } from "../claude";
 import { createMessageHandler, type MessageHandlerConfig } from "./messageHandler";
-import type { UICommand, CompactMetadata, AskUserQuestionData } from "./types";
+import type { UICommand, CompactMetadata, AskUserQuestionData, UntilDoneContinueData, UntilDoneCompleteData } from "./types";
 import {
   sessionMessages,
   loadingSessions,
@@ -28,6 +28,9 @@ export interface UseMessageHandlerOptions {
   onCompactStart?: (sessionId: string) => void;
   onCompactEnd?: (sessionId: string, metadata?: CompactMetadata) => void;
   onContextOverflow?: (sessionId: string, autoRetry: boolean) => void;
+  // Until Done (Ralph loop) mode callbacks
+  onUntilDoneContinue?: (sessionId: string, data: UntilDoneContinueData) => void;
+  onUntilDoneComplete?: (sessionId: string, data: UntilDoneCompleteData) => void;
 }
 
 /**
@@ -113,6 +116,8 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     onCompactStart,
     onCompactEnd,
     onContextOverflow,
+    onUntilDoneContinue,
+    onUntilDoneComplete,
   } = options;
 
   const activeSubagents = new Map<string, { elapsed: number }>();
@@ -226,6 +231,14 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
 
       onContextOverflow: (sessionId, autoRetry) => {
         onContextOverflow?.(sessionId, autoRetry);
+      },
+
+      onUntilDoneContinue: (sessionId, data) => {
+        onUntilDoneContinue?.(sessionId, data);
+      },
+
+      onUntilDoneComplete: (sessionId, data) => {
+        onUntilDoneComplete?.(sessionId, data);
       },
 
       scrollToBottom,

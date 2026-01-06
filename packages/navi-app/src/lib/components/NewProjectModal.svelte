@@ -1,4 +1,22 @@
 <script lang="ts">
+  // Hardcoded templates
+  const TEMPLATES = [
+    {
+      id: "vibe-coding",
+      name: "Vibe Coding",
+      description: "Full vibe coding pipeline with Spec, Plan, and Implement agents",
+      icon: "🚀",
+      tags: ["apps", "mvp", "features"],
+    },
+    {
+      id: "nano-banana",
+      name: "Image Generation",
+      description: "AI image generation with creative and branding agents",
+      icon: "🎨",
+      tags: ["images", "design", "logos"],
+    },
+  ];
+
   interface Props {
     open: boolean;
     defaultProjectsDir: string;
@@ -6,11 +24,12 @@
     onCreate: () => void;
     onPickDirectory: () => void;
     onCreateAgent?: (name: string, description: string) => void;
-    projectCreationMode: "quick" | "browse" | "agent";
+    onCreateFromTemplate?: (templateId: string, name: string) => void;
+    projectCreationMode: "quick" | "browse" | "agent" | "template";
     newProjectQuickName: string;
     newProjectPath: string;
     newProjectName: string;
-    onModeChange: (mode: "quick" | "browse" | "agent") => void;
+    onModeChange: (mode: "quick" | "browse" | "agent" | "template") => void;
     onQuickNameChange: (name: string) => void;
     onPathChange: (path: string) => void;
     onNameChange: (name: string) => void;
@@ -23,6 +42,7 @@
     onCreate,
     onPickDirectory,
     onCreateAgent,
+    onCreateFromTemplate,
     projectCreationMode,
     newProjectQuickName,
     newProjectPath,
@@ -38,10 +58,17 @@
   let agentDescription = $state("");
   let agentCreating = $state(false);
 
+  // Template creation state
+  let selectedTemplate = $state<string | null>(null);
+  let templateProjectName = $state("");
+  let templateCreating = $state(false);
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Enter") {
       if (projectCreationMode === "agent") {
         handleCreateAgent();
+      } else if (projectCreationMode === "template") {
+        handleCreateFromTemplate();
       } else {
         onCreate();
       }
@@ -57,18 +84,29 @@
     agentDescription = "";
   }
 
-  // Reset agent fields when modal closes
+  async function handleCreateFromTemplate() {
+    if (!selectedTemplate || !templateProjectName.trim() || !onCreateFromTemplate) return;
+    templateCreating = true;
+    onCreateFromTemplate(selectedTemplate, templateProjectName.trim());
+    templateCreating = false;
+    selectedTemplate = null;
+    templateProjectName = "";
+  }
+
+  // Reset fields when modal closes
   $effect(() => {
     if (!open) {
       agentName = "";
       agentDescription = "";
+      selectedTemplate = null;
+      templateProjectName = "";
     }
   });
 </script>
 
 {#if open}
   <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30">
-    <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+    <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
       <div class="px-6 py-5 border-b border-gray-100">
         <h3 class="font-serif text-2xl text-gray-900">
           {projectCreationMode === "agent" ? "Create New Agent" : "Create New Workspace"}
@@ -82,6 +120,17 @@
         >
           Quick Start
         </button>
+        {#if onCreateFromTemplate}
+          <button
+            onclick={() => onModeChange("template")}
+            class={`px-3 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors flex items-center gap-1.5 ${projectCreationMode === 'template' ? 'text-emerald-600 border-emerald-600' : 'text-gray-500 border-transparent hover:text-gray-700'}`}
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+            </svg>
+            Template
+          </button>
+        {/if}
         <button
           onclick={() => onModeChange("browse")}
           class={`px-3 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${projectCreationMode === 'browse' ? 'text-gray-900 border-gray-900' : 'text-gray-500 border-transparent hover:text-gray-700'}`}
@@ -178,6 +227,60 @@
           <div class="text-xs text-gray-500 bg-indigo-50 rounded-lg px-3 py-2 border border-indigo-100">
             <span class="font-medium text-indigo-700">Location:</span> <span class="font-mono text-indigo-600">~/.navi/agents/{agentName.trim().replace(/[^a-zA-Z0-9-_]/g, "-").toLowerCase() || "agent-name"}</span>
           </div>
+        {:else if projectCreationMode === "template"}
+          <div class="space-y-3">
+            <label class="text-xs font-medium text-gray-700">Choose a Template</label>
+            <div class="grid gap-2">
+              {#each TEMPLATES as template}
+                <button
+                  onclick={() => selectedTemplate = template.id}
+                  class={`w-full text-left p-3 rounded-lg border-2 transition-all ${
+                    selectedTemplate === template.id
+                      ? 'border-emerald-500 bg-emerald-50'
+                      : 'border-gray-200 hover:border-gray-300 bg-white'
+                  }`}
+                >
+                  <div class="flex items-start gap-3">
+                    <span class="text-2xl">{template.icon}</span>
+                    <div class="flex-1 min-w-0">
+                      <div class="font-medium text-gray-900">{template.name}</div>
+                      <div class="text-xs text-gray-500 mt-0.5">{template.description}</div>
+                      <div class="flex gap-1 mt-1.5">
+                        {#each template.tags as tag}
+                          <span class="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{tag}</span>
+                        {/each}
+                      </div>
+                    </div>
+                    {#if selectedTemplate === template.id}
+                      <svg class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                      </svg>
+                    {/if}
+                  </div>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          {#if selectedTemplate}
+            <div class="space-y-1.5">
+              <label for="template-name" class="text-xs font-medium text-gray-700">Project Name</label>
+              <!-- svelte-ignore a11y_autofocus -->
+              <input
+                id="template-name"
+                type="text"
+                bind:value={templateProjectName}
+                placeholder="e.g. my-awesome-app"
+                onkeydown={handleKeydown}
+                autofocus
+                class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-0 transition-colors placeholder:text-gray-400"
+              />
+            </div>
+
+            <div class="text-xs text-gray-500 bg-emerald-50 rounded-lg px-3 py-2 border border-emerald-100">
+              <span class="font-medium text-emerald-700">Location:</span> <span class="font-mono text-emerald-600">{defaultProjectsDir}/{templateProjectName.trim().replace(/[^a-zA-Z0-9-_]/g, "-").toLowerCase() || "project-name"}</span>
+            </div>
+          {/if}
         {/if}
       </div>
 
@@ -190,6 +293,14 @@
             class="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {agentCreating ? "Creating..." : "Create Agent"}
+          </button>
+        {:else if projectCreationMode === "template"}
+          <button
+            onclick={handleCreateFromTemplate}
+            disabled={!selectedTemplate || !templateProjectName.trim() || templateCreating}
+            class="px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {templateCreating ? "Creating..." : "Create from Template"}
           </button>
         {:else}
           <button onclick={onCreate} class="px-4 py-2 text-sm font-medium bg-gray-900 hover:bg-black text-white rounded-lg shadow-sm transition-all active:scale-95">Create Workspace</button>

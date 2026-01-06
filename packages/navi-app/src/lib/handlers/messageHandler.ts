@@ -304,6 +304,42 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         });
         break;
       }
+
+      case "until_done_continue": {
+        if (uiSessionId) {
+          const continueMsg = msg as {
+            type: "until_done_continue";
+            iteration: number;
+            maxIterations: number;
+            totalCost: number;
+            reason: string;
+          };
+          callbacks.onUntilDoneContinue?.(uiSessionId, {
+            iteration: continueMsg.iteration,
+            maxIterations: continueMsg.maxIterations,
+            totalCost: continueMsg.totalCost,
+            reason: continueMsg.reason,
+          });
+        }
+        break;
+      }
+
+      case "until_done_complete": {
+        if (uiSessionId) {
+          const completeMsg = msg as {
+            type: "until_done_complete";
+            totalIterations: number;
+            totalCost: number;
+            reason: string;
+          };
+          callbacks.onUntilDoneComplete?.(uiSessionId, {
+            totalIterations: completeMsg.totalIterations,
+            totalCost: completeMsg.totalCost,
+            reason: completeMsg.reason,
+          });
+        }
+        break;
+      }
     }
   }
 

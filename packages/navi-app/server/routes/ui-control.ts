@@ -82,5 +82,26 @@ export async function handleUiControlRoutes(
     return json({ success: true, terminalId, projectId });
   }
 
+  // Open logs viewer in preview panel
+  if (url.pathname === "/api/ui/logs" && method === "POST") {
+    let body;
+    try {
+      const text = await req.text();
+      body = JSON.parse(text);
+    } catch (e) {
+      return json({ error: "Invalid JSON body", details: String(e) }, 400);
+    }
+    const { processId, terminalId } = body;
+    if (!processId && !terminalId) {
+      return json({ error: "processId or terminalId is required" }, 400);
+    }
+    broadcastToClients({
+      type: "ui_command",
+      command: "open_logs",
+      payload: { processId, terminalId },
+    });
+    return json({ success: true, processId, terminalId });
+  }
+
   return null;
 }

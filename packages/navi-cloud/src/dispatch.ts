@@ -1,21 +1,21 @@
 /**
- * Navi Cloud Router Worker
+ * Navi Cloud - Dispatch Worker
  *
- * Routes *.usenavi.app subdomains to the correct Cloudflare Pages project.
- * Deployed with wildcard route: *.usenavi.app
- *
- * Example:
- *   myapp.usenavi.app → proxies to myapp-abc123.pages.dev
+ * Routes *.usenavi.app requests to the correct user Worker.
+ * Uses Workers for Platforms dispatch namespace.
  */
 
 export interface Env {
-  DB: D1Database;
+  REGISTRY_DB: D1Database;
+  USER_WORKERS: DispatchNamespace;
+  DEPLOY_SECRET: string;
 }
 
 interface AppRecord {
   slug: string;
-  cf_pages_url: string;
+  worker_name: string;
   status: string;
+  d1_database_id: string | null;
 }
 
 export default {
@@ -27,46 +27,46 @@ export default {
     // e.g., "myapp.usenavi.app" → "myapp"
     const subdomain = hostname.replace('.usenavi.app', '').toLowerCase();
 
-    // Reserved subdomains that should not be routed
-    const reserved = ['www', 'api', 'admin', 'app', 'dashboard', 'docs', 'mail', 'smtp'];
+    // Handle root domain
+    if (subdomain === '' || hostname === 'usenavi.app' || hostname === 'www.usenavi.app') {
+      return Response.redirect('https://usenavi.app', 302);
+    }
+
+    // Reserved subdomains
+    const reserved = ['www', 'api', 'admin', 'app', 'dashboard', 'docs', 'mail', 'smtp', 'ftp'];
     if (reserved.includes(subdomain)) {
       return new Response('Reserved subdomain', { status: 400 });
     }
 
     // Look up the app in the registry
-    const app = await env.DB.prepare(`
-      SELECT slug, cf_pages_url, status FROM apps WHERE slug = ? AND status = 'live'
+    const app = await env.REGISTRY_DB.prepare(`
+      SELECT slug, worker_name, status, d1_database_id
+      FROM apps
+      WHERE slug = ? AND status = 'live'
     `).bind(subdomain).first<AppRecord>();
 
     if (!app) {
       return notFoundPage(subdomain);
     }
 
-    // Proxy the request to the Pages project
-    const targetUrl = new URL(url.pathname + url.search, `https://${app.cf_pages_url}`);
-
-    const proxyRequest = new Request(targetUrl.toString(), {
-      method: request.method,
-      headers: request.headers,
-      body: request.body,
-      redirect: 'manual',
-    });
-
     try {
-      const response = await fetch(proxyRequest);
+      // Get the user's Worker from dispatch namespace
+      const userWorker = env.USER_WORKERS.get(app.worker_name);
 
-      // Clone response with CORS headers
-      const newHeaders = new Headers(response.headers);
-      newHeaders.set('X-Powered-By', 'Navi Cloud');
-      newHeaders.set('X-Navi-App', subdomain);
-
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: newHeaders,
+      // Forward the request to the user's Worker
+      // Pass along the D1 database binding if the app has one
+      return await userWorker.fetch(request, {
+        // These will be available as env in the user worker
+        cf: {
+          // Custom metadata we can read in the user worker
+          naviApp: {
+            slug: app.slug,
+            d1DatabaseId: app.d1_database_id,
+          },
+        },
       });
     } catch (error) {
-      console.error(`Proxy error for ${subdomain}:`, error);
+      console.error(`Dispatch error for ${subdomain}:`, error);
       return errorPage(subdomain, 'Failed to load app');
     }
   },
@@ -93,8 +93,9 @@ function notFoundPage(subdomain: string): Response {
       padding: 20px;
     }
     .container { max-width: 500px; }
-    h1 { font-size: 3rem; margin-bottom: 1rem; }
-    .slug { color: #8b5cf6; font-family: monospace; }
+    h1 { font-size: 4rem; margin-bottom: 0.5rem; opacity: 0.3; }
+    h2 { font-size: 1.5rem; margin-bottom: 1rem; }
+    .slug { color: #8b5cf6; font-family: monospace; background: rgba(139, 92, 246, 0.1); padding: 2px 8px; border-radius: 4px; }
     p { color: #94a3b8; margin-bottom: 2rem; line-height: 1.6; }
     a {
       display: inline-block;
@@ -104,6 +105,7 @@ function notFoundPage(subdomain: string): Response {
       text-decoration: none;
       border-radius: 8px;
       font-weight: 500;
+      transition: background 0.2s;
     }
     a:hover { background: #7c3aed; }
   </style>
@@ -111,13 +113,14 @@ function notFoundPage(subdomain: string): Response {
 <body>
   <div class="container">
     <h1>404</h1>
+    <h2>App not found</h2>
     <p>
-      The app <span class="slug">${subdomain}.usenavi.app</span> doesn't exist yet.
+      <span class="slug">${subdomain}.usenavi.app</span> doesn't exist yet.
     </p>
     <p>
-      Want to deploy something here? Ship it with Navi!
+      Build something amazing with Navi and ship it here.
     </p>
-    <a href="https://usenavi.app">Learn about Navi</a>
+    <a href="https://usenavi.app">Get Navi</a>
   </div>
 </body>
 </html>`;
@@ -148,9 +151,11 @@ function errorPage(subdomain: string, message: string): Response {
       text-align: center;
       padding: 20px;
     }
-    h1 { font-size: 2rem; margin-bottom: 1rem; color: #ef4444; }
+    h1 { font-size: 1.5rem; margin-bottom: 1rem; color: #ef4444; }
     p { color: #94a3b8; }
     .slug { color: #8b5cf6; font-family: monospace; }
+    .retry { margin-top: 2rem; }
+    a { color: #8b5cf6; }
   </style>
 </head>
 <body>
@@ -158,6 +163,7 @@ function errorPage(subdomain: string, message: string): Response {
     <h1>Something went wrong</h1>
     <p>${message}</p>
     <p style="margin-top: 1rem;">App: <span class="slug">${subdomain}.usenavi.app</span></p>
+    <p class="retry"><a href="">Try again</a></p>
   </div>
 </body>
 </html>`;

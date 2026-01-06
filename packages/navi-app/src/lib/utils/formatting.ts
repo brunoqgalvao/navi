@@ -119,6 +119,29 @@ export function linkifyFilenames(
   });
 }
 
+export interface ChatReferenceInfo {
+  id: string;
+  title?: string;
+}
+
+export function linkifyChatReferences(
+  html: string,
+  chatLookup: Map<string, { title: string; projectName?: string }>,
+  escapeHtmlFn: typeof escapeHtml = escapeHtml
+): string {
+  // Pattern: [[chat:SESSION_ID]] or [[chat:SESSION_ID|Custom Title]]
+  // Matches inside HTML content (avoids tags)
+  const chatRefPattern = /\[\[chat:([a-f0-9-]{36})(?:\|([^\]]+))?\]\]/gi;
+
+  return html.replace(chatRefPattern, (match, sessionId, customTitle) => {
+    const chatInfo = chatLookup.get(sessionId);
+    const displayTitle = customTitle || chatInfo?.title || 'Chat';
+    const projectName = chatInfo?.projectName || '';
+
+    return `<span class="chat-reference" data-session-id="${escapeHtmlFn(sessionId)}" data-title="${escapeHtmlFn(displayTitle)}" data-project="${escapeHtmlFn(projectName)}" title="Click to open chat${projectName ? ` (${projectName})` : ''}"><span class="chat-reference-icon">💬</span><span class="chat-reference-title">${escapeHtmlFn(displayTitle)}</span></span>`;
+  });
+}
+
 export function linkifyFileLineReferences(
   html: string, 
   projectPath: string | undefined,

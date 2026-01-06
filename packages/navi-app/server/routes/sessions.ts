@@ -1,5 +1,6 @@
 import { json } from "../utils/response";
 import { projects, sessions, messages, searchIndex, pendingQuestions, type Message } from "../db";
+import { enableUntilDone, disableUntilDone, getUntilDoneSessions } from "../websocket/handler";
 
 export function createSessionApprovedAllSet(): Set<string> {
   return new Set<string>();
@@ -597,6 +598,61 @@ export async function handleSessionRoutes(
       console.error("Failed to prune tool results:", e);
       return json({ error: "Failed to prune tool results", details: String(e) }, 500);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // UNTIL DONE MODE
+  // ═══════════════════════════════════════════════════════════════
+
+  // Enable until done mode for a session
+  const untilDoneEnableMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/until-done$/);
+  if (untilDoneEnableMatch && method === "POST") {
+    const sessionId = untilDoneEnableMatch[1];
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    const body = await req.json();
+    const maxIterations = body.maxIterations || 10;
+
+    enableUntilDone(
+      sessionId,
+      body.originalPrompt || "",
+      session.project_id,
+      session.model || undefined,
+      maxIterations
+    );
+
+    return json({
+      success: true,
+      sessionId,
+      untilDoneEnabled: true,
+      maxIterations,
+    });
+  }
+
+  // Disable until done mode for a session
+  if (untilDoneEnableMatch && method === "DELETE") {
+    const sessionId = untilDoneEnableMatch[1];
+    disableUntilDone(sessionId);
+    return json({ success: true, sessionId, untilDoneEnabled: false });
+  }
+
+  // Get until done status for a session
+  if (untilDoneEnableMatch && method === "GET") {
+    const sessionId = untilDoneEnableMatch[1];
+    const state = getUntilDoneSessions().get(sessionId);
+    if (!state) {
+      return json({ enabled: false, sessionId });
+    }
+    return json({
+      enabled: state.enabled,
+      sessionId,
+      iteration: state.iteration,
+      maxIterations: state.maxIterations,
+      totalCost: state.totalCost,
+    });
   }
 
   return null;

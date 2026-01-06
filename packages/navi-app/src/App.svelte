@@ -2,11 +2,11 @@
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
-  import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences } from "./lib/utils";
+  import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
   import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference } from "./lib/stores";
   import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
   import { parseHash, onHashChange } from "./lib/router";
-  import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts } from "./lib/config";
+  import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
   import { setupGlobalErrorHandlers, pendingErrorReport, type ErrorReport } from "./lib/errorHandler";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
@@ -222,18 +222,36 @@
   
   let currentMessages = $derived($session.sessionId ? ($sessionMessages.get($session.sessionId) || []) : []);
   let currentTodos = $derived($session.sessionId ? ($sessionTodos.get($session.sessionId) || []) : []);
-  
+
   let sidebarProjects = $state<Project[]>([]);
   let sidebarSessions = $state<Session[]>([]);
   let recentChats = $state<Session[]>([]);
   let workspaceFolders = $state<WorkspaceFolder[]>([]);
+
+  // Chat reference lookup for cross-chat linking
+  let chatLookup = $derived(() => {
+    const lookup = new Map<string, { title: string; projectName?: string }>();
+    // Add sidebar sessions
+    for (const s of sidebarSessions) {
+      const project = sidebarProjects.find(p => p.id === s.project_id);
+      lookup.set(s.id, { title: s.title, projectName: project?.name });
+    }
+    // Add recent chats (may overlap, that's fine)
+    for (const s of recentChats) {
+      if (!lookup.has(s.id)) {
+        const project = sidebarProjects.find(p => p.id === s.project_id);
+        lookup.set(s.id, { title: s.title, projectName: project?.name });
+      }
+    }
+    return lookup;
+  });
   let showNewProjectModal = $state(false);
   let newProjectTargetFolderId = $state<string | null>(null);
   let newProjectName = $state("");
   let newProjectPath = $state("");
   let newProjectQuickName = $state("");
   let defaultProjectsDir = $state("");
-  let projectCreationMode = $state<"quick" | "browse" | "agent">("quick");
+  let projectCreationMode = $state<"quick" | "browse" | "agent" | "template">("quick");
   let editingProject = $state<Project | null>(null);
   let editProjectName = $state("");
   let editProjectPath = $state("");
@@ -266,6 +284,17 @@
   let showProjectPermissions = $state<Project | null>(null);
   let globalPermissionSettings = $state<PermissionSettings | null>(null);
   let permissionDefaults = $state<{ tools: string[]; dangerous: string[] }>({ tools: [], dangerous: [] });
+
+  // Until Done mode state (per-session)
+  let untilDoneSessions = $state<Map<string, { enabled: boolean; iteration: number; maxIterations: number; totalCost: number }>>(new Map());
+
+  // Derived state for current session
+  let currentUntilDone = $derived(
+    $session.sessionId ? untilDoneSessions.get($session.sessionId) : undefined
+  );
+  let untilDoneEnabled = $derived(currentUntilDone?.enabled ?? false);
+  let untilDoneIteration = $derived(currentUntilDone?.iteration ?? 0);
+  let untilDoneMaxIterations = 10; // Default max iterations
 
   const messageHandler = useMessageHandler({
     getCurrentSessionId: () => $session.sessionId,
@@ -364,6 +393,20 @@
             });
           }
           break;
+        case "open_logs":
+          const { processId: openLogsProcessId, terminalId: openLogsTermId } = command.payload as { processId?: string; terminalId?: string };
+          // Open logs in preview panel using the logs: source format
+          if (openLogsProcessId) {
+            previewSource = `logs:${openLogsProcessId}`;
+            showPreview = true;
+            rightPanelMode = "preview";
+          } else if (openLogsTermId) {
+            // Open terminal logs in preview panel
+            previewSource = `logs:terminal:${openLogsTermId}`;
+            showPreview = true;
+            rightPanelMode = "preview";
+          }
+          break;
       }
     },
     scrollToBottom,
@@ -437,6 +480,31 @@
         // No auto-retry possible, show modal
         showContextOverflowModal = true;
       }
+    },
+    onUntilDoneContinue: (sessionId, data) => {
+      // Update the session's until-done state
+      untilDoneSessions = new Map(untilDoneSessions.set(sessionId, {
+        enabled: true,
+        iteration: data.iteration,
+        maxIterations: data.maxIterations,
+        totalCost: data.totalCost,
+      }));
+      console.log(`[UntilDone] Continuing: session ${sessionId}, iteration ${data.iteration}/${data.maxIterations}, reason: ${data.reason}`);
+    },
+    onUntilDoneComplete: (sessionId, data) => {
+      // Remove from tracking
+      untilDoneSessions.delete(sessionId);
+      untilDoneSessions = new Map(untilDoneSessions);
+
+      // Show notification only if it's the current session
+      if (sessionId === $session.sessionId) {
+        notifications.add({
+          type: "success",
+          title: "Task Complete",
+          message: `Finished in ${data.totalIterations} iteration${data.totalIterations > 1 ? 's' : ''} ($${data.totalCost.toFixed(2)})`,
+        });
+      }
+      console.log(`[UntilDone] Complete: session ${sessionId}, ${data.reason}`);
     },
   });
 
@@ -1066,6 +1134,50 @@
     }
   }
 
+  async function createProjectFromTemplate(templateId: string, name: string) {
+    if (!name.trim()) return;
+
+    const sanitizedName = name.trim().replace(/[^a-zA-Z0-9-_]/g, "-").toLowerCase();
+    const fullPath = `${defaultProjectsDir}/${sanitizedName}`;
+
+    try {
+      // Create the directory first
+      await api.fs.mkdir(fullPath);
+    } catch (e: any) {
+      console.error("Failed to create directory:", e);
+      alert(`Failed to create directory: ${e.message}`);
+      return;
+    }
+
+    try {
+      // Apply the template
+      await api.fs.applyTemplate(templateId, fullPath);
+    } catch (e: any) {
+      console.error("Failed to apply template:", e);
+      alert(`Failed to apply template: ${e.message}`);
+      return;
+    }
+
+    try {
+      // Create the project record
+      const newProject = await api.projects.create({
+        name: name.trim(),
+        path: fullPath
+      });
+      if (newProjectTargetFolderId) {
+        await setProjectFolder(newProject.id, newProjectTargetFolderId);
+      }
+      await loadProjects();
+      selectProject(newProject);
+      showNewProjectModal = false;
+      projectCreationMode = "quick";
+      newProjectTargetFolderId = null;
+    } catch (e: any) {
+      console.error("Failed to create project:", e);
+      alert(`Failed to create project: ${e.message}`);
+    }
+  }
+
   async function pickDirectory() {
     if (isTauri()) {
       try {
@@ -1579,7 +1691,15 @@
   function stopGeneration() {
     const sessionId = $session.sessionId;
     if (!sessionId) return;
-    
+
+    // Also disable until done mode when stopping
+    if (untilDoneSessions.has(sessionId)) {
+      untilDoneSessions.delete(sessionId);
+      untilDoneSessions = new Map(untilDoneSessions);
+      // Also disable on server
+      fetch(`${getServerUrl()}/api/sessions/${sessionId}/until-done`, { method: "DELETE" }).catch(() => {});
+    }
+
     try {
       client.abort(sessionId);
     } catch (e) {
@@ -1591,6 +1711,44 @@
         content: "Request stopped",
         timestamp: new Date(),
       });
+    }
+  }
+
+  async function toggleUntilDone() {
+    const sessionId = $session.sessionId;
+    if (!sessionId) return;
+
+    const baseUrl = getServerUrl();
+    const currentlyEnabled = untilDoneSessions.has(sessionId);
+
+    if (!currentlyEnabled) {
+      // Enable until done mode
+      try {
+        await fetch(`${baseUrl}/api/sessions/${sessionId}/until-done`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ maxIterations: untilDoneMaxIterations }),
+        });
+        untilDoneSessions = new Map(untilDoneSessions.set(sessionId, {
+          enabled: true,
+          iteration: 0,
+          maxIterations: untilDoneMaxIterations,
+          totalCost: 0,
+        }));
+        console.log("[UntilDone] Enabled for session", sessionId);
+      } catch (e) {
+        console.error("[UntilDone] Failed to enable:", e);
+      }
+    } else {
+      // Disable until done mode
+      try {
+        await fetch(`${baseUrl}/api/sessions/${sessionId}/until-done`, { method: "DELETE" });
+        untilDoneSessions.delete(sessionId);
+        untilDoneSessions = new Map(untilDoneSessions);
+        console.log("[UntilDone] Disabled for session", sessionId);
+      } catch (e) {
+        console.error("[UntilDone] Failed to disable:", e);
+      }
     }
   }
 
@@ -1825,15 +1983,18 @@
   function renderMarkdown(content: string): string {
     const html = marked.parse(content) as string;
     const projectPath = currentProject?.path;
-    return linkifyUrls(
-      linkifyFilenames(
-        linkifyFileLineReferences(
-          linkifyCodePaths(html, projectPath, projectFileIndex),
-          projectPath,
+    return linkifyChatReferences(
+      linkifyUrls(
+        linkifyFilenames(
+          linkifyFileLineReferences(
+            linkifyCodePaths(html, projectPath, projectFileIndex),
+            projectPath,
+            projectFileIndex
+          ),
           projectFileIndex
-        ),
-        projectFileIndex
-      )
+        )
+      ),
+      chatLookup()
     );
   }
 
@@ -1844,7 +2005,7 @@
   function handleMessageClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     const link = target.closest('a.preview-link') as HTMLAnchorElement | null;
-    
+
     if (link) {
       e.preventDefault();
       e.stopPropagation();
@@ -1854,7 +2015,33 @@
       }
       return;
     }
-    
+
+    // Handle chat reference clicks
+    const chatRef = target.closest('.chat-reference') as HTMLElement | null;
+    if (chatRef) {
+      e.preventDefault();
+      e.stopPropagation();
+      const sessionId = chatRef.dataset.sessionId;
+      if (sessionId) {
+        // Find the session and navigate to it
+        const targetSession = sidebarSessions.find(s => s.id === sessionId) ||
+                              recentChats.find(s => s.id === sessionId);
+        if (targetSession) {
+          selectSession(targetSession);
+        } else {
+          // Session not in current list - try to fetch and navigate
+          api.sessions.get(sessionId).then((session) => {
+            if (session) {
+              selectSession(session);
+            }
+          }).catch(err => {
+            console.error("Failed to load referenced chat:", err);
+          });
+        }
+      }
+      return;
+    }
+
     if (target.classList.contains("file-link")) {
       e.preventDefault();
       const path = target.dataset.path;
@@ -2344,6 +2531,7 @@
               onPruneToolResults={() => pruneToolResults($session.sessionId || '')}
               onSDKCompact={() => sendMessage("/compact")}
               onStartNewChat={() => startNewChatWithSummary($session.sessionId || '')}
+              onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
             />
           {/if}
 
@@ -2390,11 +2578,14 @@
                     {queuedCount}
                     projectPath={currentProject?.path}
                     activeSkills={activeSkills.map(s => ({ name: s.name, path: s.slug }))}
+                    sessionId={$session.sessionId || undefined}
+                    {untilDoneEnabled}
                     onSubmit={sendMessage}
                     onStop={stopGeneration}
                     onPreview={openPreview}
                     onExecCommand={handleExecCommand}
                     onManageSkills={() => { projectSettingsInitialTab = "skills"; showProjectSettings = true; }}
+                    onToggleUntilDone={toggleUntilDone}
                 />
 
                 <div class="text-center mt-2">
@@ -2414,6 +2605,7 @@
       mode={rightPanelMode}
       width={rightPanelWidth}
       projectId={currentProject?.id || null}
+      sessionId={$session.sessionId || null}
       projectPath={currentProject?.path || null}
       {previewSource}
       {browserUrl}
@@ -2452,6 +2644,9 @@
         openAgent(agent);
         showAgentBuilder = true;
       }
+    }}
+    onCreateFromTemplate={async (templateId, name) => {
+      await createProjectFromTemplate(templateId, name);
     }}
     {projectCreationMode}
     {newProjectQuickName}

@@ -12,6 +12,7 @@
   import { streamingStore, type StreamingState } from "../handlers";
   import { sessionMessages, loadingSessions, sessionTodos, type ChatMessage } from "../stores";
   import type { ContentBlock } from "../claude";
+  import BackgroundProcessBadge from "./BackgroundProcessBadge.svelte";
 
   interface Props {
     sessionId: string | null;
@@ -58,6 +59,8 @@
     onPruneToolResults?: () => void;
     onSDKCompact?: () => void;
     onStartNewChat?: () => void;
+    // Background processes
+    onOpenProcesses?: () => void;
   }
 
   let {
@@ -91,6 +94,7 @@
     onPruneToolResults,
     onSDKCompact,
     onStartNewChat,
+    onOpenProcesses,
   }: Props = $props();
 
   const usagePercent = $derived(
@@ -183,6 +187,11 @@
 
 <div class="space-y-2">
   <div class="max-w-3xl mx-auto w-full md:pt-6 space-y-3 pb-64 px-4" style="overflow-anchor: none;">
+    <!-- Background process badge -->
+    <div class="flex justify-center">
+      <BackgroundProcessBadge {sessionId} onClick={onOpenProcesses} />
+    </div>
+
     {#if messages.length === 0 && !isStreaming && emptyState !== "none"}
       <div class="flex flex-col items-center justify-center text-gray-400 space-y-6 min-h-[40vh] animate-in fade-in duration-500">
         <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center shadow-sm">

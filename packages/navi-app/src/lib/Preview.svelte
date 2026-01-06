@@ -6,12 +6,15 @@
   import MermaidRenderer from "./components/MermaidRenderer.svelte";
   import JsonTreeViewer from "./components/JsonTreeViewer.svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
+  import STLViewer from "./components/STLViewer.svelte";
+  import GLBViewer from "./components/GLBViewer.svelte";
+  import LogViewer from "./components/LogViewer.svelte";
   import { api } from "./api";
   import { getApiBase } from "./config";
   import { textReferences } from "./stores";
   import type { TextReference } from "./stores/types";
 
-  type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "xlsx" | "json" | "none";
+  type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "xlsx" | "json" | "stl" | "glb" | "logs" | "none";
 
   interface Props {
     source: string;
@@ -86,10 +89,17 @@
   const jsonExtensions = ["json"];
   const markdownExtensions = ["md", "mdx", "markdown"];
   const pdfExtensions = ["pdf"];
+  const stlExtensions = ["stl"];
+  const glbExtensions = ["glb", "gltf"];
 
   function detectType(src: string): PreviewType {
     if (!src) return "none";
-    
+
+    // Check for logs: prefix (e.g., "logs:process-id" or "logs:terminal:terminal-id")
+    if (src.startsWith("logs:")) {
+      return "logs";
+    }
+
     if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("localhost") || src.match(/^:\d+/)) {
       return "url";
     }
@@ -102,6 +112,8 @@
     if (csvExtensions.includes(ext)) return "csv";
     if (xlsxExtensions.includes(ext)) return "xlsx";
     if (pdfExtensions.includes(ext)) return "pdf";
+    if (stlExtensions.includes(ext)) return "stl";
+    if (glbExtensions.includes(ext)) return "glb";
     if (markdownExtensions.includes(ext)) return "markdown";
     if (jsonExtensions.includes(ext)) return "json";
     if (codeExtensions.includes(ext)) return "code";
@@ -678,7 +690,7 @@
         lastSource = source;
         loadFile(source);
       }
-    } else if (detectedType === "image" || detectedType === "pdf" || detectedType === "audio" || detectedType === "video") {
+    } else if (detectedType === "image" || detectedType === "pdf" || detectedType === "audio" || detectedType === "video" || detectedType === "stl" || detectedType === "glb") {
       content = source;
       lastSource = source;
     }
@@ -796,6 +808,10 @@
             <svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
           {:else if detectedType === "markdown"}
             <svg class="w-3.5 h-3.5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+          {:else if detectedType === "stl"}
+            <svg class="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"></path></svg>
+          {:else if detectedType === "glb"}
+            <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
           {:else}
             <svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
           {/if}
@@ -940,6 +956,21 @@
         <div class="px-3 py-2 bg-gray-900">
           <span class="text-xs text-gray-400 truncate">{source.split('/').pop()}</span>
         </div>
+      </div>
+    {:else if detectedType === "stl"}
+      <div class="flex-1 min-h-0">
+        <STLViewer src={`${getApiBase()}/fs/read?path=${encodeURIComponent(source)}&raw=true`} />
+      </div>
+    {:else if detectedType === "glb"}
+      <div class="flex-1 min-h-0">
+        <GLBViewer src={`${getApiBase()}/fs/read?path=${encodeURIComponent(source)}&raw=true`} />
+      </div>
+    {:else if detectedType === "logs"}
+      {@const logSource = source.replace(/^logs:/, "")}
+      {@const isTerminal = logSource.startsWith("terminal:")}
+      {@const sourceId = isTerminal ? logSource.replace(/^terminal:/, "") : logSource}
+      <div class="flex-1 min-h-0">
+        <LogViewer {sourceId} sourceType={isTerminal ? "terminal" : "process"} onClose={onClose} />
       </div>
     {:else if detectedType === "csv"}
       <div class="h-full overflow-auto">

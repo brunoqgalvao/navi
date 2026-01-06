@@ -22,6 +22,7 @@
     mode: PanelMode;
     width: number;
     projectId: string | null;
+    sessionId: string | null;
     projectPath: string | null;
     previewSource: string | null;
     browserUrl: string;
@@ -40,6 +41,7 @@
     mode,
     width,
     projectId,
+    sessionId,
     projectPath,
     previewSource,
     browserUrl,
@@ -250,6 +252,7 @@
       <div class="flex-1 flex flex-col w-full overflow-hidden">
         <BackgroundProcessPanel
           {projectId}
+          {sessionId}
           onOpenPreview={(url) => {
             onBrowserUrlChange(url);
             onModeChange("browser");

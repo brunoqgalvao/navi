@@ -124,6 +124,20 @@ export async function initDb() {
     db.run("ALTER TABLE messages ADD COLUMN is_final INTEGER DEFAULT 0");
   } catch {}
 
+  // Until Done (Ralph loop) mode columns
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN until_done_mode INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN until_done_iteration INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN until_done_max_iterations INTEGER DEFAULT 10");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN until_done_total_cost REAL DEFAULT 0");
+  } catch {}
+
   db.run(`
     CREATE TABLE IF NOT EXISTS cost_entries (
       id TEXT PRIMARY KEY,
@@ -282,6 +296,11 @@ export interface Session {
   favorite: number;
   archived: number;
   marked_for_review: number;
+  // Until Done (Ralph loop) mode
+  until_done_mode: number;
+  until_done_iteration: number;
+  until_done_max_iterations: number;
+  until_done_total_cost: number;
   created_at: number;
   updated_at: number;
 }
@@ -464,6 +483,16 @@ export const sessions = {
     run("UPDATE sessions SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
   setMarkedForReview: (id: string, markedForReview: boolean) =>
     run("UPDATE sessions SET marked_for_review = ?, updated_at = ? WHERE id = ?", [markedForReview ? 1 : 0, Date.now(), id]),
+
+  // Until Done (Ralph loop) mode methods
+  setUntilDoneMode: (id: string, enabled: boolean, maxIterations: number = 10) =>
+    run("UPDATE sessions SET until_done_mode = ?, until_done_iteration = ?, until_done_max_iterations = ?, until_done_total_cost = 0, updated_at = ? WHERE id = ?",
+        [enabled ? 1 : 0, enabled ? 1 : 0, maxIterations, Date.now(), id]),
+  incrementUntilDoneIteration: (id: string, iterationCost: number = 0) =>
+    run("UPDATE sessions SET until_done_iteration = until_done_iteration + 1, until_done_total_cost = until_done_total_cost + ?, updated_at = ? WHERE id = ?",
+        [iterationCost, Date.now(), id]),
+  clearUntilDoneMode: (id: string) =>
+    run("UPDATE sessions SET until_done_mode = 0, updated_at = ? WHERE id = ?", [Date.now(), id]),
 };
 
 export const messages = {

@@ -82,7 +82,7 @@ export {
 // References store
 export { textReferences, terminalReferences, chatReferences } from "./references";
 
-export type { UIScaleLevel, FileBrowserState } from "./ui";
+export type { UIScaleLevel, FileBrowserState, ProjectStatusInfo } from "./ui";
 
 // Cost stores
 export { costStore } from "./costs";

@@ -465,19 +465,39 @@ export const pendingPermissionRequests = derived(
   ($notifications) => $notifications.filter(n => n.type === "permission_request" && !n.dismissed)
 );
 
+export interface ProjectStatusInfo {
+  status: ProjectStatusType;
+  attentionCount: number; // permission + awaiting_input
+  runningCount: number;
+}
+
 export const projectStatus = derived(
   sessionStatus,
   ($sessionStatus) => {
-    const projectMap = new Map<string, ProjectStatusType>();
+    const projectMap = new Map<string, ProjectStatusInfo>();
 
     $sessionStatus.forEach(status => {
-      const current = projectMap.get(status.projectId) || "idle";
+      const current = projectMap.get(status.projectId) || {
+        status: "idle" as ProjectStatusType,
+        attentionCount: 0,
+        runningCount: 0,
+      };
 
-      if (status.status === "permission" || status.status === "unread") {
-        projectMap.set(status.projectId, "attention");
-      } else if (status.status === "running" && current !== "attention") {
-        projectMap.set(status.projectId, "active");
+      if (status.status === "permission" || status.status === "awaiting_input") {
+        current.attentionCount++;
+        current.status = "attention";
+      } else if (status.status === "running") {
+        current.runningCount++;
+        if (current.status !== "attention") {
+          current.status = "active";
+        }
+      } else if (status.status === "unread" && current.status === "idle") {
+        // Unread is lower priority, only set if idle
+        current.status = "attention";
+        current.attentionCount++;
       }
+
+      projectMap.set(status.projectId, current);
     });
 
     return projectMap;

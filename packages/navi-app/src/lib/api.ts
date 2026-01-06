@@ -315,6 +315,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ path, editor }),
       }),
+    applyTemplate: (templateId: string, targetPath: string) =>
+      request<{ success: boolean; templateId: string; targetPath: string; message: string }>("/fs/apply-template", {
+        method: "POST",
+        body: JSON.stringify({ templateId, targetPath }),
+      }),
   },
 
   config: {

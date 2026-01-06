@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { flip } from "svelte/animate";
   import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, attentionItems } from "../../stores";
   import { api, type Project, type Session, type WorkspaceFolder } from "../../api";
   import { getApiBase } from "../../config";
@@ -7,6 +8,8 @@
   import TitleSuggestion from "../TitleSuggestion.svelte";
   import RelativeTime from "../RelativeTime.svelte";
   import EditableText from "../EditableText.svelte";
+  import SessionStatusBadge from "../SessionStatusBadge.svelte";
+  import WorkspaceCountBadge from "../WorkspaceCountBadge.svelte";
   import type { ChatMessage } from "../../stores";
 
   interface Props {
@@ -135,9 +138,9 @@
     })
   );
 
-  // Use centralized attention store for pending/review items
-  let pendingActionChats = $derived($attentionItems.pendingActions.map(item => item.session));
-  let reviewQueueChats = $derived($attentionItems.needsReview.map(item => item.session));
+  // Use centralized attention store for running/needs-input items
+  let runningChats = $derived($attentionItems.runningSessions.map(item => item.session));
+  let needsInputChats = $derived($attentionItems.needsInput.map(item => item.session));
 
   let draggedProjectId = $state<string | null>(null);
   let draggedProjectFolderId = $state<string | null>(null);
@@ -230,7 +233,13 @@
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", proj.id);
       e.dataTransfer.setData("type", "project");
+      // Create custom drag image
+      const dragEl = e.target as HTMLElement;
+      const rect = dragEl.getBoundingClientRect();
+      e.dataTransfer.setDragImage(dragEl, rect.width / 2, 20);
     }
+    // Add dragging class to body to prevent text selection
+    document.body.classList.add('dragging-active');
   }
 
   function handleProjectDragOver(e: DragEvent, projId: string) {
@@ -299,7 +308,7 @@
     }
 
     const sameFolderOrBothRoot = (draggedProj.folder_id || null) === (targetProj.folder_id || null);
-    
+
     if (sameFolderOrBothRoot) {
       const relevantProjects = projects.filter(p => (p.folder_id || null) === (targetProj.folder_id || null));
       const draggedIndex = relevantProjects.findIndex(p => p.id === draggedProjectId);
@@ -313,7 +322,7 @@
       const newRelevant = [...relevantProjects];
       const [removed] = newRelevant.splice(draggedIndex, 1);
       newRelevant.splice(targetIndex, 0, removed);
-      
+
       const otherProjects = projects.filter(p => (p.folder_id || null) !== (targetProj.folder_id || null));
       const allProjects = [...otherProjects, ...newRelevant];
       onProjectReorder(allProjects.map(p => p.id));
@@ -333,6 +342,7 @@
   }
 
   function handleProjectDragEnd() {
+    document.body.classList.remove('dragging-active');
     resetDragState();
   }
 
@@ -341,7 +351,12 @@
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", sess.id);
+      // Create custom drag image
+      const dragEl = e.target as HTMLElement;
+      const rect = dragEl.getBoundingClientRect();
+      e.dataTransfer.setDragImage(dragEl, rect.width / 2, 20);
     }
+    document.body.classList.add('dragging-active');
   }
 
   function handleSessionDragOver(e: DragEvent, sessId: string) {
@@ -378,6 +393,7 @@
   }
 
   function handleSessionDragEnd() {
+    document.body.classList.remove('dragging-active');
     resetDragState();
   }
 
@@ -403,7 +419,12 @@
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", folder.id);
       e.dataTransfer.setData("type", "folder");
+      // Create custom drag image
+      const dragEl = e.target as HTMLElement;
+      const rect = dragEl.getBoundingClientRect();
+      e.dataTransfer.setDragImage(dragEl, rect.width / 2, 20);
     }
+    document.body.classList.add('dragging-active');
   }
 
   function handleFolderReorderDragOver(e: DragEvent, targetFolderId: string) {
@@ -444,6 +465,7 @@
   }
 
   function handleFolderDragEnd() {
+    document.body.classList.remove('dragging-active');
     resetDragState();
   }
 
@@ -583,18 +605,20 @@
           <div class="text-xs text-gray-400 italic text-center py-4">No workspaces yet</div>
         {:else}
           <div class="space-y-1">
-            {#each folders as folder}
+            {#each folders as folder (folder.id)}
               {@const folderPinned = !!folder.pinned}
               {@const isDragOverForReorder = dragOverFolderForReorder === folder.id}
               {@const isDragging = draggedFolderId === folder.id}
+              {@const isFolderDropTarget = dragOverFolderId === folder.id}
               <div
-                class="group relative {isDragOverForReorder ? 'before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-blue-400' : ''} {isDragging ? 'opacity-50' : ''}"
+                animate:flip={{ duration: 200 }}
+                class="group relative {isDragOverForReorder ? 'drop-indicator-line' : ''} {isDragging ? 'drag-source' : ''}"
                 draggable={!folderPinned}
                 ondragstart={(e) => handleFolderDragStart(e, folder)}
                 ondragend={handleFolderDragEnd}
               >
                 <div
-                  class="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 cursor-pointer {dragOverFolderId === folder.id ? 'bg-gray-100 border border-gray-300' : ''} {!folderPinned ? 'cursor-grab active:cursor-grabbing' : ''}"
+                  class="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 cursor-pointer {isFolderDropTarget ? 'bg-indigo-50' : ''} {!folderPinned ? 'cursor-grab active:cursor-grabbing' : ''}"
                   ondragover={(e) => { handleFolderDragOver(e, folder.id); handleFolderReorderDragOver(e, folder.id); }}
                   ondragleave={(e) => { handleFolderDragLeave(e); handleFolderReorderDragLeave(e); }}
                   ondrop={(e) => { handleFolderDrop(e, folder.id); handleFolderReorderDrop(e, folder); }}
@@ -646,9 +670,12 @@
                 </div>
                 {#if !folder.collapsed}
                   <div class="ml-4 space-y-0.5">
-                    {#each getProjectsInFolder(folder.id) as proj}
-                      <div 
-                        class="group/proj relative {dragOverProjectId === proj.id && !proj.pinned ? 'border-t-2 border-gray-400' : ''} {draggedProjectId === proj.id ? 'opacity-50' : ''}"
+                    {#each getProjectsInFolder(folder.id) as proj (proj.id)}
+                      {@const isDropTarget = dragOverProjectId === proj.id && !proj.pinned}
+                      {@const isDragged = draggedProjectId === proj.id}
+                      <div
+                        animate:flip={{ duration: 200 }}
+                        class="group/proj relative {isDropTarget ? 'drop-indicator-line' : ''} {isDragged ? 'drag-source' : ''}"
                         role="listitem"
                         draggable={!proj.pinned}
                         ondragstart={(e) => !proj.pinned && handleProjectDragStart(e, proj)}
@@ -660,17 +687,22 @@
                         <button
                           onclick={() => onSelectProject(proj)}
                           oncontextmenu={(e) => { e.preventDefault(); projectMenuId = proj.id; }}
-                          class="w-full text-left px-2.5 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
+                          class="w-full text-left px-2.5 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
                         >
                           <div class="flex items-center gap-2">
                             <svg class="w-3 h-3 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                             <span class="text-[12px] font-medium truncate {proj.archived ? 'text-gray-400' : ''}">{proj.name}</span>
                             {#if proj.archived}
                               <span class="shrink-0 text-[9px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Archived</span>
-                            {:else if $projectStatus.get(proj.id) === "attention"}
-                              <span class="shrink-0 w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Needs attention"></span>
-                            {:else if $projectStatus.get(proj.id) === "active"}
-                              <span class="shrink-0 w-1.5 h-1.5 bg-blue-400 rounded-full" title="Active"></span>
+                            {:else}
+                              {@const statusInfo = $projectStatus.get(proj.id)}
+                              {#if statusInfo}
+                                <WorkspaceCountBadge
+                                  attentionCount={statusInfo.attentionCount}
+                                  runningCount={statusInfo.runningCount}
+                                  size="sm"
+                                />
+                              {/if}
                             {/if}
                           </div>
                         </button>
@@ -718,20 +750,25 @@
             {/each}
 
             {#if draggedProjectId && draggedProjectFolderId !== null}
-              <div 
-                class="mt-2 pt-2 border-t border-gray-100 {isDraggingToRoot ? 'bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg' : ''}"
+              <div
+                class="mt-2 pt-2 border-t border-gray-100 {isDraggingToRoot ? 'bg-indigo-50 rounded-lg' : ''}"
                 ondragover={handleRootDragOver}
                 ondragleave={handleRootDragLeave}
                 ondrop={handleRootDrop}
               >
-                <div class="text-[10px] text-gray-400 text-center py-2">Drop here to remove from folder</div>
+                <div class="text-[10px] text-gray-400 text-center py-2 {isDraggingToRoot ? 'text-indigo-600 font-medium' : ''}">
+                  Drop here to remove from folder
+                </div>
               </div>
             {/if}
 
             <div class="{folders.length > 0 ? 'mt-2 pt-2 border-t border-gray-100' : ''}">
-              {#each getProjectsInFolder(null) as proj}
-                <div 
-                  class="group relative {dragOverProjectId === proj.id && !proj.pinned ? 'border-t-2 border-gray-400' : ''} {draggedProjectId === proj.id ? 'opacity-50' : ''}"
+              {#each getProjectsInFolder(null) as proj (proj.id)}
+                {@const isDropTarget = dragOverProjectId === proj.id && !proj.pinned}
+                {@const isDragged = draggedProjectId === proj.id}
+                <div
+                  animate:flip={{ duration: 200 }}
+                  class="group relative {isDropTarget ? 'drop-indicator-line' : ''} {isDragged ? 'drag-source' : ''}"
                   role="listitem"
                   draggable={!proj.pinned}
                   ondragstart={(e) => !proj.pinned && handleProjectDragStart(e, proj)}
@@ -743,17 +780,22 @@
                   <button
                     onclick={() => onSelectProject(proj)}
                     oncontextmenu={(e) => { e.preventDefault(); projectMenuId = proj.id; }}
-                    class="w-full text-left px-2.5 py-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
+                    class="w-full text-left px-2.5 py-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
                   >
                     <div class="flex items-center gap-2">
                       <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                       <span class="text-[13px] font-medium truncate {proj.archived ? 'text-gray-400' : ''}">{proj.name}</span>
                       {#if proj.archived}
                         <span class="shrink-0 text-[9px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded" title="Archived">Archived</span>
-                      {:else if $projectStatus.get(proj.id) === "attention"}
-                        <span class="shrink-0 w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Needs attention"></span>
-                      {:else if $projectStatus.get(proj.id) === "active"}
-                        <span class="shrink-0 w-1.5 h-1.5 bg-blue-400 rounded-full" title="Active"></span>
+                      {:else}
+                        {@const statusInfo = $projectStatus.get(proj.id)}
+                        {#if statusInfo}
+                          <WorkspaceCountBadge
+                            attentionCount={statusInfo.attentionCount}
+                            runningCount={statusInfo.runningCount}
+                            size="sm"
+                          />
+                        {/if}
                       {/if}
                     </div>
                   </button>
@@ -800,49 +842,39 @@
           </div>
         {/if}
 
-        {#if pendingActionChats.length > 0}
+        {#if runningChats.length > 0}
           <div class="mt-4">
             <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1 px-2 flex items-center gap-1.5">
-              <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
-              Pending Actions
+              <span class="relative flex h-1.5 w-1.5">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-500"></span>
+              </span>
+              Running
             </h3>
             <div class="space-y-0">
-              {#each pendingActionChats as chat}
-                <button onclick={() => onGoToChat(chat)} class="w-full text-left px-2 py-1.5 rounded text-gray-600 hover:bg-amber-50 hover:text-gray-800 transition-colors flex items-center gap-1.5 border-l-2 border-amber-400 ml-1">
-                  <svg class="w-2.5 h-2.5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+              {#each runningChats as chat}
+                <button onclick={() => onGoToChat(chat)} class="w-full text-left px-2 py-1.5 rounded text-gray-600 hover:bg-indigo-50 hover:text-gray-800 transition-colors flex items-center gap-1.5 border-l-2 border-indigo-400 ml-1">
+                  <svg class="w-2.5 h-2.5 text-indigo-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                   <span class="text-[11px] truncate flex-1 font-medium">{chat.title}</span>
-                  {#if $sessionStatus.get(chat.id)?.status === "running"}
-                    <svg class="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                  {:else if $sessionStatus.get(chat.id)?.status === "permission"}
-                    <span class="w-2 h-2 bg-amber-500 rounded-full animate-pulse shrink-0" title="Permission required"></span>
-                  {:else if $sessionStatus.get(chat.id)?.status === "awaiting_input"}
-                    <span class="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shrink-0" title="Awaiting your input"></span>
-                  {/if}
+                  <SessionStatusBadge status={$sessionStatus.get(chat.id)?.status} />
                 </button>
               {/each}
             </div>
           </div>
         {/if}
 
-        {#if reviewQueueChats.length > 0}
+        {#if needsInputChats.length > 0}
           <div class="mt-4">
             <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1 px-2 flex items-center gap-1.5">
-              <svg class="w-3 h-3 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-              Needs Review
+              <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
+              Needs Input
             </h3>
             <div class="space-y-0">
-              {#each reviewQueueChats as chat}
-                <button onclick={() => onGoToChat(chat)} class="w-full text-left px-2 py-1.5 rounded text-gray-600 hover:bg-blue-50 hover:text-gray-800 transition-colors flex items-center gap-1.5 border-l-2 border-blue-400 ml-1">
-                  <svg class="w-2.5 h-2.5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+              {#each needsInputChats as chat}
+                <button onclick={() => onGoToChat(chat)} class="w-full text-left px-2 py-1.5 rounded text-gray-600 hover:bg-amber-50 hover:text-gray-800 transition-colors flex items-center gap-1.5 border-l-2 border-amber-400 ml-1">
+                  <svg class="w-2.5 h-2.5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                   <span class="text-[11px] truncate flex-1 font-medium">{chat.title}</span>
-                  <div class="flex items-center gap-1 shrink-0">
-                    {#if chat.marked_for_review}
-                      <svg class="w-3 h-3 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Marked for review"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                    {/if}
-                    {#if $sessionStatus.get(chat.id)?.status === "unread"}
-                      <span class="w-1.5 h-1.5 bg-gray-500 rounded-full" title="Unread"></span>
-                    {/if}
-                  </div>
+                  <SessionStatusBadge status={$sessionStatus.get(chat.id)?.status} />
                 </button>
               {/each}
             </div>
@@ -857,15 +889,7 @@
                 <button onclick={() => onGoToChat(chat)} class="w-full text-left px-2 py-1 rounded text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors flex items-center gap-1.5">
                   <svg class="w-2.5 h-2.5 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                   <span class="text-[11px] truncate flex-1">{chat.title}</span>
-                  {#if $sessionStatus.get(chat.id)?.status === "running"}
-                    <svg class="w-3.5 h-3.5 text-gray-400 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                  {:else if $sessionStatus.get(chat.id)?.status === "permission"}
-                    <span class="w-2 h-2 bg-[#D97706] rounded-full animate-pulse shrink-0" title="Permission required"></span>
-                  {:else if $sessionStatus.get(chat.id)?.status === "awaiting_input"}
-                    <span class="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shrink-0" title="Awaiting your input"></span>
-                  {:else if $sessionStatus.get(chat.id)?.status === "unread"}
-                    <span class="w-1.5 h-1.5 bg-gray-400 rounded-full shrink-0" title="New results"></span>
-                  {/if}
+                  <SessionStatusBadge status={$sessionStatus.get(chat.id)?.status} />
                 </button>
               {/each}
             </div>
@@ -1014,10 +1038,13 @@
           {:else if filteredSessions.length === 0}
             <div class="text-xs text-gray-400 italic text-center py-4">No matching chats</div>
           {:else}
-            {#each filteredSessions as sess}
-              <div 
+            {#each filteredSessions as sess (sess.id)}
+              {@const isDropTarget = dragOverSessionId === sess.id && !sess.pinned}
+              {@const isDragged = draggedSessionId === sess.id}
+              <div
+                animate:flip={{ duration: 200 }}
                 data-session-item={sess.id}
-                class="group relative {dragOverSessionId === sess.id && !sess.pinned ? 'border-t-2 border-gray-400' : ''} {draggedSessionId === sess.id ? 'opacity-50' : ''}"
+                class="group relative {isDropTarget ? 'drop-indicator-line' : ''} {isDragged ? 'drag-source' : ''}"
                 role="listitem"
                 draggable={!sess.pinned}
                 ondragstart={(e) => !sess.pinned && handleSessionDragStart(e, sess)}
@@ -1028,7 +1055,7 @@
               >
                 <button
                   onclick={() => onSelectSession(sess)}
-                  class={`w-full text-left px-2.5 py-2 rounded-lg text-[13px] transition-all border sidebar-item-glow ${sess.pinned ? '' : 'cursor-grab active:cursor-grabbing'} ${$session.sessionId === sess.id ? 'bg-white border-gray-200 shadow-sm text-gray-900 z-10 relative' : 'border-transparent text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
+                  class={`w-full text-left px-2.5 py-2 rounded-lg text-[13px] border sidebar-item-glow ${sess.pinned ? '' : 'cursor-grab active:cursor-grabbing'} ${$session.sessionId === sess.id ? 'bg-white border-gray-200 shadow-sm text-gray-900 z-10 relative' : 'border-transparent text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
                 >
                   <div class="truncate pr-16 font-medium flex items-center gap-1">
                     <span class="shrink-0 -ml-1">
@@ -1059,15 +1086,7 @@
                 </button>
 
                 <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 {sessionMenuId === sess.id ? 'z-[70]' : 'z-20'}">
-                  {#if $sessionStatus.get(sess.id)?.status === "running"}
-                    <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                  {:else if $sessionStatus.get(sess.id)?.status === "permission"}
-                    <span class="w-2.5 h-2.5 bg-[#D97706] rounded-full animate-pulse" title="Permission required"></span>
-                  {:else if $sessionStatus.get(sess.id)?.status === "awaiting_input"}
-                    <span class="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse" title="Awaiting your input"></span>
-                  {:else if $sessionStatus.get(sess.id)?.status === "unread"}
-                    <span class="w-2 h-2 bg-gray-400 rounded-full" title="New results"></span>
-                  {/if}
+                  <SessionStatusBadge status={$sessionStatus.get(sess.id)?.status} size="md" />
 
                   {#if sess.marked_for_review}
                     <button

@@ -288,7 +288,9 @@ export type ClaudeMessage =
   | UnknownMessage
   | { type: "connected" }
   | { type: "aborted"; sessionId?: string; uiSessionId?: string }
-  | { type: "ui_command"; command: string; payload: Record<string, unknown> };
+  | { type: "ui_command"; command: string; payload: Record<string, unknown> }
+  | { type: "until_done_continue"; uiSessionId?: string; iteration: number; maxIterations: number; totalCost: number; reason: string }
+  | { type: "until_done_complete"; uiSessionId?: string; totalIterations: number; totalCost: number; reason: string };
 
 export class ClaudeClient {
   private ws: WebSocket | null = null;

@@ -40,6 +40,10 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
           mkv: "video/x-matroska",
           m4v: "video/mp4",
           ogv: "video/ogg",
+          // 3D models
+          stl: "model/stl",
+          glb: "model/gltf-binary",
+          gltf: "model/gltf+json",
         };
         const contentType = mimeTypes[ext] || "application/octet-stream";
         return new Response(file, {
@@ -200,5 +204,92 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
     }
   }
 
+  // Apply a project template to a target directory
+  if (url.pathname === "/api/fs/apply-template" && method === "POST") {
+    const body = await req.json();
+    const { templateId, targetPath } = body;
+
+    if (!templateId || !targetPath) {
+      return json({ error: "templateId and targetPath required" }, 400);
+    }
+
+    try {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+
+      // Hardcoded templates directory path
+      // process.cwd() is packages/navi-app, so we go up 2 levels to repo root
+      // Use path.resolve to get absolute path
+      const TEMPLATES_BASE = process.env.TEMPLATES_DIR ||
+        path.resolve(process.cwd(), "..", "..", ".claude", "templates");
+
+      const templatePath = path.join(TEMPLATES_BASE, templateId);
+      console.log("[fs/apply-template] TEMPLATES_BASE:", TEMPLATES_BASE);
+      console.log("[fs/apply-template] templatePath:", templatePath);
+      console.log("[fs/apply-template] targetPath:", targetPath);
+
+      // Verify template exists
+      try {
+        await fs.access(templatePath);
+      } catch (accessErr) {
+        console.error("[fs/apply-template] Template not found:", templatePath, accessErr);
+        return json({ error: `Template "${templateId}" not found at ${templatePath}` }, 404);
+      }
+
+      // Create target directory if it doesn't exist
+      await fs.mkdir(targetPath, { recursive: true });
+
+      // Copy CLAUDE.md if it exists
+      const claudeMdSrc = path.join(templatePath, "CLAUDE.md");
+      const claudeMdDest = path.join(targetPath, "CLAUDE.md");
+      try {
+        await fs.access(claudeMdSrc);
+        await fs.copyFile(claudeMdSrc, claudeMdDest);
+      } catch {
+        // CLAUDE.md doesn't exist in template, that's okay
+      }
+
+      // Copy .claude directory recursively if it exists
+      const claudeDirSrc = path.join(templatePath, ".claude");
+      const claudeDirDest = path.join(targetPath, ".claude");
+      try {
+        await fs.access(claudeDirSrc);
+        await copyDirRecursive(claudeDirSrc, claudeDirDest);
+      } catch {
+        // .claude dir doesn't exist in template, that's okay
+      }
+
+      return json({
+        success: true,
+        templateId,
+        targetPath,
+        message: `Template "${templateId}" applied successfully`
+      });
+    } catch (e: any) {
+      console.error("[fs/apply-template] Failed:", e);
+      return json({ error: e.message || "Failed to apply template" }, 500);
+    }
+  }
+
   return null;
+}
+
+// Helper to recursively copy a directory
+async function copyDirRecursive(src: string, dest: string): Promise<void> {
+  const fs = await import("fs/promises");
+  const path = await import("path");
+
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirRecursive(srcPath, destPath);
+    } else {
+      await fs.copyFile(srcPath, destPath);
+    }
+  }
 }

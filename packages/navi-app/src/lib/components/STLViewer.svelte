@@ -1,0 +1,332 @@
+<script lang="ts">
+  import { onMount, onDestroy } from "svelte";
+  import * as THREE from "three";
+  import { STLLoader } from "three/addons/loaders/STLLoader.js";
+  import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+  interface Props {
+    src: string;
+    modelColor?: string;
+    backgroundColor?: string;
+  }
+
+  let { src, modelColor = "#6366f1", backgroundColor = "#1f2937" }: Props = $props();
+
+  let container: HTMLDivElement;
+  let scene: THREE.Scene;
+  let camera: THREE.PerspectiveCamera;
+  let renderer: THREE.WebGLRenderer;
+  let controls: OrbitControls;
+  let mesh: THREE.Mesh | null = null;
+  let animationId: number;
+  let loading = $state(true);
+  let error = $state("");
+
+  function initScene() {
+    // Scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(backgroundColor);
+
+    // Camera
+    const aspect = container.clientWidth / container.clientHeight;
+    camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 2000);
+    camera.position.set(100, 100, 100);
+
+    // Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    // Controls
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.screenSpacePanning = true;
+    controls.minDistance = 10;
+    controls.maxDistance = 1000;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(50, 50, 50);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 1024;
+    directionalLight.shadow.mapSize.height = 1024;
+    scene.add(directionalLight);
+
+    const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+    directionalLight2.position.set(-50, 50, -50);
+    scene.add(directionalLight2);
+
+    // Hemisphere light for softer shadows
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+    hemiLight.position.set(0, 100, 0);
+    scene.add(hemiLight);
+
+    // Grid helper
+    const gridHelper = new THREE.GridHelper(200, 20, 0x444444, 0x333333);
+    scene.add(gridHelper);
+  }
+
+  function loadSTL() {
+    loading = true;
+    error = "";
+
+    const loader = new STLLoader();
+
+    console.log("[STLViewer] Loading from:", src);
+
+    loader.load(
+      src,
+      (geometry) => {
+        // Remove old mesh if exists
+        if (mesh) {
+          scene.remove(mesh);
+          mesh.geometry.dispose();
+          (mesh.material as THREE.Material).dispose();
+        }
+
+        // Center geometry
+        geometry.center();
+        geometry.computeVertexNormals();
+
+        // Material with better appearance
+        const material = new THREE.MeshPhongMaterial({
+          color: new THREE.Color(modelColor),
+          specular: 0x222222,
+          shininess: 30,
+          flatShading: false,
+        });
+
+        mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+
+        // Fit camera to model
+        fitCameraToModel();
+
+        loading = false;
+      },
+      (progress) => {
+        // Progress callback
+        const percent = progress.lengthComputable
+          ? Math.round((progress.loaded / progress.total) * 100)
+          : 0;
+        console.log(`Loading STL: ${percent}%`);
+      },
+      (err) => {
+        console.error("[STLViewer] Error loading STL:", err);
+        console.error("[STLViewer] URL was:", src);
+        error = `Failed to load STL file: ${err?.message || err}`;
+        loading = false;
+      }
+    );
+  }
+
+  function fitCameraToModel() {
+    if (!mesh) return;
+
+    const box = new THREE.Box3().setFromObject(mesh);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = camera.fov * (Math.PI / 180);
+    let cameraZ = Math.abs(maxDim / (2 * Math.tan(fov / 2)));
+    cameraZ *= 1.5; // Add some padding
+
+    camera.position.set(cameraZ, cameraZ * 0.8, cameraZ);
+    camera.lookAt(center);
+
+    controls.target.copy(center);
+    controls.update();
+
+    // Update near/far planes
+    camera.near = cameraZ / 100;
+    camera.far = cameraZ * 100;
+    camera.updateProjectionMatrix();
+  }
+
+  function animate() {
+    animationId = requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  function handleResize() {
+    if (!container || !camera || !renderer) return;
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height);
+  }
+
+  function resetView() {
+    fitCameraToModel();
+  }
+
+  function toggleWireframe() {
+    if (mesh && mesh.material instanceof THREE.MeshPhongMaterial) {
+      mesh.material.wireframe = !mesh.material.wireframe;
+    }
+  }
+
+  onMount(() => {
+    initScene();
+    loadSTL();
+    animate();
+
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  });
+
+  onDestroy(() => {
+    cancelAnimationFrame(animationId);
+
+    if (mesh) {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
+
+    if (renderer) {
+      renderer.dispose();
+      container?.removeChild(renderer.domElement);
+    }
+
+    if (controls) {
+      controls.dispose();
+    }
+  });
+
+  // Reload when src changes
+  $effect(() => {
+    if (src && renderer) {
+      loadSTL();
+    }
+  });
+</script>
+
+<div class="stl-viewer" bind:this={container}>
+  {#if loading}
+    <div class="loading-overlay">
+      <div class="loading-spinner">
+        <svg class="w-8 h-8 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="ml-2 text-white text-sm">Loading 3D model...</span>
+      </div>
+    </div>
+  {/if}
+
+  {#if error}
+    <div class="error-overlay">
+      <div class="error-content">
+        <svg class="w-12 h-12 text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <p class="text-white text-sm">{error}</p>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Controls overlay -->
+  <div class="controls-overlay">
+    <button onclick={resetView} title="Reset view" class="control-btn">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+      </svg>
+    </button>
+    <button onclick={toggleWireframe} title="Toggle wireframe" class="control-btn">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"></path>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Instructions -->
+  <div class="instructions">
+    <span>Drag to rotate • Scroll to zoom • Shift+drag to pan</span>
+  </div>
+</div>
+
+<style>
+  .stl-viewer {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 300px;
+    overflow: hidden;
+  }
+
+  .loading-overlay,
+  .error-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(31, 41, 55, 0.9);
+    z-index: 10;
+  }
+
+  .loading-spinner {
+    display: flex;
+    align-items: center;
+  }
+
+  .error-content {
+    text-align: center;
+  }
+
+  .controls-overlay {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 8px;
+    z-index: 5;
+  }
+
+  .control-btn {
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .control-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .instructions {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 12px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    z-index: 5;
+  }
+</style>

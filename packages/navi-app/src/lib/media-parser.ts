@@ -1,5 +1,5 @@
 export interface MediaItem {
-  type: 'image' | 'audio' | 'video';
+  type: 'image' | 'audio' | 'video' | 'model3d';
   src: string;
   alt?: string;
   caption?: string;
@@ -15,17 +15,19 @@ const MEDIA_BLOCK_REGEX = /```media\n([\s\S]*?)```/g;
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'];
 const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'];
 const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v'];
+const MODEL3D_EXTENSIONS = ['.stl', '.glb', '.gltf'];
 
-function getMediaType(src: string): 'image' | 'audio' | 'video' | null {
+function getMediaType(src: string): 'image' | 'audio' | 'video' | 'model3d' | null {
   const lower = src.toLowerCase();
   if (IMAGE_EXTENSIONS.some(ext => lower.endsWith(ext))) return 'image';
   if (AUDIO_EXTENSIONS.some(ext => lower.endsWith(ext))) return 'audio';
   if (VIDEO_EXTENSIONS.some(ext => lower.endsWith(ext))) return 'video';
-  
+  if (MODEL3D_EXTENSIONS.some(ext => lower.endsWith(ext))) return 'model3d';
+
   if (lower.includes('/image/') || lower.includes('image/')) return 'image';
   if (lower.includes('/audio/') || lower.includes('audio/')) return 'audio';
   if (lower.includes('/video/') || lower.includes('video/')) return 'video';
-  
+
   return null;
 }
 
@@ -55,8 +57,8 @@ function parseMediaBlockContent(content: string): MediaItem[] {
     const typeMatch = trimmed.match(/^type:\s*(.+)$/i);
     if (typeMatch && currentItem) {
       const type = typeMatch[1].trim().toLowerCase();
-      if (type === 'image' || type === 'audio' || type === 'video') {
-        currentItem.type = type;
+      if (type === 'image' || type === 'audio' || type === 'video' || type === 'model3d' || type === '3d') {
+        currentItem.type = type === '3d' ? 'model3d' : type;
       }
       continue;
     }
@@ -129,6 +131,18 @@ export function isMediaUrl(url: string): boolean {
   return getMediaType(url) !== null;
 }
 
-export function getMediaTypeFromUrl(url: string): 'image' | 'audio' | 'video' | null {
+export function getMediaTypeFromUrl(url: string): 'image' | 'audio' | 'video' | 'model3d' | null {
   return getMediaType(url);
+}
+
+export function is3DModelUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return MODEL3D_EXTENSIONS.some(ext => lower.endsWith(ext));
+}
+
+export function get3DModelType(url: string): 'stl' | 'glb' | null {
+  const lower = url.toLowerCase();
+  if (lower.endsWith('.stl')) return 'stl';
+  if (lower.endsWith('.glb') || lower.endsWith('.gltf')) return 'glb';
+  return null;
 }

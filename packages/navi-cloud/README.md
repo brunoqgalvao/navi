@@ -1,194 +1,246 @@
 # Navi Cloud
 
-Zero-config deployment for Navi apps. Ship to `*.usenavi.app` with one command.
+Zero-config deployment platform for Navi. Ship apps to `*.usenavi.app` instantly.
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                        Navi Desktop App                          │
+│                          Navi Desktop                             │
 │                                                                   │
-│  User: "ship it"  →  Claude builds & deploys                     │
-└───────────────────────────┬──────────────────────────────────────┘
-                            │
-                            ▼
+│    User: "ship it"  →  Build  →  POST /deploy                    │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │
+                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                       Navi Cloud API                              │
-│                    (Cloudflare Worker)                            │
+│                    api.usenavi.app (API Worker)                   │
 │                                                                   │
-│  POST /deploy       Create/update deployment                     │
-│  GET  /deploy/:slug Get deployment status                        │
-│  DELETE /deploy/:slug Delete deployment                          │
+│  POST /deploy       Create/update app                            │
+│  GET  /deploy/:slug Get app status                               │
+│  DELETE /deploy/:slug Delete app                                 │
 │  GET  /apps         List all apps                                │
-└───────────────────────────┬──────────────────────────────────────┘
-                            │
-                            ▼
+└───────────────────────────────┬──────────────────────────────────┘
+                                │
+                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                     Cloudflare Infrastructure                     │
+│                  Workers for Platforms ($25/mo)                   │
 │                                                                   │
-│  Pages Projects      One per deployed app                        │
-│  D1 Databases        One per app (if needed)                     │
-│  Router Worker       *.usenavi.app → correct Pages project       │
+│  Dispatch Worker    Routes *.usenavi.app to user workers         │
+│  User Workers       One per deployed app (in dispatch namespace) │
+│  D1 Databases       One per app that needs a database            │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+## Stack
+
+| Component | Tech |
+|-----------|------|
+| **Hosting** | Cloudflare Workers for Platforms |
+| **Database** | D1 (SQLite, one per app) |
+| **Auth** | Navi Auth (built-in, session-based) |
+| **Framework** | Vite + React (default) |
+
+## Pricing
+
+Workers for Platforms: **$25/month flat** includes:
+- 20 million requests
+- 60 million CPU milliseconds
+- 1,000 scripts (user apps)
+
+Overage:
+- $0.30 per million additional requests
+- $0.02 per additional script
+- D1 is essentially free for most usage
+
 ## Setup (One-Time)
 
-### 1. Cloudflare Account
+### Prerequisites
 
-Create a Cloudflare account at [dash.cloudflare.com](https://dash.cloudflare.com).
+1. Cloudflare account with Workers for Platforms enabled
+2. `usenavi.app` domain added to Cloudflare
+3. Wrangler CLI: `npm install -g wrangler`
 
-### 2. Add usenavi.app Domain
+### 1. Login to Cloudflare
 
-1. Go to Cloudflare Dashboard → Add Site
-2. Add `usenavi.app` domain
-3. Update nameservers at your registrar
-4. Enable "Proxy" (orange cloud) for DNS
-
-### 3. Configure Wildcard DNS
-
-```
-Type: A
-Name: *
-Content: 192.0.2.1 (placeholder, will be proxied)
-Proxy: ON
+```bash
+wrangler login
 ```
 
-This routes all `*.usenavi.app` subdomains through Cloudflare.
-
-### 4. Create API Token
-
-1. Go to My Profile → API Tokens
-2. Create Token with these permissions:
-   - **Cloudflare Pages**: Edit
-   - **D1**: Edit
-   - **Account**: Read
-3. Save the token securely
-
-### 5. Create D1 Database (Registry)
+### 2. Create Resources
 
 ```bash
 cd packages/navi-cloud
-bun install
+
+# Create D1 database
 wrangler d1 create navi-cloud-registry
-```
+# Copy the database_id to wrangler.toml and wrangler.api.toml
 
-Copy the database ID to `wrangler.toml` and `wrangler.router.toml`.
+# Create dispatch namespace (requires Workers for Platforms)
+wrangler dispatch-namespace create navi-user-apps
 
-### 6. Run Migrations
-
-```bash
+# Run migrations
 wrangler d1 execute navi-cloud-registry --file=./migrations/001_init.sql
 ```
 
-### 7. Set Secrets
+### 3. Set Secrets
 
 ```bash
-# API Worker
-wrangler secret put CLOUDFLARE_API_TOKEN
-wrangler secret put CLOUDFLARE_ACCOUNT_ID
+# For API worker
+wrangler secret put DEPLOY_SECRET --config wrangler.api.toml
+wrangler secret put CLOUDFLARE_API_TOKEN --config wrangler.api.toml
+wrangler secret put CLOUDFLARE_ACCOUNT_ID --config wrangler.api.toml
+
+# For dispatch worker
 wrangler secret put DEPLOY_SECRET
-
-# Router Worker (shares database, no secrets needed)
 ```
 
-### 8. Deploy Workers
+### 4. Deploy Workers
 
 ```bash
-# Deploy API worker
-bun run deploy
-
-# Deploy router worker
-bun run deploy:router
+# Deploy both workers
+npm run deploy:all
 ```
 
-## Usage
+### 5. Configure DNS
 
-### From Navi Desktop
+In Cloudflare DNS for `usenavi.app`:
 
-Just say "ship it" or "deploy this" to Claude. It will:
+```
+Type: AAAA
+Name: *
+Content: 100::
+Proxy: ON (orange cloud)
 
-1. Build your project
-2. Upload to Navi Cloud
-3. Return a live URL
-
-### Programmatic API
-
-```bash
-# Deploy
-curl -X POST https://api.usenavi.app/deploy \
-  -H "Authorization: Bearer $DEPLOY_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "slug": "my-app",
-    "framework": "sveltekit",
-    "files": [
-      {"path": "index.html", "content": "base64..."}
-    ]
-  }'
-
-# Response
-{
-  "success": true,
-  "url": "https://my-app.usenavi.app",
-  "pagesUrl": "https://navi-my-app-abc123.pages.dev"
-}
+Type: AAAA
+Name: api
+Content: 100::
+Proxy: ON (orange cloud)
 ```
 
 ## Development
 
 ```bash
 # Install deps
-bun install
+npm install
 
-# Run locally
-bun run dev
+# Run dispatch worker locally
+npm run dev
 
-# Deploy to production
-bun run deploy
+# Run API worker locally
+npm run dev:api
+
+# View logs
+npm run tail
+npm run tail:api
+```
+
+## API Reference
+
+### Deploy App
+
+```bash
+POST https://api.usenavi.app/deploy
+Authorization: Bearer <DEPLOY_SECRET>
+Content-Type: application/json
+
+{
+  "slug": "my-app",
+  "name": "My App",
+  "framework": "vite-react",
+  "needsDatabase": false,
+  "needsAuth": false,
+  "files": [
+    { "path": "index.html", "content": "<base64>" },
+    { "path": "assets/app.js", "content": "<base64>" }
+  ]
+}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "url": "https://my-app.usenavi.app",
+  "slug": "my-app",
+  "deployCount": 1,
+  "database": null,
+  "hasAuth": false
+}
+```
+
+### Get App Status
+
+```bash
+GET https://api.usenavi.app/deploy/my-app
+Authorization: Bearer <DEPLOY_SECRET>
+```
+
+### List Apps
+
+```bash
+GET https://api.usenavi.app/apps
+Authorization: Bearer <DEPLOY_SECRET>
+```
+
+### Delete App
+
+```bash
+DELETE https://api.usenavi.app/deploy/my-app
+Authorization: Bearer <DEPLOY_SECRET>
 ```
 
 ## Environment Variables
 
-### Navi App (.env)
+### Navi Desktop (.env)
 
 ```env
 NAVI_CLOUD_API=https://api.usenavi.app
-NAVI_CLOUD_SECRET=your-deploy-secret
+NAVI_CLOUD_SECRET=<your-deploy-secret>
 ```
 
-### Cloudflare Worker (secrets)
+### Cloudflare Workers (secrets)
 
 ```
-CLOUDFLARE_API_TOKEN=your-cf-token
-CLOUDFLARE_ACCOUNT_ID=your-account-id
-DEPLOY_SECRET=shared-secret-with-navi-app
+DEPLOY_SECRET=<shared-secret>
+CLOUDFLARE_API_TOKEN=<cf-api-token>
+CLOUDFLARE_ACCOUNT_ID=<cf-account-id>
 ```
 
-## Costs
+## File Structure
 
-- **Cloudflare Workers**: Free tier = 100k requests/day
-- **Cloudflare Pages**: Unlimited sites, 500 builds/month free
-- **D1 Database**: 5GB free, 5M rows read/day
+```
+packages/navi-cloud/
+├── src/
+│   ├── dispatch.ts      # Routes *.usenavi.app to user workers
+│   └── api.ts           # Handles deploy API requests
+├── migrations/
+│   └── 001_init.sql     # Registry database schema
+├── wrangler.toml        # Dispatch worker config
+├── wrangler.api.toml    # API worker config
+└── package.json
+```
 
-At scale, roughly $0.15/million requests + $0.75/million D1 reads.
+## How It Works
 
-## Troubleshooting
+1. **Deploy request** comes in with files (base64 encoded)
+2. **API Worker** generates a user Worker script that serves those files
+3. **User Worker** is uploaded to the dispatch namespace
+4. **Registry** records the app → worker mapping in D1
+5. **Dispatch Worker** receives requests to `*.usenavi.app`
+6. **Lookup** finds the worker name from registry
+7. **Forward** request to the user's Worker
+8. **Response** served from the user's static files
 
-### "App not found" at subdomain
+## Limitations
 
-1. Check DNS is proxied (orange cloud)
-2. Verify router worker is deployed
-3. Check app exists in D1 registry
+- Static files only (no server-side code in user apps yet)
+- Max ~25MB per app (Worker script size limit)
+- D1 database per app (not shared)
 
-### Deploy fails
+## Future Enhancements
 
-1. Verify API token has Pages + D1 permissions
-2. Check project name doesn't conflict
-3. Look at worker logs: `wrangler tail`
-
-### Build not found
-
-1. Make sure you ran `bun run build` first
-2. Check the output directory matches your framework
-3. Verify files exist in build directory
+- [ ] API routes in user apps (serverless functions)
+- [ ] Navi Auth integration
+- [ ] Custom domains per app
+- [ ] Build logs streaming
+- [ ] Rollback to previous deployments

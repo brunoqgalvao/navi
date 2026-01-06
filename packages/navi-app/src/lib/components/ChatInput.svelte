@@ -41,15 +41,17 @@
     projectPath?: string;
     activeSkills?: Skill[];
     sessionId?: string;
+    untilDoneEnabled?: boolean;
     onSubmit: () => void;
     onStop?: () => void;
     onPreview?: (path: string) => void;
     onExecCommand?: (command: string) => void;
     onManageSkills?: () => void;
     onNavigateToChat?: (sessionId: string) => void;
+    onToggleUntilDone?: () => void;
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone }: Props = $props();
 
   let showSkillsMenu = $state(false);
 
@@ -774,6 +776,18 @@
 
     <!-- Action buttons - positioned inside textarea area -->
     <div class="absolute right-2 bottom-2 flex items-center gap-1">
+      <!-- Until Done toggle -->
+      {#if onToggleUntilDone}
+        <button
+          onclick={onToggleUntilDone}
+          class="p-1.5 rounded-lg transition-all {untilDoneEnabled ? 'text-orange-500 bg-orange-50 hover:bg-orange-100' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}"
+          title={untilDoneEnabled ? "Until Done mode ON - will auto-continue until complete" : "Until Done mode OFF - click to enable"}
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+          </svg>
+        </button>
+      {/if}
       <AudioRecorder
         bind:this={audioRecorderRef}
         onTranscript={(text) => { value = value ? value + " " + text : text; }}
@@ -956,6 +970,20 @@
       </div>
 
       <div class="flex items-center gap-1">
+        <!-- Until Done toggle -->
+        <button
+          onclick={() => onToggleUntilDone?.()}
+          class="flex items-center gap-1 px-2 py-0.5 text-[10px] rounded transition-colors font-medium {untilDoneEnabled ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}"
+          title={untilDoneEnabled ? 'Until Done mode: ON - Claude will keep working until task is complete' : 'Until Done mode: OFF - Click to enable auto-continue'}
+        >
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          {untilDoneEnabled ? 'Until Done' : 'Loop'}
+        </button>
+
+        <div class="w-px h-4 bg-gray-200"></div>
+
         <button
           onclick={() => onManageSkills?.()}
           class="flex items-center gap-1 px-2 py-0.5 text-[10px] text-purple-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors font-medium"

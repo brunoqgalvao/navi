@@ -308,6 +308,37 @@ The genui blocks are sandboxed and support:
 - Basic styling with inline CSS
 - Click and form submit events are captured
 
+### Copyable Text Snippets
+
+Use \`copyable\` code blocks to display text with a convenient copy button:
+
+\`\`\`copyable
+npm install my-package
+\`\`\`
+
+With a label:
+
+\`\`\`copyable
+label: API Key
+sk-1234567890abcdef
+\`\`\`
+
+Multiline content:
+
+\`\`\`copyable
+label: Environment Variables
+text:
+DATABASE_URL=postgres://localhost:5432/mydb
+API_KEY=sk-1234567890
+SECRET=my-secret-value
+\`\`\`
+
+Use copyable blocks for:
+- Commands the user should run
+- API keys, tokens, or credentials
+- Configuration values
+- URLs or file paths they might need to copy
+
 ### JSON Tree Display
 
 When outputting complex JSON data, the UI will render it as an interactive collapsible tree with expand/collapse controls.

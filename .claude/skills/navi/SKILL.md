@@ -30,10 +30,16 @@ For simplicity in examples below, we use `http://localhost:3001` but substitute 
 | Create new chat | `/projects/{id}/sessions` | POST |
 | Fork chat | `/sessions/{id}/fork` | POST |
 | **Open preview panel** | `/ui/preview` | POST |
+| **Open process/terminal logs** | `/ui/logs` | POST |
 | **Navigate to project/session** | `/ui/navigate` | POST |
 | **Show notification** | `/ui/notification` | POST |
 | Create folder | `/folders` | POST |
 | List projects | `/projects` | GET |
+| **List background processes** | `/background-processes` | GET |
+| **Start background process** | `/background-processes` | POST |
+| **Get process output** | `/background-processes/{id}/output` | GET |
+| Kill/remove process | `/background-processes/{id}` | DELETE |
+| Restart process | `/background-processes/{id}/restart` | POST |
 
 ---
 
@@ -819,6 +825,190 @@ curl -X DELETE http://localhost:3001/api/terminal/pty/$TERM_ID
 
 ---
 
+---
+
+## Background Process Management
+
+Background processes are long-running commands (dev servers, build watchers, etc.) that run independently of the terminal. They're tracked separately and their output is stored for inspection.
+
+### List Background Processes
+
+```bash
+curl http://localhost:3001/api/background-processes
+# Filter by session:
+curl "http://localhost:3001/api/background-processes?sessionId=session_123"
+# Filter by status:
+curl "http://localhost:3001/api/background-processes?status=running"
+```
+
+Response:
+```json
+[
+  {
+    "id": "proc_abc123",
+    "type": "bash",
+    "command": "npm run dev",
+    "cwd": "/path/to/project",
+    "pid": 12345,
+    "sessionId": "session_123",
+    "projectId": "project_456",
+    "startedAt": 1704067200000,
+    "status": "running",
+    "output": ["...", "..."],
+    "outputSize": 4567,
+    "ports": [3000],
+    "label": "Dev Server"
+  }
+]
+```
+
+### Start Background Process
+
+```bash
+curl -X POST http://localhost:3001/api/background-processes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "npm run dev",
+    "cwd": "/path/to/project",
+    "sessionId": "session_123",
+    "projectId": "project_456",
+    "type": "dev_server",
+    "label": "Frontend Dev"
+  }'
+```
+
+### Get Process Details
+
+```bash
+curl http://localhost:3001/api/background-processes/{processId}
+```
+
+### Get Process Output (Logs)
+
+Retrieve the last N lines of output from a process:
+
+```bash
+curl "http://localhost:3001/api/background-processes/{processId}/output?lines=100"
+```
+
+Response:
+```json
+{
+  "output": ["line1", "line2", "..."],
+  "totalLines": 100
+}
+```
+
+### Kill a Process
+
+```bash
+curl -X DELETE http://localhost:3001/api/background-processes/{processId} \
+  -H "Content-Type: application/json" \
+  -d '{"signal": "SIGTERM"}'
+```
+
+### Remove Process from Tracking
+
+```bash
+curl -X DELETE http://localhost:3001/api/background-processes/{processId} \
+  -H "Content-Type: application/json" \
+  -d '{"remove": true}'
+```
+
+### Restart a Process
+
+```bash
+curl -X POST http://localhost:3001/api/background-processes/{processId}/restart
+```
+
+### Detect Existing Listening Processes
+
+Find processes already listening on ports (useful for detecting orphaned dev servers):
+
+```bash
+curl http://localhost:3001/api/background-processes/detect
+```
+
+Response:
+```json
+[
+  {"pid": 12345, "port": 3000, "command": "node"},
+  {"pid": 12346, "port": 5173, "command": "bun"}
+]
+```
+
+---
+
+## Viewing Logs in Preview Panel
+
+The logs viewer can display output from both **background processes** and **PTY terminals** in a dedicated preview panel with features like:
+- Real-time auto-refresh (2s interval)
+- ANSI color code rendering (toggle on/off)
+- Line numbers
+- Error line highlighting
+- Copy/download functionality
+- Process/terminal metadata (PID, status, duration, ports)
+
+### Open Process Logs
+
+Open a background process's logs in the preview panel:
+
+```bash
+curl -X POST http://localhost:3001/api/ui/logs \
+  -H "Content-Type: application/json" \
+  -d '{"processId": "proc_abc123"}'
+```
+
+### Open Terminal Logs
+
+Open a PTY terminal's output buffer in the preview panel:
+
+```bash
+curl -X POST http://localhost:3001/api/ui/logs \
+  -H "Content-Type: application/json" \
+  -d '{"terminalId": "pty_xyz789"}'
+```
+
+This is useful when you want to inspect terminal output without switching to the terminal panel.
+
+### Workflow: Monitor a Dev Server
+
+```bash
+# 1. Start a dev server as background process
+PROC_ID=$(curl -s -X POST http://localhost:3001/api/background-processes \
+  -H "Content-Type: application/json" \
+  -d '{"command": "npm run dev", "cwd": "/my/project", "label": "Dev Server"}' | jq -r '.id')
+
+# 2. Open logs in preview panel
+curl -X POST http://localhost:3001/api/ui/logs \
+  -H "Content-Type: application/json" \
+  -d "{\"processId\": \"$PROC_ID\"}"
+
+# 3. Check process status
+curl http://localhost:3001/api/background-processes/$PROC_ID
+
+# 4. Get latest output via API
+curl "http://localhost:3001/api/background-processes/$PROC_ID/output?lines=50"
+```
+
+### Workflow: Debug Terminal Errors
+
+```bash
+# 1. List active terminals
+curl http://localhost:3001/api/terminal/pty
+
+# 2. Check for errors in a terminal
+TERM_ID="your-terminal-id"
+curl http://localhost:3001/api/terminal/pty/$TERM_ID/errors
+
+# 3. If errors found, open logs in preview for detailed inspection
+curl -X POST http://localhost:3001/api/ui/logs \
+  -H "Content-Type: application/json" \
+  -d "{\"terminalId\": \"$TERM_ID\"}"
+```
+
+---
+
 ## Tips
 
 1. **Use jq** for parsing JSON responses: `curl ... | jq '.id'`
@@ -827,6 +1017,8 @@ curl -X DELETE http://localhost:3001/api/terminal/pty/$TERM_ID
 4. **Auto-accept** settings cascade: Session > Project > Global
 5. **Search** is full-text across all sessions and messages
 6. **Terminal buffer** stores up to 500 lines of output per terminal
+7. **Background processes** store up to 200 lines of output each
+8. **Port detection** is automatic - processes listening on ports are detected via output patterns
 
 ## Guidelines
 

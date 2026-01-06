@@ -42,7 +42,9 @@
     ],
     "resources": [
       "resources/query-worker.js",
-      "resources/claude-agent-sdk/**/*"
+      "resources/claude-agent-sdk/**/*",
+      "resources/pty-server.cjs",
+      "resources/pty-node_modules/**/*"
     ],
     "macOS": {
       "signingIdentity": "-",

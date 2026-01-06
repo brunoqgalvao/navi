@@ -1,9 +1,9 @@
 <script lang="ts">
   /**
-   * BackgroundProcessPanel - Manage and monitor background processes
+   * ProcessPanel - Manage and monitor ALL processes (background + active)
    *
    * Features:
-   * - View running processes with live output
+   * - View ALL running processes: query workers, terminals, exec, background
    * - Stop/restart processes
    * - Auto-detect ports and offer preview
    * - Show process output in expandable view
@@ -15,6 +15,7 @@
     type BackgroundProcessStatus,
     type BackgroundProcessEvent,
   } from "../api";
+  import { getApiBase } from "../config";
 
   interface Props {
     projectId?: string | null;
@@ -24,7 +25,27 @@
 
   let { projectId = null, sessionId = null, onOpenPreview }: Props = $props();
 
-  let processes: BackgroundProcess[] = $state([]);
+  // Unified process type that covers both background and active processes
+  interface UnifiedProcess {
+    id: string;
+    type: "query" | "exec" | "pty" | "child" | "bash" | "task" | "dev_server";
+    command?: string;
+    cwd?: string;
+    pid?: number;
+    sessionId?: string;
+    sessionTitle?: string;
+    projectId?: string;
+    startedAt: number;
+    status: "running" | "completed" | "failed" | "killed";
+    exitCode?: number;
+    output: string[];
+    outputSize: number;
+    ports: number[];
+    label?: string;
+    source: "active" | "background"; // Track which API it came from
+  }
+
+  let processes: UnifiedProcess[] = $state([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let expandedProcessId = $state<string | null>(null);
@@ -34,73 +55,178 @@
   // Polling interval for process list
   let pollInterval: ReturnType<typeof setInterval> | null = null;
 
+  // Load active processes from /api/processes
+  async function loadActiveProcesses(): Promise<UnifiedProcess[]> {
+    try {
+      const apiBase = getApiBase();
+      const res = await fetch(`${apiBase}/processes`);
+      if (!res.ok) return [];
+      const data = await res.json();
+
+      // Filter by sessionId if provided, but always include "global" processes
+      const filtered = sessionId
+        ? data.filter((p: any) => p.sessionId === sessionId || p.sessionId === "global")
+        : data;
+
+      return filtered.map((p: any) => ({
+        id: p.id,
+        type: p.type,
+        command: p.command,
+        cwd: p.cwd,
+        pid: p.pid,
+        sessionId: p.sessionId,
+        sessionTitle: p.sessionTitle,
+        startedAt: p.startedAt,
+        status: "running" as const,
+        output: [],
+        outputSize: 0,
+        ports: [],
+        label: getLabelForActiveProcess(p),
+        source: "active" as const,
+      }));
+    } catch (e) {
+      console.error("[ProcessPanel] Failed to load active processes:", e);
+      return [];
+    }
+  }
+
+  function getLabelForActiveProcess(p: any): string {
+    switch (p.type) {
+      case "query":
+        return p.sessionTitle || "Claude Agent";
+      case "pty":
+        return "Terminal";
+      case "exec":
+        return "Command";
+      case "child":
+        return p.command?.split("/").pop() || "Child Process";
+      default:
+        return p.type;
+    }
+  }
+
   async function loadProcesses() {
     try {
-      const filter: { projectId?: string; sessionId?: string } = {};
-      if (projectId) filter.projectId = projectId;
-      // Don't filter by sessionId - show all processes for the project
-      processes = await backgroundProcessApi.list(filter);
+      console.log("[ProcessPanel] Loading processes for sessionId:", sessionId);
+      // Load both active and background processes in parallel
+      const [activeProcs, bgProcs] = await Promise.all([
+        loadActiveProcesses(),
+        backgroundProcessApi.list(sessionId ? { sessionId } : undefined).catch(() => [] as BackgroundProcess[]),
+      ]);
+      console.log("[ProcessPanel] Active processes:", activeProcs.length, "Background processes:", bgProcs.length);
+
+      // Convert background processes to unified format
+      // Only include processes that match our sessionId (if we have one), plus "global" processes
+      const bgUnified: UnifiedProcess[] = bgProcs
+        .filter((p) => !sessionId || p.sessionId === sessionId || p.sessionId === "global")
+        .map((p): UnifiedProcess => ({
+          id: p.id,
+          type: p.type,
+          command: p.command,
+          cwd: p.cwd,
+          pid: p.pid,
+          sessionId: p.sessionId,
+          projectId: p.projectId,
+          startedAt: p.startedAt,
+          status: p.status,
+          exitCode: p.exitCode,
+          output: p.output,
+          outputSize: p.outputSize,
+          ports: p.ports,
+          label: p.label,
+          source: "background",
+        }));
+
+      // Merge and deduplicate (background processes take precedence if same ID)
+      const bgIds = new Set(bgUnified.map((p) => p.id));
+      const merged = [
+        ...bgUnified,
+        ...activeProcs.filter((p) => !bgIds.has(p.id)),
+      ];
+
+      // Sort: running first, then by startedAt descending
+      processes = merged.sort((a, b) => {
+        if (a.status === "running" && b.status !== "running") return -1;
+        if (b.status === "running" && a.status !== "running") return 1;
+        return b.startedAt - a.startedAt;
+      });
+
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load processes";
-      console.error("[BackgroundProcessPanel] Load error:", e);
+      console.error("[ProcessPanel] Load error:", e);
     } finally {
       loading = false;
     }
   }
 
-  async function killProcess(id: string) {
-    actionInProgress = id;
+  async function killProcess(proc: UnifiedProcess) {
+    actionInProgress = proc.id;
     try {
-      await backgroundProcessApi.kill(id);
+      if (proc.source === "background") {
+        await backgroundProcessApi.kill(proc.id);
+      } else {
+        // Kill active process via /api/processes/:id
+        const apiBase = getApiBase();
+        await fetch(`${apiBase}/processes/${proc.id}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: proc.type }),
+        });
+      }
       await loadProcesses();
     } catch (e) {
-      console.error("[BackgroundProcessPanel] Kill error:", e);
+      console.error("[ProcessPanel] Kill error:", e);
     } finally {
       actionInProgress = null;
     }
   }
 
-  async function restartProcess(id: string) {
-    actionInProgress = id;
+  async function restartProcess(proc: UnifiedProcess) {
+    if (proc.source !== "background") return; // Only background processes can be restarted
+    actionInProgress = proc.id;
     try {
-      await backgroundProcessApi.restart(id);
+      await backgroundProcessApi.restart(proc.id);
       await loadProcesses();
     } catch (e) {
-      console.error("[BackgroundProcessPanel] Restart error:", e);
+      console.error("[ProcessPanel] Restart error:", e);
     } finally {
       actionInProgress = null;
     }
   }
 
-  async function removeProcess(id: string) {
-    actionInProgress = id;
+  async function removeProcess(proc: UnifiedProcess) {
+    if (proc.source !== "background") return; // Only background processes can be removed from list
+    actionInProgress = proc.id;
     try {
-      await backgroundProcessApi.remove(id);
+      await backgroundProcessApi.remove(proc.id);
       await loadProcesses();
     } catch (e) {
-      console.error("[BackgroundProcessPanel] Remove error:", e);
+      console.error("[ProcessPanel] Remove error:", e);
     } finally {
       actionInProgress = null;
     }
   }
 
-  async function loadOutput(id: string) {
+  async function loadOutput(proc: UnifiedProcess) {
+    if (proc.source !== "background") return; // Only background processes have output
     try {
-      const result = await backgroundProcessApi.getOutput(id, 100);
-      liveOutput.set(id, result.output);
+      const result = await backgroundProcessApi.getOutput(proc.id, 100);
+      liveOutput.set(proc.id, result.output);
       liveOutput = new Map(liveOutput); // Trigger reactivity
     } catch (e) {
-      console.error("[BackgroundProcessPanel] Load output error:", e);
+      console.error("[ProcessPanel] Load output error:", e);
     }
   }
 
-  function toggleExpand(id: string) {
-    if (expandedProcessId === id) {
+  function toggleExpand(proc: UnifiedProcess) {
+    if (expandedProcessId === proc.id) {
       expandedProcessId = null;
     } else {
-      expandedProcessId = id;
-      loadOutput(id);
+      expandedProcessId = proc.id;
+      if (proc.source === "background") {
+        loadOutput(proc);
+      }
     }
   }
 
@@ -122,7 +248,7 @@
     return `${hours}h ${minutes % 60}m`;
   }
 
-  function getStatusColor(status: BackgroundProcessStatus): string {
+  function getStatusColor(status: string): string {
     switch (status) {
       case "running":
         return "bg-green-100 text-green-700 border-green-200";
@@ -137,7 +263,7 @@
     }
   }
 
-  function getStatusIcon(status: BackgroundProcessStatus): string {
+  function getStatusIcon(status: string): string {
     switch (status) {
       case "running":
         return "●";
@@ -149,6 +275,47 @@
         return "■";
       default:
         return "○";
+    }
+  }
+
+  function getTypeIcon(type: string): string {
+    switch (type) {
+      case "query":
+        return "🤖";
+      case "pty":
+        return "⬛";
+      case "exec":
+      case "bash":
+        return "⚡";
+      case "child":
+        return "↳";
+      case "dev_server":
+        return "🌐";
+      case "task":
+        return "📋";
+      default:
+        return "○";
+    }
+  }
+
+  function getTypeLabel(type: string): string {
+    switch (type) {
+      case "query":
+        return "Agent";
+      case "pty":
+        return "Terminal";
+      case "exec":
+        return "Exec";
+      case "bash":
+        return "Bash";
+      case "child":
+        return "Child";
+      case "dev_server":
+        return "Server";
+      case "task":
+        return "Task";
+      default:
+        return type;
     }
   }
 
@@ -164,7 +331,11 @@
             if (bgEvent.process) {
               // Add to list if matches filter
               if (!projectId || bgEvent.process.projectId === projectId) {
-                processes = [...processes, bgEvent.process];
+                const newProc: UnifiedProcess = {
+                  ...bgEvent.process,
+                  source: "background",
+                };
+                processes = [...processes, newProc];
               }
             }
             break;
@@ -294,8 +465,8 @@
             d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
           />
         </svg>
-        <p class="font-medium text-gray-600">No background processes</p>
-        <p class="text-gray-400 mt-1">Processes started by Claude will appear here</p>
+        <p class="font-medium text-gray-600">No processes in this chat</p>
+        <p class="text-gray-400 mt-1">Processes started in this session will appear here</p>
       </div>
     {:else}
       <div class="divide-y divide-gray-100">
@@ -304,15 +475,21 @@
             <!-- Process Row -->
             <div
               class="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-              onclick={() => toggleExpand(proc.id)}
+              onclick={() => toggleExpand(proc)}
               role="button"
               tabindex="0"
-              onkeydown={(e) => e.key === "Enter" && toggleExpand(proc.id)}
+              onkeydown={(e) => e.key === "Enter" && toggleExpand(proc)}
             >
               <div class="flex items-start justify-between gap-3">
                 <div class="flex-1 min-w-0">
-                  <!-- Label and Status -->
-                  <div class="flex items-center gap-2 mb-1">
+                  <!-- Type, Label and Status -->
+                  <div class="flex items-center gap-2 mb-1 flex-wrap">
+                    <!-- Type badge -->
+                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600 border border-gray-200">
+                      <span class="text-[10px]">{getTypeIcon(proc.type)}</span>
+                      {getTypeLabel(proc.type)}
+                    </span>
+                    <!-- Status badge -->
                     <span
                       class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border {getStatusColor(
                         proc.status
@@ -329,13 +506,19 @@
                     {/if}
                   </div>
 
-                  <!-- Command -->
-                  <p
-                    class="text-xs font-mono text-gray-600 truncate max-w-[300px]"
-                    title={proc.command}
-                  >
-                    {proc.command}
-                  </p>
+                  <!-- Command or Session Title -->
+                  {#if proc.command}
+                    <p
+                      class="text-xs font-mono text-gray-600 truncate max-w-[300px]"
+                      title={proc.command}
+                    >
+                      {proc.command}
+                    </p>
+                  {:else if proc.sessionTitle}
+                    <p class="text-xs text-gray-600">
+                      Session: {proc.sessionTitle}
+                    </p>
+                  {/if}
 
                   <!-- Ports -->
                   {#if proc.ports.length > 0}
@@ -369,7 +552,7 @@
                     <button
                       onclick={(e) => {
                         e.stopPropagation();
-                        killProcess(proc.id);
+                        killProcess(proc);
                       }}
                       disabled={actionInProgress === proc.id}
                       class="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
@@ -379,11 +562,11 @@
                         <rect x="6" y="6" width="12" height="12" rx="2" />
                       </svg>
                     </button>
-                  {:else}
+                  {:else if proc.source === "background"}
                     <button
                       onclick={(e) => {
                         e.stopPropagation();
-                        restartProcess(proc.id);
+                        restartProcess(proc);
                       }}
                       disabled={actionInProgress === proc.id}
                       class="p-1.5 text-green-500 hover:text-green-700 hover:bg-green-50 rounded transition-colors disabled:opacity-50"
@@ -401,7 +584,7 @@
                     <button
                       onclick={(e) => {
                         e.stopPropagation();
-                        removeProcess(proc.id);
+                        removeProcess(proc);
                       }}
                       disabled={actionInProgress === proc.id}
                       class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
@@ -442,24 +625,38 @@
               </div>
             </div>
 
-            <!-- Expanded Output -->
+            <!-- Expanded Output / Details -->
             {#if expandedProcessId === proc.id}
               <div class="px-4 pb-3">
-                <div
-                  class="bg-gray-900 rounded-lg p-3 max-h-64 overflow-y-auto font-mono text-xs text-gray-300"
-                >
-                  {#if liveOutput.get(proc.id)?.length}
-                    {#each liveOutput.get(proc.id) || [] as line}
-                      <div class="whitespace-pre-wrap break-all leading-relaxed">{line}</div>
-                    {/each}
-                  {:else if proc.output.length > 0}
-                    {#each proc.output.slice(-50) as line}
-                      <div class="whitespace-pre-wrap break-all leading-relaxed">{line}</div>
-                    {/each}
-                  {:else}
-                    <span class="text-gray-500 italic">No output yet</span>
-                  {/if}
-                </div>
+                {#if proc.source === "background"}
+                  <!-- Background process output -->
+                  <div
+                    class="bg-gray-900 rounded-lg p-3 max-h-64 overflow-y-auto font-mono text-xs text-gray-300"
+                  >
+                    {#if liveOutput.get(proc.id)?.length}
+                      {#each liveOutput.get(proc.id) || [] as line}
+                        <div class="whitespace-pre-wrap break-all leading-relaxed">{line}</div>
+                      {/each}
+                    {:else if proc.output.length > 0}
+                      {#each proc.output.slice(-50) as line}
+                        <div class="whitespace-pre-wrap break-all leading-relaxed">{line}</div>
+                      {/each}
+                    {:else}
+                      <span class="text-gray-500 italic">No output captured</span>
+                    {/if}
+                  </div>
+                {:else}
+                  <!-- Active process details -->
+                  <div class="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-1">
+                    <div><span class="font-medium">Type:</span> {getTypeLabel(proc.type)}</div>
+                    {#if proc.pid}<div><span class="font-medium">PID:</span> {proc.pid}</div>{/if}
+                    {#if proc.cwd}<div><span class="font-medium">CWD:</span> {proc.cwd}</div>{/if}
+                    {#if proc.sessionId}<div><span class="font-medium">Session:</span> {proc.sessionId}</div>{/if}
+                    <div class="text-gray-400 italic mt-2">
+                      Output not available for active processes. Use Terminal panel for interactive output.
+                    </div>
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>

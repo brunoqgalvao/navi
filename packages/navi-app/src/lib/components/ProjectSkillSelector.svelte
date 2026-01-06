@@ -16,18 +16,41 @@
   let error: string | null = $state(null);
   let togglingSkill: string | null = $state(null);
   let openMenuId: string | null = $state(null);
+  let searchQuery = $state("");
 
-  // Derived: split skills into enabled and available
+  // Helper to check if skill matches search
+  function matchesSearch(skill: Skill, query: string): boolean {
+    if (!query.trim()) return true;
+    const q = query.toLowerCase();
+    return (
+      skill.name.toLowerCase().includes(q) ||
+      skill.description?.toLowerCase().includes(q) ||
+      skill.tags?.some((t) => t.toLowerCase().includes(q)) ||
+      skill.category?.toLowerCase().includes(q)
+    );
+  }
+
+  // Derived: split skills into enabled and available, filtered by search
   let enabledSkills = $derived(
     $skillLibrary
       .filter((s) => s.enabled_projects?.includes(projectId))
+      .filter((s) => matchesSearch(s, searchQuery))
       .sort((a, b) => a.name.localeCompare(b.name))
   );
 
   let availableSkills = $derived(
     $skillLibrary
       .filter((s) => !s.enabled_projects?.includes(projectId))
+      .filter((s) => matchesSearch(s, searchQuery))
       .sort((a, b) => a.name.localeCompare(b.name))
+  );
+
+  // Total counts (unfiltered) for section headers
+  let totalEnabled = $derived(
+    $skillLibrary.filter((s) => s.enabled_projects?.includes(projectId)).length
+  );
+  let totalAvailable = $derived(
+    $skillLibrary.filter((s) => !s.enabled_projects?.includes(projectId)).length
   );
 
   onMount(async () => {
@@ -93,7 +116,7 @@
 <div class="h-full overflow-y-auto">
   <div class="max-w-2xl mx-auto p-8">
     <!-- Header -->
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between mb-4">
       <div>
         <h2 class="text-xl font-semibold text-gray-900">Project Skills</h2>
         <p class="text-sm text-gray-500 mt-1">
@@ -112,6 +135,41 @@
         </button>
       {/if}
     </div>
+
+    <!-- Search -->
+    {#if $skillLibrary.length > 0}
+      <div class="relative mb-6">
+        <svg
+          class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          />
+        </svg>
+        <input
+          type="text"
+          bind:value={searchQuery}
+          placeholder="Search skills by name, description, or tags..."
+          class="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300 transition-colors"
+        />
+        {#if searchQuery}
+          <button
+            onclick={() => (searchQuery = "")}
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        {/if}
+      </div>
+    {/if}
 
     {#if error}
       <div class="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-6">
@@ -158,14 +216,18 @@
           <div class="flex items-center gap-2 mb-3">
             <div class="w-2 h-2 bg-green-500 rounded-full"></div>
             <h3 class="text-sm font-medium text-gray-700 uppercase tracking-wide">
-              Enabled ({enabledSkills.length})
+              Enabled ({searchQuery ? `${enabledSkills.length}/${totalEnabled}` : enabledSkills.length})
             </h3>
           </div>
 
           {#if enabledSkills.length === 0}
             <div class="bg-gray-50 border border-gray-200 border-dashed rounded-xl px-6 py-8 text-center">
-              <p class="text-sm text-gray-500">No skills enabled for this project</p>
-              <p class="text-xs text-gray-400 mt-1">Enable skills below to give Claude new capabilities</p>
+              {#if searchQuery && totalEnabled > 0}
+                <p class="text-sm text-gray-500">No enabled skills match "{searchQuery}"</p>
+              {:else}
+                <p class="text-sm text-gray-500">No skills enabled for this project</p>
+                <p class="text-xs text-gray-400 mt-1">Enable skills below to give Claude new capabilities</p>
+              {/if}
             </div>
           {:else}
             <div class="space-y-2">
@@ -267,15 +329,20 @@
         {/if}
 
         <!-- Available Skills Section -->
-        {#if availableSkills.length > 0}
+        {#if availableSkills.length > 0 || (searchQuery && totalAvailable > 0)}
           <div>
             <div class="flex items-center gap-2 mb-3">
               <div class="w-2 h-2 bg-gray-300 rounded-full"></div>
               <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide">
-                Available ({availableSkills.length})
+                Available ({searchQuery ? `${availableSkills.length}/${totalAvailable}` : availableSkills.length})
               </h3>
             </div>
 
+            {#if availableSkills.length === 0 && searchQuery}
+              <div class="bg-gray-50 border border-gray-200 border-dashed rounded-xl px-6 py-8 text-center">
+                <p class="text-sm text-gray-500">No available skills match "{searchQuery}"</p>
+              </div>
+            {:else}
             <div class="space-y-2">
               {#each availableSkills as skill (skill.id)}
                 {@const isToggling = togglingSkill === skill.id}
@@ -366,6 +433,7 @@
                 </div>
               {/each}
             </div>
+            {/if}
           </div>
         {/if}
       </div>

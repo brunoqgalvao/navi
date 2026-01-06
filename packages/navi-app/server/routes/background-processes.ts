@@ -7,9 +7,13 @@
 import { json, corsHeaders } from "../utils/response";
 import { spawn, exec, type ChildProcess } from "child_process";
 import { homedir } from "os";
+import { getActiveProcesses } from "../websocket/handler";
 
 // Constants
 const MAX_OUTPUT_LINES = 200;
+// Strip ANSI color codes for port detection
+const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, "");
+
 const PORT_DETECTION_PATTERNS = [
   /listening on (?:port )?(\d+)/i,
   /started (?:on|at) (?:http:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)/i,
@@ -18,6 +22,7 @@ const PORT_DETECTION_PATTERNS = [
   /ready on http:\/\/(?:localhost|127\.0\.0\.1):(\d+)/i,
   /➜\s+Local:\s+http:\/\/(?:localhost|127\.0\.0\.1):(\d+)/i,
   /http:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)/i,
+  /port\s*[=:]\s*(\d+)/i,
 ];
 
 export type BackgroundProcessStatus = "running" | "completed" | "failed" | "killed";
@@ -77,8 +82,9 @@ function emitEvent(event: ProcessEvent) {
 
 function detectPorts(output: string): number[] {
   const ports: number[] = [];
+  const cleanOutput = stripAnsi(output);
   for (const pattern of PORT_DETECTION_PATTERNS) {
-    const match = output.match(pattern);
+    const match = cleanOutput.match(pattern);
     if (match && match[1]) {
       const port = parseInt(match[1], 10);
       if (port > 0 && port < 65536 && !ports.includes(port)) {
@@ -466,10 +472,27 @@ export async function handleBackgroundProcessRoutes(
   // Start a new background process
   if (url.pathname === "/api/background-processes" && method === "POST") {
     const body = await req.json();
-    const { command, cwd, sessionId, projectId, type, label } = body;
+    let { command, cwd, sessionId, projectId, type, label } = body;
 
     if (!command) {
       return json({ error: "Command required" }, 400);
+    }
+
+    // Auto-detect sessionId from active query worker if not provided
+    if (!sessionId) {
+      const activeProcesses = getActiveProcesses();
+      // Get the most recent active session (there's usually only one)
+      for (const [sid] of activeProcesses) {
+        sessionId = sid;
+        console.log(`[BackgroundProcesses] Auto-detected sessionId: ${sessionId}`);
+        break;
+      }
+
+      // Default to "global" if no active session found
+      if (!sessionId) {
+        sessionId = "global";
+        console.log(`[BackgroundProcesses] No active session found, using default: ${sessionId}`);
+      }
     }
 
     const proc = startBackgroundProcess({ command, cwd, sessionId, projectId, type, label });

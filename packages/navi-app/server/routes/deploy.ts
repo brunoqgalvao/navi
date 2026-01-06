@@ -9,7 +9,7 @@ import { json, error } from "../utils/response";
 import { readdir, readFile, stat } from "fs/promises";
 import { join, relative } from "path";
 
-// Navi Cloud API endpoint (will be configured)
+// Navi Cloud API endpoint
 const NAVI_CLOUD_API = process.env.NAVI_CLOUD_API || "https://api.usenavi.app";
 const NAVI_CLOUD_SECRET = process.env.NAVI_CLOUD_SECRET || "";
 
@@ -17,9 +17,9 @@ interface DeployRequest {
   projectPath: string;
   slug?: string;
   name?: string;
-  framework?: "static" | "sveltekit" | "nextjs" | "vite" | "astro";
+  framework?: "static" | "vite-react";
   needsDatabase?: boolean;
-  buildCommand?: string;
+  needsAuth?: boolean;
   outputDir?: string;
 }
 
@@ -27,6 +27,9 @@ interface FileEntry {
   path: string;
   content: string; // base64
 }
+
+// Max file size: 10MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 export async function handleDeployRoutes(
   url: URL,
@@ -40,11 +43,9 @@ export async function handleDeployRoutes(
   }
 
   // Get deploy status
-  if (url.pathname.startsWith("/api/deploy/") && method === "GET") {
+  if (url.pathname.match(/^\/api\/deploy\/[\w-]+$/) && method === "GET") {
     const slug = url.pathname.split("/")[3];
-    if (slug) {
-      return await handleGetStatus(slug);
-    }
+    return await handleGetStatus(slug);
   }
 
   // List deployed apps
@@ -53,11 +54,9 @@ export async function handleDeployRoutes(
   }
 
   // Delete a deployment
-  if (url.pathname.startsWith("/api/deploy/") && method === "DELETE") {
+  if (url.pathname.match(/^\/api\/deploy\/[\w-]+$/) && method === "DELETE") {
     const slug = url.pathname.split("/")[3];
-    if (slug) {
-      return await handleDelete(slug);
-    }
+    return await handleDelete(slug);
   }
 
   // Detect framework
@@ -70,7 +69,7 @@ export async function handleDeployRoutes(
 }
 
 async function handleDeploy(body: DeployRequest): Promise<Response> {
-  const { projectPath, slug, name, framework, needsDatabase, buildCommand, outputDir } = body;
+  const { projectPath, slug, name, framework, needsDatabase, needsAuth, outputDir } = body;
 
   if (!projectPath) {
     return error("projectPath is required", 400);
@@ -79,27 +78,32 @@ async function handleDeploy(body: DeployRequest): Promise<Response> {
   try {
     // Step 1: Detect framework if not specified
     const detectedFramework = framework || (await detectFramework(projectPath));
-    console.log(`Detected framework: ${detectedFramework}`);
+    console.log(`[Deploy] Framework: ${detectedFramework}`);
 
     // Step 2: Determine output directory
     const buildDir = outputDir || getBuildDir(detectedFramework, projectPath);
+    console.log(`[Deploy] Build dir: ${buildDir}`);
 
     // Step 3: Collect files from build directory
     const files = await collectFiles(buildDir);
 
     if (files.length === 0) {
       return error(
-        `No files found in ${buildDir}. Did you run the build command?`,
+        `No files found in ${buildDir}. Did you run 'bun run build'?`,
         400
       );
     }
 
-    console.log(`Collected ${files.length} files from ${buildDir}`);
+    // Calculate total size
+    const totalSize = files.reduce((sum, f) => sum + f.content.length * 0.75, 0); // base64 is ~33% larger
+    console.log(`[Deploy] Collected ${files.length} files (${(totalSize / 1024 / 1024).toFixed(2)} MB)`);
 
     // Step 4: Generate slug if not provided
     const deploySlug = slug || generateSlug(projectPath);
 
     // Step 5: Deploy to Navi Cloud
+    console.log(`[Deploy] Deploying to ${NAVI_CLOUD_API}/deploy as '${deploySlug}'`);
+
     const response = await fetch(`${NAVI_CLOUD_API}/deploy`, {
       method: "POST",
       headers: {
@@ -111,28 +115,33 @@ async function handleDeploy(body: DeployRequest): Promise<Response> {
         name: name || deploySlug,
         framework: detectedFramework,
         needsDatabase: needsDatabase || false,
+        needsAuth: needsAuth || false,
         files,
       }),
     });
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: "Unknown error" }));
-      return error(err.error || "Deploy failed", response.status);
+      console.error(`[Deploy] Failed:`, err);
+      return error((err as any).error || "Deploy failed", response.status);
     }
 
-    const result = await response.json();
+    const result = await response.json() as any;
+    console.log(`[Deploy] Success: ${result.url}`);
 
     return json({
       success: true,
       url: result.url,
-      pagesUrl: result.pagesUrl,
-      deploymentId: result.deploymentId,
+      slug: result.slug,
+      deployCount: result.deployCount,
       database: result.database,
+      hasAuth: result.hasAuth,
       filesDeployed: files.length,
+      totalSize: Math.round(totalSize),
       framework: detectedFramework,
     });
   } catch (err) {
-    console.error("Deploy error:", err);
+    console.error("[Deploy] Error:", err);
     return error(err instanceof Error ? err.message : "Deploy failed", 500);
   }
 }
@@ -208,9 +217,7 @@ async function handleDetectFramework(projectPath: string): Promise<Response> {
 }
 
 // Helper: Detect framework from project files
-async function detectFramework(
-  projectPath: string
-): Promise<"static" | "sveltekit" | "nextjs" | "vite" | "astro"> {
+async function detectFramework(projectPath: string): Promise<"static" | "vite-react"> {
   try {
     const pkgPath = join(projectPath, "package.json");
     const pkgContent = await readFile(pkgPath, "utf-8");
@@ -218,10 +225,8 @@ async function detectFramework(
 
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-    if (deps["@sveltejs/kit"]) return "sveltekit";
-    if (deps["next"]) return "nextjs";
-    if (deps["astro"]) return "astro";
-    if (deps["vite"]) return "vite";
+    // Check for Vite (covers React, Vue, Svelte with Vite)
+    if (deps["vite"]) return "vite-react";
 
     return "static";
   } catch {
@@ -230,18 +235,9 @@ async function detectFramework(
 }
 
 // Helper: Get build output directory
-function getBuildDir(
-  framework: string,
-  projectPath: string
-): string {
+function getBuildDir(framework: string, projectPath: string): string {
   switch (framework) {
-    case "sveltekit":
-      return join(projectPath, "build");
-    case "nextjs":
-      return join(projectPath, "out");
-    case "astro":
-      return join(projectPath, "dist");
-    case "vite":
+    case "vite-react":
       return join(projectPath, "dist");
     default:
       return projectPath;
@@ -251,13 +247,7 @@ function getBuildDir(
 // Helper: Get build command
 function getBuildCommand(framework: string): string | null {
   switch (framework) {
-    case "sveltekit":
-      return "bun run build";
-    case "nextjs":
-      return "bun run build";
-    case "astro":
-      return "bun run build";
-    case "vite":
+    case "vite-react":
       return "bun run build";
     default:
       return null;
@@ -278,8 +268,13 @@ async function collectFiles(
     for (const entry of entries) {
       const fullPath = join(dirPath, entry.name);
 
-      // Skip node_modules and hidden files
-      if (entry.name.startsWith(".") || entry.name === "node_modules") {
+      // Skip node_modules, hidden files, and common non-deployable files
+      if (
+        entry.name.startsWith(".") ||
+        entry.name === "node_modules" ||
+        entry.name === "src" ||
+        entry.name.endsWith(".map")
+      ) {
         continue;
       }
 
@@ -287,10 +282,11 @@ async function collectFiles(
         const subFiles = await collectFiles(fullPath, base);
         files.push(...subFiles);
       } else if (entry.isFile()) {
-        // Skip files > 25MB
         const stats = await stat(fullPath);
-        if (stats.size > 25 * 1024 * 1024) {
-          console.warn(`Skipping large file: ${fullPath}`);
+
+        // Skip large files
+        if (stats.size > MAX_FILE_SIZE) {
+          console.warn(`[Deploy] Skipping large file (${(stats.size / 1024 / 1024).toFixed(2)} MB): ${entry.name}`);
           continue;
         }
 
@@ -304,7 +300,7 @@ async function collectFiles(
       }
     }
   } catch (err) {
-    console.error(`Error reading directory ${dirPath}:`, err);
+    console.error(`[Deploy] Error reading ${dirPath}:`, err);
   }
 
   return files;
@@ -313,10 +309,16 @@ async function collectFiles(
 // Helper: Generate slug from project path
 function generateSlug(projectPath: string): string {
   const name = projectPath.split("/").pop() || "app";
-  return name
+  let slug = name
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 30);
+    .replace(/^-|-$/g, "");
+
+  // Ensure minimum length
+  if (slug.length < 3) {
+    slug = slug + "-app";
+  }
+
+  return slug.slice(0, 30);
 }
