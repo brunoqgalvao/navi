@@ -2566,6 +2566,7 @@
               onStartNewChat={() => startNewChatWithSummary($session.sessionId || '')}
               onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
               onSuggestionClick={(prompt) => { inputText = prompt; }}
+              {projectContext}
             />
           {/if}
 

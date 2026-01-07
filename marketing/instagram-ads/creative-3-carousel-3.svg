@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <defs>
+    <linearGradient id="bg5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="100%" style="stop-color:#111"/>
+    </linearGradient>
+    <linearGradient id="green5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4ade80"/>
+      <stop offset="100%" style="stop-color:#22c55e"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1080" height="1080" fill="url(#bg5)"/>
+
+  <g opacity="0.03">
+    <pattern id="dots5" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="12" cy="12" r="1" fill="#fff"/>
+    </pattern>
+    <rect width="1080" height="1080" fill="url(#dots5)"/>
+  </g>
+
+  <!-- Slide indicator -->
+  <g transform="translate(540, 80)">
+    <circle cx="-30" r="5" fill="#333"/>
+    <circle cx="0" r="5" fill="#333"/>
+    <circle cx="30" r="5" fill="#4ade80"/>
+    <circle cx="60" r="5" fill="#333"/>
+  </g>
+
+  <!-- Feature headline -->
+  <text x="540" y="180" font-family="system-ui, -apple-system, sans-serif" font-size="48" font-weight="700" fill="url(#green5)" text-anchor="middle" letter-spacing="-2">
+    Visual Task Progress
+  </text>
+
+  <!-- Task card showcase -->
+  <g transform="translate(140, 240)">
+    <rect width="800" height="520" rx="20" fill="#151515" stroke="#2a2a2a" stroke-width="1"/>
+
+    <!-- Header -->
+    <g transform="translate(30, 30)">
+      <text x="0" y="24" font-family="system-ui, sans-serif" font-size="18" font-weight="600" fill="#fff">Implementing new feature</text>
+    </g>
+
+    <!-- Main task card -->
+    <g transform="translate(30, 80)">
+      <rect width="740" height="380" rx="16" fill="#0f0f0f" stroke="#222" stroke-width="1"/>
+
+      <!-- Header bar -->
+      <rect width="740" height="44" rx="16" fill="#161616"/>
+      <rect y="16" width="740" height="28" fill="#161616"/>
+      <circle cx="24" cy="22" r="6" fill="#4ade80">
+        <animate attributeName="opacity" values="1;0.4;1" dur="1.5s" repeatCount="indefinite"/>
+      </circle>
+      <text x="44" y="26" font-family="system-ui, sans-serif" font-size="12" fill="#666" letter-spacing="0.5">TASK IN PROGRESS</text>
+
+      <!-- Completed tasks -->
+      <g transform="translate(24, 64)">
+        <circle cx="12" cy="12" r="12" fill="#4ade80"/>
+        <polyline points="6,12 10,16 18,7" fill="none" stroke="#0a0a0a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="36" y="10" font-family="monospace" font-size="14" fill="#4ade80">read_file</text>
+        <text x="130" y="10" font-family="monospace" font-size="14" fill="#888">src/components/Header.svelte</text>
+        <text x="36" y="30" font-family="monospace" font-size="11" fill="#555">Analyzed 124 lines</text>
+      </g>
+
+      <g transform="translate(24, 124)">
+        <circle cx="12" cy="12" r="12" fill="#4ade80"/>
+        <polyline points="6,12 10,16 18,7" fill="none" stroke="#0a0a0a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="36" y="10" font-family="monospace" font-size="14" fill="#4ade80">read_file</text>
+        <text x="130" y="10" font-family="monospace" font-size="14" fill="#888">src/stores/navigation.ts</text>
+        <text x="36" y="30" font-family="monospace" font-size="11" fill="#555">Found existing nav state</text>
+      </g>
+
+      <g transform="translate(24, 184)">
+        <circle cx="12" cy="12" r="12" fill="#4ade80"/>
+        <polyline points="6,12 10,16 18,7" fill="none" stroke="#0a0a0a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="36" y="10" font-family="monospace" font-size="14" fill="#4ade80">write_file</text>
+        <text x="140" y="10" font-family="monospace" font-size="14" fill="#888">src/components/MobileNav.svelte</text>
+        <text x="36" y="30" font-family="monospace" font-size="11" fill="#555">Created new component (87 lines)</text>
+      </g>
+
+      <!-- In progress task -->
+      <g transform="translate(24, 244)">
+        <circle cx="12" cy="12" r="12" fill="#fbbf24"/>
+        <g transform="translate(12, 12)">
+          <circle cx="0" cy="0" r="6" fill="none" stroke="#0a0a0a" stroke-width="2" stroke-dasharray="4 2">
+            <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="1s" repeatCount="indefinite"/>
+          </circle>
+        </g>
+        <text x="36" y="10" font-family="monospace" font-size="14" fill="#fbbf24">edit_file</text>
+        <text x="130" y="10" font-family="monospace" font-size="14" fill="#888">src/components/Header.svelte</text>
+        <text x="36" y="30" font-family="monospace" font-size="11" fill="#fbbf24">Integrating mobile nav toggle...</text>
+      </g>
+
+      <!-- Pending tasks -->
+      <g transform="translate(24, 304)">
+        <circle cx="12" cy="12" r="12" fill="none" stroke="#444" stroke-width="2"/>
+        <text x="36" y="10" font-family="monospace" font-size="14" fill="#555">edit_file</text>
+        <text x="130" y="10" font-family="monospace" font-size="14" fill="#444">src/app.css</text>
+        <text x="36" y="30" font-family="monospace" font-size="11" fill="#444">Pending: Add responsive styles</text>
+      </g>
+
+      <g transform="translate(24, 350)">
+        <circle cx="12" cy="12" r="12" fill="none" stroke="#444" stroke-width="2"/>
+        <text x="36" y="10" font-family="monospace" font-size="14" fill="#555">bash</text>
+        <text x="86" y="10" font-family="monospace" font-size="14" fill="#444">npm run build</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Benefit callout -->
+  <g transform="translate(540, 820)">
+    <rect x="-340" y="-40" width="680" height="80" rx="12" fill="#1a1a1a"/>
+    <circle cx="-280" cy="0" r="24" fill="#4ade80" opacity="0.2"/>
+    <polyline transform="translate(-292, -8)" points="4,8 10,14 20,2" fill="none" stroke="#4ade80" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="-240" y="8" font-family="system-ui, sans-serif" font-size="20" fill="#fff">See exactly what Claude is doing</text>
+  </g>
+
+  <!-- Swipe indicator -->
+  <g transform="translate(540, 1000)">
+    <text x="0" y="0" font-family="system-ui, sans-serif" font-size="14" fill="#555" text-anchor="middle">One more</text>
+  </g>
+</svg>

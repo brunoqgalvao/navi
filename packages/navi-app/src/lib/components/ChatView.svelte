@@ -63,6 +63,8 @@
     // Background processes
     onOpenProcesses?: () => void;
     onSuggestionClick?: (prompt: string) => void;
+    // Project context for suggestions
+    projectContext?: { summary: string; suggestions: string[] } | null;
   }
 
   let {
@@ -98,6 +100,7 @@
     onStartNewChat,
     onOpenProcesses,
     onSuggestionClick,
+    projectContext = null,
   }: Props = $props();
 
   const usagePercent = $derived(
@@ -196,7 +199,7 @@
     </div>
 
     {#if messages.length === 0 && !isStreaming && emptyState !== "none"}
-      <EmptyStateWelcome {onSuggestionClick} />
+      <EmptyStateWelcome {onSuggestionClick} {projectContext} />
     {/if}
 
     {#each getVisibleMessages() as msg, idx (msg.id)}

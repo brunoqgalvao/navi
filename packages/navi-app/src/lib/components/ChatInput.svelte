@@ -937,38 +937,34 @@
 
   <!-- Skills bar - inside input box -->
   {#if activeSkills.length > 0 || !isShellCommand(value)}
-    <div class="border-t {isShellCommand(value) ? 'border-[#3d59a1]/30' : 'border-gray-100'} px-3 py-2 flex items-center justify-between">
-      <div class="flex items-center gap-2 flex-wrap">
+    <div class="border-t {isShellCommand(value) ? 'border-[#3d59a1]/30' : 'border-gray-100'} px-3 py-2 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
         {#if activeSkills.length > 0}
-          <div class="flex items-center gap-1 text-purple-500">
-            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
-            </svg>
-          </div>
+          <svg class="w-3.5 h-3.5 text-purple-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
           {#each activeSkills.slice(0, 4) as skill}
             <button
               onclick={() => onManageSkills?.()}
-              class="group relative flex items-center gap-1.5 text-[11px] pl-2 pr-2.5 py-1 bg-gradient-to-r from-purple-50 to-fuchsia-50 text-purple-700 rounded-full font-medium border border-purple-200/60 hover:border-purple-300 hover:from-purple-100 hover:to-fuchsia-100 hover:shadow-sm transition-all duration-150 cursor-pointer"
+              class="group flex items-center gap-1.5 text-[11px] pl-2 pr-2.5 py-0.5 bg-gradient-to-r from-purple-50 to-fuchsia-50 text-purple-700 rounded-full font-medium border border-purple-200/60 hover:border-purple-300 hover:from-purple-100 hover:to-fuchsia-100 hover:shadow-sm transition-all duration-150 cursor-pointer flex-shrink-0"
             >
-              <span class="w-1.5 h-1.5 rounded-full bg-gradient-to-br from-purple-400 to-fuchsia-500 group-hover:scale-110 transition-transform"></span>
-              <span class="truncate max-w-[120px]">{skill.name}</span>
+              <span class="w-1.5 h-1.5 rounded-full bg-gradient-to-br from-purple-400 to-fuchsia-500 group-hover:scale-110 transition-transform flex-shrink-0"></span>
+              <span class="truncate max-w-[100px]">{skill.name}</span>
             </button>
           {/each}
           {#if activeSkills.length > 4}
             <button
               onclick={() => onManageSkills?.()}
-              class="flex items-center gap-1 text-[11px] px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full font-medium border border-gray-200 hover:bg-gray-150 hover:border-gray-300 transition-all duration-150 cursor-pointer"
+              class="flex items-center text-[11px] px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full font-medium border border-gray-200 hover:bg-gray-200 hover:border-gray-300 transition-all duration-150 cursor-pointer flex-shrink-0"
             >
-              <span>+{activeSkills.length - 4}</span>
+              +{activeSkills.length - 4}
             </button>
           {/if}
         {:else}
-          <div class="flex items-center gap-1.5 text-gray-400">
-            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
-            </svg>
-            <span class="text-[11px]">No skills active</span>
-          </div>
+          <svg class="w-3.5 h-3.5 text-gray-300 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          <span class="text-[11px] text-gray-400">No skills active</span>
         {/if}
       </div>
 
