@@ -549,6 +549,18 @@ export const sessions = {
 export const messages = {
   listBySession: (sessionId: string) =>
     queryAll<Message>("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC", [sessionId]),
+  listBySessionPaginated: (sessionId: string, limit: number, offset: number) =>
+    queryAll<Message>(
+      "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+      [sessionId, limit, offset]
+    ),
+  countBySession: (sessionId: string): number => {
+    const result = queryOne<{ count: number }>(
+      "SELECT COUNT(*) as count FROM messages WHERE session_id = ?",
+      [sessionId]
+    );
+    return result?.count ?? 0;
+  },
   get: (id: string) => queryOne<Message>("SELECT * FROM messages WHERE id = ?", [id]),
   create: (
     id: string,

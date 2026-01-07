@@ -7,6 +7,26 @@ export async function handleMessageRoutes(url: URL, method: string, req: Request
   if (messagesMatch) {
     const sessionId = messagesMatch[1];
     if (method === "GET") {
+      // Support pagination via query params: ?limit=50&offset=0
+      const limit = parseInt(url.searchParams.get("limit") || "0", 10);
+      const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+
+      if (limit > 0) {
+        // Paginated request - returns newest messages first (reversed for display)
+        const total = messages.countBySession(sessionId);
+        const paginatedMsgs = messages.listBySessionPaginated(sessionId, limit, offset);
+        // Reverse to get chronological order for display
+        const chronologicalMsgs = paginatedMsgs.reverse();
+        return json({
+          messages: chronologicalMsgs.map(m => ({ ...m, content: JSON.parse(m.content) })),
+          total,
+          limit,
+          offset,
+          hasMore: offset + paginatedMsgs.length < total,
+        });
+      }
+
+      // No pagination - return all messages (backwards compatible)
       const msgs = messages.listBySession(sessionId);
       return json(msgs.map(m => ({ ...m, content: JSON.parse(m.content) })));
     }

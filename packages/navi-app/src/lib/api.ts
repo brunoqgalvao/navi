@@ -78,6 +78,14 @@ export interface Message {
   is_final?: number;
 }
 
+export interface PaginatedMessages {
+  messages: Message[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${getApiBaseUrl()}${path}`, {
     ...options,
@@ -266,6 +274,8 @@ export const api = {
 
   messages: {
     list: (sessionId: string) => request<Message[]>(`/sessions/${sessionId}/messages`),
+    listPaginated: (sessionId: string, limit: number, offset: number = 0) =>
+      request<PaginatedMessages>(`/sessions/${sessionId}/messages?limit=${limit}&offset=${offset}`),
     get: (id: string) => request<Message>(`/messages/${id}`),
     update: (id: string, content: MessageContent) =>
       request<{ success: boolean; sessionReset?: boolean; historyContext?: string }>(`/messages/${id}`, {

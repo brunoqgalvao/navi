@@ -10,10 +10,11 @@
   import WorkingIndicator from "./WorkingIndicator.svelte";
   import ContextWarning from "./ContextWarning.svelte";
   import { streamingStore, type StreamingState } from "../handlers";
-  import { sessionMessages, loadingSessions, sessionTodos, type ChatMessage } from "../stores";
+  import { sessionMessages, loadingSessions, sessionTodos, type ChatMessage, type SessionPaginationState } from "../stores";
   import type { ContentBlock } from "../claude";
   import BackgroundProcessBadge from "./BackgroundProcessBadge.svelte";
   import EmptyStateWelcome from "./EmptyStateWelcome.svelte";
+  import { loadMoreMessages } from "../actions/session-actions";
 
   interface Props {
     sessionId: string | null;
@@ -111,22 +112,33 @@
 
   let messagesMap = $state<Map<string, ChatMessage[]>>(new Map());
   let streamingMap = $state<Map<string, StreamingState>>(new Map());
+  let paginationMap = $state<Map<string, SessionPaginationState>>(new Map());
 
   // Store unsubscribe functions to prevent memory leaks
   const unsubMessages = sessionMessages.subscribe(v => messagesMap = v);
   const unsubStreaming = streamingStore.subscribe(v => streamingMap = v);
+  const unsubPagination = sessionMessages.paginationStore.subscribe(v => paginationMap = v);
 
   // Clean up subscriptions when component is destroyed
   onDestroy(() => {
     unsubMessages();
     unsubStreaming();
+    unsubPagination();
   });
 
   const messages = $derived(sessionId ? (messagesMap.get(sessionId) || []) : []);
   const streamingState = $derived(sessionId ? streamingMap.get(sessionId) : undefined);
+  const pagination = $derived(sessionId ? paginationMap.get(sessionId) : undefined);
   const isLoading = $derived(sessionId ? $loadingSessions.has(sessionId) : false);
   const todos = $derived(sessionId ? ($sessionTodos.get(sessionId) || []) : []);
   const isStreaming = $derived(streamingState?.isStreaming ?? false);
+
+  // Handle loading more messages
+  async function handleLoadMore() {
+    if (sessionId) {
+      await loadMoreMessages(sessionId);
+    }
+  }
 
   function getMainMessages(): ChatMessage[] {
     return messages
@@ -199,6 +211,30 @@
     <div class="flex justify-center">
       <BackgroundProcessBadge {sessionId} onClick={onOpenProcesses} />
     </div>
+
+    <!-- Load more older messages button -->
+    {#if pagination?.hasMore}
+      <div class="flex justify-center py-3">
+        <button
+          onclick={handleLoadMore}
+          disabled={pagination.isLoadingMore}
+          class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          {#if pagination.isLoadingMore}
+            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>Loading...</span>
+          {:else}
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
+            </svg>
+            <span>Load older messages ({pagination.total - pagination.loadedCount} more)</span>
+          {/if}
+        </button>
+      </div>
+    {/if}
 
     {#if messages.length === 0 && !isStreaming && emptyState !== "none"}
       <EmptyStateWelcome {onSuggestionClick} {projectContext} />
