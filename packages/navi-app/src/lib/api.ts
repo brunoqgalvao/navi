@@ -219,6 +219,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ archived }),
       }),
+    archiveAllNonStarred: (projectId: string) =>
+      request<{ success: boolean }>(`/projects/${projectId}/sessions/archive-all-non-starred`, {
+        method: "POST",
+      }),
     setMarkedForReview: (id: string, markedForReview: boolean) =>
       request<Session>(`/sessions/${id}/mark-for-review`, {
         method: "POST",

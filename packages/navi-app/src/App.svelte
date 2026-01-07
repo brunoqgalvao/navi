@@ -1648,6 +1648,28 @@
     }
   }
 
+  async function archiveAllNonStarred() {
+    if (!currentProject) return;
+    try {
+      await api.sessions.archiveAllNonStarred(currentProject.id);
+      if (!$showArchivedWorkspaces) {
+        // Remove non-starred sessions from sidebar
+        const currentSessionId = $session.sessionId;
+        const wasCurrentArchived = sidebarSessions.find(s => s.id === currentSessionId && !s.favorite);
+        sidebarSessions = sidebarSessions.filter(s => s.favorite);
+        if (wasCurrentArchived) {
+          session.setSession(null);
+        }
+      } else {
+        // Mark all non-starred as archived
+        sidebarSessions = sidebarSessions.map(s => s.favorite ? s : { ...s, archived: 1 });
+      }
+      loadRecentChatsAction();
+    } catch (err) {
+      console.error("Failed to archive all non-starred sessions:", err);
+    }
+  }
+
   async function toggleSessionMarkedForReview(sess: Session, e: Event) {
     e.stopPropagation();
     const newMarkedForReview = !sess.marked_for_review;
@@ -2544,6 +2566,7 @@
     onDuplicateSession={duplicateSession}
     onToggleSessionFavorite={toggleSessionFavorite}
     onToggleSessionArchive={toggleSessionArchive}
+    onArchiveAllNonStarred={archiveAllNonStarred}
     onToggleSessionMarkedForReview={toggleSessionMarkedForReview}
     onProjectReorder={async (order) => { 
       await api.projects.reorder(order); 

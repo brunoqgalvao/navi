@@ -657,6 +657,8 @@ export const sessions = {
         [inputTokens, outputTokens, sessionId]),
   setArchivedByProject: (projectId: string, archived: boolean) =>
     run("UPDATE sessions SET archived = ?, updated_at = ? WHERE project_id = ?", [archived ? 1 : 0, Date.now(), projectId]),
+  archiveAllNonStarred: (projectId: string) =>
+    run("UPDATE sessions SET archived = 1, updated_at = ? WHERE project_id = ? AND favorite = 0 AND archived = 0", [Date.now(), projectId]),
   setArchived: (id: string, archived: boolean) =>
     run("UPDATE sessions SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
   setMarkedForReview: (id: string, markedForReview: boolean) =>

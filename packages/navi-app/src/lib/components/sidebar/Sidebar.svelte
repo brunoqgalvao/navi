@@ -47,6 +47,7 @@
     onDuplicateSession: (session: Session, e: Event) => void;
     onToggleSessionFavorite: (session: Session, e: Event) => void;
     onToggleSessionArchive: (session: Session, e: Event) => void;
+    onArchiveAllNonStarred: () => void;
     onToggleSessionMarkedForReview: (session: Session, e: Event) => void;
     onProjectReorder: (order: string[]) => void;
     onSessionReorder: (order: string[]) => void;
@@ -105,6 +106,7 @@
     onDuplicateSession,
     onToggleSessionFavorite,
     onToggleSessionArchive,
+    onArchiveAllNonStarred,
     onToggleSessionMarkedForReview,
     onProjectReorder,
     onSessionReorder,
@@ -1030,6 +1032,13 @@
                 {$blockedCount}
               </span>
             {/if}
+            <button
+              onclick={onArchiveAllNonStarred}
+              class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+              title="Archive all non-starred chats"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4l3 3m0 0l3-3m-3 3V9"></path></svg>
+            </button>
             <button
               onclick={() => showArchivedWorkspaces.toggle()}
               class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors {$showArchivedWorkspaces ? 'bg-gray-200 text-gray-600' : ''}"
