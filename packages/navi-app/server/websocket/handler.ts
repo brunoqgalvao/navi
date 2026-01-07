@@ -1116,15 +1116,15 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
         // MULTI-SESSION: Handle spawn, context, escalate, deliver, decision
         // ═══════════════════════════════════════════════════════════════
         else if (msg.type === "multi_session_spawn") {
-          handleMultiSessionSpawn(proc, sessionId, msg);
+          handleMultiSessionSpawn(child, sessionId, msg);
         } else if (msg.type === "multi_session_get_context") {
-          handleMultiSessionGetContext(proc, sessionId, msg);
+          handleMultiSessionGetContext(child, sessionId, msg);
         } else if (msg.type === "multi_session_escalate") {
-          handleMultiSessionEscalate(proc, sessionId, msg);
+          handleMultiSessionEscalate(child, sessionId, msg);
         } else if (msg.type === "multi_session_deliver") {
-          handleMultiSessionDeliver(proc, sessionId, msg);
+          handleMultiSessionDeliver(child, sessionId, msg);
         } else if (msg.type === "multi_session_log_decision") {
-          handleMultiSessionLogDecision(proc, sessionId, msg);
+          handleMultiSessionLogDecision(child, sessionId, msg);
         } else if (msg.type === "complete") {
           if (lastMainAssistantMsgId) {
             messages.markFinal(lastMainAssistantMsgId);

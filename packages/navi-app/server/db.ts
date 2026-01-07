@@ -393,6 +393,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_session_artifacts_root ON session_artifacts(root_session_id);
   `);
 
+
   saveDb()
   return db;
 }
