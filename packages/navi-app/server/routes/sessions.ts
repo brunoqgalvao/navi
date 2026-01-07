@@ -94,6 +94,14 @@ export async function handleSessionRoutes(
     return json(sessions.get(id));
   }
 
+  // Archive all non-starred sessions in a project
+  const archiveAllNonStarredMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions\/archive-all-non-starred$/);
+  if (archiveAllNonStarredMatch && method === "POST") {
+    const projectId = archiveAllNonStarredMatch[1];
+    sessions.archiveAllNonStarred(projectId);
+    return json({ success: true });
+  }
+
   const sessionMarkedForReviewMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mark-for-review$/);
   if (sessionMarkedForReviewMatch && method === "POST") {
     const id = sessionMarkedForReviewMatch[1];

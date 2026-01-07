@@ -262,3 +262,34 @@ export async function reorderSessions(projectId: string, sessionIds: string[]): 
     return false;
   }
 }
+
+export async function archiveAllNonStarred(projectId: string, showArchivedWorkspaces: boolean): Promise<boolean> {
+  try {
+    await api.sessions.archiveAllNonStarred(projectId);
+    const sessions = callbacks?.getSidebarSessions() || [];
+
+    if (!showArchivedWorkspaces) {
+      // Remove non-starred sessions from sidebar if not showing archived
+      const starredSessions = sessions.filter(s => s.favorite);
+      callbacks?.setSidebarSessions(starredSessions);
+
+      // Clear current session if it was archived
+      const session = get(currentSession);
+      const wasCurrentArchived = sessions.find(s => s.id === session.sessionId && !s.favorite);
+      if (wasCurrentArchived) {
+        currentSession.setSession(null);
+      }
+    } else {
+      // Update archived status on all non-starred sessions
+      callbacks?.setSidebarSessions(
+        sessions.map(s => s.favorite ? s : { ...s, archived: 1 })
+      );
+    }
+
+    callbacks?.loadRecentChats();
+    return true;
+  } catch (err) {
+    showError({ title: "Archive All Failed", message: "Failed to archive non-starred chats", error: err });
+    return false;
+  }
+}

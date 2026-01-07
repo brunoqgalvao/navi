@@ -26,6 +26,7 @@ export {
   toggleSessionPin,
   toggleSessionFavorite,
   toggleSessionArchive,
+  archiveAllNonStarred,
   reorderSessions,
   type SessionActionCallbacks,
 } from "./session-actions";
