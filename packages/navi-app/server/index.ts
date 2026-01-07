@@ -25,6 +25,8 @@ import { handleDeployRoutes } from "./routes/deploy";
 import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
 import { handleExtensionRoutes } from "./routes/extensions";
 import { handleKanbanRoutes } from "./routes/kanban";
+import { handleWorktreeRoutes } from "./routes/worktrees";
+import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -325,6 +327,14 @@ const server = Bun.serve({
 
     // Kanban routes
     response = await handleKanbanRoutes(url, method, req);
+    if (response) return response;
+
+    // Worktree routes
+    response = await handleWorktreeRoutes(url, method, req);
+    if (response) return response;
+
+    // Session hierarchy routes (multi-agent)
+    response = await handleSessionHierarchyRoutes(url, method, req);
     if (response) return response;
 
     // Ephemeral chat

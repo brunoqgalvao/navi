@@ -26,6 +26,7 @@
     projectId: string | null;
     sessionId: string | null;
     projectPath: string | null;
+    worktreePath?: string | null;  // Use this for git operations when in a worktree
     previewSource: string | null;
     browserUrl: string;
     isResizing: boolean;
@@ -46,6 +47,7 @@
     projectId,
     sessionId,
     projectPath,
+    worktreePath = null,
     previewSource,
     browserUrl,
     isResizing,
@@ -59,6 +61,9 @@
     onTerminalSendToClaude,
     onNavigateToSession,
   }: Props = $props();
+
+  // Use worktree path for git if available, otherwise use project path
+  let effectiveGitPath = $derived(worktreePath || projectPath);
 
   // Extension settings modal
   let showExtensionSettings = $state(false);
@@ -221,7 +226,7 @@
     {:else if mode === "git" && projectPath}
       <!-- Git panel - full width -->
       <div class="flex-1 min-h-0 flex flex-col w-full overflow-hidden">
-        <GitPanel rootPath={projectPath} />
+        <GitPanel rootPath={effectiveGitPath} />
       </div>
     {:else if mode === "terminal"}
       <!-- Terminal panel - full width -->

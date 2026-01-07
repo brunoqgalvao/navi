@@ -273,6 +273,102 @@ export interface UnknownMessage {
   timestamp?: number;
 }
 
+// Session Hierarchy Events (Multi-Agent)
+export interface SessionSpawnedMessage {
+  type: "session:spawned";
+  session: {
+    id: string;
+    title: string;
+    role: string | null;
+    task: string | null;
+    agent_status: string;
+    depth: number;
+    parent_session_id: string | null;
+    root_session_id: string | null;
+  };
+  parentId: string;
+}
+
+export interface SessionStatusChangedMessage {
+  type: "session:status_changed";
+  sessionId: string;
+  status: string;
+  previousStatus: string;
+}
+
+export interface SessionEscalatedMessage {
+  type: "session:escalated";
+  sessionId: string;
+  escalation: {
+    type: string;
+    summary: string;
+    context: string;
+    options?: string[];
+    created_at: number;
+  };
+}
+
+export interface SessionEscalationResolvedMessage {
+  type: "session:escalation_resolved";
+  sessionId: string;
+  response: {
+    action: string;
+    content: string;
+  };
+}
+
+export interface SessionDeliveredMessage {
+  type: "session:delivered";
+  sessionId: string;
+  deliverable: {
+    type: string;
+    summary: string;
+    content: any;
+    artifacts?: Array<{ path: string; description?: string }>;
+  };
+}
+
+export interface SessionArchivedMessage {
+  type: "session:archived";
+  sessionId: string;
+}
+
+export interface SessionDecisionLoggedMessage {
+  type: "session:decision_logged";
+  decision: {
+    id: string;
+    root_session_id: string;
+    session_id: string;
+    category: string | null;
+    decision: string;
+    rationale: string | null;
+    created_at: number;
+  };
+}
+
+export interface SessionArtifactCreatedMessage {
+  type: "session:artifact_created";
+  artifact: {
+    id: string;
+    session_id: string;
+    root_session_id: string;
+    path: string;
+    description: string | null;
+    artifact_type: string | null;
+    created_at: number;
+  };
+}
+
+export type SessionHierarchyMessage =
+  | SessionSpawnedMessage
+  | SessionStatusChangedMessage
+  | SessionEscalatedMessage
+  | SessionEscalationResolvedMessage
+  | SessionDeliveredMessage
+  | SessionArchivedMessage
+  | SessionDecisionLoggedMessage
+  | SessionArtifactCreatedMessage;
+
 export type ClaudeMessage =
   | SystemMessage
   | AssistantMessage
@@ -286,11 +382,13 @@ export type ClaudeMessage =
   | StreamEventMessage
   | AuthStatusMessage
   | UnknownMessage
+  | SessionHierarchyMessage
   | { type: "connected" }
   | { type: "aborted"; sessionId?: string; uiSessionId?: string }
   | { type: "ui_command"; command: string; payload: Record<string, unknown> }
   | { type: "until_done_continue"; uiSessionId?: string; iteration: number; maxIterations: number; totalCost: number; reason: string }
-  | { type: "until_done_complete"; uiSessionId?: string; totalIterations: number; totalCost: number; reason: string };
+  | { type: "until_done_complete"; uiSessionId?: string; totalIterations: number; totalCost: number; reason: string }
+  | { type: "play_sound"; sound: string };
 
 export class ClaudeClient {
   private ws: WebSocket | null = null;

@@ -1,6 +1,7 @@
 import type { ClaudeMessage, SystemMessage, AssistantMessage, UserMessage } from "../claude";
 import { createMessageHandler, type MessageHandlerConfig } from "./messageHandler";
 import type { UICommand, CompactMetadata, AskUserQuestionData, UntilDoneContinueData, UntilDoneCompleteData } from "./types";
+import type { SessionHierarchyEvent } from "../features/session-hierarchy/types";
 import {
   sessionMessages,
   loadingSessions,
@@ -31,6 +32,9 @@ export interface UseMessageHandlerOptions {
   // Until Done (Ralph loop) mode callbacks
   onUntilDoneContinue?: (sessionId: string, data: UntilDoneContinueData) => void;
   onUntilDoneComplete?: (sessionId: string, data: UntilDoneCompleteData) => void;
+  // Session Hierarchy (Multi-Agent) callbacks
+  onSessionHierarchyEvent?: (event: SessionHierarchyEvent) => void;
+  onPlaySound?: (sound: string) => void;
 }
 
 /**
@@ -118,6 +122,8 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     onContextOverflow,
     onUntilDoneContinue,
     onUntilDoneComplete,
+    onSessionHierarchyEvent,
+    onPlaySound,
   } = options;
 
   const activeSubagents = new Map<string, { elapsed: number }>();
@@ -239,6 +245,14 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
 
       onUntilDoneComplete: (sessionId, data) => {
         onUntilDoneComplete?.(sessionId, data);
+      },
+
+      onSessionHierarchyEvent: (event) => {
+        onSessionHierarchyEvent?.(event);
+      },
+
+      onPlaySound: (sound) => {
+        onPlaySound?.(sound);
       },
 
       scrollToBottom,

@@ -1,0 +1,623 @@
+<script lang="ts">
+  import Modal from "./Modal.svelte";
+  import { worktreeApi, type MergePreview, type MergeResult, type ConflictInfo } from "../api";
+
+  interface Props {
+    open: boolean;
+    sessionId: string;
+    sessionTitle: string;
+    branch: string;
+    baseBranch: string;
+    onClose: () => void;
+    onMergeComplete: () => void;
+  }
+
+  let {
+    open,
+    sessionId,
+    sessionTitle,
+    branch,
+    baseBranch,
+    onClose,
+    onMergeComplete,
+  }: Props = $props();
+
+  type Step = "preview" | "merging" | "conflicts" | "success" | "error";
+
+  let step = $state<Step>("preview");
+  let preview = $state<MergePreview | null>(null);
+  let conflicts = $state<ConflictInfo[]>([]);
+  let error = $state<string | null>(null);
+  let loading = $state(true);
+  let cleanupAfterMerge = $state(true);
+
+  async function loadPreview() {
+    try {
+      loading = true;
+      error = null;
+      preview = await worktreeApi.previewMerge(sessionId);
+    } catch (e: any) {
+      error = e.message;
+      step = "error";
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function handleMerge() {
+    step = "merging";
+    try {
+      const result = await worktreeApi.merge(sessionId, {
+        autoCommit: true,
+        cleanupAfter: cleanupAfterMerge,
+      });
+
+      if (result.hasConflicts && result.conflicts) {
+        conflicts = result.conflicts;
+        step = "conflicts";
+      } else if (result.success) {
+        step = "success";
+      } else {
+        error = result.error || "Merge failed";
+        step = "error";
+      }
+    } catch (e: any) {
+      error = e.message;
+      step = "error";
+    }
+  }
+
+  async function handleAbort() {
+    try {
+      await worktreeApi.abortMerge(sessionId);
+      step = "preview";
+      await loadPreview();
+    } catch (e: any) {
+      error = e.message;
+    }
+  }
+
+  function handleClose() {
+    if (step === "success") {
+      onMergeComplete();
+    }
+    onClose();
+  }
+
+  // Load preview on mount
+  $effect(() => {
+    loadPreview();
+  });
+
+  const statusIcon = (status: string) => {
+    switch (status) {
+      case "A": return { icon: "+", color: "#10b981", label: "Added" };
+      case "M": return { icon: "~", color: "#f59e0b", label: "Modified" };
+      case "D": return { icon: "-", color: "#ef4444", label: "Deleted" };
+      case "R": return { icon: "→", color: "#6366f1", label: "Renamed" };
+      default: return { icon: "?", color: "#6b7280", label: "Changed" };
+    }
+  };
+</script>
+
+<Modal {open} title="Merge to {baseBranch}" onClose={handleClose} size="lg">
+  {#snippet children()}
+    {#if step === "preview"}
+      {#if loading}
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>Analyzing changes...</p>
+        </div>
+      {:else if preview}
+        <div class="preview-content">
+          <div class="summary-card">
+            <div class="summary-header">
+              <h3>Ready to merge</h3>
+              <p class="summary-subtitle">
+                Merge <strong>{branch.replace("session/", "")}</strong> into <strong>{baseBranch}</strong>
+              </p>
+            </div>
+
+            {#if preview.hasUncommittedChanges}
+              <div class="warning-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>You have uncommitted changes. They will be auto-committed before merge.</span>
+              </div>
+            {/if}
+
+            <div class="stats-row">
+              <div class="stat">
+                <span class="stat-value">{preview.commits.length}</span>
+                <span class="stat-label">commits</span>
+              </div>
+              <div class="stat">
+                <span class="stat-value">{preview.changedFiles.length}</span>
+                <span class="stat-label">files changed</span>
+              </div>
+            </div>
+          </div>
+
+          {#if preview.commits.length > 0}
+            <div class="section">
+              <h4>Commits</h4>
+              <div class="commits-list">
+                {#each preview.commits.slice(0, 5) as commit}
+                  <div class="commit-item">
+                    <span class="commit-hash">{commit.hash.slice(0, 7)}</span>
+                    <span class="commit-message">{commit.message}</span>
+                  </div>
+                {/each}
+                {#if preview.commits.length > 5}
+                  <div class="more-items">+{preview.commits.length - 5} more commits</div>
+                {/if}
+              </div>
+            </div>
+          {/if}
+
+          {#if preview.changedFiles.length > 0}
+            <div class="section">
+              <h4>Changed Files</h4>
+              <div class="files-list">
+                {#each preview.changedFiles.slice(0, 10) as file}
+                  {@const status = statusIcon(file.status)}
+                  <div class="file-item">
+                    <span class="file-status" style="color: {status.color}" title={status.label}>{status.icon}</span>
+                    <span class="file-path">{file.path}</span>
+                  </div>
+                {/each}
+                {#if preview.changedFiles.length > 10}
+                  <div class="more-items">+{preview.changedFiles.length - 10} more files</div>
+                {/if}
+              </div>
+            </div>
+          {/if}
+
+          <label class="cleanup-option">
+            <input type="checkbox" bind:checked={cleanupAfterMerge} />
+            <span>Delete worktree after successful merge</span>
+          </label>
+        </div>
+      {/if}
+
+    {:else if step === "merging"}
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Merging changes...</p>
+      </div>
+
+    {:else if step === "conflicts"}
+      <div class="conflicts-content">
+        <div class="conflict-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div>
+            <h3>Merge Conflicts</h3>
+            <p>These files have conflicts that need to be resolved manually.</p>
+          </div>
+        </div>
+
+        <div class="conflicts-list">
+          {#each conflicts as conflict}
+            <div class="conflict-item">
+              <span class="conflict-icon">!</span>
+              <span class="conflict-file">{conflict.file}</span>
+            </div>
+          {/each}
+        </div>
+
+        <p class="conflict-help">
+          Please resolve the conflicts in your editor, then try merging again.
+        </p>
+      </div>
+
+    {:else if step === "success"}
+      <div class="success-content">
+        <div class="success-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h3>Merge Complete!</h3>
+        <p>Your changes have been merged into <strong>{baseBranch}</strong>.</p>
+        {#if cleanupAfterMerge}
+          <p class="cleanup-note">The worktree has been cleaned up.</p>
+        {/if}
+      </div>
+
+    {:else if step === "error"}
+      <div class="error-content">
+        <div class="error-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </div>
+        <h3>Merge Failed</h3>
+        <p class="error-message">{error}</p>
+      </div>
+    {/if}
+  {/snippet}
+
+  {#snippet footer()}
+    {#if step === "preview"}
+      <button class="btn btn-secondary" onclick={onClose}>Cancel</button>
+      <button
+        class="btn btn-primary"
+        onclick={handleMerge}
+        disabled={loading || !preview?.canMerge}
+      >
+        Merge to {baseBranch}
+      </button>
+    {:else if step === "conflicts"}
+      <button class="btn btn-secondary" onclick={handleAbort}>Abort Merge</button>
+      <button class="btn btn-primary" onclick={() => { step = "preview"; loadPreview(); }}>
+        Try Again
+      </button>
+    {:else if step === "success"}
+      <button class="btn btn-primary" onclick={handleClose}>Done</button>
+    {:else if step === "error"}
+      <button class="btn btn-secondary" onclick={() => { step = "preview"; loadPreview(); }}>
+        Try Again
+      </button>
+      <button class="btn btn-primary" onclick={onClose}>Close</button>
+    {/if}
+  {/snippet}
+</Modal>
+
+<style>
+  .loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 2rem;
+    gap: 1rem;
+  }
+
+  .spinner {
+    width: 2rem;
+    height: 2rem;
+    border: 3px solid #e5e5e5;
+    border-top-color: #10b981;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .loading p {
+    color: #6b7280;
+    font-size: 0.875rem;
+  }
+
+  .preview-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .summary-card {
+    background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+    border: 1px solid #a7f3d0;
+    border-radius: 12px;
+    padding: 1.25rem;
+  }
+
+  .summary-header h3 {
+    margin: 0 0 0.25rem 0;
+    font-size: 1.125rem;
+    color: #065f46;
+  }
+
+  .summary-subtitle {
+    margin: 0;
+    font-size: 0.875rem;
+    color: #059669;
+  }
+
+  .warning-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    color: #92400e;
+  }
+
+  .warning-box svg {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    color: #f59e0b;
+  }
+
+  .stats-row {
+    display: flex;
+    gap: 2rem;
+    margin-top: 1rem;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #065f46;
+  }
+
+  .stat-label {
+    font-size: 0.75rem;
+    color: #059669;
+  }
+
+  .section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .section h4 {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #374151;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .commits-list, .files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.5rem;
+    max-height: 150px;
+    overflow-y: auto;
+  }
+
+  .commit-item, .file-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+    font-family: ui-monospace, monospace;
+  }
+
+  .commit-hash {
+    color: #6366f1;
+    font-weight: 500;
+  }
+
+  .commit-message {
+    color: #374151;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-status {
+    font-weight: 700;
+    width: 1rem;
+    text-align: center;
+  }
+
+  .file-path {
+    color: #374151;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .more-items {
+    font-size: 0.75rem;
+    color: #6b7280;
+    padding: 0.25rem 0.5rem;
+  }
+
+  .cleanup-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #374151;
+    cursor: pointer;
+  }
+
+  .cleanup-option input {
+    accent-color: #10b981;
+  }
+
+  .conflicts-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .conflict-header {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 12px;
+  }
+
+  .conflict-header svg {
+    width: 1.5rem;
+    height: 1.5rem;
+    color: #ef4444;
+    flex-shrink: 0;
+  }
+
+  .conflict-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: #991b1b;
+  }
+
+  .conflict-header p {
+    margin: 0.25rem 0 0 0;
+    font-size: 0.8125rem;
+    color: #b91c1c;
+  }
+
+  .conflicts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.5rem;
+  }
+
+  .conflict-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.5rem;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8125rem;
+  }
+
+  .conflict-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ef4444;
+    color: white;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 0.75rem;
+  }
+
+  .conflict-file {
+    color: #374151;
+  }
+
+  .conflict-help {
+    font-size: 0.8125rem;
+    color: #6b7280;
+    margin: 0;
+  }
+
+  .success-content, .error-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .success-icon {
+    width: 4rem;
+    height: 4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #d1fae5;
+    border-radius: 50%;
+    margin-bottom: 1rem;
+  }
+
+  .success-icon svg {
+    width: 2rem;
+    height: 2rem;
+    color: #10b981;
+  }
+
+  .success-content h3 {
+    margin: 0 0 0.5rem 0;
+    color: #065f46;
+  }
+
+  .success-content p {
+    margin: 0;
+    color: #059669;
+  }
+
+  .cleanup-note {
+    margin-top: 0.5rem !important;
+    font-size: 0.8125rem;
+    color: #6b7280 !important;
+  }
+
+  .error-icon {
+    width: 4rem;
+    height: 4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fee2e2;
+    border-radius: 50%;
+    margin-bottom: 1rem;
+  }
+
+  .error-icon svg {
+    width: 2rem;
+    height: 2rem;
+    color: #ef4444;
+  }
+
+  .error-content h3 {
+    margin: 0 0 0.5rem 0;
+    color: #991b1b;
+  }
+
+  .error-message {
+    color: #b91c1c;
+    font-size: 0.875rem;
+  }
+
+  .btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-secondary {
+    background: white;
+    color: #374151;
+    border: 1px solid #d1d5db;
+  }
+
+  .btn-secondary:hover {
+    background: #f9fafb;
+    border-color: #9ca3af;
+  }
+
+  .btn-primary {
+    background: #10b981;
+    color: white;
+    border: 1px solid #10b981;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: #059669;
+    border-color: #059669;
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+</style>

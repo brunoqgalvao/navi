@@ -10,7 +10,11 @@
   import EditableText from "../EditableText.svelte";
   import SessionStatusBadge from "../SessionStatusBadge.svelte";
   import WorkspaceCountBadge from "../WorkspaceCountBadge.svelte";
+  import WorktreeBadge from "../WorktreeBadge.svelte";
   import type { ChatMessage } from "../../stores";
+  import SessionTree from "../../features/session-hierarchy/components/SessionTree.svelte";
+  import AgentStatusBadge from "../../features/session-hierarchy/components/AgentStatusBadge.svelte";
+  import { blockedSessionsStore, blockedCount } from "../../features/session-hierarchy";
 
   interface Props {
     projects: Project[];
@@ -65,6 +69,9 @@
     agents?: { id: string; name: string; type: "agent" | "skill"; description?: string }[];
     onSelectAgent?: (agent: { id: string; name: string; type: "agent" | "skill"; description?: string }) => void;
     titleSuggestionRef?: TitleSuggestion | null;
+    // Session hierarchy (multi-agent)
+    onSelectHierarchySession?: (session: any) => void;
+    onResolveEscalation?: (sessionId: string) => void;
   }
 
   let {
@@ -120,10 +127,26 @@
     agents = [],
     onSelectAgent,
     titleSuggestionRef = $bindable(null),
+    onSelectHierarchySession,
+    onResolveEscalation,
   }: Props = $props();
 
   // Agent section collapsed state
   let agentsSectionCollapsed = $state(true);
+
+  // Session hierarchy state
+  let showSessionTree = $state(false);
+  let sessionTreeExpanded = $state(true);
+
+  // Check if current session has children or is part of a hierarchy
+  let currentSessionHasHierarchy = $derived(() => {
+    const currentSess = sessions.find(s => s.id === $session.sessionId);
+    if (!currentSess) return false;
+    // Has parent or has children (check if any session has this as parent)
+    const hasParent = !!(currentSess as any).parent_session_id;
+    const hasChildren = sessions.some(s => (s as any).parent_session_id === currentSess.id);
+    return hasParent || hasChildren;
+  });
 
   let sidebarSearchQuery = $state("");
   let filteredSessions = $derived(
@@ -548,7 +571,7 @@
     {/if}
   </div>
 
-  <div class="flex-1 overflow-y-auto min-h-0 flex flex-col py-2">
+  <div class="flex-1 overflow-y-auto min-h-0 flex flex-col py-2 sidebar-scroll">
     {#if sidebarCollapsed}
       <div class="flex flex-col items-center gap-1 px-2">
         <button onclick={onCollapseToggle} class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 rounded transition-all" title="Workspaces">
@@ -1000,6 +1023,13 @@
         <div class="flex items-center justify-between mb-2 px-1">
           <h3 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Chats</h3>
           <div class="flex items-center gap-1">
+            <!-- Blocked sessions indicator -->
+            {#if $blockedCount > 0}
+              <span class="flex items-center gap-1 text-[10px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded" title="{$blockedCount} session(s) need input">
+                <span class="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse"></span>
+                {$blockedCount}
+              </span>
+            {/if}
             <button
               onclick={() => showArchivedWorkspaces.toggle()}
               class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors {$showArchivedWorkspaces ? 'bg-gray-200 text-gray-600' : ''}"
@@ -1010,6 +1040,34 @@
             <button onclick={onCreateNewChat} class="text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-0.5 rounded transition-colors border border-gray-200">+ New</button>
           </div>
         </div>
+
+        <!-- Session Tree (when current session has children/parent) -->
+        {#if currentSessionHasHierarchy() && $session.sessionId}
+          <div class="mb-3 px-1">
+            <button
+              onclick={() => sessionTreeExpanded = !sessionTreeExpanded}
+              class="flex items-center justify-between w-full text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1 hover:text-gray-600"
+            >
+              <span class="flex items-center gap-1">
+                <svg class="w-3 h-3 transition-transform {sessionTreeExpanded ? 'rotate-90' : ''}" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                </svg>
+                Agent Tree
+              </span>
+            </button>
+            {#if sessionTreeExpanded}
+              <div class="bg-gray-50 rounded-lg p-1 border border-gray-100">
+                <SessionTree
+                  rootSessionId={$session.sessionId}
+                  currentSessionId={$session.sessionId}
+                  onSelectSession={(sess) => onSelectHierarchySession?.(sess)}
+                  onResolveEscalation={(id) => onResolveEscalation?.(id)}
+                  compact={true}
+                />
+              </div>
+            {/if}
+          </div>
+        {/if}
 
         <div class="mb-2 px-1">
           <div class="relative">
@@ -1080,8 +1138,19 @@
                       />
                     {/if}
                   </div>
-                  <div class="text-[10px] opacity-60 mt-0.5 flex justify-between">
+                  <div class="text-[10px] opacity-60 mt-0.5 flex items-center gap-1.5">
                     <RelativeTime timestamp={sess.updated_at} />
+                    {#if sess.worktree_branch}
+                      <span
+                        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded text-[9px] font-medium cursor-help group/branch relative"
+                        title="Parallel branch: {sess.worktree_branch}&#10;Base: {sess.worktree_base_branch || 'main'}&#10;&#10;This chat works in an isolated copy.&#10;Click 'Merge' in chat to apply changes."
+                      >
+                        <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        {sess.worktree_branch.replace(/^session\//, '').slice(0, 15)}{sess.worktree_branch.replace(/^session\//, '').length > 15 ? '...' : ''}
+                      </span>
+                    {/if}
                   </div>
                 </button>
 

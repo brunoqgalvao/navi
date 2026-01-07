@@ -3,7 +3,8 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards } from "../db";
+import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions } from "../db";
+import { sessionManager, type SessionEvent } from "../services/session-manager";
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
 import { generateChatTitle } from "../services/title-generator";
 import { hasMessageContent, shouldPersistUserMessage, safeSend } from "../services/message-helpers";
@@ -264,6 +265,539 @@ function broadcastKanbanUpdate(cardId: string) {
   });
 }
 
+/**
+ * Broadcast session hierarchy events to all clients
+ */
+function broadcastSessionHierarchyEvent(event: SessionEvent) {
+  let wsEvent: any;
+
+  switch (event.type) {
+    case "spawned":
+      wsEvent = {
+        type: "session:spawned",
+        session: event.session,
+        parentId: event.parentId,
+      };
+      break;
+
+    case "status_changed":
+      wsEvent = {
+        type: "session:status_changed",
+        sessionId: event.sessionId,
+        status: event.status,
+        previousStatus: event.previousStatus,
+      };
+      break;
+
+    case "escalated":
+      wsEvent = {
+        type: "session:escalated",
+        sessionId: event.sessionId,
+        escalation: event.escalation,
+      };
+      // Play notification sound for escalations
+      broadcastToClients({ type: "play_sound", sound: "escalation" });
+      break;
+
+    case "escalation_resolved":
+      wsEvent = {
+        type: "session:escalation_resolved",
+        sessionId: event.sessionId,
+        response: event.response,
+      };
+      break;
+
+    case "delivered":
+      wsEvent = {
+        type: "session:delivered",
+        sessionId: event.sessionId,
+        deliverable: event.deliverable,
+      };
+      break;
+
+    case "archived":
+      wsEvent = {
+        type: "session:archived",
+        sessionId: event.sessionId,
+      };
+      break;
+
+    case "decision_logged":
+      wsEvent = {
+        type: "session:decision_logged",
+        decision: event.decision,
+      };
+      break;
+
+    case "artifact_created":
+      wsEvent = {
+        type: "session:artifact_created",
+        artifact: event.artifact,
+      };
+      break;
+
+    default:
+      return;
+  }
+
+  broadcastToClients(wsEvent);
+}
+
+// Subscribe to session manager events
+sessionManager.subscribe(broadcastSessionHierarchyEvent);
+
+// ============================================================================
+// Multi-Session Handler Functions
+// ============================================================================
+
+// Pending escalations waiting for response (parent or human)
+const pendingEscalations = new Map<string, {
+  sessionId: string;
+  requestId: string;
+  proc: ChildProcess;
+}>();
+
+// Active child session workers (for multi-session)
+const childSessionWorkers = new Map<string, ChildProcess>();
+
+/**
+ * Start a child session's query in the background
+ * This is called when a parent agent spawns a child agent
+ */
+function startChildSessionQuery(
+  childSessionId: string,
+  config: {
+    prompt: string;
+    cwd: string;
+    model: string;
+    projectId: string;
+  }
+) {
+  const childSession = sessions.get(childSessionId);
+  if (!childSession) {
+    console.error(`[MultiSession] Child session ${childSessionId} not found`);
+    return;
+  }
+
+  // Build multi-session context for the child
+  const multiSessionContext = {
+    enabled: true,
+    parentSessionId: childSession.parent_session_id || undefined,
+    rootSessionId: childSession.root_session_id || childSession.id,
+    depth: childSession.depth || 0,
+    role: childSession.role || undefined,
+    task: childSession.task || undefined,
+    // Get parent and sibling info
+    ...(childSession.parent_session_id && (() => {
+      const parent = sessions.get(childSession.parent_session_id);
+      const siblings = sessionHierarchy.getSiblings(childSessionId);
+      const rootId = childSession.root_session_id || childSession.id;
+      const recentDecisions = sessionDecisions.listByRoot(rootId).slice(0, 5);
+      return {
+        parentTask: parent?.task || parent?.title,
+        siblingRoles: siblings.map(s => s.role || "agent").filter(Boolean),
+        recentDecisions: recentDecisions.map(d => d.decision),
+      };
+    })()),
+  };
+
+  const inputJson = JSON.stringify({
+    prompt: config.prompt,
+    cwd: config.cwd,
+    model: config.model,
+    sessionId: childSessionId,
+    permissionSettings: {
+      autoAcceptAll: true, // Auto-accept for child sessions
+      requireConfirmation: [],
+    },
+    multiSession: multiSessionContext,
+  });
+
+  // Find worker path
+  const workerPath = existsSync(join(dirname(fileURLToPath(import.meta.url)), "../../query-worker.js"))
+    ? join(dirname(fileURLToPath(import.meta.url)), "../../query-worker.js")
+    : existsSync(join(dirname(fileURLToPath(import.meta.url)), "../query-worker.ts"))
+      ? join(dirname(fileURLToPath(import.meta.url)), "../query-worker.ts")
+      : join(dirname(fileURLToPath(import.meta.url)), "../query-worker.js");
+
+  const workerEnv = { ...process.env };
+  delete workerEnv.ANTHROPIC_API_KEY;
+  delete workerEnv.ANTHROPIC_BASE_URL;
+
+  const resolvedBunPath = resolveBunExecutable();
+  const bunPath = resolvedBunPath ?? "bun";
+
+  console.log(`[MultiSession] Starting child worker for session ${childSessionId}`);
+
+  const childProc = spawn(bunPath, ["run", "--env-file=/dev/null", workerPath, inputJson], {
+    cwd: config.cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+    env: workerEnv,
+  });
+
+  childSessionWorkers.set(childSessionId, childProc);
+
+  let buffer = "";
+
+  childProc.stdout?.on("data", (chunk) => {
+    buffer += chunk.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const msg = JSON.parse(line);
+
+        if (msg.type === "message") {
+          const data = msg.data;
+          const now = Date.now();
+
+          // Persist messages
+          if (data.type === "assistant" && hasMessageContent(data.content)) {
+            const msgId = data.uuid || crypto.randomUUID();
+            messages.upsert(
+              msgId,
+              childSessionId,
+              "assistant",
+              JSON.stringify(data.content),
+              now,
+              data.parentToolUseId ?? null,
+              0
+            );
+          }
+
+          // Broadcast to clients
+          broadcastToClients({
+            ...data,
+            uiSessionId: childSessionId,
+          });
+        }
+        // Handle multi-session tool calls from child
+        else if (msg.type === "multi_session_spawn") {
+          handleMultiSessionSpawn(childProc, childSessionId, msg);
+        } else if (msg.type === "multi_session_get_context") {
+          handleMultiSessionGetContext(childProc, childSessionId, msg);
+        } else if (msg.type === "multi_session_escalate") {
+          handleMultiSessionEscalate(childProc, childSessionId, msg);
+        } else if (msg.type === "multi_session_deliver") {
+          handleMultiSessionDeliver(childProc, childSessionId, msg);
+        } else if (msg.type === "multi_session_log_decision") {
+          handleMultiSessionLogDecision(childProc, childSessionId, msg);
+        } else if (msg.type === "complete") {
+          console.log(`[MultiSession] Child session ${childSessionId} completed`);
+        }
+      } catch (e) {
+        console.error(`[MultiSession] Error parsing child worker output:`, e);
+      }
+    }
+  });
+
+  childProc.stderr?.on("data", (chunk) => {
+    console.error(`[MultiSession][${childSessionId}] stderr:`, chunk.toString());
+  });
+
+  childProc.on("close", (code) => {
+    console.log(`[MultiSession] Child worker ${childSessionId} exited with code ${code}`);
+    childSessionWorkers.delete(childSessionId);
+  });
+
+  childProc.on("error", (err) => {
+    console.error(`[MultiSession] Child worker ${childSessionId} error:`, err);
+    childSessionWorkers.delete(childSessionId);
+  });
+}
+
+/**
+ * Handle spawn_agent request from worker
+ */
+function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) {
+    sendWorkerResponse(proc, "multi_session_spawn_response", msg.requestId, {
+      success: false,
+      error: "No session ID",
+    });
+    return;
+  }
+
+  try {
+    const child = sessionManager.spawn(sessionId, {
+      title: msg.title,
+      role: msg.role,
+      task: msg.task,
+      model: msg.model,
+      context: msg.context,
+    });
+
+    if (child) {
+      sendWorkerResponse(proc, "multi_session_spawn_response", msg.requestId, {
+        success: true,
+        childSessionId: child.id,
+      });
+
+      console.log(`[MultiSession] Spawned child session ${child.id} (${msg.role}) for parent ${sessionId}`);
+
+      // Auto-start the child session
+      // Get parent session to determine project and working directory
+      const parentSession = sessions.get(sessionId);
+      if (parentSession) {
+        const project = projects.get(parentSession.project_id);
+        const workingDirectory = parentSession.worktree_path || project?.path || process.cwd();
+
+        // Build the initial prompt from task and context
+        const initialPrompt = msg.context
+          ? `${msg.task}\n\nAdditional context from parent:\n${msg.context}`
+          : msg.task;
+
+        console.log(`[MultiSession] Auto-starting child session ${child.id} with task: ${msg.task.substring(0, 50)}...`);
+
+        // Start the child query in the background
+        // We use setTimeout to not block the parent's spawn response
+        setTimeout(() => {
+          startChildSessionQuery(child.id, {
+            prompt: initialPrompt,
+            cwd: workingDirectory,
+            model: msg.model || parentSession.model || "opus",
+            projectId: parentSession.project_id,
+          });
+        }, 100);
+      }
+    } else {
+      sendWorkerResponse(proc, "multi_session_spawn_response", msg.requestId, {
+        success: false,
+        error: "Failed to spawn child session (check depth/concurrent limits)",
+      });
+    }
+  } catch (error) {
+    sendWorkerResponse(proc, "multi_session_spawn_response", msg.requestId, {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+/**
+ * Handle get_context request from worker
+ */
+async function handleMultiSessionGetContext(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) {
+    sendWorkerResponse(proc, "multi_session_context_response", msg.requestId, {
+      content: "Error: No session ID",
+    });
+    return;
+  }
+
+  try {
+    const result = await sessionManager.getContext(sessionId, {
+      source: msg.source,
+      query: msg.query,
+      siblingRole: msg.siblingRole,
+    });
+
+    sendWorkerResponse(proc, "multi_session_context_response", msg.requestId, {
+      content: result?.content || "No context available",
+      metadata: result?.metadata,
+    });
+  } catch (error) {
+    sendWorkerResponse(proc, "multi_session_context_response", msg.requestId, {
+      content: `Error retrieving context: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+}
+
+/**
+ * Handle escalate request from worker
+ */
+function handleMultiSessionEscalate(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) {
+    sendWorkerResponse(proc, "multi_session_escalation_response", msg.requestId, {
+      action: "abort",
+      content: "No session ID",
+    });
+    return;
+  }
+
+  try {
+    // Store the pending escalation so we can respond later
+    pendingEscalations.set(msg.requestId, {
+      sessionId,
+      requestId: msg.requestId,
+      proc,
+    });
+
+    // Create the escalation
+    sessionManager.escalate(sessionId, {
+      type: msg.escalationType,
+      summary: msg.summary,
+      context: msg.context,
+      options: msg.options,
+    });
+
+    // The response will come later via resolveMultiSessionEscalation
+    // when parent/human responds
+    console.log(`[MultiSession] Session ${sessionId} escalated: ${msg.summary}`);
+  } catch (error) {
+    sendWorkerResponse(proc, "multi_session_escalation_response", msg.requestId, {
+      action: "abort",
+      content: error instanceof Error ? error.message : "Unknown error",
+    });
+    pendingEscalations.delete(msg.requestId);
+  }
+}
+
+/**
+ * Resolve an escalation (called when parent/human responds)
+ */
+export function resolveMultiSessionEscalation(requestId: string, action: string, content: string) {
+  const pending = pendingEscalations.get(requestId);
+  if (!pending) {
+    console.warn(`[MultiSession] No pending escalation found for ${requestId}`);
+    return false;
+  }
+
+  sendWorkerResponse(pending.proc, "multi_session_escalation_response", requestId, {
+    action,
+    content,
+  });
+
+  pendingEscalations.delete(requestId);
+  sessionManager.resolveEscalation(pending.sessionId, { action: action as any, content });
+  return true;
+}
+
+/**
+ * Handle deliver request from worker
+ */
+function handleMultiSessionDeliver(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) {
+    sendWorkerResponse(proc, "multi_session_deliver_response", msg.requestId, {
+      success: false,
+    });
+    return;
+  }
+
+  try {
+    const childSession = sessions.get(sessionId);
+
+    sessionManager.deliver(sessionId, {
+      type: msg.deliverableType,
+      summary: msg.summary,
+      content: msg.content,
+      artifacts: msg.artifacts,
+    });
+
+    sendWorkerResponse(proc, "multi_session_deliver_response", msg.requestId, {
+      success: true,
+    });
+
+    console.log(`[MultiSession] Session ${sessionId} delivered: ${msg.summary}`);
+
+    // Inject the deliverable into the parent session's conversation
+    if (childSession?.parent_session_id) {
+      const parentProc = activeProcesses.get(childSession.parent_session_id)?.process;
+      if (parentProc?.stdin) {
+        // Send a synthetic message to the parent that includes the child's deliverable
+        const deliverableMessage = JSON.stringify({
+          type: "child_deliverable",
+          childSessionId: sessionId,
+          childRole: childSession.role || "agent",
+          deliverable: {
+            type: msg.deliverableType,
+            summary: msg.summary,
+            content: msg.content,
+            artifacts: msg.artifacts,
+          },
+        });
+        parentProc.stdin.write(deliverableMessage + "\n");
+        console.log(`[MultiSession] Injected deliverable from ${sessionId} into parent ${childSession.parent_session_id}`);
+
+        // Also create a synthetic message in the parent's conversation
+        const parentMsgId = crypto.randomUUID();
+        const now = Date.now();
+        const syntheticContent = [
+          {
+            type: "text",
+            text: `**Child Agent (${childSession.role || "agent"}) completed:**\n\n${msg.summary}\n\n---\n\n${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}`,
+          },
+        ];
+
+        messages.upsert(
+          parentMsgId,
+          childSession.parent_session_id,
+          "assistant",
+          JSON.stringify(syntheticContent),
+          now,
+          null,
+          1 // synthetic
+        );
+
+        // Broadcast to UI
+        broadcastToClients({
+          type: "assistant",
+          uiSessionId: childSession.parent_session_id,
+          content: syntheticContent,
+          uuid: parentMsgId,
+          timestamp: now,
+          isSynthetic: true,
+          fromChildSession: sessionId,
+        });
+      }
+    }
+  } catch (error) {
+    sendWorkerResponse(proc, "multi_session_deliver_response", msg.requestId, {
+      success: false,
+    });
+  }
+}
+
+/**
+ * Handle log_decision request from worker
+ */
+function handleMultiSessionLogDecision(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) {
+    sendWorkerResponse(proc, "multi_session_decision_response", msg.requestId, {
+      success: false,
+    });
+    return;
+  }
+
+  try {
+    const decision = sessionManager.logDecision(
+      sessionId,
+      msg.decision,
+      msg.category,
+      msg.rationale
+    );
+
+    sendWorkerResponse(proc, "multi_session_decision_response", msg.requestId, {
+      success: true,
+      decisionId: decision?.id,
+    });
+  } catch (error) {
+    sendWorkerResponse(proc, "multi_session_decision_response", msg.requestId, {
+      success: false,
+    });
+  }
+}
+
+/**
+ * Send a response back to the worker process
+ */
+function sendWorkerResponse(proc: ChildProcess, type: string, requestId: string, data: any) {
+  if (!proc.stdin) {
+    console.error(`[MultiSession] Worker process has no stdin`);
+    return;
+  }
+
+  const response = JSON.stringify({
+    type,
+    requestId,
+    ...data,
+  });
+
+  proc.stdin.write(response + "\n");
+}
+
 function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
   const timestamp = Date.now();
   const uuid = (msg as any).uuid || crypto.randomUUID();
@@ -345,7 +879,8 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
-  const workingDirectory = project?.path || process.cwd();
+  // Use worktree path if session has one, otherwise use project path
+  const workingDirectory = session?.worktree_path || project?.path || process.cwd();
   const defaultWorkerCwd = join(__dirname, "..");
   const execDir = process.execPath ? dirname(process.execPath) : process.cwd();
   const workerCwd = existsSync(defaultWorkerCwd) ? defaultWorkerCwd : execDir;
@@ -377,6 +912,36 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
       : fallbackWorkerPath;
   const isSessionApprovedAll = sessionId ? (sessionApprovedAll.has(sessionId) || session?.auto_accept_all === 1) : false;
   const isProjectApprovedAll = project?.auto_accept_all === 1;
+
+  // Build multi-session context if this session is part of a hierarchy
+  let multiSessionContext: any = undefined;
+  if (session) {
+    const isChildSession = !!session.parent_session_id;
+    const canSpawnChildren = (session.depth || 0) < 2; // Max depth 3, so 0,1 can spawn
+
+    // Enable multi-session for all sessions (root and children)
+    // Root sessions can spawn, children have full context
+    multiSessionContext = {
+      enabled: true,
+      parentSessionId: session.parent_session_id || undefined,
+      rootSessionId: session.root_session_id || session.id,
+      depth: session.depth || 0,
+      role: session.role || undefined,
+      task: session.task || undefined,
+      // For child sessions, get parent context
+      ...(isChildSession && session.parent_session_id && (() => {
+        const parent = sessions.get(session.parent_session_id);
+        const siblings = sessionHierarchy.getSiblings(session.id);
+        const recentDecisions = sessionDecisions.listByRoot(session.root_session_id || session.id).slice(0, 5);
+        return {
+          parentTask: parent?.task || parent?.title,
+          siblingRoles: siblings.map(s => s.role || "agent").filter(Boolean),
+          recentDecisions: recentDecisions.map(d => d.decision),
+        };
+      })()),
+    };
+  }
+
   const inputJson = JSON.stringify({
     prompt: effectivePrompt,
     cwd: workingDirectory,
@@ -388,6 +953,7 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
       autoAcceptAll: permissionSettings.autoAcceptAll || isSessionApprovedAll || isProjectApprovedAll,
       requireConfirmation: permissionSettings.requireConfirmation,
     },
+    multiSession: multiSessionContext,
   });
 
   const workerEnv = { ...process.env };
@@ -545,6 +1111,20 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
             setKanbanCardBlocked(sessionId, "Needs input from user");
           }
           sendToSession(sessionId, payload);
+        }
+        // ═══════════════════════════════════════════════════════════════
+        // MULTI-SESSION: Handle spawn, context, escalate, deliver, decision
+        // ═══════════════════════════════════════════════════════════════
+        else if (msg.type === "multi_session_spawn") {
+          handleMultiSessionSpawn(proc, sessionId, msg);
+        } else if (msg.type === "multi_session_get_context") {
+          handleMultiSessionGetContext(proc, sessionId, msg);
+        } else if (msg.type === "multi_session_escalate") {
+          handleMultiSessionEscalate(proc, sessionId, msg);
+        } else if (msg.type === "multi_session_deliver") {
+          handleMultiSessionDeliver(proc, sessionId, msg);
+        } else if (msg.type === "multi_session_log_decision") {
+          handleMultiSessionLogDecision(proc, sessionId, msg);
         } else if (msg.type === "complete") {
           if (lastMainAssistantMsgId) {
             messages.markFinal(lastMainAssistantMsgId);

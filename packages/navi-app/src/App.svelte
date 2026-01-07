@@ -5,6 +5,8 @@
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
   import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference } from "./lib/stores";
   import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
+  import { getStatus as getGitStatus } from "./lib/features/git/api";
+  import { createNewChatWithWorktree } from "./lib/actions";
   import { parseHash, onHashChange } from "./lib/router";
   import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
   import { setupGlobalErrorHandlers, pendingErrorReport, type ErrorReport } from "./lib/errorHandler";
@@ -92,6 +94,7 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
+  import MergeModal from "./lib/components/MergeModal.svelte";
   import { QueuedMessagesPanel } from "./lib/components/queue";
   import ProcessManager from "./lib/components/ProcessManager.svelte";
   import { useMessageHandler } from "./lib/handlers";
@@ -107,6 +110,7 @@
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
   import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
+  import { handleSessionHierarchyWSEvent } from "./lib/features/session-hierarchy";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings, WorkspaceFolder } from "./lib/api";
@@ -227,6 +231,12 @@
   let sidebarProjects = $state<Project[]>([]);
   let sidebarSessions = $state<Session[]>([]);
   let recentChats = $state<Session[]>([]);
+
+  // Get current session data from sidebar sessions for worktree info
+  let currentSessionData = $derived($session.sessionId ? sidebarSessions.find(s => s.id === $session.sessionId) : null);
+
+  // Track if current project is a git repo (for worktree feature)
+  let currentProjectIsGitRepo = $state(false);
   let workspaceFolders = $state<WorkspaceFolder[]>([]);
 
   // Chat reference lookup for cross-chat linking
@@ -274,6 +284,7 @@
   let showProjectSettings = $state(false);
   let projectSettingsInitialTab = $state<"instructions" | "model" | "permissions" | "skills" | undefined>(undefined);
   let showDebugInfo = $state(false);
+  let showMergeModal = $state(false);
   let sidebarCollapsed = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
@@ -507,6 +518,44 @@
       }
       console.log(`[UntilDone] Complete: session ${sessionId}, ${data.reason}`);
     },
+    // Session Hierarchy (Multi-Agent) events
+    onSessionHierarchyEvent: (event) => {
+      // Forward to session hierarchy store handler
+      handleSessionHierarchyWSEvent(event);
+
+      // Show notifications for important events
+      switch (event.type) {
+        case "session:spawned":
+          notifications.add({
+            type: "info",
+            title: "Agent Spawned",
+            message: `${event.session.role || "Agent"}: ${event.session.task || event.session.title}`,
+          });
+          break;
+        case "session:escalated":
+          notifications.add({
+            type: "warning",
+            title: "Agent Needs Help",
+            message: event.escalation.summary,
+            persistent: true,
+          });
+          break;
+        case "session:delivered":
+          notifications.add({
+            type: "success",
+            title: "Agent Completed",
+            message: event.deliverable.summary,
+          });
+          break;
+      }
+    },
+    onPlaySound: (sound) => {
+      // Play notification sound
+      if (sound === "escalation") {
+        // Could play a sound file here
+        console.log("[Sound] Playing escalation sound");
+      }
+    },
   });
 
   let showPreview = $state(false);
@@ -706,6 +755,20 @@
   let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.sessionId === $session.sessionId).length : 0);
   let showOnboarding = $derived(!$onboardingComplete);
   let activeSkills = $state<Skill[]>([]);
+
+  // Check git status when project changes
+  $effect(() => {
+    const projectPath = currentProject?.path;
+    if (projectPath) {
+      getGitStatus(projectPath).then(status => {
+        currentProjectIsGitRepo = status.isGitRepo;
+      }).catch(() => {
+        currentProjectIsGitRepo = false;
+      });
+    } else {
+      currentProjectIsGitRepo = false;
+    }
+  });
 
   $effect(() => {
     if ($session.selectedModel !== lastSessionModel) {
@@ -1032,12 +1095,21 @@
     projectContext = null;
     projectContextError = null;
     claudeMdContent = null;
-    
+    currentProjectIsGitRepo = false;
+
     try {
       const sessionsList = await api.sessions.list(project.id, $showArchivedWorkspaces);
       sidebarSessions = sessionsList;
     } catch (e) {
       console.error("Failed to load sessions:", e);
+    }
+
+    // Check if project is a git repo
+    try {
+      const gitStatus = await getGitStatus(project.path);
+      currentProjectIsGitRepo = gitStatus.isGitRepo;
+    } catch (e) {
+      currentProjectIsGitRepo = false;
     }
 
     api.claudeMd.initProject(project.path).catch(e => {
@@ -2632,6 +2704,16 @@
               onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
               onSuggestionClick={(prompt) => { inputText = prompt; }}
               {projectContext}
+              worktreeBranch={currentSessionData?.worktree_branch}
+              worktreeBaseBranch={currentSessionData?.worktree_base_branch}
+              sessionTitle={currentSessionData?.title || ''}
+              onMergeComplete={async () => {
+                // Refresh sessions list after merge
+                if ($session.projectId) {
+                  const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+                  sidebarSessions = sessionsList;
+                }
+              }}
             />
           {/if}
 
@@ -2680,12 +2762,27 @@
                     activeSkills={activeSkills.map(s => ({ name: s.name, path: s.slug }))}
                     sessionId={$session.sessionId || undefined}
                     {untilDoneEnabled}
+                    isGitRepo={currentProjectIsGitRepo}
+                    isNewChat={!$session.sessionId || currentMessages.length === 0}
+                    worktreeBranch={currentSessionData?.worktree_branch}
+                    worktreeBaseBranch={currentSessionData?.worktree_base_branch}
                     onSubmit={sendMessage}
                     onStop={stopGeneration}
                     onPreview={openPreview}
                     onExecCommand={handleExecCommand}
                     onManageSkills={() => { projectSettingsInitialTab = "skills"; showProjectSettings = true; }}
                     onToggleUntilDone={toggleUntilDone}
+                    onCreateWithWorktree={async (description) => {
+                      const newSessionId = await createNewChatWithWorktree(description);
+                      if (newSessionId) {
+                        // Refresh sessions and send the first message
+                        const sessionsList = await api.sessions.list($session.projectId!, $showArchivedWorkspaces);
+                        sidebarSessions = sessionsList;
+                        // Send the actual message after worktree is created
+                        sendMessage();
+                      }
+                    }}
+                    onMergeWorktree={() => showMergeModal = true}
                 />
 
                 <div class="text-center mt-2">
@@ -2707,6 +2804,7 @@
       projectId={currentProject?.id || null}
       sessionId={$session.sessionId || null}
       projectPath={currentProject?.path || null}
+      worktreePath={currentSessionData?.worktree_path}
       {previewSource}
       {browserUrl}
       isResizing={isResizingRight}
@@ -2849,6 +2947,31 @@
 
   {#if showProjectSettings && currentProject}
     <ProjectSettings project={currentProject} onClose={() => { showProjectSettings = false; projectSettingsInitialTab = undefined; }} initialTab={projectSettingsInitialTab} />
+  {/if}
+
+  <!-- Worktree Merge Modal -->
+  {#if currentSessionData?.worktree_branch && $session.sessionId}
+    <MergeModal
+      open={showMergeModal}
+      sessionId={$session.sessionId}
+      sessionTitle={currentSessionData.title || ''}
+      branch={currentSessionData.worktree_branch}
+      baseBranch={currentSessionData.worktree_base_branch || 'main'}
+      onClose={() => showMergeModal = false}
+      onMergeComplete={async () => {
+        showMergeModal = false;
+        // Refresh sessions and archive the current session
+        if ($session.projectId && $session.sessionId) {
+          await api.sessions.setArchived($session.sessionId, true);
+          const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+          sidebarSessions = sessionsList;
+          // Select a different session or clear current
+          if (!$showArchivedWorkspaces) {
+            currentSession.setSession(null);
+          }
+        }
+      }}
+    />
   {/if}
 
   <SearchModal 

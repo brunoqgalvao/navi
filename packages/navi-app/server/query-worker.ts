@@ -405,6 +405,71 @@ function buildSystemPromptAppend(skills: SkillInfo[]): string {
   return UI_INSTRUCTIONS + '\n' + skillsPrompt;
 }
 
+interface MultiSessionContext {
+  enabled: boolean;
+  parentSessionId?: string;
+  rootSessionId?: string;
+  depth: number;
+  role?: string;
+  task?: string;
+  parentTask?: string;
+  siblingRoles?: string[];
+  recentDecisions?: string[];
+}
+
+function buildMultiSessionSystemPrompt(ctx: MultiSessionContext): string {
+  const siblingsText = ctx.siblingRoles && ctx.siblingRoles.length > 0
+    ? `You have sibling agents working on: ${ctx.siblingRoles.join(", ")}`
+    : "You are the only child agent at this level.";
+
+  const decisionsText = ctx.recentDecisions && ctx.recentDecisions.length > 0
+    ? `\n\nRecent project decisions:\n${ctx.recentDecisions.map(d => `- ${d}`).join("\n")}`
+    : "";
+
+  const canSpawn = ctx.depth < 2; // Max depth is 3, so depth 0, 1 can spawn
+
+  return `
+## Multi-Session Agent Context
+
+You are a specialized agent working on a specific task within a larger project.
+
+### Your Role: ${ctx.role || "agent"}
+
+### Your Task
+${ctx.task || "Complete the assigned work"}
+
+### Context
+- Parent's task: ${ctx.parentTask || "Unknown"}
+- ${siblingsText}
+- Session depth: ${ctx.depth} of 3 (max)${decisionsText}
+
+### Available Multi-Session Tools
+You have access to these coordination tools via MCP:
+
+${canSpawn ? `- **spawn_agent**: Create child agents for subtasks (you can spawn up to ${3 - ctx.depth - 1} more levels)` : "- spawn_agent: NOT AVAILABLE (max depth reached)"}
+- **get_context**: Query parent, siblings, or project-wide decisions/artifacts
+- **log_decision**: Record important decisions for other agents to see
+- **escalate**: Request help when blocked (parent first, then human)
+- **deliver**: Complete your task and return results to parent
+
+### Guidelines
+
+1. **Focus on YOUR specific task.** Don't duplicate work siblings are doing.
+2. **Use get_context sparingly** to coordinate with siblings if needed.
+3. **Log important decisions** so others can see them (architecture, API contracts, tech choices).
+4. **Only escalate if you truly cannot proceed.** Try to resolve issues yourself first.
+5. **Deliver when your task is COMPLETE**, not before.
+6. **Be efficient** - don't spawn agents for trivial work you can do yourself.
+7. **Coordinate with siblings** - check what decisions they've made before making conflicting ones.
+
+### Important Notes
+
+- Your deliverable will be sent to your parent agent, who will incorporate it into their work.
+- After you call \`deliver\`, your session will be archived.
+- If you spawn child agents, wait for their deliverables before completing your own task.
+`.trim();
+}
+
 interface WorkerInput {
   prompt: string;
   cwd: string;
@@ -415,6 +480,18 @@ interface WorkerInput {
   permissionSettings?: {
     autoAcceptAll: boolean;
     requireConfirmation: string[];
+  };
+  // Multi-session hierarchy context
+  multiSession?: {
+    enabled: boolean;
+    parentSessionId?: string;
+    rootSessionId?: string;
+    depth: number;
+    role?: string;
+    task?: string;
+    parentTask?: string;
+    siblingRoles?: string[];
+    recentDecisions?: string[];
   };
 }
 
@@ -473,6 +550,277 @@ const userInteractionServer = createSdkMcpServer({
           content: [{
             type: "text" as const,
             text: `User answered:\n${answerText}`,
+          }],
+        };
+      }
+    ),
+  ],
+});
+
+// ============================================================================
+// Multi-Session Agent Tools (Fractal Agents)
+// ============================================================================
+
+// Pending multi-session requests
+const pendingSpawnRequests = new Map<string, (result: { success: boolean; childSessionId?: string; error?: string }) => void>();
+const pendingContextRequests = new Map<string, (result: { content: string; metadata?: any }) => void>();
+const pendingEscalationRequests = new Map<string, (result: { action: string; content: string }) => void>();
+const pendingDeliverRequests = new Map<string, (result: { success: boolean }) => void>();
+const pendingDecisionRequests = new Map<string, (result: { success: boolean; decisionId?: string }) => void>();
+
+// Create MCP server with multi-session tools
+const multiSessionServer = createSdkMcpServer({
+  name: "multi-session",
+  version: "1.0.0",
+  tools: [
+    tool(
+      "spawn_agent",
+      `Spawn a child agent to handle a subtask in parallel.
+The child will work independently and deliver results back to you when complete.
+Use this for:
+- Parallelizable work (e.g., frontend and backend simultaneously)
+- Specialized tasks that need focused attention
+- Breaking down complex work into manageable pieces
+
+The child agent has its own context window and can spawn its own children (up to depth 3).
+You will receive their deliverable when they complete.
+
+IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them yourself.`,
+      {
+        title: z.string().describe("Short title for the child session (e.g., 'Build Login Form')"),
+        role: z.string().describe("The role/specialty of the child agent (e.g., 'frontend', 'backend', 'researcher', 'architect')"),
+        task: z.string().describe("Clear description of what the child should accomplish. Be specific about deliverables."),
+        model: z.enum(["opus", "sonnet", "haiku"]).optional().describe("Optional: Model to use (defaults to parent's model). Use 'haiku' for simpler tasks."),
+        context: z.string().optional().describe("Optional: Additional context to pass to the child that they should know."),
+      },
+      async (args) => {
+        const requestId = crypto.randomUUID();
+
+        // Send spawn request to main server
+        send({
+          type: "multi_session_spawn",
+          requestId,
+          title: args.title,
+          role: args.role,
+          task: args.task,
+          model: args.model,
+          context: args.context,
+        });
+
+        // Wait for response
+        const result = await new Promise<{ success: boolean; childSessionId?: string; error?: string }>((resolve) => {
+          pendingSpawnRequests.set(requestId, resolve);
+        });
+
+        if (!result.success) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Failed to spawn child agent: ${result.error}`,
+            }],
+          };
+        }
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Spawned child agent '${args.role}' to work on: ${args.task}
+
+Child session ID: ${result.childSessionId}
+
+The child agent is now working independently. You will receive their deliverable when they complete. Continue with your own work in the meantime.`,
+          }],
+        };
+      }
+    ),
+
+    tool(
+      "get_context",
+      `Access context from parent session, sibling sessions, project decisions, or artifacts.
+Use this when you need information beyond your immediate task context.
+
+Sources:
+- 'parent': Get information about the parent session's task and status
+- 'sibling': Get information about sibling sessions (other children of your parent)
+- 'decisions': Get project-wide decisions that have been logged
+- 'artifacts': Get list of artifacts created in this session tree
+
+Be specific in your query to get relevant information. You'll receive excerpts, not full dumps.`,
+      {
+        source: z.enum(["parent", "sibling", "decisions", "artifacts"]).describe("Where to get context from"),
+        query: z.string().describe("What specific information do you need?"),
+        sibling_role: z.string().optional().describe("If source is 'sibling', which sibling's role to query (optional)"),
+      },
+      async (args) => {
+        const requestId = crypto.randomUUID();
+
+        send({
+          type: "multi_session_get_context",
+          requestId,
+          source: args.source,
+          query: args.query,
+          siblingRole: args.sibling_role,
+        });
+
+        const result = await new Promise<{ content: string; metadata?: any }>((resolve) => {
+          pendingContextRequests.set(requestId, resolve);
+        });
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: result.content,
+          }],
+        };
+      }
+    ),
+
+    tool(
+      "log_decision",
+      `Log an important decision for the project.
+Other agents (parent, siblings, children) can see this via get_context.
+
+Use for:
+- Architecture choices ("Using REST instead of GraphQL")
+- Technology selections ("Using Tailwind for styling")
+- API contracts ("POST /api/auth/login returns {token, user}")
+- Design patterns ("Using repository pattern for data access")
+
+Decisions help coordinate work across agents and maintain consistency.`,
+      {
+        decision: z.string().describe("The decision that was made"),
+        category: z.string().optional().describe("Category (e.g., 'architecture', 'api', 'tech_choice', 'design', 'security')"),
+        rationale: z.string().optional().describe("Why this decision was made (optional but helpful)"),
+      },
+      async (args) => {
+        const requestId = crypto.randomUUID();
+
+        send({
+          type: "multi_session_log_decision",
+          requestId,
+          decision: args.decision,
+          category: args.category,
+          rationale: args.rationale,
+        });
+
+        const result = await new Promise<{ success: boolean; decisionId?: string }>((resolve) => {
+          pendingDecisionRequests.set(requestId, resolve);
+        });
+
+        if (!result.success) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: "Failed to log decision.",
+            }],
+          };
+        }
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Decision logged: "${args.decision}"
+${args.category ? `Category: ${args.category}` : ""}
+${args.rationale ? `Rationale: ${args.rationale}` : ""}
+
+Other agents in this session tree can now see this decision.`,
+          }],
+        };
+      }
+    ),
+
+    tool(
+      "escalate",
+      `Escalate to your parent session when you're blocked and cannot proceed.
+The parent will either answer directly or escalate further up the chain.
+Human intervention is the last resort.
+
+IMPORTANT: Before escalating:
+1. Try to resolve the issue yourself
+2. Check sibling context for relevant information
+3. Review logged decisions
+
+Escalation types:
+- 'question': Need information to proceed
+- 'decision_needed': Need a choice between options
+- 'blocker': Technical or dependency blocker
+- 'permission': Need authorization for something`,
+      {
+        type: z.enum(["question", "decision_needed", "blocker", "permission"]).describe("Type of escalation"),
+        summary: z.string().describe("Brief summary of the issue (1-2 sentences)"),
+        context: z.string().describe("What you tried and why you're stuck"),
+        options: z.array(z.string()).optional().describe("If type is 'decision_needed', the available choices"),
+      },
+      async (args) => {
+        const requestId = crypto.randomUUID();
+
+        send({
+          type: "multi_session_escalate",
+          requestId,
+          escalationType: args.type,
+          summary: args.summary,
+          context: args.context,
+          options: args.options,
+        });
+
+        // Wait for escalation response (could take a while if human needs to respond)
+        const result = await new Promise<{ action: string; content: string }>((resolve) => {
+          pendingEscalationRequests.set(requestId, resolve);
+        });
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Escalation resolved:
+Action: ${result.action}
+Response: ${result.content}
+
+You can now continue with your task.`,
+          }],
+        };
+      }
+    ),
+
+    tool(
+      "deliver",
+      `Complete your task and deliver results to your parent session.
+After calling this, your session will be archived.
+
+IMPORTANT: Only call this when your task is fully complete.
+If you have subtasks running, wait for them to deliver first.
+
+The deliverable will be sent to your parent, who will incorporate it into their work.`,
+      {
+        type: z.enum(["code", "research", "decision", "artifact", "error"]).describe("Type of deliverable"),
+        summary: z.string().describe("Brief summary of what you accomplished"),
+        content: z.string().describe("The actual deliverable content (can be code, analysis, decision, etc.)"),
+        artifacts: z.array(z.object({
+          path: z.string().describe("File path"),
+          description: z.string().optional().describe("What this file does"),
+        })).optional().describe("List of files created/modified"),
+      },
+      async (args) => {
+        const requestId = crypto.randomUUID();
+
+        send({
+          type: "multi_session_deliver",
+          requestId,
+          deliverableType: args.type,
+          summary: args.summary,
+          content: args.content,
+          artifacts: args.artifacts,
+        });
+
+        const result = await new Promise<{ success: boolean }>((resolve) => {
+          pendingDeliverRequests.set(requestId, resolve);
+        });
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: result.success
+              ? `Deliverable sent to parent. Your task is complete and this session will be archived shortly. Good work!`
+              : `Failed to deliver. Please try again or escalate if the issue persists.`,
           }],
         };
       }
@@ -640,7 +988,7 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
 let sessionApprovedAll = false;
 
 async function runQuery(input: WorkerInput) {
-  const { prompt, cwd, resume, model, allowedTools, sessionId, permissionSettings } = input;
+  const { prompt, cwd, resume, model, allowedTools, sessionId, permissionSettings, multiSession } = input;
 
   // Clear any stray API keys from environment - Navi controls auth exclusively
   delete process.env.ANTHROPIC_API_KEY;
@@ -732,9 +1080,18 @@ async function runQuery(input: WorkerInput) {
 
     const agents = loadAllAgents(cwd);
 
-    const systemPromptAppend = buildSystemPromptAppend(skills);
+    // Build system prompt append with skills
+    let systemPromptAppend = buildSystemPromptAppend(skills);
+
+    // Add multi-session context if this is a child session
+    if (multiSession?.enabled && multiSession.parentSessionId) {
+      const multiSessionContext = buildMultiSessionSystemPrompt(multiSession);
+      systemPromptAppend = multiSessionContext + '\n\n' + systemPromptAppend;
+      console.error(`[Worker] Multi-session enabled. Depth: ${multiSession.depth}, Role: ${multiSession.role}`);
+    }
+
     console.error(`[Worker] System prompt append (${systemPromptAppend.length} chars)`);
-    
+
     const allTools = allowedTools || [
       "Read",
       "Write",
@@ -748,15 +1105,27 @@ async function runQuery(input: WorkerInput) {
       "Task",
       "TaskOutput",
       // Note: ask_user_question is exposed via MCP server (mcp__user-interaction__ask_user_question)
+      // Multi-session tools exposed via MCP server (mcp__multi-session__*)
     ];
-    
+
     const requireConfirmation = permissionSettings?.requireConfirmation || [];
     const autoAllowedTools = allTools.filter(t => !requireConfirmation.includes(t));
-    
+
     console.error(`[Worker] allTools:`, allTools);
     console.error(`[Worker] requireConfirmation:`, requireConfirmation);
     console.error(`[Worker] autoAllowedTools:`, autoAllowedTools);
-    
+
+    // Build MCP servers - always include user-interaction, conditionally include multi-session
+    const mcpServers: Record<string, any> = {
+      "user-interaction": userInteractionServer,
+    };
+
+    // Enable multi-session tools if enabled (for all sessions that can spawn or are children)
+    if (multiSession?.enabled) {
+      mcpServers["multi-session"] = multiSessionServer;
+      console.error(`[Worker] Multi-session MCP server enabled`);
+    }
+
     const q = query({
       prompt,
       options: {
@@ -772,10 +1141,7 @@ async function runQuery(input: WorkerInput) {
         settingSources: ['user', 'project', 'local'] as const,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
         includePartialMessages: true,
-        // MCP server for user interaction (ask_user_question tool)
-        mcpServers: {
-          "user-interaction": userInteractionServer,
-        },
+        mcpServers,
         // Pass custom agents from .claude/agents/
         ...(Object.keys(agents).length > 0 && { agents }),
       },
@@ -858,6 +1224,45 @@ rl.on("line", (line) => {
         resolve({ answers: msg.answers });
         pendingQuestions.delete(msg.requestId);
       }
+    }
+    // Multi-session response handlers
+    else if (msg.type === "multi_session_spawn_response" && msg.requestId) {
+      const resolve = pendingSpawnRequests.get(msg.requestId);
+      if (resolve) {
+        resolve({ success: msg.success, childSessionId: msg.childSessionId, error: msg.error });
+        pendingSpawnRequests.delete(msg.requestId);
+      }
+    } else if (msg.type === "multi_session_context_response" && msg.requestId) {
+      const resolve = pendingContextRequests.get(msg.requestId);
+      if (resolve) {
+        resolve({ content: msg.content, metadata: msg.metadata });
+        pendingContextRequests.delete(msg.requestId);
+      }
+    } else if (msg.type === "multi_session_escalation_response" && msg.requestId) {
+      const resolve = pendingEscalationRequests.get(msg.requestId);
+      if (resolve) {
+        resolve({ action: msg.action, content: msg.content });
+        pendingEscalationRequests.delete(msg.requestId);
+      }
+    } else if (msg.type === "multi_session_deliver_response" && msg.requestId) {
+      const resolve = pendingDeliverRequests.get(msg.requestId);
+      if (resolve) {
+        resolve({ success: msg.success });
+        pendingDeliverRequests.delete(msg.requestId);
+      }
+    } else if (msg.type === "multi_session_decision_response" && msg.requestId) {
+      const resolve = pendingDecisionRequests.get(msg.requestId);
+      if (resolve) {
+        resolve({ success: msg.success, decisionId: msg.decisionId });
+        pendingDecisionRequests.delete(msg.requestId);
+      }
+    }
+    // Child deliverable injection (when a child completes)
+    else if (msg.type === "child_deliverable") {
+      // This message is sent when a child session delivers
+      // It will be injected into the conversation
+      console.error(`[Worker] Received child deliverable from ${msg.childRole}: ${msg.summary}`);
+      // The actual injection happens through a synthetic user message
     }
   } catch {}
 });

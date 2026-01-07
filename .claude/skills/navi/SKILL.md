@@ -939,72 +939,64 @@ Response:
 
 ---
 
-## Viewing Logs in Preview Panel
+## Viewing Process & Terminal Logs
 
-The logs viewer can display output from both **background processes** and **PTY terminals** in a dedicated preview panel with features like:
-- Real-time auto-refresh (2s interval)
-- ANSI color code rendering (toggle on/off)
-- Line numbers
-- Error line highlighting
-- Copy/download functionality
-- Process/terminal metadata (PID, status, duration, ports)
+Claude can view logs from background processes and terminal sessions directly. **Always fetch and display logs in your response** rather than asking the user to run commands or open previews.
 
-### Open Process Logs
-
-Open a background process's logs in the preview panel:
+### View Background Process Logs
 
 ```bash
-curl -X POST http://localhost:3001/api/ui/logs \
-  -H "Content-Type: application/json" \
-  -d '{"processId": "proc_abc123"}'
+# List all background processes
+curl -s http://localhost:3001/api/background-processes | jq '.[] | {id, label, status, command}'
+
+# Get output from a specific process (last 50 lines)
+curl -s "http://localhost:3001/api/background-processes/{processId}/output?lines=50" | jq -r '.output[]'
 ```
 
-### Open Terminal Logs
-
-Open a PTY terminal's output buffer in the preview panel:
+### View Terminal Session Logs
 
 ```bash
-curl -X POST http://localhost:3001/api/ui/logs \
-  -H "Content-Type: application/json" \
-  -d '{"terminalId": "pty_xyz789"}'
+# List active terminal sessions
+curl -s http://localhost:3001/api/terminal/pty | jq '.[] | {terminalId, name, cwd}'
+
+# Get terminal buffer (last 50 lines)
+curl -s "http://localhost:3001/api/terminal/pty/{terminalId}/buffer?lines=50" | jq -r '.lines[]'
+
+# Check for errors in terminal output
+curl -s "http://localhost:3001/api/terminal/pty/{terminalId}/errors" | jq '.'
 ```
 
-This is useful when you want to inspect terminal output without switching to the terminal panel.
+### Best Practices
 
-### Workflow: Monitor a Dev Server
+1. **Fetch logs directly** - Don't ask the user to run commands. Just fetch and display the relevant output.
+2. **Check for errors first** - Use the `/errors` endpoint to quickly detect issues before fetching full logs.
+3. **Show relevant portions** - Fetch last 20-50 lines unless more context is needed.
+4. **Strip ANSI codes** for readability when displaying in chat.
+
+### Example: Debug a failing process
 
 ```bash
-# 1. Start a dev server as background process
-PROC_ID=$(curl -s -X POST http://localhost:3001/api/background-processes \
-  -H "Content-Type: application/json" \
-  -d '{"command": "npm run dev", "cwd": "/my/project", "label": "Dev Server"}' | jq -r '.id')
+# 1. Check process status
+curl -s http://localhost:3001/api/background-processes/{id} | jq '{status, exitCode, label}'
 
-# 2. Open logs in preview panel
-curl -X POST http://localhost:3001/api/ui/logs \
-  -H "Content-Type: application/json" \
-  -d "{\"processId\": \"$PROC_ID\"}"
-
-# 3. Check process status
-curl http://localhost:3001/api/background-processes/$PROC_ID
-
-# 4. Get latest output via API
-curl "http://localhost:3001/api/background-processes/$PROC_ID/output?lines=50"
+# 2. Get the logs
+curl -s "http://localhost:3001/api/background-processes/{id}/output?lines=30" | jq -r '.output[]'
 ```
 
-### Workflow: Debug Terminal Errors
+### Opening Logs in Preview Panel (Optional)
+
+If the user wants to browse logs interactively, you can open them in the Preview panel:
 
 ```bash
-# 1. List active terminals
-curl http://localhost:3001/api/terminal/pty
-
-# 2. Check for errors in a terminal
-TERM_ID="your-terminal-id"
-curl http://localhost:3001/api/terminal/pty/$TERM_ID/errors
-
-# 3. If errors found, open logs in preview for detailed inspection
-curl -X POST http://localhost:3001/api/ui/logs \
+# Open process logs in preview
+curl -s -X POST http://localhost:3001/api/ui/logs \
   -H "Content-Type: application/json" \
-  -d "{\"terminalId\": \"$TERM_ID\"}"
+  -d '{"processId": "..."}'
+
+# Open terminal logs in preview
+curl -s -X POST http://localhost:3001/api/ui/logs \
+  -H "Content-Type: application/json" \
+  -d '{"terminalId": "..."}'
 ```
 
 ---

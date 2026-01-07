@@ -49,6 +49,10 @@ export interface Session {
   favorite?: number;
   archived?: number;
   marked_for_review?: number;
+  // Worktree mode - session runs in isolated git worktree
+  worktree_path?: string | null;
+  worktree_branch?: string | null;
+  worktree_base_branch?: string | null;
   created_at: number;
   updated_at: number;
   project_name?: string;
@@ -1019,4 +1023,117 @@ export const backgroundProcessApi = {
     const params = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : "";
     return request<DetectedProcess[]>(`/background-processes/detect${params}`);
   },
+};
+
+// Worktree API - manage git worktrees for sessions
+export interface WorktreeStatus {
+  ahead: number;
+  behind: number;
+  isClean: boolean;
+  staged: number;
+  modified: number;
+  untracked: number;
+}
+
+export interface WorktreeCommit {
+  hash: string;
+  message: string;
+}
+
+export interface WorktreeChangedFile {
+  path: string;
+  status: string;
+}
+
+export interface WorktreeInfo {
+  status: WorktreeStatus;
+  commits: WorktreeCommit[];
+  changedFiles: WorktreeChangedFile[];
+  branch: string | null;
+  baseBranch: string | null;
+}
+
+export interface MergePreview {
+  canMerge: boolean;
+  hasUncommittedChanges: boolean;
+  commits: WorktreeCommit[];
+  changedFiles: WorktreeChangedFile[];
+  totalChanges: number;
+  branch: string | null;
+  baseBranch: string | null;
+}
+
+export interface ConflictInfo {
+  file: string;
+  content: {
+    ours: string;
+    theirs: string;
+    full: string;
+  } | null;
+}
+
+export interface MergeResult {
+  success: boolean;
+  hasConflicts?: boolean;
+  conflicts?: ConflictInfo[];
+  error?: string;
+  merged?: boolean;
+  cleanedUp?: boolean;
+}
+
+export const worktreeApi = {
+  // Create a worktree for a session
+  create: (sessionId: string, description: string) =>
+    request<{
+      session: Session;
+      worktree: { path: string; branch: string; baseBranch: string };
+    }>(`/sessions/${sessionId}/worktree`, {
+      method: "POST",
+      body: JSON.stringify({ description }),
+    }),
+
+  // Get worktree status
+  getStatus: (sessionId: string) =>
+    request<WorktreeInfo>(`/sessions/${sessionId}/worktree/status`),
+
+  // Delete worktree
+  delete: (sessionId: string, force?: boolean, deleteBranch?: boolean) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/worktree`, {
+      method: "DELETE",
+      body: JSON.stringify({ force, deleteBranch }),
+    }),
+
+  // Commit changes in worktree
+  commit: (sessionId: string, message: string) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/worktree/commit`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  // Preview merge
+  previewMerge: (sessionId: string) =>
+    request<MergePreview>(`/sessions/${sessionId}/worktree/merge/preview`),
+
+  // Merge worktree to base branch
+  merge: (
+    sessionId: string,
+    options?: { commitMessage?: string; autoCommit?: boolean; cleanupAfter?: boolean }
+  ) =>
+    request<MergeResult>(`/sessions/${sessionId}/worktree/merge`, {
+      method: "POST",
+      body: JSON.stringify(options || {}),
+    }),
+
+  // Abort merge
+  abortMerge: (sessionId: string) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/worktree/merge/abort`, {
+      method: "POST",
+    }),
+
+  // Prune stale worktrees for a project
+  prune: (projectId: string) =>
+    request<{ success: boolean; cleanedSessions: string[] }>(
+      `/projects/${projectId}/worktrees/prune`,
+      { method: "POST" }
+    ),
 };

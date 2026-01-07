@@ -42,6 +42,12 @@
     activeSkills?: Skill[];
     sessionId?: string;
     untilDoneEnabled?: boolean;
+    // Worktree mode - for new chats
+    isGitRepo?: boolean;
+    isNewChat?: boolean;
+    // Worktree mode - for existing sessions with worktree
+    worktreeBranch?: string | null;
+    worktreeBaseBranch?: string | null;
     onSubmit: () => void;
     onStop?: () => void;
     onPreview?: (path: string) => void;
@@ -49,9 +55,21 @@
     onManageSkills?: () => void;
     onNavigateToChat?: (sessionId: string) => void;
     onToggleUntilDone?: () => void;
+    onCreateWithWorktree?: (description: string) => void;
+    onMergeWorktree?: () => void;
+    onArchiveSession?: () => void;
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession }: Props = $props();
+
+  // Worktree mode state
+  let worktreeEnabled = $state(false);
+  let worktreeDescription = $state("");
+  let showWorktreeMenu = $state(false);
+
+  function handleToggle() {
+    worktreeEnabled = !worktreeEnabled;
+  }
 
   let showSkillsMenu = $state(false);
 
@@ -68,6 +86,12 @@
         onExecCommand(command);
         value = "";
       }
+    } else if (worktreeEnabled && isNewChat && onCreateWithWorktree) {
+      // Create new chat with worktree mode
+      const description = worktreeDescription.trim() || trimmedValue.slice(0, 50);
+      onCreateWithWorktree(description);
+      worktreeEnabled = false;
+      worktreeDescription = "";
     } else {
       onSubmit();
     }
@@ -935,112 +959,150 @@
     {/if}
   </div>
 
-  <!-- Skills bar - inside input box -->
-  {#if activeSkills.length > 0 || !isShellCommand(value)}
-    <div class="border-t {isShellCommand(value) ? 'border-[#3d59a1]/30' : 'border-gray-100'} px-3 py-2 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
-        {#if activeSkills.length > 0}
-          <svg class="w-3.5 h-3.5 text-purple-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
-          </svg>
-          {#each activeSkills.slice(0, 4) as skill}
-            <button
-              onclick={() => onManageSkills?.()}
-              class="group flex items-center gap-1.5 text-[11px] pl-2 pr-2.5 py-0.5 bg-gradient-to-r from-purple-50 to-fuchsia-50 text-purple-700 rounded-full font-medium border border-purple-200/60 hover:border-purple-300 hover:from-purple-100 hover:to-fuchsia-100 hover:shadow-sm transition-all duration-150 cursor-pointer flex-shrink-0"
-            >
-              <span class="w-1.5 h-1.5 rounded-full bg-gradient-to-br from-purple-400 to-fuchsia-500 group-hover:scale-110 transition-transform flex-shrink-0"></span>
-              <span class="truncate max-w-[100px]">{skill.name}</span>
-            </button>
-          {/each}
-          {#if activeSkills.length > 4}
-            <button
-              onclick={() => onManageSkills?.()}
-              class="flex items-center text-[11px] px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full font-medium border border-gray-200 hover:bg-gray-200 hover:border-gray-300 transition-all duration-150 cursor-pointer flex-shrink-0"
-            >
-              +{activeSkills.length - 4}
-            </button>
-          {/if}
-        {:else}
-          <svg class="w-3.5 h-3.5 text-gray-300 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
-          </svg>
-          <span class="text-[11px] text-gray-400">No skills active</span>
-        {/if}
-      </div>
+  <!-- Toolbar - icon buttons on the left -->
+  {#if !isShellCommand(value)}
+    <div class="border-t border-gray-100 px-2 py-1.5 flex items-center gap-1">
+      <!-- Active Worktree indicator (for sessions with worktree) -->
+      {#if worktreeBranch}
+        <div class="relative">
+          <button
+            onclick={() => showWorktreeMenu = !showWorktreeMenu}
+            class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-150 bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+            title="Working in parallel branch"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            <span class="text-[11px] font-medium max-w-[100px] truncate">
+              {worktreeBranch.replace(/^session\//, '').slice(0, 20)}
+            </span>
+            <svg class="w-3 h-3 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </button>
 
-      <div class="flex items-center gap-1.5">
-        <!-- Until Done toggle -->
-        <button
-          onclick={() => onToggleUntilDone?.()}
-          class="flex items-center gap-1.5 px-2.5 py-1 text-[11px] rounded-full transition-all duration-150 font-medium border {untilDoneEnabled ? 'bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-700 border-emerald-200/60 hover:border-emerald-300 hover:from-emerald-100 hover:to-teal-100' : 'text-gray-500 border-gray-200 hover:text-gray-700 hover:bg-gray-50 hover:border-gray-300'}"
-          title={untilDoneEnabled ? 'Until Done mode: ON - Claude will keep working until task is complete' : 'Until Done mode: OFF - Click to enable auto-continue'}
-        >
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-          </svg>
-          <span>{untilDoneEnabled ? 'Loop' : 'Loop'}</span>
-        </button>
-
-        <button
-          onclick={() => onManageSkills?.()}
-          class="flex items-center gap-1.5 px-2.5 py-1 text-[11px] rounded-full transition-all duration-150 font-medium border text-gray-500 border-gray-200 hover:text-purple-600 hover:bg-purple-50 hover:border-purple-200"
-          title="Manage skills"
-        >
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-          </svg>
-          <span>Edit</span>
-        </button>
-
-        {#if activeSkills.length > 0}
-          <div class="relative">
-            <button
-              onclick={() => showSkillsMenu = !showSkillsMenu}
-              class="flex items-center justify-center w-7 h-7 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-all duration-150"
-              title="View all skills"
-            >
-              <svg class="w-4 h-4 transition-transform duration-150 {showSkillsMenu ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-              </svg>
-            </button>
-            {#if showSkillsMenu}
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div
-                class="fixed inset-0 z-40"
-                onclick={() => showSkillsMenu = false}
-              ></div>
-              <div class="absolute bottom-full right-0 mb-2 w-56 bg-white border border-gray-200 rounded-xl shadow-xl py-2 z-50">
-                <div class="px-3 py-2 text-[11px] text-gray-500 font-semibold uppercase tracking-wider border-b border-gray-100 flex items-center gap-2">
-                  <svg class="w-3.5 h-3.5 text-purple-500" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          {#if showWorktreeMenu}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="fixed inset-0 z-40"
+              onclick={() => showWorktreeMenu = false}
+            ></div>
+            <div class="absolute bottom-full left-0 mb-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl py-2 z-50">
+              <div class="px-3 py-2 border-b border-gray-100">
+                <div class="flex items-center gap-2 text-emerald-600 mb-1">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                   </svg>
-                  Active Skills ({activeSkills.length})
+                  <span class="text-xs font-semibold uppercase tracking-wide">Parallel Branch</span>
                 </div>
-                <div class="py-1">
-                  {#each activeSkills as skill}
-                    <div class="px-3 py-2 text-sm text-gray-700 flex items-center gap-2.5 hover:bg-gray-50 transition-colors">
-                      <span class="w-2 h-2 rounded-full bg-gradient-to-br from-purple-400 to-fuchsia-500 flex-shrink-0"></span>
-                      <span class="truncate">{skill.name}</span>
-                    </div>
-                  {/each}
-                </div>
-                <div class="border-t border-gray-100 pt-2 px-2">
-                  <button
-                    onclick={() => { showSkillsMenu = false; onManageSkills?.(); }}
-                    class="w-full px-3 py-2 text-left text-sm text-purple-600 hover:bg-purple-50 rounded-lg flex items-center gap-2.5 transition-colors font-medium"
-                  >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                    </svg>
-                    Manage Skills
-                  </button>
+                <p class="text-[11px] text-gray-500 leading-relaxed">
+                  Working in isolated copy. Changes don't affect <span class="font-medium text-gray-700">{worktreeBaseBranch || 'main'}</span> until merged.
+                </p>
+              </div>
+
+              <div class="px-3 py-2 border-b border-gray-100">
+                <div class="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Branch</div>
+                <div class="text-sm text-gray-800 font-mono truncate" title={worktreeBranch}>
+                  {worktreeBranch.replace(/^session\//, '')}
                 </div>
               </div>
+
+              <div class="px-2 pt-2 space-y-1">
+                <button
+                  onclick={() => { showWorktreeMenu = false; onMergeWorktree?.(); }}
+                  class="w-full px-3 py-2 text-left text-sm text-emerald-700 hover:bg-emerald-50 rounded-lg flex items-center gap-2.5 transition-colors font-medium"
+                >
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                  </svg>
+                  Merge to {worktreeBaseBranch || 'main'}
+                </button>
+              </div>
+            </div>
+          {/if}
+        </div>
+      {:else if isGitRepo && isNewChat}
+        <!-- Parallel Branch toggle (only for new chats in git repos) -->
+        <button
+          onclick={handleToggle}
+          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {worktreeEnabled ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}"
+          title={worktreeEnabled ? 'Parallel branch: ON - working in isolated copy' : 'Parallel branch: work on an isolated copy'}
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+        </button>
+      {/if}
+
+      <!-- Loop/Until Done toggle -->
+      <button
+        onclick={() => onToggleUntilDone?.()}
+        class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {untilDoneEnabled ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}"
+        title={untilDoneEnabled ? 'Loop mode: ON - Claude keeps working until done' : 'Loop mode: auto-continue until task complete'}
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+      </button>
+
+      <!-- Skills dropdown -->
+      <div class="relative">
+        <button
+          onclick={() => showSkillsMenu = !showSkillsMenu}
+          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {activeSkills.length > 0 ? 'bg-purple-100 text-purple-600 hover:bg-purple-200' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}"
+          title={activeSkills.length > 0 ? `Skills: ${activeSkills.length} active` : 'Skills: none active'}
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          {#if activeSkills.length > 0}
+            <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-purple-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+              {activeSkills.length}
+            </span>
+          {/if}
+        </button>
+
+        {#if showSkillsMenu}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="fixed inset-0 z-40"
+            onclick={() => showSkillsMenu = false}
+          ></div>
+          <div class="absolute bottom-full left-0 mb-2 w-56 bg-white border border-gray-200 rounded-xl shadow-xl py-2 z-50">
+            <div class="px-3 py-2 text-[11px] text-gray-500 font-semibold uppercase tracking-wider border-b border-gray-100 flex items-center gap-2">
+              <svg class="w-3.5 h-3.5 text-purple-500" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              {activeSkills.length > 0 ? `Active Skills (${activeSkills.length})` : 'No Skills Active'}
+            </div>
+            {#if activeSkills.length > 0}
+              <div class="py-1 max-h-48 overflow-y-auto">
+                {#each activeSkills as skill}
+                  <div class="px-3 py-2 text-sm text-gray-700 flex items-center gap-2.5 hover:bg-gray-50 transition-colors">
+                    <span class="w-2 h-2 rounded-full bg-gradient-to-br from-purple-400 to-fuchsia-500 flex-shrink-0"></span>
+                    <span class="truncate">{skill.name}</span>
+                  </div>
+                {/each}
+              </div>
             {/if}
+            <div class="border-t border-gray-100 pt-2 px-2">
+              <button
+                onclick={() => { showSkillsMenu = false; onManageSkills?.(); }}
+                class="w-full px-3 py-2 text-left text-sm text-purple-600 hover:bg-purple-50 rounded-lg flex items-center gap-2.5 transition-colors font-medium"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                Manage Skills
+              </button>
+            </div>
           </div>
         {/if}
       </div>
+
+      <!-- Spacer -->
+      <div class="flex-1"></div>
     </div>
   {/if}
 </div>

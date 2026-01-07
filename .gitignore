@@ -18,3 +18,6 @@ packages/landing-page/public/downloads/
 # Temp/test directories
 .tmp-navi-home/
 
+
+# Git worktrees managed by Navi
+.worktrees/

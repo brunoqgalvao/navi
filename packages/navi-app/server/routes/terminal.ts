@@ -486,6 +486,27 @@ export async function handleTerminalRoutes(
 
   if (url.pathname === "/api/terminal/pty" && method === "GET") {
     const sessionIdFilter = url.searchParams.get("sessionId");
+    const projectIdFilter = url.searchParams.get("projectId");
+
+    // Try to get terminals from PTY server first (it has the authoritative list)
+    try {
+      const ptyUrl = projectIdFilter
+        ? `${PTY_SERVER_HTTP}/terminals?projectId=${projectIdFilter}`
+        : `${PTY_SERVER_HTTP}/terminals`;
+      const ptyRes = await fetch(ptyUrl);
+      if (ptyRes.ok) {
+        let terminals = await ptyRes.json();
+        if (sessionIdFilter) {
+          terminals = terminals.filter((t: any) => t.sessionId === sessionIdFilter);
+        }
+        return json(terminals);
+      }
+    } catch (e) {
+      // PTY server not available, fall back to local tracking
+      console.warn("[Terminal] PTY server not available, using local tracking");
+    }
+
+    // Fall back to locally tracked terminals
     let terminals = Array.from(proxiedTerminals.entries()).map(([id, term]) => ({
       terminalId: id,
       cwd: term.cwd,
@@ -504,41 +525,109 @@ export async function handleTerminalRoutes(
   if (url.pathname.match(/^\/api\/terminal\/pty\/[\w-]+\/buffer$/) && method === "GET") {
     const terminalId = url.pathname.split("/")[4];
     const terminal = proxiedTerminals.get(terminalId);
+    const lines = parseInt(url.searchParams.get("lines") || "100");
 
-    if (!terminal) {
-      return json({ error: "Terminal not found" }, 404);
+    if (terminal) {
+      const buffer = terminal.outputBuffer.slice(-lines);
+      return json({
+        terminalId,
+        lines: buffer,
+        totalLines: terminal.outputBuffer.length,
+      });
     }
 
-    const lines = parseInt(url.searchParams.get("lines") || "100");
-    const buffer = terminal.outputBuffer.slice(-lines);
+    // Try to get buffer from PTY server directly
+    if (ptyServerConnected && ptyServerWs) {
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          resolve(json({ error: "Timeout waiting for PTY server" }, 504));
+        }, 5000);
 
-    return json({
-      terminalId,
-      lines: buffer,
-      totalLines: terminal.outputBuffer.length,
-    });
+        const handler = (data: Buffer) => {
+          try {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === "buffer" && msg.terminalId === terminalId) {
+              clearTimeout(timeout);
+              ptyServerWs?.off("message", handler);
+              // Parse the raw buffer into lines (PTY server returns 'data' not 'buffer')
+              const rawBuffer = msg.data || msg.buffer || "";
+              const bufferLines = rawBuffer.split("\n").slice(-lines);
+              resolve(json({
+                terminalId,
+                lines: bufferLines,
+                totalLines: bufferLines.length,
+              }));
+            }
+          } catch {}
+        };
+
+        ptyServerWs.on("message", handler);
+        ptyServerWs.send(JSON.stringify({
+          type: "buffer",
+          terminalId,
+          chars: lines * 200, // Estimate chars needed for N lines
+        }));
+      });
+    }
+
+    return json({ error: "Terminal not found" }, 404);
   }
 
   if (url.pathname.match(/^\/api\/terminal\/pty\/[\w-]+\/errors$/) && method === "GET") {
     const terminalId = url.pathname.split("/")[4];
     const terminal = proxiedTerminals.get(terminalId);
 
-    if (!terminal) {
-      return json({ error: "Terminal not found" }, 404);
+    // Helper to analyze buffer for errors
+    const analyzeBuffer = (bufferLines: string[]) => {
+      const recentLines = bufferLines.slice(-50).join('\n');
+      const hasErrors = TERMINAL_ERROR_PATTERNS.some(pattern => pattern.test(recentLines));
+      const errorLines = bufferLines
+        .slice(-50)
+        .filter(line => TERMINAL_ERROR_PATTERNS.some(pattern => pattern.test(line)));
+
+      return json({
+        terminalId,
+        hasErrors,
+        errorLines,
+        context: recentLines,
+      });
+    };
+
+    if (terminal) {
+      return analyzeBuffer(terminal.outputBuffer);
     }
 
-    const recentLines = terminal.outputBuffer.slice(-50).join('\n');
-    const hasErrors = TERMINAL_ERROR_PATTERNS.some(pattern => pattern.test(recentLines));
-    const errorLines = terminal.outputBuffer
-      .slice(-50)
-      .filter(line => TERMINAL_ERROR_PATTERNS.some(pattern => pattern.test(line)));
+    // Try to get buffer from PTY server directly
+    if (ptyServerConnected && ptyServerWs) {
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          resolve(json({ error: "Timeout waiting for PTY server" }, 504));
+        }, 5000);
 
-    return json({
-      terminalId,
-      hasErrors,
-      errorLines,
-      context: recentLines,
-    });
+        const handler = (data: Buffer) => {
+          try {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === "buffer" && msg.terminalId === terminalId) {
+              clearTimeout(timeout);
+              ptyServerWs?.off("message", handler);
+              // PTY server returns 'data' not 'buffer'
+              const rawBuffer = msg.data || msg.buffer || "";
+              const bufferLines = rawBuffer.split("\n");
+              resolve(analyzeBuffer(bufferLines));
+            }
+          } catch {}
+        };
+
+        ptyServerWs.on("message", handler);
+        ptyServerWs.send(JSON.stringify({
+          type: "buffer",
+          terminalId,
+          chars: 10000,
+        }));
+      });
+    }
+
+    return json({ error: "Terminal not found" }, 404);
   }
 
   return null;

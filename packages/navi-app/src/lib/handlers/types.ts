@@ -1,4 +1,5 @@
 import type { TodoItem } from "../stores/types";
+import type { SessionHierarchyEvent } from "../features/session-hierarchy/types";
 
 export interface UICommand {
   command: "open_preview" | "navigate" | "notification";
@@ -65,6 +66,9 @@ export interface HandlerCallbacks {
   onCompactEnd?: (sessionId: string, metadata?: CompactMetadata) => void;
   onUntilDoneContinue?: (sessionId: string, data: UntilDoneContinueData) => void;
   onUntilDoneComplete?: (sessionId: string, data: UntilDoneCompleteData) => void;
+  // Session Hierarchy (Multi-Agent)
+  onSessionHierarchyEvent?: (event: SessionHierarchyEvent) => void;
+  onPlaySound?: (sound: string) => void;
   scrollToBottom?: () => void;
   onNewContent?: () => void;
 }

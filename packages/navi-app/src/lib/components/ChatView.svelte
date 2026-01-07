@@ -14,6 +14,9 @@
   import type { ContentBlock } from "../claude";
   import BackgroundProcessBadge from "./BackgroundProcessBadge.svelte";
   import EmptyStateWelcome from "./EmptyStateWelcome.svelte";
+  import SessionBreadcrumbs from "../features/session-hierarchy/components/SessionBreadcrumbs.svelte";
+  import EscalationBanner from "../features/session-hierarchy/components/EscalationBanner.svelte";
+  import { sessionHierarchyApi, parseEscalation, type Escalation } from "../features/session-hierarchy";
 
   interface Props {
     sessionId: string | null;
@@ -66,6 +69,20 @@
     onSuggestionClick?: (prompt: string) => void;
     // Project context for suggestions
     projectContext?: { summary: string; suggestions: string[] } | null;
+    // Worktree mode
+    worktreeBranch?: string | null;
+    worktreeBaseBranch?: string | null;
+    sessionTitle?: string;
+    onMergeComplete?: () => void;
+    // Session hierarchy (multi-agent)
+    sessionHierarchy?: {
+      hasParent: boolean;
+      isBlocked: boolean;
+      escalation?: Escalation | null;
+      role?: string | null;
+    } | null;
+    onSelectHierarchySession?: (session: any) => void;
+    onEscalationResolved?: () => void;
   }
 
   let {
@@ -103,6 +120,13 @@
     onOpenProcesses,
     onSuggestionClick,
     projectContext = null,
+    worktreeBranch = null,
+    worktreeBaseBranch = null,
+    sessionTitle = "",
+    onMergeComplete,
+    sessionHierarchy = null,
+    onSelectHierarchySession,
+    onEscalationResolved,
   }: Props = $props();
 
   const usagePercent = $derived(
@@ -194,6 +218,30 @@
 </script>
 
 <div class="space-y-2">
+
+  <!-- Session hierarchy breadcrumbs - show when session has a parent -->
+  {#if sessionHierarchy?.hasParent && sessionId}
+    <div class="max-w-3xl mx-auto w-full px-4">
+      <SessionBreadcrumbs
+        {sessionId}
+        onSelectSession={(sess) => onSelectHierarchySession?.(sess)}
+      />
+    </div>
+  {/if}
+
+  <!-- Escalation banner - show when session is blocked -->
+  {#if sessionHierarchy?.isBlocked && sessionHierarchy.escalation && sessionId}
+    <div class="max-w-3xl mx-auto w-full px-4">
+      <EscalationBanner
+        {sessionId}
+        escalation={sessionHierarchy.escalation}
+        sessionTitle={sessionTitle}
+        sessionRole={sessionHierarchy.role || undefined}
+        onResolved={() => onEscalationResolved?.()}
+      />
+    </div>
+  {/if}
+
   <div class="max-w-3xl mx-auto w-full md:pt-6 space-y-3 pb-64 px-4" style="overflow-anchor: none;">
     <!-- Background process badge -->
     <div class="flex justify-center">

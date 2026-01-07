@@ -1,4 +1,4 @@
-import { api, type Session } from "../api";
+import { api, worktreeApi, type Session } from "../api";
 import {
   currentSession,
   sessionMessages,
@@ -10,7 +10,7 @@ import {
 import { streamingStore } from "../handlers";
 import { get } from "svelte/store";
 import { getDefaultModel } from "./data-loaders";
-import { showError } from "../errorHandler";
+import { showError, showSuccess } from "../errorHandler";
 
 export interface SessionActionCallbacks {
   setSidebarSessions: (sessions: Session[]) => void;
@@ -44,6 +44,39 @@ export async function createNewChat(): Promise<string | null> {
     return newSession.id;
   } catch (e) {
     showError({ title: "Chat Error", message: "Failed to create new chat", error: e });
+    return null;
+  }
+}
+
+export async function createNewChatWithWorktree(description: string): Promise<string | null> {
+  const session = get(currentSession);
+  if (!session.projectId) return null;
+
+  try {
+    // Create a new session first
+    const newSession = await api.sessions.create(session.projectId, { title: description || "New Chat" });
+
+    // Then create a worktree for it
+    const result = await worktreeApi.create(newSession.id, description);
+
+    const sessions = callbacks?.getSidebarSessions() || [];
+    callbacks?.setSidebarSessions([result.session, ...sessions]);
+    currentSession.setSession(result.session.id, result.session.claude_session_id);
+
+    // Set default model (Opus) for new chat
+    const defaultModel = getDefaultModel();
+    currentSession.setSelectedModel(defaultModel);
+    sessionMessages.setMessages(result.session.id, []);
+    callbacks?.loadRecentChats();
+
+    showSuccess(
+      "Parallel Branch Created",
+      `Working on branch: ${result.worktree.branch.replace("session/", "")}`
+    );
+
+    return result.session.id;
+  } catch (e) {
+    showError({ title: "Worktree Error", message: "Failed to create parallel branch", error: e });
     return null;
   }
 }

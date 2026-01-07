@@ -138,6 +138,60 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN until_done_total_cost REAL DEFAULT 0");
   } catch {}
 
+  // Worktree mode columns - allow sessions to run in isolated git worktrees
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN worktree_path TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN worktree_branch TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN worktree_base_branch TEXT");
+  } catch {}
+
+  // Multi-session hierarchy columns - fractal agent architecture
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT REFERENCES sessions(id)");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN root_session_id TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN depth INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN role TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN task TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN agent_status TEXT DEFAULT 'working'");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN deliverable TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN escalation TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN delivered_at INTEGER");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN archived_at INTEGER");
+  } catch {}
+
+  // Indexes for multi-session queries
+  try {
+    db.run("CREATE INDEX idx_sessions_parent ON sessions(parent_session_id)");
+  } catch {}
+  try {
+    db.run("CREATE INDEX idx_sessions_root ON sessions(root_session_id)");
+  } catch {}
+  try {
+    db.run("CREATE INDEX idx_sessions_agent_status ON sessions(agent_status)");
+  } catch {}
+
   db.run(`
     CREATE TABLE IF NOT EXISTS cost_entries (
       id TEXT PRIMARY KEY,
@@ -303,6 +357,42 @@ export async function initDb() {
     db.run("ALTER TABLE kanban_cards ADD COLUMN blocked INTEGER DEFAULT 0");
   } catch {}
 
+  // Session decisions table - shared decisions across session tree
+  db.run(`
+    CREATE TABLE IF NOT EXISTS session_decisions (
+      id TEXT PRIMARY KEY,
+      root_session_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      category TEXT,
+      decision TEXT NOT NULL,
+      rationale TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (root_session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_decisions_root ON session_decisions(root_session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_decisions_session ON session_decisions(session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_decisions_category ON session_decisions(category);
+  `);
+
+  // Session artifacts table - artifacts produced by sessions
+  db.run(`
+    CREATE TABLE IF NOT EXISTS session_artifacts (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      root_session_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      content TEXT,
+      description TEXT,
+      artifact_type TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY (root_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_artifacts_session ON session_artifacts(session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_artifacts_root ON session_artifacts(root_session_id);
+  `);
+
   saveDb()
   return db;
 }
@@ -331,6 +421,27 @@ export interface Project {
   updated_at: number;
 }
 
+// Agent status for multi-session hierarchy
+export type AgentStatus = 'working' | 'waiting' | 'blocked' | 'delivered' | 'failed' | 'archived';
+
+// Escalation types
+export type EscalationType = 'question' | 'decision_needed' | 'blocker' | 'permission';
+
+export interface Escalation {
+  type: EscalationType;
+  summary: string;
+  context: string;
+  options?: string[];
+  created_at: number;
+}
+
+export interface Deliverable {
+  type: 'code' | 'research' | 'decision' | 'artifact' | 'error';
+  summary: string;
+  content: any;
+  artifacts?: SessionArtifact[];
+}
+
 export interface Session {
   id: string;
   project_id: string;
@@ -352,6 +463,22 @@ export interface Session {
   until_done_iteration: number;
   until_done_max_iterations: number;
   until_done_total_cost: number;
+  // Worktree mode - session runs in isolated git worktree
+  worktree_path: string | null;
+  worktree_branch: string | null;
+  worktree_base_branch: string | null;
+  // Multi-session hierarchy - fractal agent architecture
+  parent_session_id: string | null;
+  root_session_id: string | null;
+  depth: number;
+  role: string | null;
+  task: string | null;
+  agent_status: AgentStatus;
+  deliverable: string | null;  // JSON string of Deliverable
+  escalation: string | null;   // JSON string of Escalation
+  delivered_at: number | null;
+  archived_at: number | null;
+  // Timestamps
   created_at: number;
   updated_at: number;
 }
@@ -544,6 +671,37 @@ export const sessions = {
         [iterationCost, Date.now(), id]),
   clearUntilDoneMode: (id: string) =>
     run("UPDATE sessions SET until_done_mode = 0, updated_at = ? WHERE id = ?", [Date.now(), id]),
+
+  // Worktree mode methods
+  setWorktree: (id: string, worktreePath: string, worktreeBranch: string, baseBranch: string) =>
+    run(
+      "UPDATE sessions SET worktree_path = ?, worktree_branch = ?, worktree_base_branch = ?, updated_at = ? WHERE id = ?",
+      [worktreePath, worktreeBranch, baseBranch, Date.now(), id]
+    ),
+  clearWorktree: (id: string) =>
+    run(
+      "UPDATE sessions SET worktree_path = NULL, worktree_branch = NULL, worktree_base_branch = NULL, updated_at = ? WHERE id = ?",
+      [Date.now(), id]
+    ),
+  listWithWorktrees: (projectId: string) =>
+    queryAll<Session>(
+      "SELECT * FROM sessions WHERE project_id = ? AND worktree_path IS NOT NULL ORDER BY updated_at DESC",
+      [projectId]
+    ),
+  createWithWorktree: (
+    id: string,
+    project_id: string,
+    title: string,
+    worktree_path: string,
+    worktree_branch: string,
+    worktree_base_branch: string,
+    created_at: number,
+    updated_at: number
+  ) =>
+    run(
+      "INSERT INTO sessions (id, project_id, title, worktree_path, worktree_branch, worktree_base_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, project_id, title, worktree_path, worktree_branch, worktree_base_branch, created_at, updated_at]
+    ),
 };
 
 export const messages = {
@@ -1440,4 +1598,405 @@ export const kanbanCards = {
       "UPDATE kanban_cards SET status = 'archived', updated_at = ? WHERE id = ?",
       [Date.now(), id]
     ),
+};
+
+// ============================================================================
+// Multi-Session Hierarchy (Fractal Agents)
+// ============================================================================
+
+export const MAX_SESSION_DEPTH = 3;
+export const MAX_CONCURRENT_SESSIONS = 20;
+
+export interface SessionDecision {
+  id: string;
+  root_session_id: string;
+  session_id: string;
+  category: string | null;
+  decision: string;
+  rationale: string | null;
+  created_at: number;
+}
+
+export interface SessionArtifact {
+  id: string;
+  session_id: string;
+  root_session_id: string;
+  path: string;
+  content: string | null;
+  description: string | null;
+  artifact_type: string | null;
+  created_at: number;
+}
+
+export interface SessionTreeNode extends Session {
+  children: SessionTreeNode[];
+}
+
+export interface SessionWithParent extends Session {
+  parent_title?: string;
+  parent_role?: string;
+}
+
+// Session hierarchy methods
+export const sessionHierarchy = {
+  // Get a session's full tree (root and all descendants)
+  getTree: (rootSessionId: string): SessionTreeNode | null => {
+    const root = sessions.get(rootSessionId);
+    if (!root) return null;
+
+    const buildTree = (session: Session): SessionTreeNode => {
+      const children = queryAll<Session>(
+        "SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY created_at ASC",
+        [session.id]
+      );
+      return {
+        ...session,
+        children: children.map(buildTree),
+      };
+    };
+
+    return buildTree(root);
+  },
+
+  // Get direct children of a session
+  getChildren: (sessionId: string): Session[] =>
+    queryAll<Session>(
+      "SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY created_at ASC",
+      [sessionId]
+    ),
+
+  // Get all descendants (children, grandchildren, etc.)
+  getDescendants: (sessionId: string): Session[] => {
+    const descendants: Session[] = [];
+    const collectDescendants = (parentId: string) => {
+      const children = queryAll<Session>(
+        "SELECT * FROM sessions WHERE parent_session_id = ?",
+        [parentId]
+      );
+      for (const child of children) {
+        descendants.push(child);
+        collectDescendants(child.id);
+      }
+    };
+    collectDescendants(sessionId);
+    return descendants;
+  },
+
+  // Get siblings (other children of same parent)
+  getSiblings: (sessionId: string): Session[] => {
+    const session = sessions.get(sessionId);
+    if (!session || !session.parent_session_id) return [];
+    return queryAll<Session>(
+      "SELECT * FROM sessions WHERE parent_session_id = ? AND id != ? ORDER BY created_at ASC",
+      [session.parent_session_id, sessionId]
+    );
+  },
+
+  // Get ancestor chain (parent, grandparent, etc.)
+  getAncestors: (sessionId: string): Session[] => {
+    const ancestors: Session[] = [];
+    let current = sessions.get(sessionId);
+    while (current?.parent_session_id) {
+      const parent = sessions.get(current.parent_session_id);
+      if (parent) {
+        ancestors.push(parent);
+        current = parent;
+      } else {
+        break;
+      }
+    }
+    return ancestors;
+  },
+
+  // Spawn a child session
+  spawnChild: (
+    parentSessionId: string,
+    config: {
+      id: string;
+      title: string;
+      role: string;
+      task: string;
+      model?: string;
+    }
+  ): Session | null => {
+    const parent = sessions.get(parentSessionId);
+    if (!parent) return null;
+
+    // Check depth limit
+    if (parent.depth >= MAX_SESSION_DEPTH - 1) {
+      console.error(`Cannot spawn child: max depth (${MAX_SESSION_DEPTH}) reached`);
+      return null;
+    }
+
+    // Check concurrent session limit
+    const rootId = parent.root_session_id || parent.id;
+    const activeCount = queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM sessions
+       WHERE (root_session_id = ? OR id = ?)
+       AND agent_status IN ('working', 'waiting', 'blocked')`,
+      [rootId, rootId]
+    );
+    if (activeCount && activeCount.count >= MAX_CONCURRENT_SESSIONS) {
+      console.error(`Cannot spawn child: max concurrent sessions (${MAX_CONCURRENT_SESSIONS}) reached`);
+      return null;
+    }
+
+    const now = Date.now();
+    const newDepth = parent.depth + 1;
+    const rootSessionId = parent.root_session_id || parent.id;
+
+    run(
+      `INSERT INTO sessions (
+        id, project_id, title, model,
+        parent_session_id, root_session_id, depth, role, task, agent_status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)`,
+      [
+        config.id,
+        parent.project_id,
+        config.title,
+        config.model || parent.model,
+        parentSessionId,
+        rootSessionId,
+        newDepth,
+        config.role,
+        config.task,
+        now,
+        now,
+      ]
+    );
+
+    // Update parent to waiting status
+    run(
+      "UPDATE sessions SET agent_status = 'waiting', updated_at = ? WHERE id = ?",
+      [now, parentSessionId]
+    );
+
+    return sessions.get(config.id) || null;
+  },
+
+  // Update agent status
+  updateAgentStatus: (sessionId: string, status: AgentStatus) => {
+    const now = Date.now();
+    const updates: any[] = [status, now];
+    let sql = "UPDATE sessions SET agent_status = ?, updated_at = ?";
+
+    if (status === 'delivered') {
+      sql += ", delivered_at = ?";
+      updates.push(now);
+    } else if (status === 'archived') {
+      sql += ", archived_at = ?";
+      updates.push(now);
+    }
+
+    sql += " WHERE id = ?";
+    updates.push(sessionId);
+    run(sql, updates);
+  },
+
+  // Set escalation
+  setEscalation: (sessionId: string, escalation: Escalation) => {
+    run(
+      "UPDATE sessions SET agent_status = 'blocked', escalation = ?, updated_at = ? WHERE id = ?",
+      [JSON.stringify(escalation), Date.now(), sessionId]
+    );
+  },
+
+  // Clear escalation (when resolved)
+  clearEscalation: (sessionId: string) => {
+    run(
+      "UPDATE sessions SET agent_status = 'working', escalation = NULL, updated_at = ? WHERE id = ?",
+      [Date.now(), sessionId]
+    );
+  },
+
+  // Set deliverable
+  setDeliverable: (sessionId: string, deliverable: Deliverable) => {
+    const now = Date.now();
+    run(
+      "UPDATE sessions SET agent_status = 'delivered', deliverable = ?, delivered_at = ?, updated_at = ? WHERE id = ?",
+      [JSON.stringify(deliverable), now, now, sessionId]
+    );
+
+    // Check if parent should resume (all children delivered)
+    const session = sessions.get(sessionId);
+    if (session?.parent_session_id) {
+      const pendingChildren = queryOne<{ count: number }>(
+        `SELECT COUNT(*) as count FROM sessions
+         WHERE parent_session_id = ? AND agent_status NOT IN ('delivered', 'failed', 'archived')`,
+        [session.parent_session_id]
+      );
+      if (pendingChildren && pendingChildren.count === 0) {
+        run(
+          "UPDATE sessions SET agent_status = 'working', updated_at = ? WHERE id = ?",
+          [now, session.parent_session_id]
+        );
+      }
+    }
+  },
+
+  // Archive a session (and optionally its descendants)
+  archiveSession: (sessionId: string, archiveDescendants: boolean = true) => {
+    const now = Date.now();
+    run(
+      "UPDATE sessions SET agent_status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?",
+      [now, now, sessionId]
+    );
+
+    if (archiveDescendants) {
+      const descendants = sessionHierarchy.getDescendants(sessionId);
+      for (const desc of descendants) {
+        run(
+          "UPDATE sessions SET agent_status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?",
+          [now, now, desc.id]
+        );
+      }
+    }
+  },
+
+  // Get all active sessions in a tree
+  getActiveSessions: (rootSessionId: string): Session[] =>
+    queryAll<Session>(
+      `SELECT * FROM sessions
+       WHERE (root_session_id = ? OR id = ?)
+       AND agent_status IN ('working', 'waiting', 'blocked')
+       ORDER BY depth ASC, created_at ASC`,
+      [rootSessionId, rootSessionId]
+    ),
+
+  // Get blocked sessions that need attention
+  getBlockedSessions: (rootSessionId: string): Session[] =>
+    queryAll<Session>(
+      `SELECT * FROM sessions
+       WHERE (root_session_id = ? OR id = ?)
+       AND agent_status = 'blocked'
+       ORDER BY depth ASC, created_at ASC`,
+      [rootSessionId, rootSessionId]
+    ),
+
+  // Count active sessions in tree
+  countActiveSessions: (rootSessionId: string): number => {
+    const result = queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM sessions
+       WHERE (root_session_id = ? OR id = ?)
+       AND agent_status IN ('working', 'waiting', 'blocked')`,
+      [rootSessionId, rootSessionId]
+    );
+    return result?.count || 0;
+  },
+};
+
+// Session decisions CRUD
+export const sessionDecisions = {
+  listByRoot: (rootSessionId: string): SessionDecision[] =>
+    queryAll<SessionDecision>(
+      "SELECT * FROM session_decisions WHERE root_session_id = ? ORDER BY created_at DESC",
+      [rootSessionId]
+    ),
+
+  listBySession: (sessionId: string): SessionDecision[] =>
+    queryAll<SessionDecision>(
+      "SELECT * FROM session_decisions WHERE session_id = ? ORDER BY created_at DESC",
+      [sessionId]
+    ),
+
+  listByCategory: (rootSessionId: string, category: string): SessionDecision[] =>
+    queryAll<SessionDecision>(
+      "SELECT * FROM session_decisions WHERE root_session_id = ? AND category = ? ORDER BY created_at DESC",
+      [rootSessionId, category]
+    ),
+
+  get: (id: string): SessionDecision | undefined =>
+    queryOne<SessionDecision>("SELECT * FROM session_decisions WHERE id = ?", [id]),
+
+  create: (decision: SessionDecision) => {
+    run(
+      `INSERT INTO session_decisions (id, root_session_id, session_id, category, decision, rationale, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        decision.id,
+        decision.root_session_id,
+        decision.session_id,
+        decision.category,
+        decision.decision,
+        decision.rationale,
+        decision.created_at,
+      ]
+    );
+  },
+
+  delete: (id: string) => run("DELETE FROM session_decisions WHERE id = ?", [id]),
+
+  deleteBySession: (sessionId: string) =>
+    run("DELETE FROM session_decisions WHERE session_id = ?", [sessionId]),
+
+  deleteByRoot: (rootSessionId: string) =>
+    run("DELETE FROM session_decisions WHERE root_session_id = ?", [rootSessionId]),
+};
+
+// Session artifacts CRUD
+export const sessionArtifacts = {
+  listByRoot: (rootSessionId: string): SessionArtifact[] =>
+    queryAll<SessionArtifact>(
+      "SELECT * FROM session_artifacts WHERE root_session_id = ? ORDER BY created_at DESC",
+      [rootSessionId]
+    ),
+
+  listBySession: (sessionId: string): SessionArtifact[] =>
+    queryAll<SessionArtifact>(
+      "SELECT * FROM session_artifacts WHERE session_id = ? ORDER BY created_at DESC",
+      [sessionId]
+    ),
+
+  listByType: (rootSessionId: string, artifactType: string): SessionArtifact[] =>
+    queryAll<SessionArtifact>(
+      "SELECT * FROM session_artifacts WHERE root_session_id = ? AND artifact_type = ? ORDER BY created_at DESC",
+      [rootSessionId, artifactType]
+    ),
+
+  get: (id: string): SessionArtifact | undefined =>
+    queryOne<SessionArtifact>("SELECT * FROM session_artifacts WHERE id = ?", [id]),
+
+  getByPath: (rootSessionId: string, path: string): SessionArtifact | undefined =>
+    queryOne<SessionArtifact>(
+      "SELECT * FROM session_artifacts WHERE root_session_id = ? AND path = ?",
+      [rootSessionId, path]
+    ),
+
+  create: (artifact: SessionArtifact) => {
+    run(
+      `INSERT INTO session_artifacts (id, session_id, root_session_id, path, content, description, artifact_type, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        artifact.id,
+        artifact.session_id,
+        artifact.root_session_id,
+        artifact.path,
+        artifact.content,
+        artifact.description,
+        artifact.artifact_type,
+        artifact.created_at,
+      ]
+    );
+  },
+
+  update: (id: string, updates: Partial<Omit<SessionArtifact, "id" | "session_id" | "root_session_id" | "created_at">>) => {
+    const fields: string[] = [];
+    const values: any[] = [];
+    for (const [key, value] of Object.entries(updates)) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+    if (fields.length === 0) return;
+    values.push(id);
+    run(`UPDATE session_artifacts SET ${fields.join(", ")} WHERE id = ?`, values);
+  },
+
+  delete: (id: string) => run("DELETE FROM session_artifacts WHERE id = ?", [id]),
+
+  deleteBySession: (sessionId: string) =>
+    run("DELETE FROM session_artifacts WHERE session_id = ?", [sessionId]),
+
+  deleteByRoot: (rootSessionId: string) =>
+    run("DELETE FROM session_artifacts WHERE root_session_id = ?", [rootSessionId]),
 };

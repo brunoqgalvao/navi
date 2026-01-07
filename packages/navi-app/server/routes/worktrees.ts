@@ -1,0 +1,412 @@
+import { json } from "../utils/response";
+import { projects, sessions } from "../db";
+import {
+  isGitRepo,
+  createWorktree,
+  removeWorktree,
+  deleteWorktreeBranch,
+  getWorktreeStatus,
+  isWorktreeClean,
+  commitWorktreeChanges,
+  getWorktreeCommits,
+  getWorktreeChangedFiles,
+  mergeWorktreeToBase,
+  abortMerge,
+  getConflictContent,
+  pruneWorktrees,
+} from "../utils/worktree";
+import { existsSync } from "fs";
+
+export async function handleWorktreeRoutes(
+  url: URL,
+  method: string,
+  req: Request
+): Promise<Response | null> {
+  // POST /api/sessions/:id/worktree - Create worktree for a session
+  const createMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/worktree$/);
+  if (createMatch && method === "POST") {
+    const sessionId = createMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (session.worktree_path) {
+      return json({ error: "Session already has a worktree" }, 400);
+    }
+
+    const project = projects.get(session.project_id);
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
+    if (!isGitRepo(project.path)) {
+      return json({ error: "Project is not a git repository" }, 400);
+    }
+
+    const body = await req.json();
+    const { description } = body;
+
+    if (!description || typeof description !== "string") {
+      return json({ error: "description is required" }, 400);
+    }
+
+    try {
+      const { path: worktreePath, branch, baseBranch } = createWorktree(
+        project.path,
+        description
+      );
+
+      // Update session with worktree info
+      sessions.setWorktree(sessionId, worktreePath, branch, baseBranch);
+
+      const updatedSession = sessions.get(sessionId);
+
+      return json({
+        session: updatedSession,
+        worktree: {
+          path: worktreePath,
+          branch,
+          baseBranch,
+        },
+      });
+    } catch (e: any) {
+      console.error("Create worktree error:", e);
+      return json({ error: e.message || "Failed to create worktree" }, 500);
+    }
+  }
+
+  // GET /api/sessions/:id/worktree/status - Get worktree status
+  const statusMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/worktree\/status$/
+  );
+  if (statusMatch && method === "GET") {
+    const sessionId = statusMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (!session.worktree_path) {
+      return json({ error: "Session does not have a worktree" }, 400);
+    }
+
+    if (!existsSync(session.worktree_path)) {
+      return json({
+        error: "Worktree path no longer exists",
+        needsCleanup: true,
+      }, 400);
+    }
+
+    try {
+      const status = getWorktreeStatus(session.worktree_path);
+      const commits = getWorktreeCommits(
+        session.worktree_path,
+        session.worktree_base_branch || "main"
+      );
+      const changedFiles = getWorktreeChangedFiles(
+        session.worktree_path,
+        session.worktree_base_branch || "main"
+      );
+
+      return json({
+        status,
+        commits,
+        changedFiles,
+        branch: session.worktree_branch,
+        baseBranch: session.worktree_base_branch,
+      });
+    } catch (e: any) {
+      console.error("Get worktree status error:", e);
+      return json({ error: e.message || "Failed to get worktree status" }, 500);
+    }
+  }
+
+  // DELETE /api/sessions/:id/worktree - Remove worktree from session
+  const deleteMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/worktree$/
+  );
+  if (deleteMatch && method === "DELETE") {
+    const sessionId = deleteMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (!session.worktree_path) {
+      return json({ error: "Session does not have a worktree" }, 400);
+    }
+
+    const project = projects.get(session.project_id);
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const force = body.force === true;
+    const deleteBranch = body.deleteBranch !== false; // default true
+
+    try {
+      // Check for uncommitted changes
+      if (!force && existsSync(session.worktree_path) && !isWorktreeClean(session.worktree_path)) {
+        return json({
+          error: "Worktree has uncommitted changes. Use force=true to delete anyway.",
+          hasUncommittedChanges: true,
+        }, 400);
+      }
+
+      // Remove git worktree
+      if (existsSync(session.worktree_path)) {
+        removeWorktree(project.path, session.worktree_path, force);
+      }
+
+      // Delete the branch
+      if (deleteBranch && session.worktree_branch) {
+        deleteWorktreeBranch(project.path, session.worktree_branch, force);
+      }
+
+      // Clear worktree info from session
+      sessions.clearWorktree(sessionId);
+
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Delete worktree error:", e);
+      return json({ error: e.message || "Failed to delete worktree" }, 500);
+    }
+  }
+
+  // POST /api/sessions/:id/worktree/commit - Commit changes in worktree
+  const commitMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/worktree\/commit$/
+  );
+  if (commitMatch && method === "POST") {
+    const sessionId = commitMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (!session.worktree_path || !existsSync(session.worktree_path)) {
+      return json({ error: "Session does not have a valid worktree" }, 400);
+    }
+
+    const body = await req.json();
+    const { message } = body;
+
+    if (!message || typeof message !== "string") {
+      return json({ error: "commit message is required" }, 400);
+    }
+
+    try {
+      const success = commitWorktreeChanges(session.worktree_path, message);
+
+      if (!success) {
+        return json({ error: "No changes to commit or commit failed" }, 400);
+      }
+
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Commit worktree error:", e);
+      return json({ error: e.message || "Failed to commit changes" }, 500);
+    }
+  }
+
+  // GET /api/sessions/:id/worktree/merge/preview - Preview merge
+  const previewMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/worktree\/merge\/preview$/
+  );
+  if (previewMatch && method === "GET") {
+    const sessionId = previewMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (!session.worktree_path || !existsSync(session.worktree_path)) {
+      return json({ error: "Session does not have a valid worktree" }, 400);
+    }
+
+    try {
+      const status = getWorktreeStatus(session.worktree_path);
+      const commits = getWorktreeCommits(
+        session.worktree_path,
+        session.worktree_base_branch || "main"
+      );
+      const changedFiles = getWorktreeChangedFiles(
+        session.worktree_path,
+        session.worktree_base_branch || "main"
+      );
+
+      return json({
+        canMerge: status.isClean || status.staged === 0,
+        hasUncommittedChanges: !status.isClean,
+        commits,
+        changedFiles,
+        totalChanges: changedFiles.length,
+        branch: session.worktree_branch,
+        baseBranch: session.worktree_base_branch,
+      });
+    } catch (e: any) {
+      console.error("Preview merge error:", e);
+      return json({ error: e.message || "Failed to preview merge" }, 500);
+    }
+  }
+
+  // POST /api/sessions/:id/worktree/merge - Merge worktree to base
+  const mergeMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/worktree\/merge$/
+  );
+  if (mergeMatch && method === "POST") {
+    const sessionId = mergeMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (!session.worktree_path || !existsSync(session.worktree_path)) {
+      return json({ error: "Session does not have a valid worktree" }, 400);
+    }
+
+    const project = projects.get(session.project_id);
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const { commitMessage, autoCommit = true, cleanupAfter = true } = body;
+
+    try {
+      console.log(`[Merge] Starting merge for session ${sessionId}`);
+      console.log(`[Merge] Worktree path: ${session.worktree_path}`);
+      console.log(`[Merge] Branch: ${session.worktree_branch} -> ${session.worktree_base_branch || "main"}`);
+      console.log(`[Merge] Project path: ${project.path}`);
+
+      // Auto-commit uncommitted changes if requested
+      if (autoCommit && !isWorktreeClean(session.worktree_path)) {
+        const message = commitMessage || `Changes from: ${session.title}`;
+        console.log(`[Merge] Auto-committing with message: ${message}`);
+        const committed = commitWorktreeChanges(session.worktree_path, message);
+        console.log(`[Merge] Commit result: ${committed}`);
+      }
+
+      // Perform the merge
+      console.log(`[Merge] Performing merge...`);
+      const result = mergeWorktreeToBase(
+        project.path,
+        session.worktree_branch!,
+        session.worktree_base_branch || "main"
+      );
+      console.log(`[Merge] Result:`, result);
+
+      if (!result.success && result.conflicts) {
+        // Return conflict info for resolution
+        const conflictDetails = result.conflicts.map((file) => ({
+          file,
+          content: getConflictContent(project.path, file),
+        }));
+
+        return json({
+          success: false,
+          hasConflicts: true,
+          conflicts: conflictDetails,
+        });
+      }
+
+      if (!result.success) {
+        console.error(`[Merge] Failed:`, result.error);
+        return json({ success: false, error: result.error }, 400);
+      }
+
+      // Cleanup after successful merge if requested
+      if (cleanupAfter) {
+        try {
+          removeWorktree(project.path, session.worktree_path, true);
+          deleteWorktreeBranch(project.path, session.worktree_branch!, true);
+          sessions.clearWorktree(sessionId);
+        } catch (cleanupError) {
+          console.error("Cleanup after merge failed:", cleanupError);
+        }
+      }
+
+      return json({
+        success: true,
+        merged: true,
+        cleanedUp: cleanupAfter,
+      });
+    } catch (e: any) {
+      console.error("Merge worktree error:", e);
+      return json({ error: e.message || "Failed to merge worktree" }, 500);
+    }
+  }
+
+  // POST /api/sessions/:id/worktree/merge/abort - Abort merge
+  const abortMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/worktree\/merge\/abort$/
+  );
+  if (abortMatch && method === "POST") {
+    const sessionId = abortMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    const project = projects.get(session.project_id);
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
+    try {
+      abortMerge(project.path);
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Abort merge error:", e);
+      return json({ error: e.message || "Failed to abort merge" }, 500);
+    }
+  }
+
+  // POST /api/projects/:id/worktrees/prune - Prune stale worktrees
+  const pruneMatch = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/worktrees\/prune$/
+  );
+  if (pruneMatch && method === "POST") {
+    const projectId = pruneMatch[1];
+    const project = projects.get(projectId);
+
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
+    if (!isGitRepo(project.path)) {
+      return json({ error: "Project is not a git repository" }, 400);
+    }
+
+    try {
+      pruneWorktrees(project.path);
+
+      // Also clean up sessions with orphaned worktrees
+      const worktreeSessions = sessions.listWithWorktrees(projectId);
+      const cleaned: string[] = [];
+
+      for (const sess of worktreeSessions) {
+        if (sess.worktree_path && !existsSync(sess.worktree_path)) {
+          sessions.clearWorktree(sess.id);
+          cleaned.push(sess.id);
+        }
+      }
+
+      return json({ success: true, cleanedSessions: cleaned });
+    } catch (e: any) {
+      console.error("Prune worktrees error:", e);
+      return json({ error: e.message || "Failed to prune worktrees" }, 500);
+    }
+  }
+
+  return null;
+}

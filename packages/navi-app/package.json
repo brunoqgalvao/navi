@@ -36,6 +36,8 @@
     "archiver": "^7.0.1",
     "diff": "^8.0.2",
     "highlight.js": "^11.11.1",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.0.0",
     "marked": "^17.0.1",
     "node-pty": "^1.1.0",
     "sql.js": "^1.13.0",

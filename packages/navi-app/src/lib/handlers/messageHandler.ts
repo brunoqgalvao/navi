@@ -340,6 +340,26 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         }
         break;
       }
+
+      // Session Hierarchy Events (Multi-Agent)
+      case "session:spawned":
+      case "session:status_changed":
+      case "session:escalated":
+      case "session:escalation_resolved":
+      case "session:delivered":
+      case "session:archived":
+      case "session:decision_logged":
+      case "session:artifact_created": {
+        // Forward to session hierarchy handler
+        callbacks.onSessionHierarchyEvent?.(msg as any);
+        break;
+      }
+
+      case "play_sound": {
+        const soundMsg = msg as { type: "play_sound"; sound: string };
+        callbacks.onPlaySound?.(soundMsg.sound);
+        break;
+      }
     }
   }
 
