@@ -23,6 +23,8 @@ import { handleProcessRoutes } from "./routes/processes";
 import { handleAnalyticsRoutes } from "./routes/analytics";
 import { handleDeployRoutes } from "./routes/deploy";
 import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
+import { handleExtensionRoutes } from "./routes/extensions";
+import { handleKanbanRoutes } from "./routes/kanban";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -315,6 +317,14 @@ const server = Bun.serve({
 
     // Background process routes
     response = await handleBackgroundProcessRoutes(url, method, req);
+    if (response) return response;
+
+    // Extension routes
+    response = await handleExtensionRoutes(url, method, req);
+    if (response) return response;
+
+    // Kanban routes
+    response = await handleKanbanRoutes(url, method, req);
     if (response) return response;
 
     // Ephemeral chat

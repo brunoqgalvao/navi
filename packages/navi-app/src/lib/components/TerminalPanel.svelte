@@ -4,6 +4,7 @@
   import { getWsUrl, getPtyWsUrl } from "../config";
   import type { Terminal } from "xterm";
   import type { FitAddon } from "xterm-addon-fit";
+  import TerminalCommandKModal from "./TerminalCommandKModal.svelte";
 
   interface Props {
     cwd?: string;
@@ -58,6 +59,11 @@
     /permission denied/i,
   ];
 
+  // Command K modal state
+  let showCommandKModal = $state(false);
+  let commandKAnchorX = $state(0);
+  let commandKAnchorY = $state(0);
+
   function captureOutput(data: string) {
     const lines = data.split('\n');
     outputBuffer = [...outputBuffer, ...lines].slice(-MAX_BUFFER_LINES);
@@ -78,6 +84,59 @@
   function clearBuffer() {
     outputBuffer = [];
     hasRecentError = false;
+  }
+
+  // Command K modal handlers
+  function openCommandKModal() {
+    showCommandKModal = true;
+  }
+
+  function closeCommandKModal() {
+    showCommandKModal = false;
+    terminal?.focus();
+  }
+
+  function handleCommandKRun(command: string) {
+    runCommand(command);
+  }
+
+  function handleCommandKPaste(command: string) {
+    pasteCommand(command);
+    terminal?.focus();
+  }
+
+  function getTerminalContext(): string {
+    return outputBuffer.slice(-50).join('\n');
+  }
+
+  // Keyboard shortcut handler for Cmd+K
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    // Only handle if terminal panel is focused/active
+    if (!terminalContainer?.contains(document.activeElement) && document.activeElement !== terminalContainer) {
+      return;
+    }
+
+    if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Get cursor position from terminal for tooltip placement
+      if (terminalContainer) {
+        const rect = terminalContainer.getBoundingClientRect();
+        // Position near the bottom-center of the terminal
+        commandKAnchorX = rect.left + rect.width / 2 - 210; // Half of tooltip width
+        commandKAnchorY = rect.top + rect.height - 120; // Near bottom
+      }
+
+      openCommandKModal();
+    }
+  }
+
+  // Also handle button click with cursor tracking
+  function handleAIButtonClick(e: MouseEvent) {
+    commandKAnchorX = e.clientX - 210; // Center tooltip on click
+    commandKAnchorY = e.clientY + 20; // Below the button
+    openCommandKModal();
   }
 
   function setDataHandler(handler: (data: string) => void) {
@@ -741,10 +800,12 @@
       initTerminal();
     });
     window.addEventListener("resize", handleResize);
+    window.addEventListener("keydown", handleGlobalKeydown);
   });
 
   onDestroy(() => {
     window.removeEventListener("resize", handleResize);
+    window.removeEventListener("keydown", handleGlobalKeydown);
     dataDisposable?.dispose();
     resizeDisposable?.dispose();
     dataDisposable = null;
@@ -819,6 +880,19 @@
       {/if}
     </div>
     <div class="terminal-actions">
+      <!-- AI Command Helper Button -->
+      <button
+        class="terminal-btn ai-helper"
+        onclick={handleAIButtonClick}
+        title="Terminal AI (⌘K)"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2a4 4 0 0 1 4 4v1a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V6a4 4 0 0 1 4-4z"></path>
+          <path d="M8 8v2a4 4 0 0 0 8 0V8"></path>
+          <path d="M12 14v8"></path>
+          <path d="M8 22h8"></path>
+        </svg>
+      </button>
       {#if execId}
         <button class="terminal-btn stop" onclick={killCurrentProcess} title="Stop process">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -897,6 +971,18 @@
     ></div>
   </div>
 </div>
+
+<!-- Command+K Inline Tooltip -->
+<TerminalCommandKModal
+  open={showCommandKModal}
+  onClose={closeCommandKModal}
+  onRunCommand={handleCommandKRun}
+  onPasteCommand={handleCommandKPaste}
+  terminalContext={getTerminalContext()}
+  cwd={cwd}
+  anchorX={commandKAnchorX}
+  anchorY={commandKAnchorY}
+/>
 
 <style>
   .terminal-panel {
@@ -1068,6 +1154,15 @@
 
   :global(.terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover) {
     background: #444b6a;
+  }
+
+  .terminal-btn.ai-helper {
+    color: #bb9af7;
+  }
+
+  .terminal-btn.ai-helper:hover {
+    background: rgba(187, 154, 247, 0.15);
+    color: #bb9af7;
   }
 
   .terminal-btn.send-claude {

@@ -9,9 +9,11 @@
   import GenerativeUI from "./experimental/GenerativeUI.svelte";
   import CopyButton from "./CopyButton.svelte";
   import TodoListPreview from "./tools/TodoListPreview.svelte";
+  import EmbeddedMarkdownViewer from "./EmbeddedMarkdownViewer.svelte";
   import { processGenerativeUIContent } from "../generative-ui";
   import { parseMediaContent } from "../media-parser";
   import { parseCopyableContent } from "../copyable-parser";
+  import { parseMarkdownFileContent } from "../markdown-file-parser";
   import CopyableText from "./CopyableText.svelte";
 
   interface Props {
@@ -22,6 +24,7 @@
     toolResults?: Map<string, ContentBlock>;
     onRollback?: () => void;
     onFork?: () => void;
+    onDelete?: () => void;
     onPreview?: (path: string) => void;
     onRunInTerminal?: (command: string) => void;
     onSendToClaude?: (context: string) => void;
@@ -39,6 +42,7 @@
     toolResults = new Map(),
     onRollback,
     onFork,
+    onDelete,
     onPreview,
     onRunInTerminal,
     onSendToClaude,
@@ -49,6 +53,7 @@
   }: Props = $props();
 
   let showMenu = $state(false);
+  let showDeleteConfirm = $state(false);
   let expandedBlocks = $state<Set<number>>(new Set());
   let openSubagentModal = $state<{ toolUseId: string; description: string; subagentType: string } | null>(null);
 
@@ -133,8 +138,9 @@
   function renderTextContent(text: string) {
     const copyableResult = parseCopyableContent(text);
     const mediaResult = parseMediaContent(copyableResult.processedContent);
-    const genuiResult = processGenerativeUIContent(mediaResult.processedContent);
-    return { copyableResult, mediaResult, genuiResult };
+    const markdownFileResult = parseMarkdownFileContent(mediaResult.processedContent);
+    const genuiResult = processGenerativeUIContent(markdownFileResult.processedContent);
+    return { copyableResult, mediaResult, markdownFileResult, genuiResult };
   }
 
   const copyText = $derived(getCopyText());
@@ -208,6 +214,26 @@
                 </svg>
                 Fork from here
               </button>
+              <div class="border-t border-gray-100 my-1"></div>
+              <button onclick={() => { showDeleteConfirm = true; showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+                Delete message
+              </button>
+            </div>
+          {/if}
+          {#if showDeleteConfirm}
+            <div class="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-50">
+              <p class="text-sm text-gray-700 mb-3">Delete this message?</p>
+              <div class="flex justify-end gap-2">
+                <button onclick={() => showDeleteConfirm = false} class="px-2 py-1 text-xs text-gray-600 hover:text-gray-800">
+                  Cancel
+                </button>
+                <button onclick={() => { onDelete?.(); showDeleteConfirm = false; }} class="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">
+                  Delete
+                </button>
+              </div>
             </div>
           {/if}
         </div>
@@ -312,6 +338,15 @@
             <div class="my-3">
               <CopyableText text={copyableItem.text} label={copyableItem.label} />
             </div>
+          {/each}
+          {#each rendered.markdownFileResult.items as mdFileItem, idx (idx)}
+            <EmbeddedMarkdownViewer
+              item={mdFileItem}
+              {basePath}
+              {renderMarkdown}
+              {onPreview}
+              {onSendToClaude}
+            />
           {/each}
         </div>
 

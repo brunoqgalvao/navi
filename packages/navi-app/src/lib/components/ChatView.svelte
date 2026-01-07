@@ -43,6 +43,7 @@
     onCancelEdit?: () => void;
     onRollback?: (msgId: string) => void;
     onFork?: (msgId: string) => void;
+    onDelete?: (msgId: string) => void;
     onPreview?: (path: string) => void;
     onRunInTerminal?: (command: string) => void;
     onSendToClaude?: (context: string) => void;
@@ -82,6 +83,7 @@
     onCancelEdit,
     onRollback,
     onFork,
+    onDelete,
     onPreview,
     onRunInTerminal,
     onSendToClaude,
@@ -224,6 +226,7 @@
             onCancelEdit={() => onCancelEdit?.()}
             onRollback={() => onRollback?.(msg.id)}
             onFork={() => onFork?.(msg.id)}
+            onDelete={() => onDelete?.(msg.id)}
             {onPreview}
           />
         {:else if msg.role === 'system'}
@@ -241,6 +244,7 @@
             toolResults={allToolResults}
             onRollback={() => onRollback?.(msg.id)}
             onFork={() => onFork?.(msg.id)}
+            onDelete={() => onDelete?.(msg.id)}
             {onPreview}
             {onRunInTerminal}
             {onSendToClaude}

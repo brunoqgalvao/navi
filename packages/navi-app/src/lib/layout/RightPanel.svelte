@@ -3,7 +3,7 @@
    * RightPanel - Layout component for the right side panel
    *
    * Pure layout concerns:
-   * - Panel tabs (Files+Preview, Browser, Git, Terminal)
+   * - Panel tabs (Files+Preview, Browser, Git, Terminal, Kanban)
    * - Resize handle
    * - Content switching
    * - Split view for Files + Preview (collapsible file list)
@@ -13,10 +13,12 @@
   import FileBrowser from "../FileBrowser.svelte";
   import Preview from "../Preview.svelte";
   import { GitPanel } from "../features/git";
+  import { KanbanPanel } from "../features/kanban";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
+  import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban";
 
   interface Props {
     mode: PanelMode;
@@ -35,6 +37,7 @@
     onBrowserUrlChange: (url: string) => void;
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
+    onNavigateToSession?: (sessionId: string, prompt?: string) => void;
   }
 
   let {
@@ -54,7 +57,11 @@
     onBrowserUrlChange,
     onTerminalRef,
     onTerminalSendToClaude,
+    onNavigateToSession,
   }: Props = $props();
+
+  // Extension settings modal
+  let showExtensionSettings = $state(false);
 
   // File list resizable width and collapse state
   const MIN_FILE_LIST_WIDTH = 180;
@@ -128,47 +135,27 @@
 </div>
 
 <div style="width: {width}px" class="flex flex-col border-l border-gray-200 min-w-[400px]">
-  <!-- Panel Header with Tabs -->
+  <!-- Panel Header with Extension Tabs -->
   <div class="h-10 px-2 border-b border-gray-200 flex items-center gap-1 bg-gray-50/50 shrink-0">
-    <button
-      onclick={() => onModeChange("files")}
-      class={`px-3 py-1 text-xs font-medium rounded transition-colors ${showSplitView ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
-    >
-      Files
-    </button>
-    <button
-      onclick={() => onModeChange("browser")}
-      class={`px-3 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${mode === 'browser' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
-    >
-      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
-      Browser
-    </button>
-    <button
-      onclick={() => onModeChange("git")}
-      class={`px-3 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${mode === 'git' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
-    >
-      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-      Git
-    </button>
-    <button
-      onclick={() => onModeChange("terminal")}
-      class={`px-3 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${mode === 'terminal' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
-    >
-      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-      Terminal
-    </button>
-    <button
-      onclick={() => onModeChange("processes")}
-      class={`px-3 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${mode === 'processes' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
-    >
-      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-      Processes
-    </button>
-    <div class="flex-1"></div>
-    <button onclick={onClose} class="p-1 text-gray-400 hover:text-gray-600 transition-colors" title="Close">
+    <ExtensionTabs
+      {projectId}
+      currentMode={mode}
+      onModeChange={(m) => onModeChange(m as PanelMode)}
+      onOpenSettings={() => showExtensionSettings = true}
+    />
+    <button onclick={onClose} class="p-1 text-gray-400 hover:text-gray-600 transition-colors shrink-0" title="Close">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
     </button>
   </div>
+
+  <!-- Extension Settings Modal -->
+  {#if projectId}
+    <ExtensionSettingsModal
+      open={showExtensionSettings}
+      onClose={() => showExtensionSettings = false}
+      {projectId}
+    />
+  {/if}
 
   <!-- Panel Content -->
   <div class="flex-1 overflow-hidden flex flex-col relative">
@@ -257,6 +244,14 @@
             onBrowserUrlChange(url);
             onModeChange("browser");
           }}
+        />
+      </div>
+    {:else if mode === "kanban" && projectId}
+      <!-- Kanban panel - full width -->
+      <div class="flex-1 flex flex-col w-full overflow-hidden">
+        <KanbanPanel
+          {projectId}
+          {onNavigateToSession}
         />
       </div>
     {/if}

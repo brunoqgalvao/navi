@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <defs>
+    <linearGradient id="bg6" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="100%" style="stop-color:#111"/>
+    </linearGradient>
+    <linearGradient id="gold6" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24"/>
+      <stop offset="100%" style="stop-color:#d97706"/>
+    </linearGradient>
+    <linearGradient id="glow6" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:#fbbf24;stop-opacity:0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1080" height="1080" fill="url(#bg6)"/>
+
+  <g opacity="0.03">
+    <pattern id="dots6" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="12" cy="12" r="1" fill="#fff"/>
+    </pattern>
+    <rect width="1080" height="1080" fill="url(#dots6)"/>
+  </g>
+
+  <!-- Slide indicator -->
+  <g transform="translate(540, 80)">
+    <circle cx="-30" r="5" fill="#333"/>
+    <circle cx="0" r="5" fill="#333"/>
+    <circle cx="30" r="5" fill="#333"/>
+    <circle cx="60" r="5" fill="#fbbf24"/>
+  </g>
+
+  <!-- Glow effect -->
+  <ellipse cx="540" cy="400" rx="300" ry="200" fill="url(#glow6)"/>
+
+  <!-- Logo large -->
+  <g transform="translate(540, 300)">
+    <text x="0" y="0" font-family="monospace" font-size="140" fill="#2a2a2a" text-anchor="middle">&lt;/&gt;</text>
+  </g>
+
+  <!-- Brand name -->
+  <text x="540" y="460" font-family="system-ui, -apple-system, sans-serif" font-size="80" font-weight="700" fill="#fff" text-anchor="middle" letter-spacing="-4">
+    navi
+  </text>
+
+  <!-- Tagline -->
+  <text x="540" y="540" font-family="system-ui, -apple-system, sans-serif" font-size="28" fill="#888" text-anchor="middle">
+    The desktop app for Claude Code
+  </text>
+
+  <!-- Feature pills -->
+  <g transform="translate(540, 620)">
+    <g transform="translate(-300, 0)">
+      <rect width="180" height="44" rx="22" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+      <text x="90" y="28" font-family="system-ui, sans-serif" font-size="14" fill="#888" text-anchor="middle">Session Management</text>
+    </g>
+    <g transform="translate(-90, 0)">
+      <rect width="180" height="44" rx="22" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+      <text x="90" y="28" font-family="system-ui, sans-serif" font-size="14" fill="#888" text-anchor="middle">Custom Agents</text>
+    </g>
+    <g transform="translate(120, 0)">
+      <rect width="180" height="44" rx="22" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+      <text x="90" y="28" font-family="system-ui, sans-serif" font-size="14" fill="#888" text-anchor="middle">Usage Tracking</text>
+    </g>
+  </g>
+
+  <!-- CTA Button -->
+  <g transform="translate(540, 780)">
+    <rect x="-180" y="-36" width="360" height="72" rx="16" fill="url(#gold6)"/>
+    <text x="0" y="8" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="600" fill="#0a0a0a" text-anchor="middle">
+      Download for Mac
+    </text>
+  </g>
+
+  <!-- Platform note -->
+  <text x="540" y="880" font-family="system-ui, sans-serif" font-size="14" fill="#555" text-anchor="middle">
+    macOS 12+ (Apple Silicon)
+  </text>
+
+  <!-- Early access badge -->
+  <g transform="translate(540, 940)">
+    <rect x="-80" y="-16" width="160" height="32" rx="16" fill="#fbbf24" fill-opacity="0.1" stroke="#fbbf24" stroke-width="1" stroke-opacity="0.3"/>
+    <circle cx="-50" cy="0" r="4" fill="#fbbf24"/>
+    <text x="10" y="5" font-family="system-ui, sans-serif" font-size="12" fill="#fbbf24" text-anchor="middle">Early Access</text>
+  </g>
+
+  <!-- Bottom tagline -->
+  <text x="540" y="1020" font-family="system-ui, -apple-system, sans-serif" font-size="18" fill="#444" text-anchor="middle" font-style="italic">
+    Already on it.
+  </text>
+</svg>

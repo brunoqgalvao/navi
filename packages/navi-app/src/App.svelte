@@ -106,6 +106,7 @@
   import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
   import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
+  import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings, WorkspaceFolder } from "./lib/api";
@@ -514,8 +515,10 @@
   let showBrowser = $state(false);
   let showGitPanel = $state(false);
   let showTerminal = $state(false);
+  let showKanban = $state(false);
+  let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban">("preview");
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
   let projectFileIndex = $state<Map<string, string>>(new Map());
@@ -774,9 +777,12 @@
     // Set up global error handlers
     const cleanupErrorHandlers = setupGlobalErrorHandlers();
 
+    // Initialize extension registry with default extensions
+    initializeRegistry();
+
     startSidecar().then(() => {
       serverReady = true;
-      
+
       loadProjects();
       loadRecentChatsAction();
       loadFolders();
@@ -1042,7 +1048,10 @@
     loadProjectContext(project);
     loadClaudeMd(project.path);
     loadProjectCost(project.id);
-    
+
+    // Load extension settings for this project
+    projectExtensions.loadForProject(project.id);
+
     if (!$tour.completedTours.includes("project")) {
       setTimeout(() => tour.start("project"), 500);
     }
@@ -1991,6 +2000,7 @@
     showBrowser = false;
     showGitPanel = false;
     showTerminal = false;
+    showKanban = false;
     previewSource = "";
     terminalInitialCommand = "";
   }
@@ -2011,6 +2021,35 @@
       showTerminal = true;
       rightPanelMode = "terminal";
     }
+  }
+
+  /**
+   * Handle extension toolbar clicks - opens the corresponding panel
+   */
+  function handleExtensionClick(mode: string) {
+    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban";
+    const panelMode = mode as PanelMode;
+
+    // Set the right panel mode and show flag based on extension
+    switch (panelMode) {
+      case "files":
+      case "preview":
+        showFileBrowser = true;
+        break;
+      case "browser":
+        showBrowser = true;
+        break;
+      case "git":
+        showGitPanel = true;
+        break;
+      case "terminal":
+        showTerminal = true;
+        break;
+      case "kanban":
+        showKanban = true;
+        break;
+    }
+    rightPanelMode = panelMode;
   }
 
   function renderMarkdown(content: string): string {
@@ -2308,6 +2347,43 @@
     closeMessageMenu();
   }
 
+  async function deleteMessage(msgId: string) {
+    if (!$session.sessionId) return;
+
+    try {
+      // Find the message in current messages
+      const msg = currentMessages.find(m => m.id === msgId);
+      if (!msg) {
+        console.error("[Delete] Message not found in local state:", msgId);
+        return;
+      }
+
+      // Call the API to delete
+      await api.messages.delete(msgId);
+
+      // Remove the message from local state
+      sessionMessages.update(map => {
+        const msgs = map.get($session.sessionId!) || [];
+        const filtered = msgs.filter(m => m.id !== msgId);
+        map.set($session.sessionId!, filtered);
+        return new Map(map);
+      });
+    } catch (e: any) {
+      console.error("[Delete] Failed to delete message:", e);
+      if (e.message?.includes("not found")) {
+        // Message wasn't saved to DB yet, just remove from local state
+        sessionMessages.update(map => {
+          const msgs = map.get($session.sessionId!) || [];
+          const filtered = msgs.filter(m => m.id !== msgId);
+          map.set($session.sessionId!, filtered);
+          return new Map(map);
+        });
+      } else {
+        showError({ title: "Delete failed", message: e.message || "Could not delete message" });
+      }
+    }
+  }
+
   async function forkFromMessage(msgId: string) {
     console.log("[Fork] Starting fork from message:", msgId, "session:", $session.sessionId);
     if (!$session.sessionId) {
@@ -2450,7 +2526,7 @@
     {#if currentProject}
     <div class="absolute top-3 right-3 z-20 flex gap-1">
       {#if $advancedMode}
-      <button 
+      <button
         onclick={() => showDebugInfo = true}
         class={`p-2 border rounded-lg shadow-sm transition-all group ${showDebugInfo ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
         title="Session Debug Info"
@@ -2458,35 +2534,23 @@
         <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
       </button>
       {/if}
-      <button 
-        onclick={toggleFileBrowser}
-        class={`p-2 border rounded-lg shadow-sm transition-all group ${showFileBrowser && rightPanelMode === 'files' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
-        title="Browse Files"
-      >
-        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-      </button>
-      <button
-        onclick={() => { showBrowser = true; rightPanelMode = 'browser'; }}
-        class={`p-2 border rounded-lg shadow-sm transition-all group ${showBrowser && rightPanelMode === 'browser' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
-        title="Open Browser"
-      >
-        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
-      </button>
-      <button
-        onclick={toggleGitPanel}
-        class={`p-2 border rounded-lg shadow-sm transition-all group ${showGitPanel && rightPanelMode === 'git' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
-        title="Git Panel (Cmd+G)"
-      >
-        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-      </button>
-      <button
-        onclick={toggleTerminal}
-        class={`p-2 border rounded-lg shadow-sm transition-all group ${showTerminal && rightPanelMode === 'terminal' ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
-        title="Terminal"
-      >
-        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-      </button>
+      <ExtensionToolbar
+        projectId={currentProject.id}
+        currentMode={rightPanelMode}
+        maxVisible={4}
+        onExtensionClick={handleExtensionClick}
+        onOpenSettings={() => showExtensionSettings = true}
+      />
     </div>
+    {/if}
+
+    <!-- Extension Settings Modal -->
+    {#if currentProject}
+      <ExtensionSettingsModal
+        open={showExtensionSettings}
+        onClose={() => showExtensionSettings = false}
+        projectId={currentProject.id}
+      />
     {/if}
 
     {#if !currentProject}
@@ -2549,6 +2613,7 @@
               onCancelEdit={cancelEditMessage}
               onRollback={rollbackToMessage}
               onFork={forkFromMessage}
+              onDelete={deleteMessage}
               onPreview={openPreview}
               onRunInTerminal={handleExecCommand}
               onSendToClaude={handleBashSendToClaude}
@@ -2635,7 +2700,7 @@
   </main>
 
   <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal}
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -2653,6 +2718,7 @@
         else if (mode === "browser") showBrowser = true;
         else if (mode === "git") showGitPanel = true;
         else if (mode === "terminal") showTerminal = true;
+        else if (mode === "kanban") showKanban = true;
       }}
       onClose={closeRightPanel}
       onStartResize={startResizingRight}
@@ -2660,6 +2726,16 @@
       onBrowserUrlChange={(url) => browserUrl = url}
       onTerminalRef={(ref) => terminalRef = ref}
       onTerminalSendToClaude={handleTerminalSendToClaude}
+      onNavigateToSession={(sessionId, prompt) => {
+        // Navigate to the session
+        session.setSession($session.projectId!, sessionId);
+        // If there's a prompt, set it as the input text
+        if (prompt) {
+          inputText = prompt;
+        }
+        // Close the right panel to focus on the chat
+        closeRightPanel();
+      }}
     />
   {/if}
 

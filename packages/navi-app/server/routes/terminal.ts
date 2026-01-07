@@ -272,6 +272,11 @@ export async function handleTerminalRoutes(
   method: string,
   req: Request
 ): Promise<Response | null> {
+  // Terminal AI command generation
+  if (url.pathname === "/api/terminal/generate-command" && method === "POST") {
+    return handleTerminalGenerateCommand(req);
+  }
+
   if (url.pathname === "/api/terminal/exec" && method === "POST") {
     const body = await req.json();
     const { command, cwd = homedir(), env } = body;
@@ -828,3 +833,127 @@ export function stopPeriodicCleanup() {
 
 // Auto-start periodic cleanup when module loads
 startPeriodicCleanup();
+
+/**
+ * Handle terminal command generation endpoint
+ * POST /api/terminal/generate-command
+ */
+export async function handleTerminalGenerateCommand(req: Request): Promise<Response> {
+  try {
+    const body = await req.json();
+    const { prompt, context = "", cwd = "" } = body;
+
+    if (!prompt) {
+      return json({ error: "Prompt is required" }, 400);
+    }
+
+    const systemPrompt = `You are a terminal command expert. Generate shell commands based on user requests.
+
+IMPORTANT RULES:
+1. Return ONLY a valid shell command - no explanations in the command itself
+2. Use standard Unix/macOS commands (bash-compatible)
+3. Be safe - never suggest destructive commands without warnings
+4. Consider the current working directory if provided
+5. If the user's request is ambiguous, provide the most common interpretation
+
+Response format (JSON):
+{
+  "command": "the shell command to run",
+  "explanation": "brief explanation of what the command does"
+}
+
+${cwd ? `Current directory: ${cwd}` : ""}
+${context ? `Recent terminal output for context:\n\`\`\`\n${context.slice(-2000)}\n\`\`\`` : ""}`;
+
+    // Use direct API call for speed (no tool use needed)
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      // Try to get from global settings
+      const { globalSettings } = await import("../db");
+      const storedKey = globalSettings.get("anthropicApiKey");
+      if (!storedKey) {
+        return json({ error: "No API key configured" }, 500);
+      }
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": storedKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-3-haiku-20240307",
+          max_tokens: 512,
+          system: systemPrompt,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || "API error");
+      }
+
+      const data = await res.json();
+      const responseText = data.content?.[0]?.text || "";
+
+      // Parse JSON response
+      try {
+        const parsed = JSON.parse(responseText);
+        return json({
+          command: parsed.command || "",
+          explanation: parsed.explanation || "",
+        });
+      } catch {
+        // If not JSON, treat as plain command
+        return json({
+          command: responseText.trim(),
+          explanation: "",
+        });
+      }
+    }
+
+    // Use environment API key
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-3-haiku-20240307",
+        max_tokens: 512,
+        system: systemPrompt,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || "API error");
+    }
+
+    const data = await res.json();
+    const responseText = data.content?.[0]?.text || "";
+
+    // Parse JSON response
+    try {
+      const parsed = JSON.parse(responseText);
+      return json({
+        command: parsed.command || "",
+        explanation: parsed.explanation || "",
+      });
+    } catch {
+      // If not JSON, treat as plain command
+      return json({
+        command: responseText.trim(),
+        explanation: "",
+      });
+    }
+  } catch (e: any) {
+    console.error("[Terminal] Generate command error:", e);
+    return json({ error: e.message || "Failed to generate command" }, 500);
+  }
+}

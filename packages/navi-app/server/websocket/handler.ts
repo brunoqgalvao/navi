@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb } from "../db";
+import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards } from "../db";
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
 import { generateChatTitle } from "../services/title-generator";
 import { hasMessageContent, shouldPersistUserMessage, safeSend } from "../services/message-helpers";
@@ -217,6 +217,51 @@ function sendToSession(sessionId: string | undefined, payload: unknown) {
     // Don't fall back to a different websocket as that causes cross-session leaks
     console.warn(`[sendToSession] No active ws for session ${sessionId}, dropping message`);
   }
+}
+
+/**
+ * Update kanban card when agent starts working
+ */
+function setKanbanCardExecuting(sessionId: string, statusMessage?: string) {
+  const card = kanbanCards.getBySession(sessionId);
+  if (card) {
+    kanbanCards.updateStatus(card.id, "execute", statusMessage);
+    kanbanCards.setBlocked(card.id, false);
+    broadcastKanbanUpdate(card.id);
+  }
+}
+
+/**
+ * Set kanban card blocked flag (permission/input needed)
+ */
+function setKanbanCardBlocked(sessionId: string, statusMessage?: string) {
+  const card = kanbanCards.getBySession(sessionId);
+  if (card) {
+    kanbanCards.setBlocked(card.id, true, statusMessage);
+    broadcastKanbanUpdate(card.id);
+  }
+}
+
+/**
+ * Update kanban card to review status when agent completes
+ */
+function setKanbanCardReview(sessionId: string, statusMessage?: string) {
+  const card = kanbanCards.getBySession(sessionId);
+  if (card) {
+    kanbanCards.updateStatus(card.id, "review", statusMessage);
+    kanbanCards.setBlocked(card.id, false);
+    broadcastKanbanUpdate(card.id);
+  }
+}
+
+/**
+ * Broadcast kanban card update to all clients
+ */
+function broadcastKanbanUpdate(cardId: string) {
+  broadcastToClients({
+    type: "kanban_card_updated",
+    card: kanbanCards.get(cardId),
+  });
 }
 
 function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
@@ -475,6 +520,8 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
           };
           if (sessionId) {
             pendingPermissions.set(msg.requestId, { sessionId, payload });
+            // Update kanban card to blocked (waiting for permission)
+            setKanbanCardBlocked(sessionId, `Needs permission: ${msg.toolName}`);
           }
           sendToSession(sessionId, payload);
         } else if (msg.type === "ask_user_question") {
@@ -494,6 +541,8 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
               msg.requestId,
               JSON.stringify(msg.questions)
             );
+            // Update kanban card to blocked (waiting for user input)
+            setKanbanCardBlocked(sessionId, "Needs input from user");
           }
           sendToSession(sessionId, payload);
         } else if (msg.type === "complete") {
@@ -611,6 +660,8 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
           sendToSession(sessionId, { type: "done", uiSessionId: sessionId, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
           if (sessionId) {
+            // Update kanban card to waiting_review (agent completed, needs user review)
+            setKanbanCardReview(sessionId, "Ready for review");
             activeProcesses.delete(sessionId);
             deleteStreamCapture(sessionId);
           }
@@ -620,6 +671,10 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
             uiSessionId: sessionId,
             error: msg.error,
           });
+          if (sessionId) {
+            // Update kanban card to blocked on error
+            setKanbanCardBlocked(sessionId, `Error: ${msg.error}`);
+          }
           if (sessionId) {
             activeProcesses.delete(sessionId);
             deleteStreamCapture(sessionId);
@@ -680,6 +735,10 @@ export function createWebSocketHandlers() {
 
         if (data.type === "query" && data.prompt) {
           console.log(`[${data.sessionId}] Starting query: "${data.prompt.slice(0, 50)}..."`);
+          // Update kanban card to in_progress when query starts
+          if (data.sessionId) {
+            setKanbanCardExecuting(data.sessionId, "Agent working...");
+          }
           handleQueryWithProcess(ws, data);
         } else if (data.type === "abort" && data.sessionId) {
           const active = activeProcesses.get(data.sessionId);

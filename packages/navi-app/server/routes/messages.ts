@@ -86,6 +86,7 @@ export async function handleMessageRoutes(url: URL, method: string, req: Request
     }
     if (method === "DELETE") {
       messages.delete(messageId);
+      searchIndex.removeMessage(messageId);
       return json({ success: true });
     }
   }
