@@ -213,15 +213,30 @@ Please resolve these conflicts now and complete the merge.`;
         </div>
       {:else if preview}
         <div class="preview-content">
-          <div class="summary-card">
+          <div class="summary-card" class:blocked={preview.mainHasUncommittedChanges}>
             <div class="summary-header">
-              <h3>Ready to merge</h3>
+              <h3>{preview.mainHasUncommittedChanges ? "Merge blocked" : "Ready to merge"}</h3>
               <p class="summary-subtitle">
                 Merge <strong>{branch.replace("session/", "")}</strong> into <strong>{baseBranch}</strong>
               </p>
             </div>
 
-            {#if preview.hasUncommittedChanges}
+            {#if preview.mainHasUncommittedChanges}
+              <div class="blocker-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+                <div class="blocker-content">
+                  <span class="blocker-title">Main branch has uncommitted changes</span>
+                  <span class="blocker-description">
+                    Commit or stash your changes on <strong>{baseBranch}</strong> before merging.
+                    {#if preview.mainRepoChanges}
+                      ({preview.mainRepoChanges.staged} staged, {preview.mainRepoChanges.modified} modified, {preview.mainRepoChanges.untracked} untracked)
+                    {/if}
+                  </span>
+                </div>
+              </div>
+            {:else if preview.hasUncommittedChanges}
               <div class="warning-box">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />

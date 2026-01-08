@@ -1085,6 +1085,8 @@ export interface WorktreeInfo {
 export interface MergePreview {
   canMerge: boolean;
   hasUncommittedChanges: boolean;
+  mainHasUncommittedChanges?: boolean;
+  mainRepoChanges?: { staged: number; modified: number; untracked: number } | null;
   commits: WorktreeCommit[];
   changedFiles: WorktreeChangedFile[];
   totalChanges: number;
