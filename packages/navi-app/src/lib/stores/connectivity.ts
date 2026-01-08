@@ -29,9 +29,12 @@ const initialState: ConnectivityState = {
 
 const { subscribe, set, update } = writable<ConnectivityState>(initialState);
 
+// Internal readable store for derived stores to use
+const internalStore = { subscribe };
+
 // Derived status for easy consumption
-export const connectionStatus = derived<typeof connectivityStore, ConnectionStatus>(
-  { subscribe },
+export const connectionStatus = derived<typeof internalStore, ConnectionStatus>(
+  internalStore,
   ($state) => {
     if ($state.checking && $state.lastCheck === null) return "checking";
     if (!$state.browserOnline) return "offline";

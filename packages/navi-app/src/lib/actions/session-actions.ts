@@ -13,7 +13,7 @@ import { getDefaultModel } from "./data-loaders";
 import { showError, showSuccess } from "../errorHandler";
 
 // Default page size for progressive message loading
-const MESSAGE_PAGE_SIZE = 50;
+const MESSAGE_PAGE_SIZE = 20;
 
 export interface SessionActionCallbacks {
   setSidebarSessions: (sessions: Session[]) => void;

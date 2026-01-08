@@ -3010,6 +3010,8 @@
               onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
               onSuggestionClick={(prompt) => { inputText = prompt; }}
               {projectContext}
+              projectDescription={currentProject?.description}
+              isGitRepo={currentProjectIsGitRepo}
               worktreeBranch={currentSessionData?.worktree_branch}
               worktreeBaseBranch={currentSessionData?.worktree_base_branch}
               sessionTitle={currentSessionData?.title || ''}

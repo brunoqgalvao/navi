@@ -71,6 +71,9 @@
     onSuggestionClick?: (prompt: string) => void;
     // Project context for suggestions
     projectContext?: { summary: string; suggestions: string[] } | null;
+    // Project info for empty state
+    projectDescription?: string | null;
+    isGitRepo?: boolean;
     // Worktree mode
     worktreeBranch?: string | null;
     worktreeBaseBranch?: string | null;
@@ -123,6 +126,8 @@
     onOpenProcesses,
     onSuggestionClick,
     projectContext = null,
+    projectDescription = null,
+    isGitRepo = false,
     worktreeBranch = null,
     worktreeBaseBranch = null,
     sessionTitle = "",
@@ -287,7 +292,7 @@
     {/if}
 
     {#if messages.length === 0 && !isStreaming && emptyState !== "none"}
-      <EmptyStateWelcome {onSuggestionClick} {projectContext} />
+      <EmptyStateWelcome {onSuggestionClick} {projectContext} {projectDescription} {isGitRepo} />
     {/if}
 
     {#each getVisibleMessages() as msg, idx (msg.id)}

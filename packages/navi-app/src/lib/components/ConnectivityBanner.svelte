@@ -4,22 +4,25 @@
 
   let checking = $state(false);
 
-  const statusConfig: Record<ConnectionStatus, { message: string; icon: string; color: string }> = {
-    online: { message: "", icon: "", color: "" },
+  const statusConfig: Record<ConnectionStatus, { message: string; icon: string; color: string; textColor: string }> = {
+    online: { message: "", icon: "", color: "", textColor: "" },
     offline: {
       message: "No internet connection",
       icon: "wifi-off",
-      color: "bg-red-600",
+      color: "bg-red-100 border-b border-red-200",
+      textColor: "text-red-700",
     },
     "server-down": {
       message: "Can't reach Navi server",
       icon: "server-off",
-      color: "bg-amber-600",
+      color: "bg-amber-100 border-b border-amber-200",
+      textColor: "text-amber-700",
     },
     checking: {
       message: "Checking connection...",
       icon: "loader",
-      color: "bg-gray-600",
+      color: "bg-gray-100 border-b border-gray-200",
+      textColor: "text-gray-600",
     },
   };
 
@@ -36,7 +39,7 @@
 
 {#if show}
   <div
-    class="fixed top-0 left-0 right-0 z-50 {config.color} text-white px-4 py-2 flex items-center justify-center gap-3 text-sm shadow-lg"
+    class="fixed top-0 left-0 right-0 z-50 {config.color} {config.textColor} px-4 py-2 flex items-center justify-center gap-3 text-sm"
     transition:slide={{ duration: 200 }}
   >
     <div class="flex items-center gap-2">
@@ -77,7 +80,7 @@
       <button
         onclick={retry}
         disabled={checking}
-        class="px-3 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium transition-colors disabled:opacity-50"
+        class="px-3 py-1 bg-black/10 hover:bg-black/15 rounded text-xs font-medium transition-colors disabled:opacity-50"
       >
         {#if checking}
           Checking...
