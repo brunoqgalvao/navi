@@ -1,7 +1,7 @@
 <script lang="ts">
   import { flip } from "svelte/animate";
   import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, attentionItems } from "../../stores";
-  import { api, type Project, type Session, type WorkspaceFolder } from "../../api";
+  import { api, type Project, type Session, type WorkspaceFolder, type SearchResult } from "../../api";
   import { getApiBase } from "../../config";
   import ModelSelector from "../ModelSelector.svelte";
   import StarButton from "../StarButton.svelte";
@@ -151,17 +151,80 @@
     return hasParent || hasChildren;
   });
   let sidebarSearchQuery = $state("");
-  let filteredSessions = $derived(
-    (sidebarSearchQuery.trim()
-      ? sessions.filter(s => s.title.toLowerCase().includes(sidebarSearchQuery.toLowerCase()))
-      : sessions
-    ).toSorted((a, b) => {
-      // Starred/favorited chats always come first
+  let searchResults = $state<SearchResult[]>([]);
+  let isSearching = $state(false);
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Map of session IDs to their match info from search results
+  let searchMatchInfo = $derived(() => {
+    const map = new Map<string, { matchType: 'title' | 'content'; preview?: string }>();
+    for (const result of searchResults) {
+      if (result.entity_type === 'session') {
+        map.set(result.entity_id, { matchType: 'title' });
+      } else if (result.entity_type === 'message' && result.session_id) {
+        // Only set content match if we don't already have a title match
+        if (!map.has(result.session_id)) {
+          map.set(result.session_id, { matchType: 'content', preview: result.preview || undefined });
+        }
+      }
+    }
+    return map;
+  });
+
+  // Perform debounced search
+  function doSearch(query: string) {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+
+    if (!query.trim()) {
+      searchResults = [];
+      isSearching = false;
+      return;
+    }
+
+    isSearching = true;
+    searchDebounceTimer = setTimeout(async () => {
+      try {
+        const results = await api.search.query(query, {
+          projectId: currentProject?.id,
+          limit: 50
+        });
+        // Only keep session and message results
+        searchResults = results.filter(r => r.entity_type === 'session' || r.entity_type === 'message');
+      } catch (e) {
+        console.error('Search failed:', e);
+        searchResults = [];
+      } finally {
+        isSearching = false;
+      }
+    }, 150);
+  }
+
+  // Watch for query changes
+  $effect(() => {
+    doSearch(sidebarSearchQuery);
+  });
+
+  let filteredSessions = $derived(() => {
+    const query = sidebarSearchQuery.trim();
+    let result: Session[];
+
+    if (!query) {
+      // No search - show all sessions
+      result = sessions;
+    } else {
+      // Search active - filter to sessions that appear in search results
+      const matchingSessionIds = searchMatchInfo().keys();
+      const matchSet = new Set(matchingSessionIds);
+      result = sessions.filter(s => matchSet.has(s.id));
+    }
+
+    // Sort: starred first, then by recency
+    return result.toSorted((a, b) => {
       if (a.favorite && !b.favorite) return -1;
       if (!a.favorite && b.favorite) return 1;
       return 0;
-    })
-  );
+    });
+  });
 
   // Use centralized attention store for running/needs-input items
   let runningChats = $derived($attentionItems.runningSessions.map(item => item.session));
@@ -1080,13 +1143,22 @@
 
         <div class="mb-2 px-1">
           <div class="relative">
-            <svg class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input 
-              type="text" 
+            {#if isSearching}
+              <div class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5">
+                <svg class="animate-spin text-gray-400" viewBox="0 0 24 24" fill="none">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            {:else}
+              <svg class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            {/if}
+            <input
+              type="text"
               bind:value={sidebarSearchQuery}
-              placeholder="Filter chats..."
+              placeholder="Search chats & content..."
               class="w-full text-xs pl-7 pr-2 py-1.5 bg-gray-100 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 placeholder-gray-400"
             />
             {#if sidebarSearchQuery}
@@ -1102,10 +1174,10 @@
         <div class="flex-1 overflow-y-auto space-y-0.5 sidebar-scroll pr-1">
           {#if sessions.length === 0}
             <div class="text-xs text-gray-400 italic text-center py-8">No chats yet</div>
-          {:else if filteredSessions.length === 0}
+          {:else if filteredSessions().length === 0}
             <div class="text-xs text-gray-400 italic text-center py-4">No matching chats</div>
           {:else}
-            {#each filteredSessions as sess (sess.id)}
+            {#each filteredSessions() as sess (sess.id)}
               {@const isDropTarget = dragOverSessionId === sess.id && !sess.pinned}
               {@const isDragged = draggedSessionId === sess.id}
               <div
@@ -1147,8 +1219,17 @@
                       />
                     {/if}
                   </div>
-                  <div class="text-[10px] opacity-60 mt-0.5 flex items-center gap-1.5">
+                  <div class="text-[10px] opacity-60 mt-0.5 flex items-center gap-1.5 flex-wrap">
                     <RelativeTime timestamp={sess.updated_at} />
+                    {#if sidebarSearchQuery.trim() && searchMatchInfo().get(sess.id)?.matchType === 'content'}
+                      {@const matchInfo = searchMatchInfo().get(sess.id)}
+                      <span class="inline-flex items-center gap-0.5 px-1 py-0.5 bg-amber-50 text-amber-600 rounded text-[9px] font-medium" title={matchInfo?.preview || 'Matched in message content'}>
+                        <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                        </svg>
+                        content
+                      </span>
+                    {/if}
                     {#if sess.worktree_branch}
                       <span
                         class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded text-[9px] font-medium cursor-help group/branch relative"
