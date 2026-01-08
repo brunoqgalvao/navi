@@ -323,6 +323,22 @@ export async function handleWorktreeRoutes(
       console.log(`[Merge] Branch: ${session.worktree_branch} -> ${session.worktree_base_branch || "main"}`);
       console.log(`[Merge] Project path: ${project.path}`);
 
+      // Check if main repo has uncommitted changes - block merge if so
+      const mainRepoStatus = getWorktreeStatus(project.path);
+      if (!mainRepoStatus.isClean) {
+        console.log(`[Merge] Blocked: Main repo has uncommitted changes`);
+        return json({
+          success: false,
+          error: "Cannot merge: the main repository has uncommitted changes. Please commit or stash them first.",
+          mainRepoHasChanges: true,
+          mainRepoStatus: {
+            staged: mainRepoStatus.staged,
+            modified: mainRepoStatus.modified,
+            untracked: mainRepoStatus.untracked,
+          },
+        }, 400);
+      }
+
       // Auto-commit uncommitted changes if requested
       if (autoCommit && !isWorktreeClean(session.worktree_path)) {
         const message = commitMessage || `Changes from: ${session.title}`;

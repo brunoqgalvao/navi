@@ -158,6 +158,7 @@ function createCurrentSessionStore() {
     selectedModel: string;
     inputTokens: number;
     outputTokens: number;
+    isPending: boolean; // True when in "new chat" state before first message sent
   }>({
     projectId: null,
     sessionId: null,
@@ -168,6 +169,7 @@ function createCurrentSessionStore() {
     selectedModel: "",
     inputTokens: 0,
     outputTokens: 0,
+    isPending: false,
   });
 
   const syncUrl = (projectId: string | null, sessionId: string | null) => {
@@ -179,12 +181,21 @@ function createCurrentSessionStore() {
     setProject: (projectId: string | null) =>
       update((s) => {
         syncUrl(projectId, null);
-        return { ...s, projectId, sessionId: null, claudeSessionId: null, inputTokens: 0, outputTokens: 0 };
+        return { ...s, projectId, sessionId: null, claudeSessionId: null, inputTokens: 0, outputTokens: 0, isPending: false };
       }),
     setSession: (sessionId: string | null, claudeSessionId?: string | null) =>
       update((s) => {
         syncUrl(s.projectId, sessionId);
-        return { ...s, sessionId, claudeSessionId: claudeSessionId ?? null };
+        return { ...s, sessionId, claudeSessionId: claudeSessionId ?? null, isPending: false };
+      }),
+    // Set pending state for new chat (no DB session yet)
+    setPending: (isPending: boolean) =>
+      update((s) => {
+        if (isPending) {
+          // Clear session but keep project, don't sync URL (no session to link)
+          return { ...s, sessionId: null, claudeSessionId: null, isPending: true, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+        }
+        return { ...s, isPending: false };
       }),
     setClaudeSession: (claudeSessionId: string) =>
       update((s) => ({ ...s, claudeSessionId })),
@@ -214,10 +225,11 @@ function createCurrentSessionStore() {
         selectedModel: "",
         inputTokens: 0,
         outputTokens: 0,
+        isPending: false,
       });
     },
     restoreFromUrl: (projectId: string | null, sessionId: string | null) =>
-      update((s) => ({ ...s, projectId, sessionId, claudeSessionId: null, inputTokens: 0, outputTokens: 0 })),
+      update((s) => ({ ...s, projectId, sessionId, claudeSessionId: null, inputTokens: 0, outputTokens: 0, isPending: false })),
   };
 }
 

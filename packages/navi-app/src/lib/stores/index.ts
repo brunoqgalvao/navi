@@ -139,3 +139,17 @@ export {
   type WorkspaceFolder,
   type PermissionSettings,
 } from "./workspace";
+
+// Connectivity monitoring
+export {
+  connectivityStore,
+  connectionStatus,
+  isOnline,
+  startConnectivityMonitoring,
+  stopConnectivityMonitoring,
+  checkConnectivity,
+  isNetworkError,
+  handleNetworkError,
+  type ConnectionStatus,
+  type ConnectivityState,
+} from "./connectivity";

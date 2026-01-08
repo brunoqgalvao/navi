@@ -216,6 +216,28 @@ const server = Bun.serve({
       return json({ status: "ok", port: PORT });
     }
 
+    // Internet connectivity check - tests if we can reach external APIs
+    if (url.pathname === "/api/health/internet") {
+      try {
+        // Try to reach Anthropic's API (lightweight check)
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+
+        const res = await fetch("https://api.anthropic.com/v1/models", {
+          method: "HEAD",
+          signal: controller.signal,
+        }).catch(() => null);
+
+        clearTimeout(timeout);
+
+        // Any response (even 401) means we have internet
+        const online = res !== null;
+        return json({ online, checkedAt: Date.now() });
+      } catch {
+        return json({ online: false, checkedAt: Date.now() });
+      }
+    }
+
     // Ports discovery endpoint
     if (url.pathname === "/ports") {
       return json({ server: PORT, pty: PORT + 1 });

@@ -30,18 +30,40 @@ export function initSessionActions(cb: SessionActionCallbacks) {
   callbacks = cb;
 }
 
-export async function createNewChat(): Promise<string | null> {
+/**
+ * Start a new chat in "pending" state.
+ * No database session is created until the first message is sent.
+ * This prevents empty sessions from being created when users click "New Chat" but don't send anything.
+ */
+export function startNewChat(): void {
+  const session = get(currentSession);
+  if (!session.projectId) return;
+
+  // Set pending state - no DB session created yet
+  currentSession.setPending(true);
+
+  // Set default model for new chat
+  const defaultModel = getDefaultModel();
+  currentSession.setSelectedModel(defaultModel);
+
+  // Clear any input text
+  callbacks?.setInputText("");
+}
+
+/**
+ * Actually create the database session (called when first message is sent).
+ * Returns the new session ID.
+ */
+export async function createNewChat(title?: string): Promise<string | null> {
   const session = get(currentSession);
   if (!session.projectId) return null;
 
   try {
-    const newSession = await api.sessions.create(session.projectId, { title: "New Chat" });
+    const newSession = await api.sessions.create(session.projectId, { title: title || "New Chat" });
     const sessions = callbacks?.getSidebarSessions() || [];
     callbacks?.setSidebarSessions([newSession, ...sessions]);
     currentSession.setSession(newSession.id, newSession.claude_session_id);
-    // Set default model (Opus) for new chat
-    const defaultModel = getDefaultModel();
-    currentSession.setSelectedModel(defaultModel);
+    // Keep the selected model
     sessionMessages.setMessages(newSession.id, []);
     callbacks?.loadRecentChats();
     return newSession.id;

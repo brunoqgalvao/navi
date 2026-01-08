@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference } from "./lib/stores";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill } from "./lib/api";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree } from "./lib/actions";
@@ -102,6 +102,7 @@
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
   import UpdateChecker from "./lib/components/UpdateChecker.svelte";
+  import ConnectivityBanner from "./lib/components/ConnectivityBanner.svelte";
   import ProjectEmptyState from "./lib/components/ProjectEmptyState.svelte";
   import NewProjectModal from "./lib/components/NewProjectModal.svelte";
   import ProjectPermissionsModal from "./lib/components/ProjectPermissionsModal.svelte";
@@ -127,6 +128,7 @@
     loadClaudeMd,
     loadProjectContext,
     indexProjectFiles,
+    startNewChat as startNewChatAction,
     createNewChat as createNewChatAction,
     loadFolders as loadFoldersAction,
     createFolder as createFolderAction,
@@ -900,6 +902,9 @@
     // Set up global error handlers
     const cleanupErrorHandlers = setupGlobalErrorHandlers();
 
+    // Start connectivity monitoring (checks every 30 seconds)
+    startConnectivityMonitoring(30000);
+
     // Initialize extension registry with default extensions
     initializeRegistry();
 
@@ -1020,6 +1025,7 @@
 
   onDestroy(() => {
     client?.disconnect();
+    stopConnectivityMonitoring();
     if (activeSessionsPoll) {
       clearInterval(activeSessionsPoll);
     }
@@ -2017,9 +2023,12 @@
     }
 
     let currentSessionId = $session.sessionId;
-    
-    if (!currentSessionId) {
-        const newSessionId = await createNewChatAction();
+
+    // If in pending state or no session, create the actual DB session now
+    if (!currentSessionId || $session.isPending) {
+        // Use first line of message (up to 50 chars) as title hint
+        const titleHint = inputText.trim().split('\n')[0].slice(0, 50);
+        const newSessionId = await createNewChatAction(titleHint);
         if (!newSessionId) return;
         currentSessionId = newSessionId;
     }
@@ -2774,7 +2783,7 @@
     folders={workspaceFolders}
     onSelectProject={selectProject}
     onSelectSession={selectSession}
-    onCreateNewChat={createNewChatAction}
+    onCreateNewChat={startNewChatAction}
     onGoToChat={goToChat}
     onNewProjectModal={() => { newProjectTargetFolderId = null; showNewProjectModal = true; }}
     onSettings={() => showSettings = true}
@@ -3060,7 +3069,7 @@
                     sessionId={$session.sessionId || undefined}
                     {untilDoneEnabled}
                     isGitRepo={currentProjectIsGitRepo}
-                    isNewChat={!$session.sessionId || currentMessages.length === 0}
+                    isNewChat={$session.isPending || !$session.sessionId || currentMessages.length === 0}
                     worktreeBranch={currentSessionData?.worktree_branch}
                     worktreeBaseBranch={currentSessionData?.worktree_base_branch}
                     onSubmit={sendMessage}
@@ -3331,14 +3340,9 @@
     onClose={() => showContextOverflowModal = false}
     onPrune={() => pruneToolResults($session.sessionId || '')}
     onCompact={() => sendCommand("/compact")}
-    onNewChat={async () => {
-      const newSessionId = await createNewChatAction();
-      if (newSessionId) {
-        const newSession = sidebarSessions.find(s => s.id === newSessionId);
-        if (newSession) {
-          selectSession(newSession);
-        }
-      }
+    onNewChat={() => {
+      startNewChatAction();
+      showContextOverflowModal = false;
     }}
   />
 
@@ -3451,6 +3455,7 @@
 
 <NotificationToast />
 <UpdateChecker />
+<ConnectivityBanner />
 
 <style>
 
