@@ -18,6 +18,7 @@ export {
 // Session actions
 export {
   initSessionActions,
+  startNewChat,
   createNewChat,
   createNewChatWithWorktree,
   selectSession,
