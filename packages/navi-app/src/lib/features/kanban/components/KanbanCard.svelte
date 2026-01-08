@@ -22,7 +22,9 @@
 
   function handleAction(e: MouseEvent) {
     e.stopPropagation();
-    if (card.status === "spec" && !card.session_id) {
+    if (card.status === "backlog") {
+      onMoveNext?.(card); // Move to spec
+    } else if (card.status === "spec" && !card.session_id) {
       onDispatch?.(card);
     } else if (card.status === "review") {
       onMoveNext?.(card);
@@ -70,7 +72,15 @@
 
   <!-- Quick action button (on hover) -->
   <div class="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-    {#if card.status === "spec" && !card.session_id}
+    {#if card.status === "backlog"}
+      <button
+        onclick={handleAction}
+        class="px-2 py-1 text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 rounded transition-colors"
+        title="Ready to spec"
+      >
+        → Spec
+      </button>
+    {:else if card.status === "spec" && !card.session_id}
       <button
         onclick={handleAction}
         class="px-2 py-1 text-xs font-medium text-white bg-accent-500 hover:bg-accent-600 rounded transition-colors"

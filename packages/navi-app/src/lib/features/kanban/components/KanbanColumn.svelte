@@ -82,7 +82,7 @@
       <h3 class="font-semibold text-sm text-gray-700">{column.title}</h3>
       <span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{cards.length}</span>
     </div>
-    {#if onAddCard && column.id === "spec"}
+    {#if onAddCard && (column.id === "backlog" || column.id === "spec")}
       <button
         onclick={() => { isAddingCard = true; }}
         class="p-1 text-gray-400 hover:text-accent-500 rounded transition-colors"
@@ -116,7 +116,7 @@
           bind:value={newCardTitle}
           onkeydown={handleAddKeydown}
           onblur={() => { if (!newCardTitle.trim()) isAddingCard = false; }}
-          placeholder="Task title..."
+          placeholder={column.id === "backlog" ? "Idea or future task..." : "Task title..."}
           class="w-full text-sm text-gray-900 placeholder-gray-400 outline-none"
           autofocus
         />
@@ -137,13 +137,13 @@
           </button>
         </div>
       </form>
-    {:else if column.id === "spec" && cards.length === 0}
-      <!-- Empty state for spec column -->
+    {:else if (column.id === "backlog" || column.id === "spec") && cards.length === 0}
+      <!-- Empty state for backlog/spec columns -->
       <button
         onclick={() => { isAddingCard = true; }}
         class="w-full border-2 border-dashed border-gray-200 rounded-lg p-4 text-center text-sm text-gray-400 hover:border-accent-300 hover:text-accent-500 transition-colors"
       >
-        + Add a task
+        + {column.id === "backlog" ? "Add an idea" : "Add a task"}
       </button>
     {/if}
   </div>

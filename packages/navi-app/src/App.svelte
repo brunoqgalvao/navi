@@ -1762,6 +1762,26 @@
     }
   }
 
+  async function toggleSessionBacklog(sess: Session, e: Event) {
+    e.stopPropagation();
+    const isInBacklog = !!sess.in_backlog;
+    try {
+      const response = await fetch(`${getServerUrl()}/api/sessions/${sess.id}/backlog`, {
+        method: isInBacklog ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: isInBacklog ? undefined : JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error("Failed to toggle backlog");
+      const updated = await response.json();
+      sidebarSessions = sidebarSessions.map(s =>
+        s.id === sess.id ? { ...s, in_backlog: updated.in_backlog, backlog_added_at: updated.backlog_added_at } : s
+      );
+      loadRecentChatsAction();
+    } catch (err) {
+      console.error("Failed to toggle session backlog:", err);
+    }
+  }
+
   function openEditSession(sess: Session, e: Event) {
     e.stopPropagation();
     editingSession = sess;
@@ -2666,6 +2686,7 @@
     onToggleSessionArchive={toggleSessionArchive}
     onArchiveAllNonStarred={archiveAllNonStarred}
     onToggleSessionMarkedForReview={toggleSessionMarkedForReview}
+    onToggleSessionBacklog={toggleSessionBacklog}
     onProjectReorder={async (order) => { 
       await api.projects.reorder(order); 
       const orderMap = new Map(order.map((id, i) => [id, i]));
