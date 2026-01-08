@@ -1288,3 +1288,109 @@ export const worktreeApi = {
     }>>("/worktree-previews"),
   // ⚠️ END EXPERIMENTAL preview methods
 };
+
+/**
+ * Container Preview API
+ *
+ * Containerized preview system using Colima/Docker.
+ * Runs dev servers in isolated containers with Traefik routing.
+ */
+export interface ContainerPreview {
+  id: string;
+  url: string;
+  slug: string;
+  status: "pending" | "starting" | "running" | "paused" | "stopped" | "error";
+  branch: string;
+  framework?: string;
+  startedAt?: number;
+  error?: string;
+}
+
+export interface ContainerPreviewStatus {
+  running: boolean;
+  status?: string;
+  url?: string;
+  slug?: string;
+  branch?: string;
+  framework?: string;
+  startedAt?: number;
+  error?: string;
+}
+
+export interface PreviewSystemStatus {
+  initialized: boolean;
+  runtime: {
+    runtime: "colima" | "docker" | "orbstack" | "none";
+    version?: string;
+    running: boolean;
+  };
+  proxyRunning: boolean;
+  containerCount: number;
+  proxyPort: number;
+  maxContainers: number;
+}
+
+export const containerPreviewApi = {
+  /** Get preview system status (runtime detection, proxy status) */
+  getSystemStatus: () => request<PreviewSystemStatus>("/preview/status"),
+
+  /** Initialize the preview system (detect runtime, restore containers) */
+  initialize: () =>
+    request<{
+      success: boolean;
+      runtime: string;
+      version?: string;
+      running: boolean;
+      error?: string;
+      instructions?: string;
+    }>("/preview/initialize", { method: "POST" }),
+
+  /** List all active container previews */
+  list: () => request<ContainerPreview[]>("/preview/list"),
+
+  /** Start a containerized preview for a session */
+  start: (sessionId: string) =>
+    request<{
+      success: boolean;
+      preview?: {
+        id: string;
+        url: string;
+        slug: string;
+        status: string;
+        branch: string;
+        framework?: string;
+      };
+      error?: string;
+      instructions?: string;
+    }>(`/sessions/${sessionId}/preview/container`, { method: "POST" }),
+
+  /** Stop a containerized preview for a session */
+  stop: (sessionId: string) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/preview/container`, {
+      method: "DELETE",
+    }),
+
+  /** Get container preview status for a session */
+  getStatus: (sessionId: string) =>
+    request<ContainerPreviewStatus>(`/sessions/${sessionId}/preview/container`),
+
+  /** Get container preview logs */
+  getLogs: (sessionId: string, tail = 100) =>
+    request<{ logs: string[] }>(
+      `/sessions/${sessionId}/preview/container/logs?tail=${tail}`
+    ),
+
+  /** Pause a container preview */
+  pause: (sessionId: string) =>
+    request<{ success: boolean }>(
+      `/sessions/${sessionId}/preview/container/pause`,
+      { method: "POST" }
+    ),
+
+  /** Unpause a container preview */
+  unpause: (sessionId: string) =>
+    request<{ success: boolean }>(
+      `/sessions/${sessionId}/preview/container/unpause`,
+      { method: "POST" }
+    ),
+};

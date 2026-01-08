@@ -1,0 +1,34 @@
+{
+  "version": "1",
+  "image": "oven/bun:alpine",
+  "ports": {
+    "primary": {
+      "container": 1420,
+      "description": "Vite frontend dev server"
+    },
+    "backend": {
+      "container": 3000,
+      "description": "Bun backend API server"
+    }
+  },
+  "commands": {
+    "install": "bun install",
+    "setup": [
+      "cd packages/navi-app && bun add @rollup/rollup-linux-arm64-musl --optional || true"
+    ],
+    "dev": "bun run dev"
+  },
+  "env": {
+    "NODE_ENV": "development",
+    "HOST": "0.0.0.0"
+  },
+  "healthCheck": {
+    "port": 1420,
+    "path": "/",
+    "timeout": 180
+  },
+  "resources": {
+    "memory": "2g",
+    "cpus": 2
+  }
+}

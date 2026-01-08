@@ -1,18 +1,13 @@
 <!--
-  ⚠️ EXPERIMENTAL: Worktree Preview Feature
-  Added 2026-01-08
+  Worktree Header Component
 
-  To revert preview functionality from this component:
-  1. Remove preview state variables (previewRunning, previewPorts, previewLoading)
-  2. Remove preview status check in loadStatus()
-  3. Remove togglePreview() and openPreview() functions
-  4. Remove preview button and open-preview button from template
-  5. Remove .preview and .open-preview CSS classes
-
-  See server/routes/worktree-preview.ts for full feature revert instructions.
+  Displays worktree status and provides preview functionality.
+  Supports two preview modes:
+  - Container: Uses Colima/Docker containers with Traefik routing (recommended)
+  - Native: Uses native process spawning (fallback)
 -->
 <script lang="ts">
-  import { worktreeApi, type WorktreeInfo } from "../api";
+  import { worktreeApi, containerPreviewApi, type WorktreeInfo, type ContainerPreviewStatus } from "../api";
   import WorktreeBadge from "./WorktreeBadge.svelte";
 
   interface Props {
@@ -21,6 +16,8 @@
     baseBranch: string;
     onMergeClick: () => void;
     onSyncClick?: () => void;
+    /** Callback when preview URL is available (for embedded preview) */
+    onPreviewUrlChange?: (url: string | null) => void;
   }
 
   let {
@@ -29,16 +26,22 @@
     baseBranch,
     onMergeClick,
     onSyncClick,
+    onPreviewUrlChange,
   }: Props = $props();
 
   let status = $state<WorktreeInfo | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
 
-  // ⚠️ EXPERIMENTAL: Preview server state - remove to revert
-  let previewRunning = $state(false);
+  // Preview state
+  type PreviewMode = "container" | "native" | "none";
+  let previewMode = $state<PreviewMode>("none");
+  let previewStatus = $state<"stopped" | "starting" | "running" | "paused" | "error">("stopped");
+  let previewUrl = $state<string | null>(null);
   let previewPorts = $state<number[]>([]);
   let previewLoading = $state(false);
+  let previewError = $state<string | null>(null);
+  let containerRuntimeAvailable = $state<boolean | null>(null);
 
   async function loadStatus() {
     try {
@@ -46,15 +49,41 @@
       error = null;
       status = await worktreeApi.getStatus(sessionId);
 
-      // Also check preview status
+      // Check container preview status first
       try {
-        const previewStatus = await worktreeApi.getPreviewStatus(sessionId);
-        previewRunning = previewStatus.running;
-        previewPorts = previewStatus.ports || [];
+        const containerStatus = await containerPreviewApi.getStatus(sessionId);
+        if (containerStatus.running || containerStatus.status === "starting" || containerStatus.status === "paused") {
+          previewMode = "container";
+          previewStatus = containerStatus.status as any || "running";
+          previewUrl = containerStatus.url || null;
+          containerRuntimeAvailable = true;
+          onPreviewUrlChange?.(previewUrl);
+          return;
+        }
       } catch {
-        previewRunning = false;
-        previewPorts = [];
+        // Container preview not available or not running
       }
+
+      // Fall back to native preview status
+      try {
+        const nativeStatus = await worktreeApi.getPreviewStatus(sessionId);
+        if (nativeStatus.running) {
+          previewMode = "native";
+          previewStatus = "running";
+          previewPorts = nativeStatus.ports || [];
+          previewUrl = previewPorts.length > 0 ? `http://localhost:${previewPorts[0]}` : null;
+          onPreviewUrlChange?.(previewUrl);
+          return;
+        }
+      } catch {
+        // Native preview not running
+      }
+
+      // Nothing running
+      previewMode = "none";
+      previewStatus = "stopped";
+      previewUrl = null;
+      onPreviewUrlChange?.(null);
     } catch (e: any) {
       error = e.message;
     } finally {
@@ -62,10 +91,21 @@
     }
   }
 
+  // Check container runtime availability on mount
+  async function checkContainerRuntime() {
+    try {
+      const systemStatus = await containerPreviewApi.getSystemStatus();
+      containerRuntimeAvailable = systemStatus.runtime.runtime !== "none";
+    } catch {
+      containerRuntimeAvailable = false;
+    }
+  }
+
   // Load status on mount and periodically
   $effect(() => {
+    checkContainerRuntime();
     loadStatus();
-    const interval = setInterval(loadStatus, 30000); // Refresh every 30s
+    const interval = setInterval(loadStatus, 10000); // Refresh every 10s when preview running
     return () => clearInterval(interval);
   });
 
@@ -88,39 +128,122 @@
     return parts.join(" · ") || "No changes";
   });
 
-  async function togglePreview() {
+  const isPreviewActive = $derived(
+    previewStatus === "running" || previewStatus === "starting" || previewStatus === "paused"
+  );
+
+  async function startContainerPreview() {
     previewLoading = true;
+    previewError = null;
     try {
-      if (previewRunning) {
-        await worktreeApi.stopPreview(sessionId);
-        previewRunning = false;
-        previewPorts = [];
-      } else {
-        const result = await worktreeApi.startPreview(sessionId);
-        previewRunning = true;
-        previewPorts = result.ports || [];
-        if (result.frontendPort) {
-          previewPorts = [result.frontendPort];
-        }
-        // Open in new tab after a short delay for server startup
-        if (previewPorts.length > 0) {
-          setTimeout(() => {
-            window.open(`http://localhost:${previewPorts[0]}`, "_blank");
-          }, 2000);
+      const result = await containerPreviewApi.start(sessionId);
+      if (result.success && result.preview) {
+        previewMode = "container";
+        previewStatus = result.preview.status as any || "starting";
+        previewUrl = result.preview.url;
+        onPreviewUrlChange?.(previewUrl);
+      } else if (result.error) {
+        previewError = result.error;
+        // If container runtime not available, suggest native mode
+        if (result.instructions) {
+          console.log("[Preview] Container runtime setup instructions:", result.instructions);
         }
       }
     } catch (e: any) {
-      console.error("Preview toggle failed:", e);
+      previewError = e.message;
     } finally {
       previewLoading = false;
     }
   }
 
-  function openPreview() {
-    if (previewPorts.length > 0) {
-      window.open(`http://localhost:${previewPorts[0]}`, "_blank");
+  async function startNativePreview() {
+    previewLoading = true;
+    previewError = null;
+    try {
+      const result = await worktreeApi.startPreview(sessionId);
+      previewMode = "native";
+      previewStatus = "running";
+      previewPorts = result.ports || [];
+      if (result.frontendPort) {
+        previewPorts = [result.frontendPort];
+      }
+      previewUrl = previewPorts.length > 0 ? `http://localhost:${previewPorts[0]}` : null;
+      onPreviewUrlChange?.(previewUrl);
+    } catch (e: any) {
+      previewError = e.message;
+    } finally {
+      previewLoading = false;
     }
   }
+
+  async function stopPreview() {
+    previewLoading = true;
+    previewError = null;
+    try {
+      if (previewMode === "container") {
+        await containerPreviewApi.stop(sessionId);
+      } else if (previewMode === "native") {
+        await worktreeApi.stopPreview(sessionId);
+      }
+      previewMode = "none";
+      previewStatus = "stopped";
+      previewUrl = null;
+      previewPorts = [];
+      onPreviewUrlChange?.(null);
+    } catch (e: any) {
+      previewError = e.message;
+    } finally {
+      previewLoading = false;
+    }
+  }
+
+  async function togglePreview() {
+    if (isPreviewActive) {
+      await stopPreview();
+    } else {
+      // Try container preview first, fall back to native if it fails
+      if (containerRuntimeAvailable) {
+        try {
+          await startContainerPreview();
+          // If container preview failed (no image, network issue, etc.), fall back to native
+          if (previewError) {
+            console.log("[Preview] Container preview failed, falling back to native");
+            previewError = null;
+            await startNativePreview();
+          }
+        } catch {
+          // Fall back to native on any error
+          await startNativePreview();
+        }
+      } else {
+        // No container runtime, use native directly
+        await startNativePreview();
+      }
+    }
+  }
+
+  function openPreview() {
+    if (previewUrl) {
+      window.open(previewUrl, "_blank");
+    }
+  }
+
+  // Preview button tooltip
+  const previewTooltip = $derived(() => {
+    if (previewLoading) return "Loading...";
+    if (previewStatus === "running") {
+      return previewMode === "container"
+        ? `Container preview at ${previewUrl}`
+        : `Preview running on port ${previewPorts[0] || "..."}`;
+    }
+    if (previewStatus === "starting") return "Starting preview server...";
+    if (previewStatus === "paused") return "Preview paused (click to resume)";
+    if (previewStatus === "error") return previewError || "Preview failed";
+
+    return containerRuntimeAvailable
+      ? "Start containerized preview (recommended)"
+      : "Start native preview server";
+  });
 </script>
 
 <div class="worktree-header">
@@ -132,21 +255,27 @@
   </div>
 
   <div class="header-actions">
-    <!-- ⚠️ EXPERIMENTAL: Preview button - remove to revert -->
+    <!-- Preview button -->
     <button
       class="action-button preview"
-      class:active={previewRunning}
+      class:active={isPreviewActive}
+      class:starting={previewStatus === "starting"}
+      class:paused={previewStatus === "paused"}
+      class:error={previewStatus === "error"}
+      class:container={previewMode === "container"}
       onclick={togglePreview}
       disabled={previewLoading}
-      title={previewRunning
-        ? `Preview running on port ${previewPorts[0] || '...'}`
-        : "[Experimental] Start dev server for this branch. Works best with simple projects that have a 'dev' script."}
+      title={previewTooltip()}
     >
       {#if previewLoading}
         <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="32" />
         </svg>
-      {:else if previewRunning}
+      {:else if previewStatus === "starting"}
+        <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="32" />
+        </svg>
+      {:else if isPreviewActive}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="6" y="6" width="12" height="12" rx="2" />
         </svg>
@@ -155,15 +284,22 @@
           <polygon points="5,3 19,12 5,21" />
         </svg>
       {/if}
-      {#if previewRunning}
-        Stop Preview
+      {#if previewStatus === "starting"}
+        Starting...
+      {:else if previewStatus === "paused"}
+        Paused
+      {:else if isPreviewActive}
+        Stop
       {:else}
         Preview
       {/if}
+      {#if previewMode === "container" && isPreviewActive}
+        <span class="mode-badge">🐳</span>
+      {/if}
     </button>
 
-    <!-- ⚠️ EXPERIMENTAL: Open preview button - remove to revert -->
-    {#if previewRunning && previewPorts.length > 0}
+    <!-- Open preview button -->
+    {#if isPreviewActive && previewUrl}
       <button
         class="action-button open-preview"
         onclick={openPreview}
@@ -172,10 +308,15 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
         </svg>
-        :{previewPorts[0]}
+        {#if previewMode === "native" && previewPorts.length > 0}
+          :{previewPorts[0]}
+        {:else}
+          Open
+        {/if}
       </button>
     {/if}
 
+    <!-- Sync button -->
     {#if status?.status.behind && status.status.behind > 0 && onSyncClick}
       <button class="action-button sync" onclick={onSyncClick} title="Pull latest from {baseBranch}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -185,6 +326,7 @@
       </button>
     {/if}
 
+    <!-- Merge button -->
     <button
       class="action-button merge"
       onclick={onMergeClick}
@@ -198,6 +340,14 @@
     </button>
   </div>
 </div>
+
+{#if previewError}
+  <div class="preview-error">
+    <span class="error-icon">⚠️</span>
+    <span class="error-text">{previewError}</span>
+    <button class="dismiss" onclick={() => previewError = null}>×</button>
+  </div>
+{/if}
 
 <style>
   .worktree-header {
@@ -249,7 +399,7 @@
     height: 0.875rem;
   }
 
-  /* ⚠️ EXPERIMENTAL: Preview button styles - remove to revert */
+  /* Preview button styles */
   .action-button.preview {
     background: white;
     color: #7c3aed;
@@ -272,6 +422,39 @@
     border-color: #6d28d9;
   }
 
+  .action-button.preview.starting {
+    background: #f5f3ff;
+    color: #7c3aed;
+    border-color: #c4b5fd;
+  }
+
+  .action-button.preview.paused {
+    background: #fef3c7;
+    color: #d97706;
+    border-color: #fcd34d;
+  }
+
+  .action-button.preview.error {
+    background: #fef2f2;
+    color: #dc2626;
+    border-color: #fecaca;
+  }
+
+  .action-button.preview.container.active {
+    background: #0891b2;
+    border-color: #0891b2;
+  }
+
+  .action-button.preview.container.active:hover:not(:disabled) {
+    background: #0e7490;
+    border-color: #0e7490;
+  }
+
+  .mode-badge {
+    font-size: 0.625rem;
+    margin-left: 0.125rem;
+  }
+
   .action-button.open-preview {
     background: #f5f3ff;
     color: #7c3aed;
@@ -283,7 +466,6 @@
     background: #ede9fe;
     border-color: #a78bfa;
   }
-  /* ⚠️ END EXPERIMENTAL preview styles */
 
   .action-button.sync {
     background: white;
@@ -319,5 +501,44 @@
   @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+  }
+
+  /* Error banner */
+  .preview-error {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: #fef2f2;
+    border-bottom: 1px solid #fecaca;
+    font-size: 0.75rem;
+    color: #dc2626;
+  }
+
+  .preview-error .error-icon {
+    flex-shrink: 0;
+  }
+
+  .preview-error .error-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .preview-error .dismiss {
+    flex-shrink: 0;
+    padding: 0.125rem 0.375rem;
+    background: transparent;
+    border: none;
+    color: #dc2626;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  .preview-error .dismiss:hover {
+    background: #fecaca;
+    border-radius: 4px;
   }
 </style>

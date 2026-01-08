@@ -28,6 +28,8 @@ import { handleKanbanRoutes } from "./routes/kanban";
 import { handleWorktreeRoutes } from "./routes/worktrees";
 // ⚠️ EXPERIMENTAL: Worktree preview - remove this import to revert (see worktree-preview.ts for full revert steps)
 import { handleWorktreePreviewRoutes } from "./routes/worktree-preview";
+// Container-based preview system (Colima/Docker)
+import { handleContainerPreviewRoutes } from "./routes/container-preview";
 import { handleBranchNameRoutes } from "./routes/branch-name";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 import { handleCommandsRoutes } from "./routes/commands";
@@ -361,6 +363,10 @@ const server = Bun.serve({
 
     // ⚠️ EXPERIMENTAL: Worktree preview routes (dev server in branch) - remove to revert
     response = await handleWorktreePreviewRoutes(url, method, req);
+    if (response) return response;
+
+    // Container-based preview routes (Colima/Docker)
+    response = await handleContainerPreviewRoutes(url, method, req);
     if (response) return response;
 
     // Branch name generation (LLM-powered)
