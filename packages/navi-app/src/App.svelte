@@ -983,9 +983,11 @@
         } else {
           // Fallback: just set the session store
           session.restoreFromUrl(initialRoute.projectId, initialRoute.sessionId);
-          api.sessions.list(initialRoute.projectId).then(sessions => {
-            sidebarSessions = sessions;
-          }).catch(e => console.error("Failed to load sessions from URL:", e));
+          if (initialRoute.projectId) {
+            api.sessions.list(initialRoute.projectId).then(sessions => {
+              sidebarSessions = sessions;
+            }).catch(e => console.error("Failed to load sessions from URL:", e));
+          }
         }
       };
 

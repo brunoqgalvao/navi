@@ -2,7 +2,7 @@ import type { TodoItem } from "../stores/types";
 import type { SessionHierarchyEvent } from "../features/session-hierarchy/types";
 
 export interface UICommand {
-  command: "open_preview" | "navigate" | "notification";
+  command: "open_preview" | "navigate" | "notification" | "open_terminal" | "open_logs";
   payload: Record<string, unknown>;
 }
 

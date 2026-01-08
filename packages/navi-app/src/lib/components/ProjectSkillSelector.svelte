@@ -22,7 +22,7 @@
   function matchesSearch(skill: Skill, query: string): boolean {
     if (!query.trim()) return true;
     const q = query.toLowerCase();
-    return (
+    return !!(
       skill.name.toLowerCase().includes(q) ||
       skill.description?.toLowerCase().includes(q) ||
       skill.tags?.some((t) => t.toLowerCase().includes(q)) ||

@@ -151,7 +151,7 @@
         <div class="px-3 py-2 border-b border-gray-100">
           <label class="block text-xs font-medium text-gray-600 mb-2">Output</label>
           <div class="bg-gray-50 rounded-lg p-2 text-xs max-h-48 overflow-auto">
-            <JsonTreeViewer data={$currentTestRun.output} />
+            <JsonTreeViewer value={$currentTestRun.output} />
           </div>
         </div>
       {/if}

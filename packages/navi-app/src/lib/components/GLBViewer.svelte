@@ -145,7 +145,7 @@
       (err) => {
         console.error("[GLBViewer] Error loading GLB:", err);
         console.error("[GLBViewer] URL was:", src);
-        error = `Failed to load 3D model: ${err?.message || err}`;
+        error = `Failed to load 3D model: ${(err as Error)?.message || String(err)}`;
         loading = false;
       }
     );

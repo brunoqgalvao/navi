@@ -53,6 +53,7 @@
         window.removeEventListener("mouseup", handleMouseUp);
       };
     }
+    return undefined;
   });
 </script>
 

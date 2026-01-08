@@ -26,7 +26,7 @@
 
     try {
       const yamlContent = match[1];
-      const fm: AgentFrontmatter = {};
+      const fm: Partial<AgentFrontmatter> = {};
       let currentKey = "";
       let inArray = false;
       const arrayValues: string[] = [];
@@ -67,6 +67,11 @@
 
       if (inArray && currentKey && arrayValues.length > 0) {
         (fm as any)[currentKey] = [...arrayValues];
+      }
+
+      // Only return valid frontmatter if it has required name field
+      if (!fm.name) {
+        return { frontmatter: null, body: md };
       }
 
       return { frontmatter: fm as AgentFrontmatter, body: match[2].trim() };
@@ -137,7 +142,7 @@
 
   // Save file
   async function handleSave() {
-    if (!$editorState.currentPath) return;
+    if (!$editorState.currentPath || !frontmatter) return;
 
     saving = true;
     try {

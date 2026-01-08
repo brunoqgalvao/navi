@@ -138,15 +138,15 @@
       </div>
 
       <!-- Editor -->
+      <!-- svelte-ignore a11y_unknown_aria_attribute -->
       <textarea
         bind:value={content}
         oninput={handleChange}
         onkeydown={handleKeyDown}
         class="flex-1 p-4 text-sm font-mono resize-none focus:outline-none bg-gray-900 text-gray-100 leading-5"
-        spellcheck="false"
+        spellcheck={false}
         autocomplete="off"
-        autocorrect="off"
-        autocapitalize="off"
+        data-gramm="false"
       ></textarea>
     </div>
   {/if}
