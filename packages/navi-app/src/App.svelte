@@ -2964,14 +2964,9 @@
             <ProjectEmptyState
               projectName={currentProject.name}
               projectDescription={currentProject?.description}
-              isGitRepo={currentProjectIsGitRepo}
               {claudeMdContent}
               {projectContext}
-              {inputText}
-              bind:inputRef
-              onInputChange={(text) => inputText = text}
-              onSendMessage={sendMessage}
-              onKeydown={handleKeydown}
+              onSuggestionClick={(suggestion) => { inputText = suggestion; }}
               onShowClaudeMd={() => showClaudeMdModal = true}
             />
           {:else}
@@ -3051,8 +3046,8 @@
           </button>
         </div>
 
-        <!-- Input Area (hidden on project home via CSS) -->
-        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent {currentMessages.length === 0 && !$session.sessionId ? 'hidden' : ''}" data-tour="chat-input">
+        <!-- Input Area -->
+        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent" data-tour="chat-input">
 
             <div class="w-full max-w-3xl pointer-events-auto relative">
                 <!-- Process Manager - positioned top right above input -->
