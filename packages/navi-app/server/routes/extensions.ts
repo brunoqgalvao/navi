@@ -18,6 +18,43 @@ export async function handleExtensionRoutes(
     return json({ extensions });
   }
 
+  // PUT /api/extensions/project/:projectId/reorder - Update extension order
+  // NOTE: This must come BEFORE the generic /:extensionId route to avoid "reorder" being treated as an extension ID
+  const reorderMatch = pathname.match(/^\/api\/extensions\/project\/([^/]+)\/reorder$/);
+  if (reorderMatch && method === "PUT") {
+    const projectId = reorderMatch[1];
+    try {
+      const body = await req.json();
+      const orders = body.orders as { extensionId: string; sortOrder: number }[];
+
+      if (!orders || !Array.isArray(orders)) {
+        return error("Orders array is required", 400);
+      }
+
+      extensionSettings.updateOrders(projectId, orders);
+      return json({ success: true });
+    } catch (e: any) {
+      return error(e.message || "Failed to update extension order", 500);
+    }
+  }
+
+  // PUT /api/extensions/project/:projectId/:extensionId/config - Update extension config
+  // NOTE: This must come BEFORE the generic /:extensionId route
+  const configUpdateMatch = pathname.match(/^\/api\/extensions\/project\/([^/]+)\/([^/]+)\/config$/);
+  if (configUpdateMatch && method === "PUT") {
+    const [, projectId, extensionId] = configUpdateMatch;
+    try {
+      const body = await req.json();
+      if (!body.config) {
+        return error("Config is required", 400);
+      }
+      extensionSettings.updateConfig(projectId, extensionId, JSON.stringify(body.config));
+      return json({ success: true });
+    } catch (e: any) {
+      return error(e.message || "Failed to update extension config", 500);
+    }
+  }
+
   // PUT /api/extensions/project/:projectId/:extensionId - Set extension enabled state
   const extensionUpdateMatch = pathname.match(/^\/api\/extensions\/project\/([^/]+)\/([^/]+)$/);
   if (extensionUpdateMatch && method === "PUT") {
@@ -36,41 +73,6 @@ export async function handleExtensionRoutes(
       return json({ success: true });
     } catch (e: any) {
       return error(e.message || "Failed to update extension settings", 500);
-    }
-  }
-
-  // PUT /api/extensions/project/:projectId/:extensionId/config - Update extension config
-  const configUpdateMatch = pathname.match(/^\/api\/extensions\/project\/([^/]+)\/([^/]+)\/config$/);
-  if (configUpdateMatch && method === "PUT") {
-    const [, projectId, extensionId] = configUpdateMatch;
-    try {
-      const body = await req.json();
-      if (!body.config) {
-        return error("Config is required", 400);
-      }
-      extensionSettings.updateConfig(projectId, extensionId, JSON.stringify(body.config));
-      return json({ success: true });
-    } catch (e: any) {
-      return error(e.message || "Failed to update extension config", 500);
-    }
-  }
-
-  // PUT /api/extensions/project/:projectId/reorder - Update extension order
-  const reorderMatch = pathname.match(/^\/api\/extensions\/project\/([^/]+)\/reorder$/);
-  if (reorderMatch && method === "PUT") {
-    const projectId = reorderMatch[1];
-    try {
-      const body = await req.json();
-      const orders = body.orders as { extensionId: string; sortOrder: number }[];
-
-      if (!orders || !Array.isArray(orders)) {
-        return error("Orders array is required", 400);
-      }
-
-      extensionSettings.updateOrders(projectId, orders);
-      return json({ success: true });
-    } catch (e: any) {
-      return error(e.message || "Failed to update extension order", 500);
     }
   }
 
