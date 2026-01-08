@@ -50,6 +50,10 @@ export interface Session {
   favorite?: number;
   archived?: number;
   marked_for_review?: number;
+  // Backlog
+  in_backlog?: number;
+  backlog_added_at?: number | null;
+  backlog_note?: string | null;
   // Worktree mode - session runs in isolated git worktree
   worktree_path?: string | null;
   worktree_branch?: string | null;

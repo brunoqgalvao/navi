@@ -1,6 +1,7 @@
 // Kanban types
 
 export type KanbanStatus =
+  | "backlog"
   | "spec"
   | "execute"
   | "review"
@@ -28,8 +29,13 @@ export interface KanbanColumn {
   description: string;
 }
 
-// Simplified 4-column flow
+// 5-column flow with Backlog as the entry point
 export const KANBAN_COLUMNS: KanbanColumn[] = [
+  {
+    id: "backlog",
+    title: "Backlog",
+    description: "Ideas and future work",
+  },
   {
     id: "spec",
     title: "Spec",

@@ -190,6 +190,7 @@ export function getCardsByStatus(projectId: string) {
   return derived(kanbanStore, ($store) => {
     const cards = $store.get(projectId) || [];
     const grouped: Record<KanbanStatus, KanbanCard[]> = {
+      backlog: [],
       spec: [],
       execute: [],
       review: [],

@@ -181,6 +181,17 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN archived_at INTEGER");
   } catch {}
 
+  // Backlog feature - sessions can be added to backlog for later
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN in_backlog INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN backlog_added_at INTEGER");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN backlog_note TEXT");
+  } catch {}
+
   // Indexes for multi-session queries
   try {
     db.run("CREATE INDEX idx_sessions_parent ON sessions(parent_session_id)");
@@ -478,6 +489,10 @@ export interface Session {
   escalation: string | null;   // JSON string of Escalation
   delivered_at: number | null;
   archived_at: number | null;
+  // Backlog
+  in_backlog: number;
+  backlog_added_at: number | null;
+  backlog_note: string | null;
   // Timestamps
   created_at: number;
   updated_at: number;
@@ -704,6 +719,7 @@ export const sessions = {
       "INSERT INTO sessions (id, project_id, title, worktree_path, worktree_branch, worktree_base_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [id, project_id, title, worktree_path, worktree_branch, worktree_base_branch, created_at, updated_at]
     ),
+
 };
 
 export const messages = {
@@ -1498,7 +1514,7 @@ export const extensionSettings = {
 };
 
 // Kanban Cards
-export type KanbanStatus = "spec" | "execute" | "review" | "done" | "archived";
+export type KanbanStatus = "backlog" | "spec" | "execute" | "review" | "done" | "archived";
 
 export interface KanbanCard {
   id: string;

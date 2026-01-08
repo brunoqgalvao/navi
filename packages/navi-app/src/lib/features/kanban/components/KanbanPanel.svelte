@@ -76,6 +76,7 @@
   async function handleMoveNext(card: KanbanCard) {
     // Move to next status
     const nextStatus: Record<KanbanStatus, KanbanStatus> = {
+      backlog: "spec",
       spec: "execute",
       execute: "review",
       review: "done",
