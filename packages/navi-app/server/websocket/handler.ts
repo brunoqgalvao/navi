@@ -3,12 +3,8 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-<<<<<<< Updated upstream
 import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions } from "../db";
 import { sessionManager, type SessionEvent } from "../services/session-manager";
-=======
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb } from "../db";
->>>>>>> Stashed changes
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
 import { generateChatTitle } from "../services/title-generator";
 import { hasMessageContent, shouldPersistUserMessage, safeSend } from "../services/message-helpers";
@@ -1111,7 +1107,6 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
               msg.requestId,
               JSON.stringify(msg.questions)
             );
-<<<<<<< Updated upstream
             // Update kanban card to blocked (waiting for user input)
             setKanbanCardBlocked(sessionId, "Needs input from user");
           }
@@ -1130,10 +1125,6 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
           handleMultiSessionDeliver(child, sessionId, msg);
         } else if (msg.type === "multi_session_log_decision") {
           handleMultiSessionLogDecision(child, sessionId, msg);
-=======
-          }
-          sendToSession(sessionId, payload);
->>>>>>> Stashed changes
         } else if (msg.type === "complete") {
           if (lastMainAssistantMsgId) {
             messages.markFinal(lastMainAssistantMsgId);
