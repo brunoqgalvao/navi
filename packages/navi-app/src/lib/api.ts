@@ -287,6 +287,8 @@ export const api = {
         messageCount: number;
         costUsd: number;
       }>(`/sessions/${id}/generate-summary`, { method: "POST" }),
+    clearWorktree: (id: string) =>
+      request<Session>(`/sessions/${id}/clear-worktree`, { method: "POST" }),
   },
 
   messages: {
@@ -1123,15 +1125,32 @@ export interface MergeResult {
   cleanedUp?: boolean;
 }
 
+// Branch name generation API
+export interface BranchNameResult {
+  branchName: string;  // Full branch name with session/ prefix
+  shortName: string;   // Short name without prefix
+  generatedBy: "llm" | "fallback";
+}
+
+export const branchNameApi = {
+  // Generate a smart branch name using LLM
+  generate: (description: string, useLlm: boolean = true) =>
+    request<BranchNameResult>("/branch-name/generate", {
+      method: "POST",
+      body: JSON.stringify({ description, useLlm }),
+    }),
+};
+
 export const worktreeApi = {
   // Create a worktree for a session
-  create: (sessionId: string, description: string) =>
+  // If branchName is provided, uses that; otherwise generates from description
+  create: (sessionId: string, description: string, branchName?: string) =>
     request<{
       session: Session;
       worktree: { path: string; branch: string; baseBranch: string };
     }>(`/sessions/${sessionId}/worktree`, {
       method: "POST",
-      body: JSON.stringify({ description }),
+      body: JSON.stringify({ description, branchName }),
     }),
 
   // Get worktree status
@@ -1201,4 +1220,54 @@ export const worktreeApi = {
     request<{ success: boolean }>(`/merge/snapshot/${snapshotId}`, {
       method: "DELETE",
     }),
+
+  // ⚠️ EXPERIMENTAL: Preview server methods (startPreview -> listPreviews) - remove to revert
+  // See server/routes/worktree-preview.ts for full revert instructions
+
+  // Start preview server in worktree
+  startPreview: (sessionId: string, command?: string) =>
+    request<{
+      success: boolean;
+      alreadyRunning?: boolean;
+      processId: string;
+      pid?: number;
+      frontendPort?: number;
+      backendPort?: number;
+      ports?: number[];
+      command?: string;
+      worktreePath?: string;
+      branch?: string;
+    }>(`/sessions/${sessionId}/worktree/preview`, {
+      method: "POST",
+      body: JSON.stringify({ command }),
+    }),
+
+  // Stop preview server
+  stopPreview: (sessionId: string) =>
+    request<{ success: boolean; killed: boolean }>(`/sessions/${sessionId}/worktree/preview`, {
+      method: "DELETE",
+    }),
+
+  // Get preview server status
+  getPreviewStatus: (sessionId: string) =>
+    request<{
+      running: boolean;
+      processId?: string;
+      pid?: number;
+      ports?: number[];
+      status?: string;
+      startedAt?: number;
+      output?: string[];
+    }>(`/sessions/${sessionId}/worktree/preview`),
+
+  // List all running preview servers
+  listPreviews: () =>
+    request<Array<{
+      sessionId: string;
+      processId: string;
+      status: string;
+      ports: number[];
+      branch?: string;
+    }>>("/worktree-previews"),
+  // ⚠️ END EXPERIMENTAL preview methods
 };

@@ -12,7 +12,8 @@
 
   let { filePath, oldString, newString, edits, replaceAll, onPreview }: Props = $props();
 
-  let showPreview = $state(false);
+  // Start expanded by default - no need to toggle twice
+  let showPreview = $state(true);
 
   function getFileName(path: string): string {
     return path?.split("/").pop() || path || "";
@@ -53,29 +54,31 @@
   </div>
 
   {#if showPreview}
-    {#if isMultiEdit}
-      <div class="space-y-2">
-        {#each edits! as edit, idx}
-          <div class="border border-gray-200 rounded overflow-hidden">
-            <div class="text-[10px] text-gray-500 bg-gray-100 px-2 py-1 border-b border-gray-200">
-              Change {idx + 1}
+    <div class="max-h-[400px] overflow-auto">
+      {#if isMultiEdit}
+        <div class="space-y-2">
+          {#each edits! as edit, idx}
+            <div class="border border-gray-200 rounded overflow-hidden">
+              <div class="text-[10px] text-gray-500 bg-gray-100 px-2 py-1 border-b border-gray-200">
+                Change {idx + 1}
+              </div>
+              <UnifiedDiff
+                oldText={edit.old_string || ""}
+                newText={edit.new_string || ""}
+                fileName={getFileName(filePath)}
+                maxHeight="200px"
+              />
             </div>
-            <UnifiedDiff
-              oldText={edit.old_string || ""}
-              newText={edit.new_string || ""}
-              fileName={getFileName(filePath)}
-              maxHeight="200px"
-            />
-          </div>
-        {/each}
-      </div>
-    {:else if oldString !== undefined}
-      <UnifiedDiff
-        oldText={oldString || ""}
-        newText={newString || ""}
-        fileName={getFileName(filePath)}
-        maxHeight="300px"
-      />
-    {/if}
+          {/each}
+        </div>
+      {:else if oldString !== undefined}
+        <UnifiedDiff
+          oldText={oldString || ""}
+          newText={newString || ""}
+          fileName={getFileName(filePath)}
+          maxHeight="300px"
+        />
+      {/if}
+    </div>
   {/if}
 </div>

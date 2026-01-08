@@ -961,6 +961,9 @@
             loadClaudeMd(project.path);
             loadProjectCost(project.id);
 
+            // Load extension settings for this project
+            projectExtensions.loadForProject(project.id);
+
             // If a specific session was requested, select it
             if (initialRoute.sessionId) {
               const targetSession = sessionsList.find(s => s.id === initialRoute.sessionId);
@@ -2071,6 +2074,112 @@
     scrollToBottom();
   }
 
+  // Send message to a specific session (avoids race conditions with store updates)
+  async function sendMessageToSession(targetSessionId: string) {
+    if (!inputText.trim() || !$isConnected) return;
+    if (!$session.projectId) {
+      alert("Please select or create a project first.");
+      return;
+    }
+
+    const isCurrentSessionLoading = $loadingSessions.has(targetSessionId);
+
+    if (isCurrentSessionLoading) {
+      messageQueue.add({ sessionId: targetSessionId, text: inputText.trim(), attachments: [] });
+      inputText = "";
+      sessionDrafts.clearDraft(targetSessionId);
+      return;
+    }
+
+    const currentInput = inputText;
+    const currentAttachedFiles = get(attachedFiles);
+    const currentReferences = get(textReferences);
+    inputText = "";
+    sessionDrafts.clearDraft(targetSessionId);
+    attachedFiles.clear();
+    textReferences.clear();
+
+    const currentTodos = get(todos);
+    if (currentTodos.length > 0 && currentTodos.every(t => t.status === "completed")) {
+      todos.set([]);
+    }
+
+    const thanksPatterns = /\b(thanks|thank you|thx|ty|awesome|perfect|great job|well done|amazing|love it)\b/i;
+    if (thanksPatterns.test(currentInput)) {
+      showConfetti = true;
+    }
+
+    let messageContent = currentInput;
+
+    // Add text references as markdown blockquotes
+    if (currentReferences.length > 0) {
+      const referenceBlocks = currentReferences.map(formatReference).join("\n\n");
+      messageContent = `${referenceBlocks}\n\n${messageContent}`;
+    }
+
+    // Add file references
+    if (currentAttachedFiles.length > 0) {
+      const fileRefs = currentAttachedFiles.map(f => `[File: ${f.path}]`).join("\n");
+      messageContent = `${fileRefs}\n\n${messageContent}`;
+    }
+
+    sessionMessages.addMessage(targetSessionId, {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: messageContent,
+      timestamp: new Date(),
+    });
+
+    loadingSessions.update(s => { s.add(targetSessionId); return new Set(s); });
+    sessionStatus.setRunning(targetSessionId, $session.projectId!);
+
+    const historyCtx = $sessionHistoryContext.get(targetSessionId);
+
+    client.query({
+      prompt: messageContent,
+      projectId: $session.projectId || undefined,
+      sessionId: targetSessionId,
+      claudeSessionId: $session.claudeSessionId || undefined,
+      model: $session.selectedModel || undefined,
+      historyContext: historyCtx,
+    });
+
+    if (historyCtx) {
+      sessionHistoryContext.update(map => {
+        map.delete(targetSessionId);
+        return new Map(map);
+      });
+    }
+
+    scrollToBottom();
+  }
+
+  // Send message to a specific session with explicit content (for worktree flow)
+  async function sendMessageWithContent(targetSessionId: string, messageContent: string) {
+    if (!messageContent.trim() || !$isConnected) return;
+    if (!$session.projectId) return;
+
+    sessionMessages.addMessage(targetSessionId, {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: messageContent,
+      timestamp: new Date(),
+    });
+
+    loadingSessions.update(s => { s.add(targetSessionId); return new Set(s); });
+    sessionStatus.setRunning(targetSessionId, $session.projectId!);
+
+    client.query({
+      prompt: messageContent,
+      projectId: $session.projectId || undefined,
+      sessionId: targetSessionId,
+      claudeSessionId: $session.claudeSessionId || undefined,
+      model: $session.selectedModel || undefined,
+    });
+
+    scrollToBottom();
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -2937,14 +3046,14 @@
                     onExecCommand={handleExecCommand}
                     onManageSkills={() => { projectSettingsInitialTab = "skills"; showProjectSettings = true; }}
                     onToggleUntilDone={toggleUntilDone}
-                    onCreateWithWorktree={async (description) => {
+                    onCreateWithWorktree={async (description, message) => {
                       const newSessionId = await createNewChatWithWorktree(description);
-                      if (newSessionId) {
+                      if (newSessionId && message.trim()) {
                         // Refresh sessions and send the first message
                         const sessionsList = await api.sessions.list($session.projectId!, $showArchivedWorkspaces);
                         sidebarSessions = sessionsList;
-                        // Send the actual message after worktree is created
-                        sendMessage();
+                        // Send the message directly - don't rely on inputText which may have been cleared
+                        sendMessageWithContent(newSessionId, message);
                       }
                     }}
                     onMergeWorktree={() => showMergeModal = true}
@@ -3130,16 +3239,23 @@
       baseBranch={currentSessionData.worktree_base_branch || 'main'}
       worktreePath={currentSessionData.worktree_path || undefined}
       onClose={() => showMergeModal = false}
-      onMergeComplete={async () => {
+      onMergeComplete={async ({ keepChatting }) => {
         showMergeModal = false;
-        // Refresh sessions and archive the current session
         if ($session.projectId && $session.sessionId) {
-          await api.sessions.setArchived($session.sessionId, true);
-          const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
-          sidebarSessions = sessionsList;
-          // Select a different session or clear current
-          if (!$showArchivedWorkspaces) {
-            session.setSession(null);
+          if (keepChatting) {
+            // Clear worktree data, keep the session active on main
+            await api.sessions.clearWorktree($session.sessionId);
+            // Refresh sessions list (currentSessionData is $derived and will auto-update)
+            const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+            sidebarSessions = sessionsList;
+          } else {
+            // Archive the session and clear it
+            await api.sessions.setArchived($session.sessionId, true);
+            const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+            sidebarSessions = sessionsList;
+            if (!$showArchivedWorkspaces) {
+              session.setSession(null);
+            }
           }
         }
       }}

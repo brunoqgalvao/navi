@@ -21,6 +21,8 @@ import {
   deleteRepoSnapshot,
   type ConflictContext,
 } from "../utils/worktree";
+// ⚠️ EXPERIMENTAL: Worktree preview cleanup - remove this import to revert (see worktree-preview.ts)
+import { cleanupWorktreePreview } from "./worktree-preview";
 import { existsSync } from "fs";
 
 export async function handleWorktreeRoutes(
@@ -52,16 +54,18 @@ export async function handleWorktreeRoutes(
     }
 
     const body = await req.json();
-    const { description } = body;
+    const { description, branchName } = body;
 
     if (!description || typeof description !== "string") {
       return json({ error: "description is required" }, 400);
     }
 
     try {
+      // Use custom branch name if provided (from LLM), otherwise generate from description
       const { path: worktreePath, branch, baseBranch } = createWorktree(
         project.path,
-        description
+        description,
+        branchName // Optional LLM-generated branch name
       );
 
       // Update session with worktree info
@@ -163,6 +167,9 @@ export async function handleWorktreeRoutes(
           hasUncommittedChanges: true,
         }, 400);
       }
+
+      // ⚠️ EXPERIMENTAL: Stop any running preview server for this worktree - remove to revert
+      cleanupWorktreePreview(sessionId);
 
       // Remove git worktree
       if (existsSync(session.worktree_path)) {
