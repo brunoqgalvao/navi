@@ -166,14 +166,71 @@ export async function triggerSDKCompact(
 
 /**
  * Start a new chat with a summary of the current conversation
- * TODO: Implement with LLM summarization
+ * Generates an LLM summary of the conversation and creates a new chat with it as context
  */
-export function startNewChatWithSummary(_sessionId: string): void {
+export async function startNewChatWithSummary(
+  sessionId: string,
+  callbacks: {
+    createNewChat: () => Promise<string | null>;
+    setInputText: (text: string) => void;
+  }
+): Promise<void> {
+  if (!sessionId) {
+    notifications.add({
+      type: "error",
+      title: "No session",
+      message: "No active session to summarize",
+    });
+    return;
+  }
+
   notifications.add({
     type: "info",
-    title: "Coming soon",
-    message: "Start new chat with summary is not yet implemented",
+    title: "Generating summary",
+    message: "Creating a summary of your conversation...",
   });
+
+  try {
+    // Generate the summary
+    const result = await api.sessions.generateSummary(sessionId);
+
+    // Create a new chat
+    const newSessionId = await callbacks.createNewChat();
+    if (!newSessionId) {
+      throw new Error("Failed to create new chat");
+    }
+
+    // Build the context message to pre-fill
+    const contextMessage = `# Previous Conversation Summary
+
+**From:** ${result.sessionTitle}${result.projectName ? ` (${result.projectName})` : ""}
+**Messages:** ${result.messageCount}
+
+---
+
+${result.summary}
+
+---
+
+*Continue from where we left off, or start a new related task.*`;
+
+    // Pre-fill the input with the context
+    callbacks.setInputText(contextMessage);
+
+    notifications.add({
+      type: "success",
+      title: "Summary ready",
+      message: "New chat created with conversation summary. Edit and send to continue!",
+    });
+  } catch (e) {
+    console.error("Failed to start new chat with summary:", e);
+    const errorMsg = e instanceof Error ? e.message : "Unknown error";
+    notifications.add({
+      type: "error",
+      title: "Summary failed",
+      message: errorMsg,
+    });
+  }
 }
 
 // Legacy exports for compatibility

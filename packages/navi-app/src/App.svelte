@@ -1587,6 +1587,14 @@
     }
   }
 
+  async function handleStartNewChatWithSummary(sess: Session, e: Event) {
+    e.stopPropagation();
+    await startNewChatWithSummary(sess.id, {
+      createNewChat: createNewChatAction,
+      setInputText: (text) => { inputText = text; }
+    });
+  }
+
   async function handleNavHistoryNavigate(entry: NavHistoryEntry) {
     // If different project, switch to it first
     if (entry.projectId !== $session.projectId) {
@@ -2653,6 +2661,7 @@
     onRenameSession={renameSession}
     onDeleteSession={deleteSession}
     onDuplicateSession={duplicateSession}
+    onStartNewChatWithSummary={handleStartNewChatWithSummary}
     onToggleSessionFavorite={toggleSessionFavorite}
     onToggleSessionArchive={toggleSessionArchive}
     onArchiveAllNonStarred={archiveAllNonStarred}
@@ -2853,7 +2862,10 @@
               isCompacting={$compactingSessionsStore.has($session.sessionId || '')}
               onPruneToolResults={() => pruneToolResults($session.sessionId || '')}
               onSDKCompact={() => sendCommand("/compact")}
-              onStartNewChat={() => startNewChatWithSummary($session.sessionId || '')}
+              onStartNewChat={() => startNewChatWithSummary($session.sessionId || '', {
+                createNewChat: createNewChatAction,
+                setInputText: (text) => { inputText = text; }
+              })}
               onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
               onSuggestionClick={(prompt) => { inputText = prompt; }}
               {projectContext}

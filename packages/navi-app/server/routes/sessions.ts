@@ -663,5 +663,91 @@ export async function handleSessionRoutes(
     });
   }
 
+  // Generate a summary of a session's conversation
+  const generateSummaryMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/generate-summary$/);
+  if (generateSummaryMatch && method === "POST") {
+    const sessionId = generateSummaryMatch[1];
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    const project = projects.get(session.project_id);
+    const allMessages = messages.listBySession(sessionId);
+
+    if (allMessages.length === 0) {
+      return json({ error: "No messages to summarize" }, 400);
+    }
+
+    // Extract text from message content
+    const extractText = (content: string): string => {
+      try {
+        const parsed = JSON.parse(content);
+        if (typeof parsed === "string") return parsed;
+        if (Array.isArray(parsed)) {
+          return parsed
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join("\n");
+        }
+        return "";
+      } catch {
+        return content;
+      }
+    };
+
+    // Build conversation transcript (limit to avoid token overflow)
+    const transcript = allMessages
+      .slice(-50) // Last 50 messages max
+      .map(m => {
+        const text = extractText(m.content).slice(0, 2000); // Truncate long messages
+        return `${m.role.toUpperCase()}: ${text}`;
+      })
+      .join("\n\n---\n\n");
+
+    // Call ephemeral chat to generate summary
+    const summaryPrompt = `Summarize the following conversation between a user and an AI assistant. Focus on:
+1. The main goals/tasks the user was trying to accomplish
+2. Key decisions made or approaches taken
+3. Important context that would be useful for continuing this work
+4. Any unfinished tasks or next steps mentioned
+
+Keep the summary concise but comprehensive (2-4 paragraphs). Write it as context that could be provided to start a fresh conversation.
+
+CONVERSATION:
+${transcript}`;
+
+    try {
+      const ephemeralResponse = await fetch("http://localhost:3001/api/ephemeral", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: summaryPrompt,
+          systemPrompt: "You are a helpful assistant that creates clear, actionable summaries of technical conversations. Your summaries should help someone quickly understand the context and continue the work.",
+          model: "claude-sonnet-4-20250514",
+          maxTokens: 1024,
+        }),
+      });
+
+      if (!ephemeralResponse.ok) {
+        const err = await ephemeralResponse.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to generate summary");
+      }
+
+      const data = await ephemeralResponse.json();
+
+      return json({
+        summary: data.result,
+        sessionTitle: session.title,
+        projectName: project?.name || null,
+        messageCount: allMessages.length,
+        costUsd: data.costUsd,
+      });
+    } catch (e) {
+      console.error("Failed to generate session summary:", e);
+      return json({ error: e instanceof Error ? e.message : "Failed to generate summary" }, 500);
+    }
+  }
+
   return null;
 }

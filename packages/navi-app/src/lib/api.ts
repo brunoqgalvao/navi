@@ -279,6 +279,14 @@ export const api = {
       } | null>(`/sessions/${id}/pending-question`),
     clearPendingQuestion: (id: string) =>
       request<{ success: boolean }>(`/sessions/${id}/pending-question`, { method: "DELETE" }),
+    generateSummary: (id: string) =>
+      request<{
+        summary: string;
+        sessionTitle: string;
+        projectName: string | null;
+        messageCount: number;
+        costUsd: number;
+      }>(`/sessions/${id}/generate-summary`, { method: "POST" }),
   },
 
   messages: {
