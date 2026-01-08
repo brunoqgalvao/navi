@@ -7,9 +7,10 @@
     currentTitle: string;
     messages: ChatMessage[];
     onApply: (title: string) => void;
+    sidebarWidth?: number;
   }
 
-  let { sessionId, currentTitle, messages, onApply }: Props = $props();
+  let { sessionId, currentTitle, messages, onApply, sidebarWidth = 288 }: Props = $props();
 
   // Track sessions that have already had suggestions (persists across re-renders)
   const triggeredSessions = new Set<string>();
@@ -18,6 +19,7 @@
   let showSuggestion = $state(false);
   let tooltipEl: HTMLElement | null = $state(null);
   let tooltipTop = $state(100);
+  let scrollContainer: HTMLElement | null = $state(null);
 
   let userMessageCount = $derived(
     messages.filter(m => m.role === "user" && !m.parentToolUseId).length
@@ -25,8 +27,8 @@
 
   // Trigger at user message 3 (only once per session)
   $effect(() => {
-    if (userMessageCount === 3 && 
-        sessionId && 
+    if (userMessageCount === 3 &&
+        sessionId &&
         !triggeredSessions.has(sessionId) &&
         !showSuggestion) {
       console.log("[TitleSuggestion] Triggering for session:", sessionId);
@@ -35,13 +37,44 @@
     }
   });
 
-  // Position tooltip near the parent element
+  // Find scroll container and set up scroll listener
+  $effect(() => {
+    if (tooltipEl && !scrollContainer) {
+      scrollContainer = tooltipEl.closest('.sidebar-scroll');
+    }
+  });
+
+  // Update tooltip position on scroll
+  $effect(() => {
+    if (!scrollContainer || !showSuggestion) return;
+
+    const updatePosition = () => {
+      if (tooltipEl) {
+        const parent = tooltipEl.closest('[data-session-item]');
+        if (parent) {
+          const rect = parent.getBoundingClientRect();
+          tooltipTop = rect.top;
+        }
+      }
+    };
+
+    scrollContainer.addEventListener('scroll', updatePosition);
+    return () => scrollContainer?.removeEventListener('scroll', updatePosition);
+  });
+
+  // Position tooltip near the parent element and scroll into view
   $effect(() => {
     if (showSuggestion && tooltipEl) {
       const parent = tooltipEl.closest('[data-session-item]');
       if (parent) {
-        const rect = parent.getBoundingClientRect();
-        tooltipTop = rect.top;
+        // First, scroll the session item into view within the sidebar
+        parent.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        // Give scrolling a moment to complete, then update position
+        setTimeout(() => {
+          const rect = parent.getBoundingClientRect();
+          tooltipTop = rect.top;
+        }, 100);
       }
     }
   });
@@ -155,10 +188,10 @@ Bad responses: "Debug React", Current title: ..., The new title should be...`,
 </script>
 
 {#if showSuggestion && suggestedTitle}
-  <div 
+  <div
     bind:this={tooltipEl}
-    class="fixed left-72 z-[9999] animate-fade-in pointer-events-auto"
-    style="top: {tooltipTop}px;"
+    class="fixed z-[9999] animate-fade-in pointer-events-auto"
+    style="top: {tooltipTop}px; left: {sidebarWidth}px;"
   >
     <div class="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 w-72">
       <div class="absolute -left-[7px] top-6 w-3 h-3 bg-white border-l border-b border-gray-200 transform rotate-45"></div>
