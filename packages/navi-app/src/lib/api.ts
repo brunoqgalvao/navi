@@ -1076,11 +1076,29 @@ export interface ConflictInfo {
   } | null;
 }
 
+export interface ConflictFileInfo {
+  path: string;
+  oursContent: string;
+  theirsContent: string;
+  fullContent: string;
+  conflictMarkers: string[];
+}
+
+export interface ConflictContext {
+  conflictingFiles: ConflictFileInfo[];
+  worktreeBranch: string;
+  baseBranch: string;
+  worktreePath: string;
+  mainRepoPath: string;
+  snapshotId: string;
+}
+
 export interface MergeResult {
   success: boolean;
   hasConflicts?: boolean;
   needsConflictResolution?: boolean;  // True if rebase is paused waiting for user to resolve
   conflicts?: ConflictInfo[];
+  conflictContext?: ConflictContext;  // Rich context for Claude to resolve conflicts
   error?: string;
   merged?: boolean;
   cleanedUp?: boolean;
@@ -1152,4 +1170,16 @@ export const worktreeApi = {
       `/projects/${projectId}/worktrees/prune`,
       { method: "POST" }
     ),
+
+  // Restore repo from snapshot (abort merge and rollback)
+  restoreSnapshot: (snapshotId: string) =>
+    request<{ success: boolean; message: string }>(`/merge/restore/${snapshotId}`, {
+      method: "POST",
+    }),
+
+  // Delete snapshot (cleanup after successful resolve)
+  deleteSnapshot: (snapshotId: string) =>
+    request<{ success: boolean }>(`/merge/snapshot/${snapshotId}`, {
+      method: "DELETE",
+    }),
 };

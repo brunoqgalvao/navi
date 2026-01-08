@@ -370,6 +370,24 @@ export interface MergeResult {
   conflicts?: string[];
   error?: string;
   needsConflictResolution?: boolean;  // True if rebase is paused waiting for conflict resolution
+  conflictContext?: ConflictContext;  // Rich context for Claude to resolve conflicts
+}
+
+export interface ConflictContext {
+  conflictingFiles: ConflictFileInfo[];
+  worktreeBranch: string;
+  baseBranch: string;
+  worktreePath: string;
+  mainRepoPath: string;
+  snapshotId: string;  // ID to restore if resolution fails
+}
+
+export interface ConflictFileInfo {
+  path: string;
+  oursContent: string;   // Content from base branch
+  theirsContent: string; // Content from worktree branch
+  fullContent: string;   // File with conflict markers
+  conflictMarkers: string[]; // Line numbers with conflict markers
 }
 
 /**
@@ -382,6 +400,201 @@ function safeExec(cmd: string, cwd: string): { success: boolean; output?: string
   } catch (e: any) {
     return { success: false, error: e.stderr?.toString() || e.message || String(e) };
   }
+}
+
+/**
+ * Snapshot of repo state for safe rollback
+ */
+export interface RepoSnapshot {
+  id: string;
+  repoPath: string;
+  branch: string;
+  commitHash: string;
+  stashCreated: boolean;
+  stashRef?: string;
+  timestamp: number;
+}
+
+// In-memory storage for snapshots (could be persisted to DB later)
+const snapshots = new Map<string, RepoSnapshot>();
+
+/**
+ * Create a snapshot of the repo state before risky operations
+ */
+export function createRepoSnapshot(repoPath: string): RepoSnapshot | null {
+  try {
+    const id = `snapshot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Get current branch
+    const branchResult = safeExec("git branch --show-current", repoPath);
+    if (!branchResult.success) return null;
+    const branch = branchResult.output || "HEAD";
+
+    // Get current commit hash
+    const hashResult = safeExec("git rev-parse HEAD", repoPath);
+    if (!hashResult.success) return null;
+    const commitHash = hashResult.output || "";
+
+    // Check for uncommitted changes and stash them
+    const statusResult = safeExec("git status --porcelain", repoPath);
+    const hasChanges = (statusResult.output || "").trim().length > 0;
+    let stashCreated = false;
+    let stashRef: string | undefined;
+
+    if (hasChanges) {
+      const stashResult = safeExec(`git stash push -m "navi-snapshot-${id}" --include-untracked`, repoPath);
+      if (stashResult.success) {
+        stashCreated = true;
+        // Get the stash ref
+        const stashListResult = safeExec("git stash list -1", repoPath);
+        if (stashListResult.success && stashListResult.output) {
+          const match = stashListResult.output.match(/^(stash@\{[0-9]+\})/);
+          stashRef = match ? match[1] : "stash@{0}";
+        }
+      }
+    }
+
+    const snapshot: RepoSnapshot = {
+      id,
+      repoPath,
+      branch,
+      commitHash,
+      stashCreated,
+      stashRef,
+      timestamp: Date.now(),
+    };
+
+    snapshots.set(id, snapshot);
+    console.log("[Snapshot] Created:", { id, branch, commitHash, stashCreated });
+    return snapshot;
+  } catch (e) {
+    console.error("[Snapshot] Failed to create:", e);
+    return null;
+  }
+}
+
+/**
+ * Restore repo to a previous snapshot state
+ */
+export function restoreRepoSnapshot(snapshotId: string): boolean {
+  const snapshot = snapshots.get(snapshotId);
+  if (!snapshot) {
+    console.error("[Snapshot] Not found:", snapshotId);
+    return false;
+  }
+
+  console.log("[Snapshot] Restoring:", snapshot);
+
+  try {
+    // Abort any in-progress merge or rebase
+    safeExec("git merge --abort", snapshot.repoPath);
+    safeExec("git rebase --abort", snapshot.repoPath);
+
+    // Reset to the original commit (hard reset to discard all changes)
+    const resetResult = safeExec(`git reset --hard ${snapshot.commitHash}`, snapshot.repoPath);
+    if (!resetResult.success) {
+      console.error("[Snapshot] Failed to reset:", resetResult.error);
+      return false;
+    }
+
+    // Checkout the original branch if different
+    const currentBranch = safeExec("git branch --show-current", snapshot.repoPath);
+    if (currentBranch.output !== snapshot.branch) {
+      safeExec(`git checkout "${snapshot.branch}"`, snapshot.repoPath);
+    }
+
+    // Restore stashed changes if any
+    if (snapshot.stashCreated && snapshot.stashRef) {
+      const popResult = safeExec(`git stash pop ${snapshot.stashRef}`, snapshot.repoPath);
+      if (!popResult.success) {
+        // Try just stash pop without ref
+        safeExec("git stash pop", snapshot.repoPath);
+      }
+    }
+
+    console.log("[Snapshot] Restored successfully");
+    snapshots.delete(snapshotId);
+    return true;
+  } catch (e) {
+    console.error("[Snapshot] Failed to restore:", e);
+    return false;
+  }
+}
+
+/**
+ * Delete a snapshot (call after successful operation)
+ */
+export function deleteRepoSnapshot(snapshotId: string): void {
+  const snapshot = snapshots.get(snapshotId);
+  if (snapshot) {
+    // If we created a stash but didn't restore, we should clean it up
+    // But only if the operation succeeded - leave it for manual recovery otherwise
+    snapshots.delete(snapshotId);
+    console.log("[Snapshot] Deleted:", snapshotId);
+  }
+}
+
+/**
+ * Get rich conflict information for Claude to resolve
+ */
+export function getConflictDetails(repoPath: string, conflictFiles: string[]): ConflictFileInfo[] {
+  const details: ConflictFileInfo[] = [];
+
+  for (const filePath of conflictFiles) {
+    try {
+      const fullPath = join(repoPath, filePath);
+      const fullContent = readFileSync(fullPath, "utf-8");
+
+      // Parse conflict markers to extract ours/theirs
+      let oursContent = "";
+      let theirsContent = "";
+      const conflictMarkers: string[] = [];
+
+      const lines = fullContent.split("\n");
+      let inConflict = false;
+      let inOurs = false;
+      let lineNum = 0;
+
+      for (const line of lines) {
+        lineNum++;
+        if (line.startsWith("<<<<<<<")) {
+          inConflict = true;
+          inOurs = true;
+          conflictMarkers.push(`Line ${lineNum}: Conflict start`);
+        } else if (line.startsWith("=======")) {
+          inOurs = false;
+        } else if (line.startsWith(">>>>>>>")) {
+          inConflict = false;
+          conflictMarkers.push(`Line ${lineNum}: Conflict end`);
+        } else if (inConflict) {
+          if (inOurs) {
+            oursContent += line + "\n";
+          } else {
+            theirsContent += line + "\n";
+          }
+        }
+      }
+
+      details.push({
+        path: filePath,
+        oursContent: oursContent.trim(),
+        theirsContent: theirsContent.trim(),
+        fullContent,
+        conflictMarkers,
+      });
+    } catch (e) {
+      console.error(`[Conflict] Failed to read ${filePath}:`, e);
+      details.push({
+        path: filePath,
+        oursContent: "",
+        theirsContent: "",
+        fullContent: "",
+        conflictMarkers: [],
+      });
+    }
+  }
+
+  return details;
 }
 
 /**
@@ -450,6 +663,28 @@ export function mergeWorktreeToBase(
   console.log("[Merge] Starting rebase-based merge:", { worktreeBranch, baseBranch, mainRepoPath, worktreePath });
 
   // ============================================
+  // PHASE 0: Create snapshots for safe rollback
+  // ============================================
+  let mainSnapshot: RepoSnapshot | null = null;
+  let worktreeSnapshot: RepoSnapshot | null = null;
+
+  console.log("[Merge] Phase 0: Creating safety snapshots");
+  mainSnapshot = createRepoSnapshot(mainRepoPath);
+  if (!mainSnapshot) {
+    return { success: false, error: "Failed to create safety snapshot of main repo" };
+  }
+
+  if (worktreePath) {
+    worktreeSnapshot = createRepoSnapshot(worktreePath);
+    if (!worktreeSnapshot) {
+      deleteRepoSnapshot(mainSnapshot.id);
+      return { success: false, error: "Failed to create safety snapshot of worktree" };
+    }
+  }
+
+  console.log("[Merge] Snapshots created:", { main: mainSnapshot.id, worktree: worktreeSnapshot?.id });
+
+  // ============================================
   // PHASE 1: Rebase worktree onto latest base
   // ============================================
   if (worktreePath) {
@@ -464,6 +699,9 @@ export function mergeWorktreeToBase(
     // Check if worktree has uncommitted changes
     const wtStatus = safeExec("git status --porcelain", worktreePath);
     if ((wtStatus.output || "").trim().length > 0) {
+      // Restore snapshots
+      if (worktreeSnapshot) restoreRepoSnapshot(worktreeSnapshot.id);
+      restoreRepoSnapshot(mainSnapshot.id);
       return {
         success: false,
         error: "Worktree has uncommitted changes. Please commit them first before merging."
@@ -488,18 +726,33 @@ export function mergeWorktreeToBase(
         .filter(Boolean);
 
       if (conflicts.length > 0) {
-        // DON'T abort - keep rebase in progress so user can resolve conflicts
-        console.log("[Merge] Rebase conflicts detected, waiting for resolution:", conflicts);
+        // Get rich conflict details for Claude
+        const conflictingFiles = getConflictDetails(worktreePath, conflicts);
+        console.log("[Merge] Rebase conflicts detected, providing context for resolution:", conflicts);
+
+        // Create conflict context for Claude
+        const conflictContext: ConflictContext = {
+          conflictingFiles,
+          worktreeBranch,
+          baseBranch,
+          worktreePath,
+          mainRepoPath,
+          snapshotId: worktreeSnapshot?.id || mainSnapshot.id,
+        };
+
         return {
           success: false,
           conflicts,
           needsConflictResolution: true,
-          error: `Conflicts detected. Please resolve them in the parallel branch, then click "Continue Merge".`
+          conflictContext,
+          error: `Merge conflicts detected in ${conflicts.length} file(s). Claude will help resolve them.`
         };
       }
 
-      // No conflicts but still failed - abort and return error
-      safeExec("git rebase --abort", worktreePath);
+      // No conflicts but still failed - restore and return error
+      console.log("[Merge] Rebase failed without conflicts, restoring snapshots");
+      if (worktreeSnapshot) restoreRepoSnapshot(worktreeSnapshot.id);
+      restoreRepoSnapshot(mainSnapshot.id);
       return {
         success: false,
         error: `Failed to rebase onto ${baseBranch}: ${rebaseResult.error}`
@@ -514,56 +767,34 @@ export function mergeWorktreeToBase(
   // ============================================
   console.log("[Merge] Phase 2: Fast-forward merge in main repo");
 
+  // The snapshot already handled stashing, so we just need to do the merge
   // Step 1: Get current branch in main repo
   const branchResult = safeExec("git branch --show-current", mainRepoPath);
   if (!branchResult.success) {
+    if (worktreeSnapshot) restoreRepoSnapshot(worktreeSnapshot.id);
+    restoreRepoSnapshot(mainSnapshot.id);
     return { success: false, error: `Failed to get current branch: ${branchResult.error}` };
   }
   state.originalBranch = branchResult.output || "";
   console.log("[Merge] Original branch:", state.originalBranch);
 
-  // Step 2: Check for uncommitted changes in main repo
-  const statusResult = safeExec("git status --porcelain", mainRepoPath);
-  if (!statusResult.success) {
-    return { success: false, error: `Failed to get git status: ${statusResult.error}` };
-  }
-  const hasUncommittedChanges = (statusResult.output || "").trim().length > 0;
-  console.log("[Merge] Has uncommitted changes:", hasUncommittedChanges);
-
-  // Step 3: Stash uncommitted changes if needed
-  if (hasUncommittedChanges) {
-    console.log("[Merge] Stashing uncommitted changes...");
-    const stashResult = safeExec('git stash push --include-untracked -m "Auto-stash before worktree merge"', mainRepoPath);
-    if (!stashResult.success) {
-      return { success: false, error: `Failed to stash changes: ${stashResult.error}` };
-    }
-    state.didStash = true;
-
-    // Verify clean
-    const verifyClean = safeExec("git status --porcelain", mainRepoPath);
-    if ((verifyClean.output || "").trim().length > 0) {
-      rollbackMerge(mainRepoPath, state);
-      return { success: false, error: "Failed to stash all changes." };
-    }
-    console.log("[Merge] Stash created successfully");
-  }
-
-  // Step 4: Checkout base branch if needed
+  // Step 2: Checkout base branch if needed
   if (state.originalBranch !== baseBranch) {
     console.log("[Merge] Checking out base branch:", baseBranch);
     const checkoutResult = safeExec(`git checkout "${baseBranch}"`, mainRepoPath);
     if (!checkoutResult.success) {
-      rollbackMerge(mainRepoPath, state);
+      if (worktreeSnapshot) restoreRepoSnapshot(worktreeSnapshot.id);
+      restoreRepoSnapshot(mainSnapshot.id);
       return { success: false, error: `Failed to checkout ${baseBranch}: ${checkoutResult.error}` };
     }
     state.didCheckout = true;
   }
 
-  // Step 5: Pull latest on base branch
+  // Step 3: Pull latest on base branch
   console.log("[Merge] Pulling latest on", baseBranch);
   safeExec("git pull --ff-only", mainRepoPath); // Best effort, might fail if no remote
 
-  // Step 6: Fast-forward merge (should ALWAYS succeed after rebase)
+  // Step 4: Fast-forward merge (should ALWAYS succeed after rebase)
   console.log("[Merge] Fast-forward merging:", worktreeBranch);
   state.mergeInProgress = true;
 
@@ -575,13 +806,53 @@ export function mergeWorktreeToBase(
   }
 
   if (!mergeResult.success) {
-    console.log("[Merge] Merge failed unexpectedly");
-    rollbackMerge(mainRepoPath, state);
+    console.log("[Merge] Merge in main repo failed, checking for conflicts");
+
+    // Check if there are merge conflicts in the main repo
+    const conflictStatus = safeExec("git status --porcelain", mainRepoPath);
+    const conflicts = (conflictStatus.output || "")
+      .split("\n")
+      .filter((line) => line.startsWith("UU") || line.startsWith("AA") || line.startsWith("DD") || line.startsWith("DU") || line.startsWith("UD"))
+      .map((line) => line.slice(3).trim())
+      .filter(Boolean);
+
+    if (conflicts.length > 0) {
+      // Get rich conflict details for Claude
+      const conflictingFiles = getConflictDetails(mainRepoPath, conflicts);
+      console.log("[Merge] Conflicts detected in main repo:", conflicts);
+
+      // Create conflict context for Claude to resolve in main repo
+      const conflictContext: ConflictContext = {
+        conflictingFiles,
+        worktreeBranch,
+        baseBranch,
+        worktreePath: mainRepoPath, // Conflicts are in main repo
+        mainRepoPath,
+        snapshotId: mainSnapshot.id,
+      };
+
+      return {
+        success: false,
+        conflicts,
+        needsConflictResolution: true,
+        conflictContext,
+        error: `Merge conflicts in main repo. Claude will help resolve them.`
+      };
+    }
+
+    // No conflicts but still failed - restore from snapshot
+    console.log("[Merge] Merge failed unexpectedly (no conflicts detected), restoring snapshots");
+    if (worktreeSnapshot) restoreRepoSnapshot(worktreeSnapshot.id);
+    restoreRepoSnapshot(mainSnapshot.id);
     return { success: false, error: `Merge failed: ${mergeResult.error}` };
   }
 
   state.mergeInProgress = false;
   console.log("[Merge] Merge successful!");
+
+  // Clean up snapshots on success
+  if (worktreeSnapshot) deleteRepoSnapshot(worktreeSnapshot.id);
+  deleteRepoSnapshot(mainSnapshot.id);
 
   // Step 7: Restore stash
   if (state.didStash) {

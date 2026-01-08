@@ -111,6 +111,7 @@
   import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
   import { handleSessionHierarchyWSEvent } from "./lib/features/session-hierarchy";
+  import { fetchCommands, type CustomCommand } from "./lib/features/commands";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
   import type { PermissionSettings, WorkspaceFolder } from "./lib/api";
@@ -779,6 +780,7 @@
   let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.sessionId === $session.sessionId).length : 0);
   let showOnboarding = $derived(!$onboardingComplete);
   let activeSkills = $state<Skill[]>([]);
+  let customCommands = $state<CustomCommand[]>([]);
 
   // Check git status when project changes
   $effect(() => {
@@ -1021,6 +1023,17 @@
     } else {
       activeSkills = [];
     }
+  });
+
+  // Load custom commands when project changes
+  $effect(() => {
+    const projectPath = currentProject?.path;
+    fetchCommands(projectPath).then(commands => {
+      customCommands = commands;
+    }).catch(e => {
+      console.error("Failed to load custom commands:", e);
+      customCommands = [];
+    });
   });
 
   async function loadProjects() {
@@ -2849,6 +2862,12 @@
                       }
                     }}
                     onMergeWorktree={() => showMergeModal = true}
+                    slashCommands={customCommands.map(c => ({
+                      name: c.name,
+                      description: c.description,
+                      argsHint: c.argsHint,
+                      isBuiltIn: false,
+                    }))}
                 />
 
                 <div class="text-center mt-2">
@@ -3023,6 +3042,7 @@
       sessionTitle={currentSessionData.title || ''}
       branch={currentSessionData.worktree_branch}
       baseBranch={currentSessionData.worktree_base_branch || 'main'}
+      worktreePath={currentSessionData.worktree_path || undefined}
       onClose={() => showMergeModal = false}
       onMergeComplete={async () => {
         showMergeModal = false;
@@ -3036,6 +3056,11 @@
             currentSession.setSession(null);
           }
         }
+      }}
+      onConflictResolution={(conflictContext, prompt) => {
+        // Send the conflict resolution prompt to Claude
+        console.log("[MergeModal] Sending conflict resolution to Claude:", conflictContext.conflictingFiles.length, "files");
+        sendCommand(prompt);
       }}
     />
   {/if}

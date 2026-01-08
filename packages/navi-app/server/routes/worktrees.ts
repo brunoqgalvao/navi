@@ -17,6 +17,9 @@ import {
   isRebaseInProgress,
   getConflictContent,
   pruneWorktrees,
+  restoreRepoSnapshot,
+  deleteRepoSnapshot,
+  type ConflictContext,
 } from "../utils/worktree";
 import { existsSync } from "fs";
 
@@ -309,16 +312,19 @@ export async function handleWorktreeRoutes(
       console.log(`[Merge] Result:`, result);
 
       if (!result.success && result.conflicts) {
-        // Return conflict info for resolution
+        // Return conflict info for resolution - now includes rich context for Claude
         const conflictDetails = result.conflicts.map((file) => ({
           file,
-          content: getConflictContent(project.path, file),
+          content: getConflictContent(result.conflictContext?.worktreePath || project.path, file),
         }));
 
         return json({
           success: false,
           hasConflicts: true,
+          needsConflictResolution: result.needsConflictResolution,
           conflicts: conflictDetails,
+          conflictContext: result.conflictContext, // Rich context for Claude chat
+          error: result.error,
         });
       }
 
@@ -549,6 +555,40 @@ export async function handleWorktreeRoutes(
     } catch (e: any) {
       console.error("Prune worktrees error:", e);
       return json({ error: e.message || "Failed to prune worktrees" }, 500);
+    }
+  }
+
+  // POST /api/merge/restore/:snapshotId - Restore repo from snapshot (abort merge)
+  const restoreMatch = url.pathname.match(/^\/api\/merge\/restore\/([^/]+)$/);
+  if (restoreMatch && method === "POST") {
+    const snapshotId = restoreMatch[1];
+
+    try {
+      console.log(`[Merge] Restoring from snapshot: ${snapshotId}`);
+      const success = restoreRepoSnapshot(snapshotId);
+
+      if (!success) {
+        return json({ error: "Failed to restore from snapshot" }, 400);
+      }
+
+      return json({ success: true, message: "Repository restored to pre-merge state" });
+    } catch (e: any) {
+      console.error("Restore snapshot error:", e);
+      return json({ error: e.message || "Failed to restore snapshot" }, 500);
+    }
+  }
+
+  // DELETE /api/merge/snapshot/:snapshotId - Delete snapshot (cleanup after successful resolve)
+  const deleteSnapshotMatch = url.pathname.match(/^\/api\/merge\/snapshot\/([^/]+)$/);
+  if (deleteSnapshotMatch && method === "DELETE") {
+    const snapshotId = deleteSnapshotMatch[1];
+
+    try {
+      deleteRepoSnapshot(snapshotId);
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Delete snapshot error:", e);
+      return json({ error: e.message || "Failed to delete snapshot" }, 500);
     }
   }
 

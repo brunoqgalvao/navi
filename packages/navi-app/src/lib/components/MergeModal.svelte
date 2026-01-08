@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from "./Modal.svelte";
-  import { worktreeApi, type MergePreview, type MergeResult, type ConflictInfo } from "../api";
+  import { worktreeApi, type MergePreview, type MergeResult, type ConflictInfo, type ConflictContext } from "../api";
 
   interface Props {
     open: boolean;
@@ -11,6 +11,7 @@
     worktreePath?: string;
     onClose: () => void;
     onMergeComplete: () => void;
+    onConflictResolution?: (context: ConflictContext, prompt: string) => void; // Callback to send message to Claude
   }
 
   let {
@@ -22,6 +23,7 @@
     worktreePath,
     onClose,
     onMergeComplete,
+    onConflictResolution,
   }: Props = $props();
 
   type Step = "preview" | "merging" | "conflicts" | "continuing" | "success" | "error";
@@ -66,8 +68,17 @@
         cleanupAfter: cleanupAfterMerge,
       });
 
-      if (result.needsConflictResolution && result.conflicts) {
-        // Rebase is paused - user needs to resolve conflicts in worktree
+      if (result.needsConflictResolution && result.conflictContext && onConflictResolution) {
+        // Conflicts detected - send to Claude for resolution
+        const ctx = result.conflictContext;
+        const prompt = buildConflictResolutionPrompt(ctx);
+
+        // Close modal and trigger Claude chat
+        onConflictResolution(ctx, prompt);
+        onClose();
+        return;
+      } else if (result.needsConflictResolution && result.conflicts) {
+        // Fallback: Rebase is paused - user needs to resolve conflicts in worktree
         conflicts = result.conflicts;
         needsConflictResolution = true;
         step = "conflicts";
@@ -86,6 +97,44 @@
       error = e.message;
       step = "error";
     }
+  }
+
+  function buildConflictResolutionPrompt(ctx: ConflictContext): string {
+    const fileList = ctx.conflictingFiles.map(f => `- ${f.path}`).join("\n");
+    const fileDetails = ctx.conflictingFiles.map(f => {
+      return `
+### ${f.path}
+
+**Base branch (${ctx.baseBranch}) version:**
+\`\`\`
+${f.oursContent.slice(0, 2000)}${f.oursContent.length > 2000 ? "\n... (truncated)" : ""}
+\`\`\`
+
+**Feature branch (${ctx.worktreeBranch}) version:**
+\`\`\`
+${f.theirsContent.slice(0, 2000)}${f.theirsContent.length > 2000 ? "\n... (truncated)" : ""}
+\`\`\`
+`;
+    }).join("\n");
+
+    return `I'm trying to merge the branch \`${ctx.worktreeBranch}\` into \`${ctx.baseBranch}\` but there are merge conflicts in ${ctx.conflictingFiles.length} file(s):
+
+${fileList}
+
+Please help me resolve these conflicts. Here are the details:
+
+${fileDetails}
+
+**Instructions:**
+1. Read each conflicting file in the worktree at \`${ctx.worktreePath}\`
+2. Understand the intent of both changes
+3. Edit each file to resolve the conflicts (remove the conflict markers and merge the code appropriately)
+4. After resolving all conflicts, stage the files with \`git add\`
+5. Continue the rebase with \`git rebase --continue\`
+
+The snapshot ID is \`${ctx.snapshotId}\` in case we need to abort and restore.
+
+Please resolve these conflicts now.`;
   }
 
   async function handleContinueRebase() {

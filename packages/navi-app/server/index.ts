@@ -27,6 +27,7 @@ import { handleExtensionRoutes } from "./routes/extensions";
 import { handleKanbanRoutes } from "./routes/kanban";
 import { handleWorktreeRoutes } from "./routes/worktrees";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
+import { handleCommandsRoutes } from "./routes/commands";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -335,6 +336,10 @@ const server = Bun.serve({
 
     // Session hierarchy routes (multi-agent)
     response = await handleSessionHierarchyRoutes(url, method, req);
+    if (response) return response;
+
+    // Commands routes (custom slash commands)
+    response = await handleCommandsRoutes(url, method, req);
     if (response) return response;
 
     // Ephemeral chat
