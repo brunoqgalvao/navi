@@ -63,6 +63,7 @@ export async function handleExtensionRoutes(
       const body = await req.json();
       const enabled = body.enabled ?? true;
       const sortOrder = body.sortOrder;
+      console.log("[Extensions] Upserting:", { projectId, extensionId, enabled, sortOrder });
       extensionSettings.upsert(
         projectId,
         extensionId,
@@ -70,8 +71,10 @@ export async function handleExtensionRoutes(
         body.config ? JSON.stringify(body.config) : null,
         sortOrder
       );
+      console.log("[Extensions] Upsert complete");
       return json({ success: true });
     } catch (e: any) {
+      console.error("[Extensions] Error:", e);
       return error(e.message || "Failed to update extension settings", 500);
     }
   }

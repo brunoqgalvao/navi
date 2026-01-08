@@ -133,13 +133,18 @@ export function getCurrentBranch(repoPath: string): string {
 
 /**
  * Create a new worktree with a new branch
+ * @param repoPath - Path to the main git repository
+ * @param description - Task description for generating branch name
+ * @param customBranchName - Optional pre-generated branch name (from LLM)
  */
 export function createWorktree(
   repoPath: string,
-  description: string
+  description: string,
+  customBranchName?: string
 ): { path: string; branch: string; baseBranch: string } {
   const worktreesDir = ensureWorktreesDir(repoPath);
-  const branch = generateBranchName(description);
+  // Use custom branch name if provided, otherwise generate from description
+  const branch = customBranchName || generateBranchName(description);
   const safeDirName = sanitizeBranchName(description) + "-" + Date.now().toString(36);
   const worktreePath = join(worktreesDir, safeDirName);
 
