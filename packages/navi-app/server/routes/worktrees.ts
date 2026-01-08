@@ -7,6 +7,8 @@ import {
   deleteWorktreeBranch,
   getWorktreeStatus,
   isWorktreeClean,
+  isMainRepoClean,
+  getMainRepoChanges,
   commitWorktreeChanges,
   getWorktreeCommits,
   getWorktreeChangedFiles,
@@ -244,6 +246,11 @@ export async function handleWorktreeRoutes(
       return json({ error: "Session does not have a valid worktree" }, 400);
     }
 
+    const project = projects.get(session.project_id);
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
     try {
       const status = getWorktreeStatus(session.worktree_path);
       const commits = getWorktreeCommits(
@@ -255,9 +262,15 @@ export async function handleWorktreeRoutes(
         session.worktree_base_branch || "main"
       );
 
+      // Check if main repo has uncommitted changes - block merge if so
+      const mainRepoClean = isMainRepoClean(project.path);
+      const mainRepoChanges = mainRepoClean ? null : getMainRepoChanges(project.path);
+
       return json({
-        canMerge: status.isClean || status.staged === 0,
+        canMerge: (status.isClean || status.staged === 0) && mainRepoClean,
         hasUncommittedChanges: !status.isClean,
+        mainHasUncommittedChanges: !mainRepoClean,
+        mainRepoChanges,
         commits,
         changedFiles,
         totalChanges: changedFiles.length,
@@ -289,6 +302,16 @@ export async function handleWorktreeRoutes(
     const project = projects.get(session.project_id);
     if (!project) {
       return json({ error: "Project not found" }, 404);
+    }
+
+    // Block merge if main repo has uncommitted changes
+    if (!isMainRepoClean(project.path)) {
+      const changes = getMainRepoChanges(project.path);
+      return json({
+        error: "Cannot merge: main branch has uncommitted changes. Please commit or stash them first.",
+        mainHasUncommittedChanges: true,
+        mainRepoChanges: changes,
+      }, 400);
     }
 
     const body = await req.json().catch(() => ({}));

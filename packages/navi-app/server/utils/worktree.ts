@@ -230,6 +230,56 @@ export function isWorktreeClean(worktreePath: string): boolean {
 }
 
 /**
+ * Check if the main repository has uncommitted changes
+ * Used to block worktree merges when main has uncommitted work
+ */
+export function isMainRepoClean(repoPath: string): boolean {
+  try {
+    const status = execSync("git status --porcelain", {
+      cwd: repoPath,
+      encoding: "utf-8",
+    });
+    return status.trim() === "";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get summary of uncommitted changes in main repo
+ */
+export function getMainRepoChanges(repoPath: string): { staged: number; modified: number; untracked: number } {
+  let staged = 0;
+  let modified = 0;
+  let untracked = 0;
+
+  try {
+    const statusOutput = execSync("git status --porcelain", {
+      cwd: repoPath,
+      encoding: "utf-8",
+    });
+
+    for (const line of statusOutput.split("\n").filter(Boolean)) {
+      const indexStatus = line[0];
+      const workTreeStatus = line[1];
+
+      if (indexStatus === "?" && workTreeStatus === "?") {
+        untracked++;
+      } else {
+        if (indexStatus !== " " && indexStatus !== "?") {
+          staged++;
+        }
+        if (workTreeStatus !== " " && workTreeStatus !== "?") {
+          modified++;
+        }
+      }
+    }
+  } catch {}
+
+  return { staged, modified, untracked };
+}
+
+/**
  * Get detailed worktree status
  */
 export function getWorktreeStatus(worktreePath: string): WorktreeStatus {
