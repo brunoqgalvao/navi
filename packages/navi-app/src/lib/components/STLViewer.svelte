@@ -123,7 +123,7 @@
       (err) => {
         console.error("[STLViewer] Error loading STL:", err);
         console.error("[STLViewer] URL was:", src);
-        error = `Failed to load STL file: ${err?.message || err}`;
+        error = `Failed to load STL file: ${(err as Error)?.message || String(err)}`;
         loading = false;
       }
     );

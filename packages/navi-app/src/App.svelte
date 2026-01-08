@@ -2961,6 +2961,8 @@
           {#if currentMessages.length === 0 && !$session.sessionId}
             <ProjectEmptyState
               projectName={currentProject.name}
+              projectDescription={currentProject?.description}
+              isGitRepo={currentProjectIsGitRepo}
               {claudeMdContent}
               {projectContext}
               {inputText}
