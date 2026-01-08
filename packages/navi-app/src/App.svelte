@@ -4,7 +4,7 @@
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
   import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference } from "./lib/stores";
-  import { api, skillsApi, costsApi, type Project, type Session, type Skill } from "./lib/api";
+  import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill } from "./lib/api";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree } from "./lib/actions";
   import { parseHash, onHashChange } from "./lib/router";
@@ -286,6 +286,8 @@
   let projectSettingsInitialTab = $state<"instructions" | "model" | "permissions" | "skills" | undefined>(undefined);
   let showDebugInfo = $state(false);
   let showMergeModal = $state(false);
+  let isResolvingMergeConflicts = $state(false);
+  let mergeConflictInfo = $state<{ branch: string; baseBranch: string; fileCount: number; snapshotId: string } | null>(null);
   let sidebarCollapsed = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
@@ -432,6 +434,37 @@
       // Reset activeSubagents for current session
       if (sessionId === $session.sessionId) {
         activeSubagents = new Map();
+      }
+      // Clear merge conflict resolution state when streaming ends
+      if (isResolvingMergeConflicts && sessionId === $session.sessionId) {
+        const snapshotId = mergeConflictInfo?.snapshotId;
+        isResolvingMergeConflicts = false;
+        mergeConflictInfo = null;
+
+        if (snapshotId) {
+          // Clean up the snapshot since resolution is complete
+          worktreeApi.deleteSnapshot(snapshotId).catch(e =>
+            console.warn("[MergeConflict] Failed to cleanup snapshot:", e)
+          );
+        }
+
+        if (reason === "done") {
+          showSuccess({ title: 'Merge Conflicts Resolved', message: 'Conflicts resolved. Archiving session...' });
+          // Archive the session after successful merge conflict resolution
+          if ($session.projectId && sessionId) {
+            api.sessions.setArchived(sessionId, true).then(async () => {
+              const sessionsList = await api.sessions.list($session.projectId!, $showArchivedWorkspaces);
+              sidebarSessions = sessionsList;
+              // Select a different session or clear current if not showing archived
+              if (!$showArchivedWorkspaces) {
+                currentSession.setSession(null);
+              }
+              showSuccess({ title: 'Session Archived', message: 'The merge session has been archived.' });
+            }).catch(e => {
+              console.error("[MergeConflict] Failed to archive session:", e);
+            });
+          }
+        }
       }
       // Process any queued messages
       processMessageQueue(sessionId);
@@ -2732,6 +2765,47 @@
 
 
 
+        <!-- Merge Conflict Resolution Banner -->
+        {#if isResolvingMergeConflicts && mergeConflictInfo}
+          <div class="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="flex items-center justify-center w-8 h-8 bg-amber-100 rounded-full">
+                <svg class="w-5 h-5 text-amber-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </div>
+              <div>
+                <p class="text-sm font-medium text-amber-800">Resolving Merge Conflicts</p>
+                <p class="text-xs text-amber-600">
+                  Claude is resolving {mergeConflictInfo.fileCount} conflicting file{mergeConflictInfo.fileCount > 1 ? 's' : ''}
+                  to merge <code class="bg-amber-100 px-1 rounded">{mergeConflictInfo.branch.replace('session/', '')}</code>
+                  into <code class="bg-amber-100 px-1 rounded">{mergeConflictInfo.baseBranch}</code>
+                </p>
+              </div>
+            </div>
+            <button
+              class="text-xs px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-md transition-colors flex items-center gap-1"
+              onclick={async () => {
+                if (mergeConflictInfo?.snapshotId && confirm('Abort merge and restore repository to previous state?')) {
+                  try {
+                    await worktreeApi.restoreSnapshot(mergeConflictInfo.snapshotId);
+                    isResolvingMergeConflicts = false;
+                    mergeConflictInfo = null;
+                    showSuccess({ title: 'Merge Aborted', message: 'Repository restored to pre-merge state' });
+                  } catch (e: any) {
+                    showError({ title: 'Abort Failed', message: e.message });
+                  }
+                }
+              }}
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Abort
+            </button>
+          </div>
+        {/if}
+
         <!-- Messages -->
 
         <div class="flex-1 overflow-y-auto p-4 md:p-0 scroll-smooth" bind:this={messagesContainer} onscroll={handleMessagesScroll}>
@@ -3058,6 +3132,14 @@
         }
       }}
       onConflictResolution={(conflictContext, prompt) => {
+        // Set merge conflict state for UI indicator
+        isResolvingMergeConflicts = true;
+        mergeConflictInfo = {
+          branch: conflictContext.worktreeBranch,
+          baseBranch: conflictContext.baseBranch,
+          fileCount: conflictContext.conflictingFiles.length,
+          snapshotId: conflictContext.snapshotId,
+        };
         // Send the conflict resolution prompt to Claude
         console.log("[MergeModal] Sending conflict resolution to Claude:", conflictContext.conflictingFiles.length, "files");
         sendCommand(prompt);

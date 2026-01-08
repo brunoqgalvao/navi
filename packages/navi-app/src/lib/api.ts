@@ -1,4 +1,5 @@
-import { getApiBase, getPtyApiUrl } from "./config";
+import { getApiBase, getPtyApiUrl, getServerUrl } from "./config";
+export { getServerUrl };
 import type { ContentBlock } from "./claude";
 
 const getApiBaseUrl = () => getApiBase();
