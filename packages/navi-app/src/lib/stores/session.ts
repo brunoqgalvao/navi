@@ -3,13 +3,24 @@ import { setHash } from "../router";
 import type { ChatMessage, TodoItem, SessionDebugInfo, SessionStatus, SessionStatusType, ModelInfo, SDKEvent, QueuedMessage, SessionWorkspace, TerminalTab, BrowserState } from "./types";
 import type { ContentBlock } from "../claude";
 
-// Session messages store
+// Pagination metadata per session
+export interface SessionPaginationState {
+  total: number;
+  loadedCount: number;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+}
+
+// Session messages store with pagination support
 function createSessionMessagesStore() {
   const { subscribe, set, update } = writable<Map<string, ChatMessage[]>>(new Map());
+  const paginationStore = writable<Map<string, SessionPaginationState>>(new Map());
 
   return {
     subscribe,
     set,
+    update,
+    paginationStore,
     addMessage: (sessionId: string, msg: ChatMessage) =>
       update((map) => {
         const msgs = map.get(sessionId) || [];
@@ -42,11 +53,64 @@ function createSessionMessagesStore() {
         map.set(sessionId, msgs);
         return new Map(map);
       }),
-    clearSession: (sessionId: string) =>
+    // Set messages with pagination metadata
+    setMessagesPaginated: (sessionId: string, msgs: ChatMessage[], total: number, hasMore: boolean) => {
+      update((map) => {
+        map.set(sessionId, msgs);
+        return new Map(map);
+      });
+      paginationStore.update((map) => {
+        map.set(sessionId, { total, loadedCount: msgs.length, hasMore, isLoadingMore: false });
+        return new Map(map);
+      });
+    },
+    // Prepend older messages (for "load more")
+    prependMessages: (sessionId: string, olderMsgs: ChatMessage[], hasMore: boolean) => {
+      update((map) => {
+        const existing = map.get(sessionId) || [];
+        // Filter out any duplicates by ID
+        const existingIds = new Set(existing.map(m => m.id));
+        const newMsgs = olderMsgs.filter(m => !existingIds.has(m.id));
+        map.set(sessionId, [...newMsgs, ...existing]);
+        return new Map(map);
+      });
+      paginationStore.update((map) => {
+        const existing = map.get(sessionId);
+        if (existing) {
+          map.set(sessionId, {
+            ...existing,
+            loadedCount: existing.loadedCount + olderMsgs.length,
+            hasMore,
+            isLoadingMore: false,
+          });
+        }
+        return new Map(map);
+      });
+    },
+    setLoadingMore: (sessionId: string, isLoading: boolean) => {
+      paginationStore.update((map) => {
+        const existing = map.get(sessionId);
+        if (existing) {
+          map.set(sessionId, { ...existing, isLoadingMore: isLoading });
+        }
+        return new Map(map);
+      });
+    },
+    getPagination: (sessionId: string): SessionPaginationState | undefined => {
+      let result: SessionPaginationState | undefined;
+      paginationStore.subscribe(map => { result = map.get(sessionId); })();
+      return result;
+    },
+    clearSession: (sessionId: string) => {
       update((map) => {
         map.delete(sessionId);
         return new Map(map);
-      }),
+      });
+      paginationStore.update((map) => {
+        map.delete(sessionId);
+        return new Map(map);
+      });
+    },
     getMessages: (sessionId: string, map: Map<string, ChatMessage[]>) => map.get(sessionId) || [],
     markFinal: (sessionId: string, messageId: string) =>
       update((map) => {

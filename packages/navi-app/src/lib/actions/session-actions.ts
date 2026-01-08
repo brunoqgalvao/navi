@@ -1,4 +1,4 @@
-import { api, worktreeApi, type Session } from "../api";
+import { api, worktreeApi, type Session, type Message } from "../api";
 import {
   currentSession,
   sessionMessages,
@@ -11,6 +11,9 @@ import { streamingStore } from "../handlers";
 import { get } from "svelte/store";
 import { getDefaultModel } from "./data-loaders";
 import { showError, showSuccess } from "../errorHandler";
+
+// Default page size for progressive message loading
+const MESSAGE_PAGE_SIZE = 50;
 
 export interface SessionActionCallbacks {
   setSidebarSessions: (sessions: Session[]) => void;
@@ -132,37 +135,63 @@ export async function selectSession(s: Session) {
     console.warn("[Session] Failed to refresh session data:", e);
   }
 
-  // Load messages if not already loaded
+  // Load messages if not already loaded (paginated - most recent first)
   const messages = get(sessionMessages);
   if (!messages.has(s.id)) {
     try {
-      const msgs = await api.messages.list(s.id);
-      const loadedMsgs: ChatMessage[] = msgs.map(m => {
-        let content = m.content;
-        if (typeof content === "string") {
-          try { content = JSON.parse(content); } catch { /* content is already in expected format */ }
-        }
-        return {
-          id: m.id,
-          role: m.role as any,
-          content: content,
-          timestamp: new Date(m.timestamp),
-          parentToolUseId: m.parent_tool_use_id ?? undefined,
-          isSynthetic: !!m.is_synthetic,
-          isFinal: !!m.is_final,
-        };
-      });
+      const result = await api.messages.listPaginated(s.id, MESSAGE_PAGE_SIZE, 0);
+      const loadedMsgs = parseMessages(result.messages);
       const subagentMsgs = loadedMsgs.filter(m => m.parentToolUseId);
       if (subagentMsgs.length > 0) {
         console.log("[session-actions] Loaded", subagentMsgs.length, "subagent messages from DB");
       }
-      sessionMessages.setMessages(s.id, loadedMsgs);
+      sessionMessages.setMessagesPaginated(s.id, loadedMsgs, result.total, result.hasMore);
     } catch (e) {
       showError({ title: "Messages Error", message: "Failed to load chat messages", error: e });
     }
   }
 
   callbacks.scrollToBottom(true);
+}
+
+// Helper to parse raw messages into ChatMessage format
+function parseMessages(msgs: Message[]): ChatMessage[] {
+  return msgs.map(m => {
+    let content = m.content;
+    if (typeof content === "string") {
+      try { content = JSON.parse(content); } catch { /* content is already in expected format */ }
+    }
+    return {
+      id: m.id,
+      role: m.role as any,
+      content: content,
+      timestamp: new Date(m.timestamp),
+      parentToolUseId: m.parent_tool_use_id ?? undefined,
+      isSynthetic: !!m.is_synthetic,
+      isFinal: !!m.is_final,
+    };
+  });
+}
+
+// Load more (older) messages for a session
+export async function loadMoreMessages(sessionId: string): Promise<boolean> {
+  const pagination = sessionMessages.getPagination(sessionId);
+  if (!pagination || !pagination.hasMore || pagination.isLoadingMore) {
+    return false;
+  }
+
+  sessionMessages.setLoadingMore(sessionId, true);
+
+  try {
+    const result = await api.messages.listPaginated(sessionId, MESSAGE_PAGE_SIZE, pagination.loadedCount);
+    const olderMsgs = parseMessages(result.messages);
+    sessionMessages.prependMessages(sessionId, olderMsgs, result.hasMore);
+    return true;
+  } catch (e) {
+    sessionMessages.setLoadingMore(sessionId, false);
+    showError({ title: "Messages Error", message: "Failed to load more messages", error: e });
+    return false;
+  }
 }
 
 export async function deleteSession(id: string): Promise<boolean> {

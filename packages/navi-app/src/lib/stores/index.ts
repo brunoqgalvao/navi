@@ -50,7 +50,7 @@ export {
   projectWorkspaces,
 } from "./session";
 
-export type { ProjectWorkspace } from "./session";
+export type { ProjectWorkspace, SessionPaginationState } from "./session";
 
 // Project stores
 export {
