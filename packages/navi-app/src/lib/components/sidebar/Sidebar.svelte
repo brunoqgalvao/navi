@@ -1144,6 +1144,7 @@
                         currentTitle={sess.title}
                         messages={currentMessages}
                         onApply={onTitleApply}
+                        {sidebarWidth}
                       />
                     {/if}
                   </div>
