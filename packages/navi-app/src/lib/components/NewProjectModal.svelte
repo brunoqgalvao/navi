@@ -24,7 +24,7 @@
     onCreate: () => void;
     onPickDirectory: () => void;
     onCreateAgent?: (name: string, description: string) => void;
-    onCreateFromTemplate?: (templateId: string, name: string) => void;
+onCreateFromTemplate?: (templateId: string, name: string) => void;
     projectCreationMode: "quick" | "browse" | "agent" | "template";
     newProjectQuickName: string;
     newProjectPath: string;
@@ -42,7 +42,7 @@
     onCreate,
     onPickDirectory,
     onCreateAgent,
-    onCreateFromTemplate,
+onCreateFromTemplate,
     projectCreationMode,
     newProjectQuickName,
     newProjectPath,
@@ -58,16 +58,15 @@
   let agentDescription = $state("");
   let agentCreating = $state(false);
 
-  // Template creation state
+// Template creation state
   let selectedTemplate = $state<string | null>(null);
   let templateProjectName = $state("");
   let templateCreating = $state(false);
-
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Enter") {
       if (projectCreationMode === "agent") {
         handleCreateAgent();
-      } else if (projectCreationMode === "template") {
+} else if (projectCreationMode === "template") {
         handleCreateFromTemplate();
       } else {
         onCreate();
@@ -84,7 +83,7 @@
     agentDescription = "";
   }
 
-  async function handleCreateFromTemplate() {
+async function handleCreateFromTemplate() {
     if (!selectedTemplate || !templateProjectName.trim() || !onCreateFromTemplate) return;
     templateCreating = true;
     onCreateFromTemplate(selectedTemplate, templateProjectName.trim());
@@ -98,7 +97,7 @@
     if (!open) {
       agentName = "";
       agentDescription = "";
-      selectedTemplate = null;
+selectedTemplate = null;
       templateProjectName = "";
     }
   });
@@ -120,7 +119,7 @@
         >
           Quick Start
         </button>
-        {#if onCreateFromTemplate}
+{#if onCreateFromTemplate}
           <button
             onclick={() => onModeChange("template")}
             class={`px-3 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors flex items-center gap-1.5 ${projectCreationMode === 'template' ? 'text-emerald-600 border-emerald-600' : 'text-gray-500 border-transparent hover:text-gray-700'}`}
@@ -227,7 +226,7 @@
           <div class="text-xs text-gray-500 bg-indigo-50 rounded-lg px-3 py-2 border border-indigo-100">
             <span class="font-medium text-indigo-700">Location:</span> <span class="font-mono text-indigo-600">~/.navi/agents/{agentName.trim().replace(/[^a-zA-Z0-9-_]/g, "-").toLowerCase() || "agent-name"}</span>
           </div>
-        {:else if projectCreationMode === "template"}
+{:else if projectCreationMode === "template"}
           <div class="space-y-3">
             <label class="text-xs font-medium text-gray-700">Choose a Template</label>
             <div class="grid gap-2">
@@ -294,7 +293,7 @@
           >
             {agentCreating ? "Creating..." : "Create Agent"}
           </button>
-        {:else if projectCreationMode === "template"}
+{:else if projectCreationMode === "template"}
           <button
             onclick={handleCreateFromTemplate}
             disabled={!selectedTemplate || !templateProjectName.trim() || templateCreating}

@@ -306,6 +306,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_pending_questions_request ON pending_questions(request_id);
   `);
 
+<<<<<<< Updated upstream
   // Extension settings table - per-project extension configuration
   db.run(`
     CREATE TABLE IF NOT EXISTS extension_settings (
@@ -394,6 +395,8 @@ export async function initDb() {
   `);
 
 
+=======
+>>>>>>> Stashed changes
   saveDb()
   return db;
 }

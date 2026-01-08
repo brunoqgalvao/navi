@@ -309,38 +309,30 @@
     }
   }
 
-  async function handleQuickCommit() {
+async function handleQuickCommit() {
     if (!status || quickCommitting) return;
 
     quickCommitting = true;
     quickCommitError = "";
 
     try {
-      // Step 1: Stage all changes
       await gitApi.stageAll(rootPath);
-
-      // Step 2: Generate commit message with AI
       const message = await gitApi.generateCommitMessage(rootPath);
 
       if (!message || !message.trim()) {
         throw new Error("Failed to generate commit message");
       }
 
-      // Step 3: Commit with the generated message
       await gitApi.commit(rootPath, message);
-
-      // Refresh to show the new commit
       refresh();
     } catch (e) {
       console.error("Quick commit failed:", e);
       quickCommitError = e instanceof Error ? e.message : "Quick commit failed";
-      // Clear error after 5 seconds
       setTimeout(() => quickCommitError = "", 5000);
     } finally {
       quickCommitting = false;
     }
   }
-
   async function handleSummarizeChanges() {
     if (!status) return;
 

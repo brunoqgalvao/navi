@@ -48,7 +48,6 @@ export interface UntilDoneCompleteData {
   totalCost: number;
   reason: string;
 }
-
 export interface HandlerCallbacks {
   onSessionInit?: (sessionId: string, data: { model?: string; cwd?: string; tools?: string[]; skills?: string[] }) => void;
   onMessageUpdate?: (sessionId: string) => void;

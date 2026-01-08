@@ -136,7 +136,7 @@
   // Agent section collapsed state
   let agentsSectionCollapsed = $state(true);
 
-  // Session hierarchy state
+// Session hierarchy state
   let showSessionTree = $state(false);
   let sessionTreeExpanded = $state(true);
 
@@ -144,12 +144,10 @@
   let currentSessionHasHierarchy = $derived(() => {
     const currentSess = sessions.find(s => s.id === $session.sessionId);
     if (!currentSess) return false;
-    // Has parent or has children (check if any session has this as parent)
     const hasParent = !!(currentSess as any).parent_session_id;
     const hasChildren = sessions.some(s => (s as any).parent_session_id === currentSess.id);
     return hasParent || hasChildren;
   });
-
   let sidebarSearchQuery = $state("");
   let filteredSessions = $derived(
     (sidebarSearchQuery.trim()
@@ -881,7 +879,7 @@
                 <button onclick={() => onGoToChat(chat)} class="w-full text-left px-2 py-1.5 rounded text-gray-600 hover:bg-indigo-50 hover:text-gray-800 transition-colors flex items-center gap-1.5 border-l-2 border-indigo-400 ml-1">
                   <svg class="w-2.5 h-2.5 text-indigo-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                   <span class="text-[11px] truncate flex-1 font-medium">{chat.title}</span>
-                  <SessionStatusBadge status={$sessionStatus.get(chat.id)?.status} />
+<SessionStatusBadge status={$sessionStatus.get(chat.id)?.status} />
                 </button>
               {/each}
             </div>
@@ -914,7 +912,7 @@
                 <button onclick={() => onGoToChat(chat)} class="w-full text-left px-2 py-1 rounded text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors flex items-center gap-1.5">
                   <svg class="w-2.5 h-2.5 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                   <span class="text-[11px] truncate flex-1">{chat.title}</span>
-                  <SessionStatusBadge status={$sessionStatus.get(chat.id)?.status} />
+<SessionStatusBadge status={$sessionStatus.get(chat.id)?.status} />
                 </button>
               {/each}
             </div>
@@ -1164,7 +1162,7 @@
                 </button>
 
                 <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 {sessionMenuId === sess.id ? 'z-[70]' : 'z-20'}">
-                  <SessionStatusBadge status={$sessionStatus.get(sess.id)?.status} size="md" />
+<SessionStatusBadge status={$sessionStatus.get(sess.id)?.status} size="md" />
 
                   {#if sess.marked_for_review}
                     <button

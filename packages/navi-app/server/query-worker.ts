@@ -556,6 +556,7 @@ const userInteractionServer = createSdkMcpServer({
     ),
   ],
 });
+<<<<<<< Updated upstream
 
 // ============================================================================
 // Multi-Session Agent Tools (Fractal Agents)
@@ -827,6 +828,8 @@ The deliverable will be sent to your parent, who will incorporate it into their 
     ),
   ],
 });
+=======
+>>>>>>> Stashed changes
 
 function send(msg: any) {
   console.log(JSON.stringify(msg));
@@ -1105,7 +1108,10 @@ async function runQuery(input: WorkerInput) {
       "Task",
       "TaskOutput",
       // Note: ask_user_question is exposed via MCP server (mcp__user-interaction__ask_user_question)
+<<<<<<< Updated upstream
       // Multi-session tools exposed via MCP server (mcp__multi-session__*)
+=======
+>>>>>>> Stashed changes
     ];
 
     const requireConfirmation = permissionSettings?.requireConfirmation || [];
@@ -1141,7 +1147,14 @@ async function runQuery(input: WorkerInput) {
         settingSources: ['user', 'project', 'local'] as const,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
         includePartialMessages: true,
+<<<<<<< Updated upstream
         mcpServers,
+=======
+        // MCP server for user interaction (ask_user_question tool)
+        mcpServers: {
+          "user-interaction": userInteractionServer,
+        },
+>>>>>>> Stashed changes
         // Pass custom agents from .claude/agents/
         ...(Object.keys(agents).length > 0 && { agents }),
       },
@@ -1224,6 +1237,7 @@ rl.on("line", (line) => {
         resolve({ answers: msg.answers });
         pendingQuestions.delete(msg.requestId);
       }
+<<<<<<< Updated upstream
     }
     // Multi-session response handlers
     else if (msg.type === "multi_session_spawn_response" && msg.requestId) {
@@ -1263,6 +1277,8 @@ rl.on("line", (line) => {
       // It will be injected into the conversation
       console.error(`[Worker] Received child deliverable from ${msg.childRole}: ${msg.summary}`);
       // The actual injection happens through a synthetic user message
+=======
+>>>>>>> Stashed changes
     }
   } catch {}
 });

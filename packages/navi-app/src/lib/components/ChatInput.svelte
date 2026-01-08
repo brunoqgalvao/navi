@@ -33,6 +33,13 @@
     path: string;
   }
 
+  interface SlashCommand {
+    name: string;
+    description: string;
+    argsHint?: string;
+    isBuiltIn?: boolean;
+  }
+
   interface Props {
     value: string;
     disabled?: boolean;
@@ -58,9 +65,11 @@
     onCreateWithWorktree?: (description: string) => void;
     onMergeWorktree?: () => void;
     onArchiveSession?: () => void;
+    // Slash commands from SDK
+    slashCommands?: SlashCommand[];
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession, slashCommands = [] }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
@@ -144,9 +153,39 @@
       : availableChats.slice(0, 10)
   );
 
-  // Picker mode: "file" | "terminal" | "chat" | null
-  let pickerMode = $derived<"file" | "terminal" | "chat" | null>(
-    showChatPicker ? "chat" : showTerminalPicker ? "terminal" : showFilePicker ? "file" : null
+  // Slash command picker state
+  let showCommandPicker = $state(false);
+  let commandPickerQuery = $state("");
+  let commandPickerIndex = $state(0);
+
+  // Built-in commands that are always available
+  const builtInCommands: SlashCommand[] = [
+    { name: "compact", description: "Summarize conversation to free up context space", isBuiltIn: true },
+    { name: "clear", description: "Clear the conversation history", isBuiltIn: true },
+    { name: "help", description: "Show available commands and help", isBuiltIn: true },
+    { name: "model", description: "Switch to a different model", argsHint: "<model>", isBuiltIn: true },
+    { name: "bug", description: "Report a bug or issue", isBuiltIn: true },
+    { name: "config", description: "Open configuration settings", isBuiltIn: true },
+  ];
+
+  // Combine built-in commands with SDK-provided slash commands
+  let allCommands = $derived<SlashCommand[]>([
+    ...builtInCommands,
+    ...slashCommands.filter(cmd => !builtInCommands.some(b => b.name === cmd.name))
+  ]);
+
+  let filteredCommands = $derived(
+    commandPickerQuery
+      ? allCommands.filter(c =>
+          c.name.toLowerCase().includes(commandPickerQuery.toLowerCase()) ||
+          c.description.toLowerCase().includes(commandPickerQuery.toLowerCase())
+        ).slice(0, 10)
+      : allCommands.slice(0, 10)
+  );
+
+  // Picker mode: "file" | "terminal" | "chat" | "command" | null
+  let pickerMode = $derived<"file" | "terminal" | "chat" | "command" | null>(
+    showCommandPicker ? "command" : showChatPicker ? "chat" : showTerminalPicker ? "terminal" : showFilePicker ? "file" : null
   );
 
   export function focus() {
@@ -295,6 +334,26 @@
       return;
     }
 
+    if (showCommandPicker) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        commandPickerIndex = Math.min(commandPickerIndex + 1, filteredCommands.length - 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        commandPickerIndex = Math.max(commandPickerIndex - 1, 0);
+      } else if (e.key === "Enter" && filteredCommands.length > 0) {
+        e.preventDefault();
+        selectCommand(filteredCommands[commandPickerIndex]);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeCommandPicker();
+      } else if (e.key === "Tab" && filteredCommands.length > 0) {
+        e.preventDefault();
+        selectCommand(filteredCommands[commandPickerIndex]);
+      }
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -305,6 +364,22 @@
     const target = e.target as HTMLTextAreaElement;
     const cursorPos = target.selectionStart;
     const textBeforeCursor = value.slice(0, cursorPos);
+
+    // Check for /command at start of input (slash commands)
+    const commandMatch = textBeforeCursor.match(/^\/([^\s]*)$/);
+    if (commandMatch) {
+      commandPickerQuery = commandMatch[1];
+      commandPickerIndex = 0;
+      showCommandPicker = true;
+      showFilePicker = false;
+      showTerminalPicker = false;
+      showChatPicker = false;
+      adjustTextareaHeight(target);
+      return;
+    } else {
+      showCommandPicker = false;
+      commandPickerQuery = "";
+    }
 
     // Check for @chat mention (must be at start or preceded by whitespace, not part of email)
     const chatMatch = textBeforeCursor.match(/(?:^|[\s])@chat([^\s@]*)$/i);
@@ -555,6 +630,24 @@
     showChatPicker = false;
     chatPickerQuery = "";
     chatPickerIndex = 0;
+  }
+
+  function selectCommand(command: SlashCommand) {
+    // Replace the current /... with the full command
+    value = `/${command.name}${command.argsHint ? " " : ""}`;
+    closeCommandPicker();
+
+    setTimeout(() => {
+      inputRef?.focus();
+      const newPos = value.length;
+      inputRef?.setSelectionRange(newPos, newPos);
+    }, 0);
+  }
+
+  function closeCommandPicker() {
+    showCommandPicker = false;
+    commandPickerQuery = "";
+    commandPickerIndex = 0;
   }
 
   // Parse and highlight mentions in the input value
@@ -953,6 +1046,51 @@
         {#if filteredChats.length === 0}
           <div class="px-3 py-4 text-sm text-gray-500 text-center">
             {availableChats.length === 0 ? "Loading chats..." : "No matching chats"}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    {#if showCommandPicker}
+      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
+        <div class="px-3 py-2 border-b border-gray-100 text-xs text-gray-500 font-medium flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+          </svg>
+          Commands
+        </div>
+        {#each filteredCommands as command, i}
+          <button
+            onclick={() => selectCommand(command)}
+            class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2 {i === commandPickerIndex ? 'bg-orange-50' : ''}"
+          >
+            <svg class="w-4 h-4 {command.isBuiltIn ? 'text-orange-500' : 'text-purple-500'} flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {#if command.isBuiltIn}
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+              {:else}
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+              {/if}
+            </svg>
+            <div class="min-w-0 flex-1">
+              <div class="text-sm text-gray-900 flex items-center gap-1">
+                <span class="font-mono">/{command.name}</span>
+                {#if command.argsHint}
+                  <span class="text-gray-400 text-xs">{command.argsHint}</span>
+                {/if}
+              </div>
+              <div class="text-xs text-gray-400 truncate">{command.description}</div>
+            </div>
+            {#if command.isBuiltIn}
+              <span class="text-[10px] px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded">built-in</span>
+            {:else}
+              <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">skill</span>
+            {/if}
+          </button>
+        {/each}
+        {#if filteredCommands.length === 0}
+          <div class="px-3 py-4 text-sm text-gray-500 text-center">
+            No matching commands
           </div>
         {/if}
       </div>
