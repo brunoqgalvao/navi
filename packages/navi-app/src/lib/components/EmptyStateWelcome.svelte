@@ -29,20 +29,22 @@
       <p class="subtitle">{subtitle}</p>
     </div>
 
-    {#if projectContext?.suggestions && projectContext.suggestions.length > 0}
-      <div class="suggestions">
-        {#each projectContext.suggestions as suggestion}
-          <button
-            class="suggestion-pill"
-            onclick={() => handleClick(suggestion)}
-          >
-            {suggestion}
-          </button>
-        {/each}
-      </div>
-
+    {#if projectContext}
       {#if projectContext.summary}
         <p class="context-summary">{projectContext.summary}</p>
+      {/if}
+
+      {#if projectContext.suggestions && projectContext.suggestions.length > 0}
+        <div class="suggestions">
+          {#each projectContext.suggestions as suggestion}
+            <button
+              class="suggestion-pill"
+              onclick={() => handleClick(suggestion)}
+            >
+              {suggestion}
+            </button>
+          {/each}
+        </div>
       {/if}
     {/if}
   </div>
@@ -108,12 +110,12 @@
   }
 
   .suggestion-pill {
-    font-size: 0.875rem;
-    color: #52525b;
+    font-size: 0.75rem;
+    color: #71717a;
     background: white;
     border: 1px solid #e4e4e7;
     border-radius: 9999px;
-    padding: 0.5rem 1rem;
+    padding: 0.375rem 0.75rem;
     cursor: pointer;
     transition: all 0.15s ease;
   }
@@ -125,11 +127,11 @@
   }
 
   .context-summary {
-    font-size: 0.75rem;
-    color: #a1a1aa;
+    font-size: 0.9375rem;
+    color: #52525b;
     text-align: center;
-    max-width: 400px;
+    max-width: 480px;
     margin: 0;
-    line-height: 1.5;
+    line-height: 1.6;
   }
 </style>
