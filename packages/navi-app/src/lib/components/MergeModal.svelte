@@ -8,6 +8,7 @@
     sessionTitle: string;
     branch: string;
     baseBranch: string;
+    worktreePath?: string;
     onClose: () => void;
     onMergeComplete: () => void;
   }
@@ -18,11 +19,12 @@
     sessionTitle,
     branch,
     baseBranch,
+    worktreePath,
     onClose,
     onMergeComplete,
   }: Props = $props();
 
-  type Step = "preview" | "merging" | "conflicts" | "success" | "error";
+  type Step = "preview" | "merging" | "conflicts" | "continuing" | "success" | "error";
 
   let step = $state<Step>("preview");
   let preview = $state<MergePreview | null>(null);
@@ -30,12 +32,24 @@
   let error = $state<string | null>(null);
   let loading = $state(true);
   let cleanupAfterMerge = $state(true);
+  let needsConflictResolution = $state(false); // True when rebase is paused for conflict resolution
 
   async function loadPreview() {
     try {
       loading = true;
       error = null;
       preview = await worktreeApi.previewMerge(sessionId);
+
+      // Check if there's an existing rebase in progress
+      try {
+        const rebaseStatus = await worktreeApi.rebaseStatus(sessionId);
+        if (rebaseStatus.inProgress) {
+          needsConflictResolution = true;
+          step = "conflicts";
+        }
+      } catch {
+        // Ignore errors checking rebase status
+      }
     } catch (e: any) {
       error = e.message;
       step = "error";
@@ -52,8 +66,15 @@
         cleanupAfter: cleanupAfterMerge,
       });
 
-      if (result.hasConflicts && result.conflicts) {
+      if (result.needsConflictResolution && result.conflicts) {
+        // Rebase is paused - user needs to resolve conflicts in worktree
         conflicts = result.conflicts;
+        needsConflictResolution = true;
+        step = "conflicts";
+      } else if (result.hasConflicts && result.conflicts) {
+        // Legacy merge conflict handling
+        conflicts = result.conflicts;
+        needsConflictResolution = false;
         step = "conflicts";
       } else if (result.success) {
         step = "success";
@@ -67,9 +88,34 @@
     }
   }
 
+  async function handleContinueRebase() {
+    step = "continuing";
+    try {
+      const result = await worktreeApi.continueRebase(sessionId, {
+        cleanupAfter: cleanupAfterMerge,
+      });
+
+      if (result.needsConflictResolution && result.conflicts) {
+        // More conflicts to resolve
+        conflicts = result.conflicts;
+        step = "conflicts";
+      } else if (result.success) {
+        step = "success";
+      } else {
+        error = result.error || "Continue merge failed";
+        step = "error";
+      }
+    } catch (e: any) {
+      error = e.message;
+      step = "error";
+    }
+  }
+
   async function handleAbort() {
     try {
+      // Abort the rebase in worktree (not merge in main repo)
       await worktreeApi.abortMerge(sessionId);
+      needsConflictResolution = false;
       step = "preview";
       await loadPreview();
     } catch (e: any) {
@@ -184,20 +230,39 @@
     {:else if step === "merging"}
       <div class="loading">
         <div class="spinner"></div>
-        <p>Merging changes...</p>
+        <p>Rebasing and merging changes...</p>
+      </div>
+
+    {:else if step === "continuing"}
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Continuing merge...</p>
       </div>
 
     {:else if step === "conflicts"}
       <div class="conflicts-content">
-        <div class="conflict-header">
+        <div class="conflict-header" class:rebase-conflict={needsConflictResolution}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
           <div>
-            <h3>Merge Conflicts</h3>
-            <p>These files have conflicts that need to be resolved manually.</p>
+            <h3>{needsConflictResolution ? "Resolve Conflicts" : "Merge Conflicts"}</h3>
+            <p>
+              {#if needsConflictResolution}
+                These files have conflicts. Resolve them in your parallel branch, then click "Continue Merge".
+              {:else}
+                These files have conflicts that need to be resolved manually.
+              {/if}
+            </p>
           </div>
         </div>
+
+        {#if needsConflictResolution && worktreePath}
+          <div class="worktree-path-box">
+            <span class="path-label">Resolve conflicts in:</span>
+            <code class="path-value">{worktreePath}</code>
+          </div>
+        {/if}
 
         <div class="conflicts-list">
           {#each conflicts as conflict}
@@ -208,9 +273,22 @@
           {/each}
         </div>
 
-        <p class="conflict-help">
-          Please resolve the conflicts in your editor, then try merging again.
-        </p>
+        <div class="conflict-instructions">
+          {#if needsConflictResolution}
+            <h4>Steps to resolve:</h4>
+            <ol>
+              <li>Open the conflicting files in your parallel branch</li>
+              <li>Look for <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> and <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code> markers</li>
+              <li>Edit the files to resolve the conflicts</li>
+              <li>Save the files (no need to stage/commit)</li>
+              <li>Click "Continue Merge" below</li>
+            </ol>
+          {:else}
+            <p class="conflict-help">
+              Please resolve the conflicts in your editor, then try merging again.
+            </p>
+          {/if}
+        </div>
       </div>
 
     {:else if step === "success"}
@@ -251,10 +329,16 @@
         Merge to {baseBranch}
       </button>
     {:else if step === "conflicts"}
-      <button class="btn btn-secondary" onclick={handleAbort}>Abort Merge</button>
-      <button class="btn btn-primary" onclick={() => { step = "preview"; loadPreview(); }}>
-        Try Again
-      </button>
+      <button class="btn btn-secondary btn-danger" onclick={handleAbort}>Abort</button>
+      {#if needsConflictResolution}
+        <button class="btn btn-primary" onclick={handleContinueRebase}>
+          Continue Merge
+        </button>
+      {:else}
+        <button class="btn btn-primary" onclick={() => { step = "preview"; loadPreview(); }}>
+          Try Again
+        </button>
+      {/if}
     {:else if step === "success"}
       <button class="btn btn-primary" onclick={handleClose}>Done</button>
     {:else if step === "error"}
@@ -514,6 +598,92 @@
     font-size: 0.8125rem;
     color: #6b7280;
     margin: 0;
+  }
+
+  .conflict-header.rebase-conflict {
+    background: #fef9c3;
+    border-color: #fde047;
+  }
+
+  .conflict-header.rebase-conflict svg {
+    color: #ca8a04;
+  }
+
+  .conflict-header.rebase-conflict h3 {
+    color: #854d0e;
+  }
+
+  .conflict-header.rebase-conflict p {
+    color: #a16207;
+  }
+
+  .worktree-path-box {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+  }
+
+  .path-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #64748b;
+  }
+
+  .path-value {
+    font-size: 0.8125rem;
+    font-family: ui-monospace, monospace;
+    color: #334155;
+    word-break: break-all;
+  }
+
+  .conflict-instructions {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .conflict-instructions h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #374151;
+  }
+
+  .conflict-instructions ol {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.8125rem;
+    color: #4b5563;
+  }
+
+  .conflict-instructions li {
+    margin-bottom: 0.375rem;
+  }
+
+  .conflict-instructions li:last-child {
+    margin-bottom: 0;
+  }
+
+  .conflict-instructions code {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.25rem;
+    background: #e5e7eb;
+    border-radius: 3px;
+  }
+
+  .btn-danger {
+    color: #dc2626;
+    border-color: #fecaca;
+  }
+
+  .btn-danger:hover {
+    background: #fef2f2;
+    border-color: #fca5a5;
   }
 
   .success-content, .error-content {

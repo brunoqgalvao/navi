@@ -1079,6 +1079,7 @@ export interface ConflictInfo {
 export interface MergeResult {
   success: boolean;
   hasConflicts?: boolean;
+  needsConflictResolution?: boolean;  // True if rebase is paused waiting for user to resolve
   conflicts?: ConflictInfo[];
   error?: string;
   merged?: boolean;
@@ -1128,11 +1129,22 @@ export const worktreeApi = {
       body: JSON.stringify(options || {}),
     }),
 
-  // Abort merge
+  // Abort merge/rebase
   abortMerge: (sessionId: string) =>
     request<{ success: boolean }>(`/sessions/${sessionId}/worktree/merge/abort`, {
       method: "POST",
     }),
+
+  // Continue rebase after conflicts resolved
+  continueRebase: (sessionId: string, options?: { cleanupAfter?: boolean }) =>
+    request<MergeResult>(`/sessions/${sessionId}/worktree/rebase/continue`, {
+      method: "POST",
+      body: JSON.stringify(options || {}),
+    }),
+
+  // Check if rebase is in progress
+  rebaseStatus: (sessionId: string) =>
+    request<{ inProgress: boolean }>(`/sessions/${sessionId}/worktree/rebase/status`),
 
   // Prune stale worktrees for a project
   prune: (projectId: string) =>

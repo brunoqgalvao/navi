@@ -11,6 +11,7 @@ export interface ChatMessage {
   isSynthetic?: boolean;
   isFinal?: boolean;
   pruned?: boolean;
+  isSystemInfo?: boolean; // System-generated info messages (compact notifications, etc.)
   inlineCommand?: {
     command: string;
     cwd?: string;

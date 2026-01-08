@@ -454,6 +454,14 @@
         set.add(sessionId);
         return new Set(set);
       });
+      // Add visible message in chat
+      sessionMessages.addMessage(sessionId, {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: [{ type: "text", text: "🧠 **Compacting context...** Claude is summarizing the conversation to free up space." }],
+        timestamp: new Date(),
+        isSystemInfo: true,
+      });
       notifications.add({
         type: "info",
         title: "Compacting context",
@@ -465,7 +473,23 @@
         set.delete(sessionId);
         return new Set(set);
       });
-      const saved = metadata?.pre_tokens ? `Freed ~${Math.round(metadata.pre_tokens / 1000)}k tokens` : "Context compacted";
+      const preTokens = metadata?.pre_tokens || 0;
+      const saved = preTokens ? `Freed ~${Math.round(preTokens / 1000)}k tokens` : "Context compacted";
+
+      // Reset token count - after compaction, context is typically ~5-10k tokens for the summary
+      // We estimate 10% of pre-compact tokens as a reasonable starting point
+      const estimatedPostTokens = preTokens ? Math.min(10000, Math.round(preTokens * 0.1)) : 5000;
+      session.setUsage(estimatedPostTokens, 0);
+
+      // Add visible message in chat showing result
+      sessionMessages.addMessage(sessionId, {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: [{ type: "text", text: `✅ **Context compacted!** ${saved}. The conversation has been summarized and you can continue.` }],
+        timestamp: new Date(),
+        isSystemInfo: true,
+      });
+
       notifications.add({
         type: "success",
         title: "Context compacted",
@@ -486,7 +510,7 @@
 
         // Small delay to let the UI update, then send a follow-up
         setTimeout(() => {
-          sendMessage("Continue from where you left off, but be more concise. Avoid reading entire large files - use targeted grep/search instead. Summarize findings rather than showing full content.");
+          sendCommand("Continue from where you left off, but be more concise. Avoid reading entire large files - use targeted grep/search instead. Summarize findings rather than showing full content.");
         }, 500);
       } else {
         // No auto-retry possible, show modal
@@ -1888,6 +1912,25 @@
     }
   }
 
+  // Send a command/message programmatically (e.g., /compact)
+  async function sendCommand(command: string) {
+    if (!command.trim() || !$isConnected) return;
+    if (!$session.projectId || !$session.sessionId) return;
+
+    const currentSessionId = $session.sessionId;
+
+    loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
+    sessionStatus.setRunning(currentSessionId, $session.projectId!);
+
+    client.query({
+      prompt: command,
+      projectId: $session.projectId,
+      sessionId: currentSessionId,
+      claudeSessionId: $session.claudeSessionId || undefined,
+      model: $session.selectedModel || undefined,
+    });
+  }
+
   async function sendMessage() {
     if (!inputText.trim() || !$isConnected) return;
     if (!$session.projectId) {
@@ -2722,7 +2765,7 @@
               isPruned={hasPrunedContext($session.sessionId || '')}
               isCompacting={$compactingSessionsStore.has($session.sessionId || '')}
               onPruneToolResults={() => pruneToolResults($session.sessionId || '')}
-              onSDKCompact={() => sendMessage("/compact")}
+              onSDKCompact={() => sendCommand("/compact")}
               onStartNewChat={() => startNewChatWithSummary($session.sessionId || '')}
               onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
               onSuggestionClick={(prompt) => { inputText = prompt; }}
@@ -3029,7 +3072,7 @@
     open={showContextOverflowModal}
     onClose={() => showContextOverflowModal = false}
     onPrune={() => pruneToolResults($session.sessionId || '')}
-    onCompact={() => sendMessage("/compact")}
+    onCompact={() => sendCommand("/compact")}
     onNewChat={async () => {
       const newSessionId = await createNewChatAction();
       if (newSessionId) {

@@ -12,6 +12,9 @@ import {
   getWorktreeChangedFiles,
   mergeWorktreeToBase,
   abortMerge,
+  abortRebase,
+  continueRebase,
+  isRebaseInProgress,
   getConflictContent,
   pruneWorktrees,
 } from "../utils/worktree";
@@ -300,7 +303,8 @@ export async function handleWorktreeRoutes(
       const result = mergeWorktreeToBase(
         project.path,
         session.worktree_branch!,
-        session.worktree_base_branch || "main"
+        session.worktree_base_branch || "main",
+        session.worktree_path  // Pass worktree path for updating with latest
       );
       console.log(`[Merge] Result:`, result);
 
@@ -368,6 +372,146 @@ export async function handleWorktreeRoutes(
     } catch (e: any) {
       console.error("Abort merge error:", e);
       return json({ error: e.message || "Failed to abort merge" }, 500);
+    }
+  }
+
+  // POST /api/sessions/:id/worktree/rebase/continue - Continue rebase after conflict resolution
+  const continueRebaseMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/worktree\/rebase\/continue$/
+  );
+  if (continueRebaseMatch && method === "POST") {
+    const sessionId = continueRebaseMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (!session.worktree_path || !existsSync(session.worktree_path)) {
+      return json({ error: "Session does not have a valid worktree" }, 400);
+    }
+
+    const project = projects.get(session.project_id);
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
+    try {
+      // Check if rebase is actually in progress
+      if (!isRebaseInProgress(session.worktree_path)) {
+        return json({ error: "No rebase in progress" }, 400);
+      }
+
+      // Continue the rebase
+      const result = continueRebase(session.worktree_path);
+
+      if (!result.success) {
+        if (result.needsConflictResolution) {
+          // More conflicts found
+          const conflictDetails = (result.conflicts || []).map((file) => ({
+            file,
+            content: getConflictContent(session.worktree_path!, file),
+          }));
+
+          return json({
+            success: false,
+            hasConflicts: true,
+            needsConflictResolution: true,
+            conflicts: conflictDetails,
+            error: result.error,
+          });
+        }
+
+        return json({ success: false, error: result.error }, 400);
+      }
+
+      // Rebase completed! Now do the fast-forward merge in main repo
+      console.log("[Continue Rebase] Rebase complete, proceeding with fast-forward merge");
+
+      const body = await req.json().catch(() => ({}));
+      const { cleanupAfter = true } = body;
+
+      // Fast-forward merge to main repo
+      const mergeResult = mergeWorktreeToBase(
+        project.path,
+        session.worktree_branch!,
+        session.worktree_base_branch || "main",
+        undefined  // Don't pass worktree path - rebase already done
+      );
+
+      if (!mergeResult.success) {
+        return json({ success: false, error: mergeResult.error }, 400);
+      }
+
+      // Cleanup after successful merge
+      if (cleanupAfter) {
+        try {
+          removeWorktree(project.path, session.worktree_path, true);
+          deleteWorktreeBranch(project.path, session.worktree_branch!, true);
+          sessions.clearWorktree(sessionId);
+        } catch (cleanupError) {
+          console.error("Cleanup after merge failed:", cleanupError);
+        }
+      }
+
+      return json({
+        success: true,
+        merged: true,
+        cleanedUp: cleanupAfter,
+      });
+    } catch (e: any) {
+      console.error("Continue rebase error:", e);
+      return json({ error: e.message || "Failed to continue rebase" }, 500);
+    }
+  }
+
+  // POST /api/sessions/:id/worktree/rebase/abort - Abort rebase
+  const abortRebaseMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/worktree\/rebase\/abort$/
+  );
+  if (abortRebaseMatch && method === "POST") {
+    const sessionId = abortRebaseMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (!session.worktree_path || !existsSync(session.worktree_path)) {
+      return json({ error: "Session does not have a valid worktree" }, 400);
+    }
+
+    try {
+      abortRebase(session.worktree_path);
+      return json({ success: true });
+    } catch (e: any) {
+      console.error("Abort rebase error:", e);
+      return json({ error: e.message || "Failed to abort rebase" }, 500);
+    }
+  }
+
+  // GET /api/sessions/:id/worktree/rebase/status - Check rebase status
+  const rebaseStatusMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/worktree\/rebase\/status$/
+  );
+  if (rebaseStatusMatch && method === "GET") {
+    const sessionId = rebaseStatusMatch[1];
+    const session = sessions.get(sessionId);
+
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    if (!session.worktree_path || !existsSync(session.worktree_path)) {
+      return json({ error: "Session does not have a valid worktree" }, 400);
+    }
+
+    try {
+      const inProgress = isRebaseInProgress(session.worktree_path);
+      return json({ inProgress });
+    } catch (e: any) {
+      console.error("Check rebase status error:", e);
+      return json({ error: e.message || "Failed to check rebase status" }, 500);
     }
   }
 

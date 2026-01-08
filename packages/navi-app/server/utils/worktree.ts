@@ -369,6 +369,7 @@ export interface MergeResult {
   success: boolean;
   conflicts?: string[];
   error?: string;
+  needsConflictResolution?: boolean;  // True if rebase is paused waiting for conflict resolution
 }
 
 /**
@@ -414,17 +415,30 @@ function rollbackMerge(
 }
 
 /**
- * Merge worktree branch into base branch
- * Automatically stashes uncommitted changes, merges, then unstashes
+ * Merge worktree branch into base branch using REBASE strategy
  *
- * SAFETY: Uses atomic rollback - if anything fails, repo is restored to original state
+ * Strategy:
+ * 1. In WORKTREE: rebase onto latest base branch
+ *    - This brings worktree up-to-date with base
+ *    - Conflicts are resolved here (in the safe worktree environment)
+ * 2. In MAIN REPO: fast-forward merge (guaranteed conflict-free after rebase)
+ *    - Stash uncommitted changes
+ *    - Checkout base, pull latest
+ *    - Fast-forward merge worktree branch
+ *    - Restore stash
+ *
+ * SAFETY:
+ * - If rebase has conflicts, main repo is UNTOUCHED
+ * - User resolves conflicts in worktree first
+ * - Final merge is always fast-forward (no conflicts possible)
  */
 export function mergeWorktreeToBase(
   mainRepoPath: string,
   worktreeBranch: string,
-  baseBranch: string
+  baseBranch: string,
+  worktreePath?: string
 ): MergeResult {
-  // Track state for rollback
+  // Track state for rollback (only for main repo operations)
   const state = {
     didStash: false,
     didCheckout: false,
@@ -433,9 +447,74 @@ export function mergeWorktreeToBase(
     mergeInProgress: false,
   };
 
-  console.log("[Merge] Starting safe merge:", { worktreeBranch, baseBranch, mainRepoPath });
+  console.log("[Merge] Starting rebase-based merge:", { worktreeBranch, baseBranch, mainRepoPath, worktreePath });
 
-  // Step 1: Get current branch
+  // ============================================
+  // PHASE 1: Rebase worktree onto latest base
+  // ============================================
+  if (worktreePath) {
+    console.log("[Merge] Phase 1: Rebasing worktree onto latest", baseBranch);
+
+    // Fetch latest from origin
+    const fetchResult = safeExec("git fetch origin", worktreePath);
+    if (!fetchResult.success) {
+      console.log("[Merge] Fetch failed (maybe no remote), continuing with local");
+    }
+
+    // Check if worktree has uncommitted changes
+    const wtStatus = safeExec("git status --porcelain", worktreePath);
+    if ((wtStatus.output || "").trim().length > 0) {
+      return {
+        success: false,
+        error: "Worktree has uncommitted changes. Please commit them first before merging."
+      };
+    }
+
+    // Try to rebase onto base branch
+    // First try origin/base, fall back to local base
+    let rebaseResult = safeExec(`git rebase "origin/${baseBranch}"`, worktreePath);
+    if (!rebaseResult.success && rebaseResult.error?.includes("origin/")) {
+      console.log("[Merge] origin/ rebase failed, trying local base branch");
+      rebaseResult = safeExec(`git rebase "${baseBranch}"`, worktreePath);
+    }
+
+    if (!rebaseResult.success) {
+      // Check for rebase conflicts
+      const conflictStatus = safeExec("git status --porcelain", worktreePath);
+      const conflicts = (conflictStatus.output || "")
+        .split("\n")
+        .filter((line) => line.startsWith("UU") || line.startsWith("AA") || line.startsWith("DD") || line.startsWith("DU") || line.startsWith("UD"))
+        .map((line) => line.slice(3).trim())
+        .filter(Boolean);
+
+      if (conflicts.length > 0) {
+        // DON'T abort - keep rebase in progress so user can resolve conflicts
+        console.log("[Merge] Rebase conflicts detected, waiting for resolution:", conflicts);
+        return {
+          success: false,
+          conflicts,
+          needsConflictResolution: true,
+          error: `Conflicts detected. Please resolve them in the parallel branch, then click "Continue Merge".`
+        };
+      }
+
+      // No conflicts but still failed - abort and return error
+      safeExec("git rebase --abort", worktreePath);
+      return {
+        success: false,
+        error: `Failed to rebase onto ${baseBranch}: ${rebaseResult.error}`
+      };
+    }
+
+    console.log("[Merge] Worktree successfully rebased onto", baseBranch);
+  }
+
+  // ============================================
+  // PHASE 2: Fast-forward merge in main repo
+  // ============================================
+  console.log("[Merge] Phase 2: Fast-forward merge in main repo");
+
+  // Step 1: Get current branch in main repo
   const branchResult = safeExec("git branch --show-current", mainRepoPath);
   if (!branchResult.success) {
     return { success: false, error: `Failed to get current branch: ${branchResult.error}` };
@@ -443,7 +522,7 @@ export function mergeWorktreeToBase(
   state.originalBranch = branchResult.output || "";
   console.log("[Merge] Original branch:", state.originalBranch);
 
-  // Step 2: Check for uncommitted changes
+  // Step 2: Check for uncommitted changes in main repo
   const statusResult = safeExec("git status --porcelain", mainRepoPath);
   if (!statusResult.success) {
     return { success: false, error: `Failed to get git status: ${statusResult.error}` };
@@ -451,24 +530,22 @@ export function mergeWorktreeToBase(
   const hasUncommittedChanges = (statusResult.output || "").trim().length > 0;
   console.log("[Merge] Has uncommitted changes:", hasUncommittedChanges);
 
-  // Step 3: Stash uncommitted changes if needed (include untracked files)
+  // Step 3: Stash uncommitted changes if needed
   if (hasUncommittedChanges) {
-    console.log("[Merge] Stashing uncommitted changes (including untracked)...");
-    // Use --include-untracked to stash everything, and --keep-index to be safe
+    console.log("[Merge] Stashing uncommitted changes...");
     const stashResult = safeExec('git stash push --include-untracked -m "Auto-stash before worktree merge"', mainRepoPath);
     if (!stashResult.success) {
       return { success: false, error: `Failed to stash changes: ${stashResult.error}` };
     }
     state.didStash = true;
-    console.log("[Merge] Stash created successfully");
 
-    // Verify the working directory is now clean
+    // Verify clean
     const verifyClean = safeExec("git status --porcelain", mainRepoPath);
     if ((verifyClean.output || "").trim().length > 0) {
-      console.log("[Merge] WARNING: Working directory not clean after stash, aborting");
       rollbackMerge(mainRepoPath, state);
-      return { success: false, error: "Failed to stash all changes. Some files could not be stashed." };
+      return { success: false, error: "Failed to stash all changes." };
     }
+    console.log("[Merge] Stash created successfully");
   }
 
   // Step 4: Checkout base branch if needed
@@ -480,50 +557,41 @@ export function mergeWorktreeToBase(
       return { success: false, error: `Failed to checkout ${baseBranch}: ${checkoutResult.error}` };
     }
     state.didCheckout = true;
-    console.log("[Merge] Checked out base branch");
   }
 
-  // Step 5: Perform the merge
-  console.log("[Merge] Merging branch:", worktreeBranch);
+  // Step 5: Pull latest on base branch
+  console.log("[Merge] Pulling latest on", baseBranch);
+  safeExec("git pull --ff-only", mainRepoPath); // Best effort, might fail if no remote
+
+  // Step 6: Fast-forward merge (should ALWAYS succeed after rebase)
+  console.log("[Merge] Fast-forward merging:", worktreeBranch);
   state.mergeInProgress = true;
-  const mergeResult = safeExec(`git merge "${worktreeBranch}" --no-edit`, mainRepoPath);
+
+  // Try fast-forward first, then regular merge
+  let mergeResult = safeExec(`git merge "${worktreeBranch}" --ff-only`, mainRepoPath);
+  if (!mergeResult.success) {
+    console.log("[Merge] Fast-forward failed, trying regular merge");
+    mergeResult = safeExec(`git merge "${worktreeBranch}" --no-edit`, mainRepoPath);
+  }
 
   if (!mergeResult.success) {
-    console.log("[Merge] Merge failed, checking for conflicts...");
-
-    // Check for merge conflicts
-    const conflictStatus = safeExec("git status --porcelain", mainRepoPath);
-    const conflicts = (conflictStatus.output || "")
-      .split("\n")
-      .filter((line) => line.startsWith("UU") || line.startsWith("AA") || line.startsWith("DD"))
-      .map((line) => line.slice(3).trim())
-      .filter(Boolean);
-
-    // Rollback everything
+    console.log("[Merge] Merge failed unexpectedly");
     rollbackMerge(mainRepoPath, state);
-
-    if (conflicts.length > 0) {
-      console.log("[Merge] Found conflicts:", conflicts);
-      return { success: false, conflicts };
-    }
-
     return { success: false, error: `Merge failed: ${mergeResult.error}` };
   }
 
   state.mergeInProgress = false;
   console.log("[Merge] Merge successful!");
 
-  // Step 6: Restore stash if we made one
+  // Step 7: Restore stash
   if (state.didStash) {
     console.log("[Merge] Restoring stashed changes...");
     const unstashResult = safeExec("git stash pop", mainRepoPath);
     if (!unstashResult.success) {
-      // Stash pop had conflicts - merge succeeded but stash restore failed
-      // This is a partial success - user needs to manually resolve
-      console.log("[Merge] Stash pop had conflicts");
+      console.log("[Merge] Stash pop had conflicts - partial success");
       return {
         success: true,
-        error: "Merge succeeded! But restoring your uncommitted changes had conflicts. Run 'git stash pop' to see them.",
+        error: "Merge succeeded! But restoring your uncommitted changes had conflicts. Run 'git stash pop' to resolve."
       };
     }
     console.log("[Merge] Stash restored successfully");
@@ -538,6 +606,86 @@ export function mergeWorktreeToBase(
  */
 export function abortMerge(repoPath: string): void {
   execSync("git merge --abort", { cwd: repoPath });
+}
+
+/**
+ * Abort an in-progress rebase
+ */
+export function abortRebase(repoPath: string): void {
+  safeExec("git rebase --abort", repoPath);
+}
+
+/**
+ * Check if a rebase is in progress
+ */
+export function isRebaseInProgress(repoPath: string): boolean {
+  const gitDir = safeExec("git rev-parse --git-dir", repoPath);
+  if (!gitDir.success) return false;
+
+  const rebaseDir = join(repoPath, gitDir.output || ".git", "rebase-merge");
+  const rebaseApplyDir = join(repoPath, gitDir.output || ".git", "rebase-apply");
+
+  return existsSync(rebaseDir) || existsSync(rebaseApplyDir);
+}
+
+/**
+ * Continue a rebase after conflicts have been resolved
+ * Returns success if rebase completes, or new conflicts if more exist
+ */
+export function continueRebase(worktreePath: string): MergeResult {
+  console.log("[Rebase] Continuing rebase in", worktreePath);
+
+  // First, check if there are still unresolved conflicts
+  const statusResult = safeExec("git status --porcelain", worktreePath);
+  const unresolvedConflicts = (statusResult.output || "")
+    .split("\n")
+    .filter((line) => line.startsWith("UU") || line.startsWith("AA") || line.startsWith("DD") || line.startsWith("DU") || line.startsWith("UD"))
+    .map((line) => line.slice(3).trim())
+    .filter(Boolean);
+
+  if (unresolvedConflicts.length > 0) {
+    console.log("[Rebase] Still has unresolved conflicts:", unresolvedConflicts);
+    return {
+      success: false,
+      conflicts: unresolvedConflicts,
+      needsConflictResolution: true,
+      error: "There are still unresolved conflicts. Please resolve all conflicts and stage the files."
+    };
+  }
+
+  // Stage any resolved files (in case user resolved but didn't stage)
+  safeExec("git add -A", worktreePath);
+
+  // Continue the rebase
+  const continueResult = safeExec("git rebase --continue", worktreePath);
+
+  if (!continueResult.success) {
+    // Check if there are new conflicts from the next commit
+    const newConflicts = safeExec("git status --porcelain", worktreePath);
+    const conflicts = (newConflicts.output || "")
+      .split("\n")
+      .filter((line) => line.startsWith("UU") || line.startsWith("AA") || line.startsWith("DD") || line.startsWith("DU") || line.startsWith("UD"))
+      .map((line) => line.slice(3).trim())
+      .filter(Boolean);
+
+    if (conflicts.length > 0) {
+      console.log("[Rebase] New conflicts from next commit:", conflicts);
+      return {
+        success: false,
+        conflicts,
+        needsConflictResolution: true,
+        error: "More conflicts found. Please resolve them and continue."
+      };
+    }
+
+    return {
+      success: false,
+      error: `Failed to continue rebase: ${continueResult.error}`
+    };
+  }
+
+  console.log("[Rebase] Rebase completed successfully!");
+  return { success: true };
 }
 
 /**
