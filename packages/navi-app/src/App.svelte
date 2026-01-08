@@ -146,6 +146,7 @@
     pruneToolResults,
     startNewChatWithSummary,
     hasPrunedContext,
+    hasRollbackContext,
     getDefaultModel,
   } from "./lib/actions";
 
@@ -2989,6 +2990,7 @@
               inputTokens={$session.inputTokens}
               contextWindow={currentProject?.context_window || 200000}
               isPruned={hasPrunedContext($session.sessionId || '')}
+              isRollback={hasRollbackContext($session.sessionId || '')}
               isCompacting={$compactingSessionsStore.has($session.sessionId || '')}
               onPruneToolResults={() => pruneToolResults($session.sessionId || '')}
               onSDKCompact={() => sendCommand("/compact")}

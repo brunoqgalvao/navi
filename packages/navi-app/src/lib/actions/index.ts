@@ -66,6 +66,7 @@ export {
   startNewChatWithSummary,
   getMessagesForApi,
   hasPrunedContext,
+  hasRollbackContext,
   clearPrunedCache,
   clearPrunedState,
 } from "./context-actions";

@@ -61,6 +61,7 @@
     inputTokens?: number;
     contextWindow?: number;
     isPruned?: boolean;
+    isRollback?: boolean;
     isCompacting?: boolean;
     onPruneToolResults?: () => void;
     onSDKCompact?: () => void;
@@ -114,6 +115,7 @@
     inputTokens = 0,
     contextWindow = 200000,
     isPruned = false,
+    isRollback = false,
     isCompacting = false,
     onPruneToolResults,
     onSDKCompact,
@@ -382,13 +384,14 @@
     </div>
     {/if}
 
-    {#if (usagePercent >= 80 || isPruned || isCompacting) && onPruneToolResults && onStartNewChat}
+    {#if (usagePercent >= 80 || isPruned || isRollback || isCompacting) && onPruneToolResults && onStartNewChat}
       <div class="mt-4">
         <ContextWarning
           {usagePercent}
           {inputTokens}
           {contextWindow}
           {isPruned}
+          {isRollback}
           {isCompacting}
           {onPruneToolResults}
           {onSDKCompact}

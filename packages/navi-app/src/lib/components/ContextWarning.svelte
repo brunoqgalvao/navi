@@ -12,6 +12,7 @@
     inputTokens: number;
     contextWindow: number;
     isPruned?: boolean;
+    isRollback?: boolean;
     isCompacting?: boolean;
     onPruneToolResults: () => void;
     onSDKCompact?: () => void;
@@ -23,6 +24,7 @@
     inputTokens,
     contextWindow,
     isPruned = false,
+    isRollback = false,
     isCompacting = false,
     onPruneToolResults,
     onSDKCompact,
@@ -88,6 +90,15 @@
     </svg>
     <span>Compacting context...</span>
     <span class="text-purple-500 text-xs">Claude is summarizing</span>
+  </div>
+{:else if isRollback}
+  <!-- Rollback indicator - sophisticated amber style -->
+  <div class="flex items-center gap-2.5 px-3 py-2 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 rounded-lg text-sm shadow-sm">
+    <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+    </svg>
+    <span class="text-amber-800 font-medium">Rolled back to checkpoint</span>
+    <span class="text-amber-600/70 text-xs">New conversation branch</span>
   </div>
 {:else if isPruned}
   <!-- Pruned context indicator -->

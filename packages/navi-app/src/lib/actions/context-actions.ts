@@ -16,13 +16,28 @@ import {
 } from "../constants";
 
 /**
- * Check if a session has pruned context active
+ * Check if a session has pruned context active (not rollback)
  * Uses sessionHistoryContext as source of truth
+ * Only returns true for actual pruning, not rollback
  */
 export function hasPrunedContext(sessionId: string): boolean {
   if (!sessionId) return false;
   const historyCtx = get(sessionHistoryContext);
-  return historyCtx.has(sessionId);
+  const ctx = historyCtx.get(sessionId);
+  // Only consider it "pruned" if we explicitly set it to "pruned"
+  // Rollback context starts with "<conversation_history>"
+  return ctx === "pruned";
+}
+
+/**
+ * Check if a session has rollback context active
+ */
+export function hasRollbackContext(sessionId: string): boolean {
+  if (!sessionId) return false;
+  const historyCtx = get(sessionHistoryContext);
+  const ctx = historyCtx.get(sessionId);
+  // Rollback context starts with "<conversation_history>"
+  return !!ctx && ctx !== "pruned" && ctx.startsWith("<conversation_history>");
 }
 
 /**
