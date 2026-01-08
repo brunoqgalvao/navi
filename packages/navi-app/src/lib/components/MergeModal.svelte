@@ -472,6 +472,27 @@ Please resolve these conflicts now and complete the merge.`;
     padding: 1.25rem;
   }
 
+  .summary-card.blocked {
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+    border-color: #fecaca;
+  }
+
+  .summary-card.blocked .summary-header h3 {
+    color: #991b1b;
+  }
+
+  .summary-card.blocked .summary-subtitle {
+    color: #b91c1c;
+  }
+
+  .summary-card.blocked .stat-value {
+    color: #991b1b;
+  }
+
+  .summary-card.blocked .stat-label {
+    color: #b91c1c;
+  }
+
   .summary-header h3 {
     margin: 0 0 0.25rem 0;
     font-size: 1.125rem;
@@ -482,6 +503,41 @@ Please resolve these conflicts now and complete the merge.`;
     margin: 0;
     font-size: 0.875rem;
     color: #059669;
+  }
+
+  .blocker-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    padding: 0.875rem;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+  }
+
+  .blocker-box svg {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+    color: #dc2626;
+  }
+
+  .blocker-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .blocker-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #991b1b;
+  }
+
+  .blocker-description {
+    font-size: 0.8125rem;
+    color: #b91c1c;
   }
 
   .warning-box {
