@@ -1108,6 +1108,8 @@
             {#each filteredSessions as sess (sess.id)}
               {@const isDropTarget = dragOverSessionId === sess.id && !sess.pinned}
               {@const isDragged = draggedSessionId === sess.id}
+              {@const sessionStatusValue = $sessionStatus.get(sess.id)?.status}
+              {@const hasActiveStatus = sessionStatusValue && sessionStatusValue !== "idle"}
               <div
                 animate:flip={{ duration: 200 }}
                 data-session-item={sess.id}
@@ -1165,9 +1167,9 @@
                 </button>
 
                 <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 {sessionMenuId === sess.id ? 'z-[70]' : 'z-20'}">
-<SessionStatusBadge status={$sessionStatus.get(sess.id)?.status} size="md" />
-
-                  {#if sess.marked_for_review}
+                  {#if hasActiveStatus}
+                    <SessionStatusBadge status={sessionStatusValue} size="md" />
+                  {:else if sess.marked_for_review}
                     <button
                       onclick={(e) => onToggleSessionMarkedForReview(sess, e)}
                       class="p-0.5 text-blue-500 hover:text-blue-600 transition-colors"
