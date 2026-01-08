@@ -457,7 +457,7 @@
               sidebarSessions = sessionsList;
               // Select a different session or clear current if not showing archived
               if (!$showArchivedWorkspaces) {
-                currentSession.setSession(null);
+                session.setSession(null);
               }
               showSuccess({ title: 'Session Archived', message: 'The merge session has been archived.' });
             }).catch(e => {
@@ -3139,7 +3139,7 @@
           sidebarSessions = sessionsList;
           // Select a different session or clear current
           if (!$showArchivedWorkspaces) {
-            currentSession.setSession(null);
+            session.setSession(null);
           }
         }
       }}

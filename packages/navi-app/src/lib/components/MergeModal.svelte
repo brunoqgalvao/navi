@@ -129,12 +129,19 @@ ${fileDetails}
 1. Read each conflicting file in the worktree at \`${ctx.worktreePath}\`
 2. Understand the intent of both changes
 3. Edit each file to resolve the conflicts (remove the conflict markers and merge the code appropriately)
-4. After resolving all conflicts, stage the files with \`git add\`
+4. After resolving all conflicts, stage the files with \`git add .\`
 5. Continue the rebase with \`git rebase --continue\`
+6. After rebase completes successfully, switch to main repo at \`${ctx.mainRepoPath}\` and fast-forward merge:
+   \`\`\`
+   cd "${ctx.mainRepoPath}"
+   git checkout ${ctx.baseBranch}
+   git merge ${ctx.worktreeBranch} --ff-only
+   \`\`\`
+7. Confirm the merge was successful
 
 The snapshot ID is \`${ctx.snapshotId}\` in case we need to abort and restore.
 
-Please resolve these conflicts now.`;
+Please resolve these conflicts now and complete the merge.`;
   }
 
   async function handleContinueRebase() {
