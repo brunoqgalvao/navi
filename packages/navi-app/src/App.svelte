@@ -9,7 +9,7 @@
   import { createNewChatWithWorktree } from "./lib/actions";
   import { parseHash, onHashChange } from "./lib/router";
   import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
-  import { setupGlobalErrorHandlers, pendingErrorReport, type ErrorReport } from "./lib/errorHandler";
+  import { setupGlobalErrorHandlers, pendingErrorReport, showError, showSuccess, type ErrorReport } from "./lib/errorHandler";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
   import hljs from "highlight.js";
@@ -406,7 +406,7 @@
           if (targetProjId) {
             projectWorkspaces.addTerminalTab(targetProjId, {
               terminalId: openTermId,
-              cwd: openTermCwd || selectedProject?.path,
+              cwd: openTermCwd || currentProject?.path,
               initialCommand: openTermCmd,
             });
           }
@@ -452,7 +452,7 @@
         }
 
         if (reason === "done") {
-          showSuccess({ title: 'Merge Conflicts Resolved', message: 'Conflicts resolved. Archiving session...' });
+          showSuccess('Merge Conflicts Resolved', 'Conflicts resolved. Archiving session...');
           // Archive the session after successful merge conflict resolution
           if ($session.projectId && sessionId) {
             api.sessions.setArchived(sessionId, true).then(async () => {
@@ -462,7 +462,7 @@
               if (!$showArchivedWorkspaces) {
                 session.setSession(null);
               }
-              showSuccess({ title: 'Session Archived', message: 'The merge session has been archived.' });
+              showSuccess('Session Archived', 'The merge session has been archived.');
             }).catch(e => {
               console.error("[MergeConflict] Failed to archive session:", e);
             });
@@ -1670,7 +1670,7 @@
       });
     } catch (e) {
       console.error("Failed to open project in new window:", e);
-      notifications.show({
+      notifications.add({
         title: "Error",
         message: "Failed to open project in new window",
         type: "error"
@@ -2709,7 +2709,7 @@
           return new Map(map);
         });
       } else {
-        showError({ title: "Delete failed", message: e.message || "Could not delete message" });
+        showError({ title: "Delete failed", message: e.message || "Could not delete message", error: e });
       }
     }
   }
@@ -2940,9 +2940,9 @@
                     await worktreeApi.restoreSnapshot(mergeConflictInfo.snapshotId);
                     isResolvingMergeConflicts = false;
                     mergeConflictInfo = null;
-                    showSuccess({ title: 'Merge Aborted', message: 'Repository restored to pre-merge state' });
+                    showSuccess('Merge Aborted', 'Repository restored to pre-merge state');
                   } catch (e: any) {
-                    showError({ title: 'Abort Failed', message: e.message });
+                    showError({ title: 'Abort Failed', message: e.message, error: e });
                   }
                 }
               }}
