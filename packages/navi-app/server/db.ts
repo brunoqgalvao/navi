@@ -904,16 +904,33 @@ export const searchIndex = {
   search: (query: string, options?: { projectId?: string; sessionId?: string; limit?: number }): SearchResult[] => {
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
     if (terms.length === 0) return [];
-    
+
     const limit = options?.limit || 50;
+    const queryLower = query.toLowerCase();
+
+    // Build relevance scoring:
+    // - Exact phrase match in title/session_title: +100
+    // - Session title contains any term: +50
+    // - Exact phrase match anywhere: +30
+    // - More recent = higher score (log scale of days ago, inverted)
     let sql = `
-      SELECT si.*, p.name as project_name
+      SELECT si.*, p.name as project_name,
+        (
+          -- Exact phrase match in session title (highest priority)
+          CASE WHEN LOWER(si.session_title) LIKE ? THEN 100 ELSE 0 END +
+          -- Any term in session title
+          CASE WHEN si.entity_type = 'session' THEN 50 ELSE 0 END +
+          -- Exact phrase match anywhere in content
+          CASE WHEN si.searchable_text LIKE ? THEN 30 ELSE 0 END +
+          -- Recency boost (max 20 points, decays over ~30 days)
+          MAX(0, 20 - (CAST((strftime('%s', 'now') - si.updated_at / 1000) AS REAL) / 86400 / 1.5))
+        ) as relevance_score
       FROM search_index si
       LEFT JOIN projects p ON si.project_id = p.id
       WHERE 1=1
     `;
-    const params: any[] = [];
-    
+    const params: any[] = [`%${queryLower}%`, `%${queryLower}%`];
+
     if (options?.projectId) {
       sql += " AND si.project_id = ?";
       params.push(options.projectId);
@@ -922,22 +939,24 @@ export const searchIndex = {
       sql += " AND si.session_id = ?";
       params.push(options.sessionId);
     }
-    
+
     for (const term of terms) {
       sql += " AND (si.searchable_text LIKE ? OR LOWER(p.name) LIKE ?)";
       params.push(`%${term}%`, `%${term}%`);
     }
-    
-    sql += ` ORDER BY 
-      CASE si.entity_type 
-        WHEN 'project' THEN 1 
-        WHEN 'session' THEN 2 
-        WHEN 'message' THEN 3 
+
+    // Order by relevance score, then by entity type, then by recency
+    sql += ` ORDER BY
+      relevance_score DESC,
+      CASE si.entity_type
+        WHEN 'project' THEN 1
+        WHEN 'session' THEN 2
+        WHEN 'message' THEN 3
       END,
-      si.updated_at DESC 
+      si.updated_at DESC
       LIMIT ?`;
     params.push(limit);
-    
+
     return queryAll<SearchResult>(sql, params);
   },
 
