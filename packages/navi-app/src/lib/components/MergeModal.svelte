@@ -10,7 +10,7 @@
     baseBranch: string;
     worktreePath?: string;
     onClose: () => void;
-    onMergeComplete: () => void;
+    onMergeComplete: (options: { keepChatting: boolean }) => void;
     onConflictResolution?: (context: ConflictContext, prompt: string) => void; // Callback to send message to Claude
   }
 
@@ -34,6 +34,7 @@
   let error = $state<string | null>(null);
   let loading = $state(true);
   let cleanupAfterMerge = $state(true);
+  let keepChatting = $state(true); // Keep the session active on main after merge
   let needsConflictResolution = $state(false); // True when rebase is paused for conflict resolution
 
   async function loadPreview() {
@@ -181,7 +182,7 @@ Please resolve these conflicts now and complete the merge.`;
 
   function handleClose() {
     if (step === "success") {
-      onMergeComplete();
+      onMergeComplete({ keepChatting });
     }
     onClose();
   }
@@ -276,10 +277,19 @@ Please resolve these conflicts now and complete the merge.`;
             </div>
           {/if}
 
-          <label class="cleanup-option">
-            <input type="checkbox" bind:checked={cleanupAfterMerge} />
-            <span>Delete worktree after successful merge</span>
-          </label>
+          <div class="options-section">
+            <label class="cleanup-option">
+              <input type="checkbox" bind:checked={keepChatting} />
+              <div class="option-text">
+                <span class="option-label">Keep chatting on {baseBranch}</span>
+                <span class="option-hint">Continue this conversation on the main branch</span>
+              </div>
+            </label>
+            <label class="cleanup-option">
+              <input type="checkbox" bind:checked={cleanupAfterMerge} />
+              <span>Delete worktree after merge</span>
+            </label>
+          </div>
         </div>
       {/if}
 
@@ -567,9 +577,18 @@ Please resolve these conflicts now and complete the merge.`;
     padding: 0.25rem 0.5rem;
   }
 
+  .options-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #e5e7eb;
+    margin-top: 0.5rem;
+  }
+
   .cleanup-option {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.5rem;
     font-size: 0.875rem;
     color: #374151;
@@ -578,6 +597,22 @@ Please resolve these conflicts now and complete the merge.`;
 
   .cleanup-option input {
     accent-color: #10b981;
+    margin-top: 0.125rem;
+  }
+
+  .option-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .option-label {
+    font-weight: 500;
+  }
+
+  .option-hint {
+    font-size: 0.75rem;
+    color: #6b7280;
   }
 
   .conflicts-content {

@@ -270,6 +270,18 @@ export async function handleSessionRoutes(
     }
   }
 
+  // Clear worktree data from session (converts it back to a normal main-branch session)
+  const clearWorktreeMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/clear-worktree$/);
+  if (clearWorktreeMatch && method === "POST") {
+    const sessionId = clearWorktreeMatch[1];
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+    sessions.clearWorktree(sessionId);
+    return json(sessions.get(sessionId));
+  }
+
   // Inspect endpoint for lazy-loading chat references
   // Returns metadata by default, or full content based on scope parameter
   const inspectMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/inspect$/);

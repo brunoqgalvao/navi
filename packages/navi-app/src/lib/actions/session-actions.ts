@@ -1,4 +1,4 @@
-import { api, worktreeApi, type Session, type Message } from "../api";
+import { api, worktreeApi, branchNameApi, type Session, type Message } from "../api";
 import {
   currentSession,
   sessionMessages,
@@ -56,11 +56,22 @@ export async function createNewChatWithWorktree(description: string): Promise<st
   if (!session.projectId) return null;
 
   try {
+    // Generate a smart branch name using LLM (fast haiku call)
+    let branchName: string | undefined;
+    try {
+      const branchResult = await branchNameApi.generate(description);
+      branchName = branchResult.branchName;
+      console.log(`[Worktree] Generated branch name via ${branchResult.generatedBy}: ${branchResult.shortName}`);
+    } catch (branchError) {
+      console.warn("[Worktree] Failed to generate smart branch name, using fallback:", branchError);
+      // Will fall back to server-side generation from description
+    }
+
     // Create a new session first
     const newSession = await api.sessions.create(session.projectId, { title: description || "New Chat" });
 
-    // Then create a worktree for it
-    const result = await worktreeApi.create(newSession.id, description);
+    // Then create a worktree for it with the smart branch name
+    const result = await worktreeApi.create(newSession.id, description, branchName);
 
     const sessions = callbacks?.getSidebarSessions() || [];
     callbacks?.setSidebarSessions([result.session, ...sessions]);

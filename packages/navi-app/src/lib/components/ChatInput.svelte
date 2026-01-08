@@ -62,7 +62,7 @@
     onManageSkills?: () => void;
     onNavigateToChat?: (sessionId: string) => void;
     onToggleUntilDone?: () => void;
-    onCreateWithWorktree?: (description: string) => void;
+    onCreateWithWorktree?: (description: string, message: string) => void;
     onMergeWorktree?: () => void;
     onArchiveSession?: () => void;
     // Slash commands from SDK
@@ -96,9 +96,11 @@
         value = "";
       }
     } else if (worktreeEnabled && isNewChat && onCreateWithWorktree) {
-      // Create new chat with worktree mode
+      // Create new chat with worktree mode - pass the message so it's sent after worktree is created
       const description = worktreeDescription.trim() || trimmedValue.slice(0, 50);
-      onCreateWithWorktree(description);
+      const message = trimmedValue;
+      onCreateWithWorktree(description, message);
+      value = ""; // Clear the input immediately to prevent race conditions
       worktreeEnabled = false;
       worktreeDescription = "";
     } else {
@@ -187,6 +189,45 @@
   let pickerMode = $derived<"file" | "terminal" | "chat" | "command" | null>(
     showCommandPicker ? "command" : showChatPicker ? "chat" : showTerminalPicker ? "terminal" : showFilePicker ? "file" : null
   );
+
+  // Parse blockquote references from input for preview
+  interface ParsedQuote {
+    content: string;
+    source?: string;
+  }
+
+  let parsedQuote: ParsedQuote | null = $derived.by(() => {
+    const lines = value.split('\n');
+    const quoteLines: string[] = [];
+    let source: string | undefined;
+
+    for (const line of lines) {
+      if (line.startsWith('> ')) {
+        const content = line.slice(2);
+        // Check if this is a source annotation line
+        const sourceMatch = content.match(/^\*Source:\s*`([^`]+)`\*$/);
+        if (sourceMatch) {
+          source = sourceMatch[1];
+        } else {
+          quoteLines.push(content);
+        }
+      }
+    }
+
+    if (quoteLines.length === 0) return null;
+
+    return {
+      content: quoteLines.join('\n'),
+      source
+    };
+  });
+
+  function clearQuote() {
+    // Remove blockquote lines from the input
+    const lines = value.split('\n');
+    const nonQuoteLines = lines.filter(line => !line.startsWith('> '));
+    value = nonQuoteLines.join('\n').trim();
+  }
 
   export function focus() {
     inputRef?.focus();
@@ -633,15 +674,25 @@
   }
 
   function selectCommand(command: SlashCommand) {
-    // Replace the current /... with the full command
-    value = `/${command.name}${command.argsHint ? " " : ""}`;
+    // Set the command text
+    value = `/${command.name}`;
     closeCommandPicker();
 
-    setTimeout(() => {
-      inputRef?.focus();
-      const newPos = value.length;
-      inputRef?.setSelectionRange(newPos, newPos);
-    }, 0);
+    // If command has no args, execute immediately
+    if (!command.argsHint) {
+      // Execute the command by submitting
+      setTimeout(() => {
+        onSubmit();
+      }, 0);
+    } else {
+      // Command needs args - put cursor after command with space
+      value = `/${command.name} `;
+      setTimeout(() => {
+        inputRef?.focus();
+        const newPos = value.length;
+        inputRef?.setSelectionRange(newPos, newPos);
+      }, 0);
+    }
   }
 
   function closeCommandPicker() {
@@ -811,6 +862,35 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
         </svg>
         <span class="text-sm font-medium">Drop files to attach</span>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Quote preview -->
+  {#if parsedQuote}
+    <div class="mx-3 mt-2 mb-1 rounded-lg border border-indigo-200 bg-indigo-50/50 overflow-hidden">
+      <div class="flex items-center justify-between px-3 py-1.5 border-b border-indigo-200/50 bg-indigo-100/30">
+        <div class="flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4z"></path>
+          </svg>
+          <span class="text-xs font-medium text-indigo-700">Quoting</span>
+          {#if parsedQuote.source}
+            <span class="text-xs text-indigo-500 font-mono truncate max-w-[200px]">{parsedQuote.source}</span>
+          {/if}
+        </div>
+        <button
+          onclick={clearQuote}
+          class="p-1 rounded hover:bg-indigo-200/50 text-indigo-400 hover:text-indigo-600 transition-colors"
+          title="Remove quote"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      <div class="px-3 py-2 max-h-24 overflow-y-auto">
+        <pre class="text-xs text-indigo-900 font-sans whitespace-pre-wrap break-words leading-relaxed">{parsedQuote.content.length > 200 ? parsedQuote.content.slice(0, 200) + '...' : parsedQuote.content}</pre>
       </div>
     </div>
   {/if}

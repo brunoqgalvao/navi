@@ -92,8 +92,12 @@
 
   function handleMentionInChat() {
     if (contextMenu && onSendToClaude) {
-      const source = item.path ? `From \`${item.path}\`:\n` : '';
-      const context = `${source}> ${contextMenu.selectedText.split('\n').join('\n> ')}`;
+      // Format as blockquote with Source annotation (for UserReferenceDisplay)
+      const quotedLines = contextMenu.selectedText.split('\n').map(line => `> ${line}`);
+      if (item.path) {
+        quotedLines.push(`> *Source: \`${item.path}\`*`);
+      }
+      const context = quotedLines.join('\n');
       onSendToClaude(context);
       contextMenu = null;
     }
