@@ -1449,6 +1449,29 @@ export interface PreviewComplianceResult {
   needsInstall?: boolean;
 }
 
+/**
+ * Port conflict info returned when a port is already in use
+ */
+export interface PortConflictInfo {
+  hasConflict: true;
+  requestedPort: number;
+  alternativePort: number;
+  conflictProcess: {
+    pid: number;
+    name: string;
+    isDevServer: boolean;
+    isSameWorkspace: boolean;  // true if same project different branch
+  };
+}
+
+/**
+ * Native preview start result - either success, conflict requiring user choice, or error
+ */
+export type NativePreviewStartResult =
+  | { success: true; port: number; url: string; framework: string; resolvedPath?: string }
+  | { success: false; conflict: PortConflictInfo }
+  | { success: false; error: string; suggestions?: string[] };
+
 export const nativePreviewApi = {
   /** Check if preview is possible for a session (compliance check) */
   checkCompliance: (sessionId: string) =>
@@ -1458,9 +1481,16 @@ export const nativePreviewApi = {
 
   /** Start native preview for a session */
   start: (sessionId: string) =>
-    request<{ success: boolean; port?: number; url?: string; framework?: string; error?: string }>(
+    request<NativePreviewStartResult>(
       `/sessions/${sessionId}/preview/native`,
       { method: "POST" }
+    ),
+
+  /** Resolve a port conflict by choosing an action */
+  resolveConflict: (sessionId: string, action: 'use_alternative' | 'kill_and_use_original') =>
+    request<NativePreviewStartResult>(
+      `/sessions/${sessionId}/preview/native/resolve-conflict`,
+      { method: "POST", body: JSON.stringify({ action }) }
     ),
 
   /** Stop native preview */

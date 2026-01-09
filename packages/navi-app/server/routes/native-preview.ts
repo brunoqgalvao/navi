@@ -101,13 +101,28 @@ export async function handleNativePreviewRoutes(
         branch
       );
 
-      return json({
-        success: true,
-        port: result.port,
-        url: result.url,
-        framework: result.framework,
-        resolvedPath: compliance.resolvedPath,
-      });
+      // Handle the different result types
+      if (result.success) {
+        return json({
+          success: true,
+          port: result.port,
+          url: result.url,
+          framework: result.framework,
+          resolvedPath: compliance.resolvedPath,
+        });
+      } else if ("conflict" in result) {
+        // Port conflict requiring user decision
+        return json({
+          success: false,
+          conflict: result.conflict,
+        });
+      } else {
+        // Error
+        return json({
+          success: false,
+          error: result.error,
+        }, 400);
+      }
     } catch (e: any) {
       console.error("[NativePreview] Start failed:", e);
       return json(
@@ -117,6 +132,56 @@ export async function handleNativePreviewRoutes(
         },
         500
       );
+    }
+  }
+
+  // POST /api/sessions/:id/preview/native/resolve-conflict - Resolve a port conflict
+  const resolveConflictMatch = url.pathname.match(
+    /^\/api\/sessions\/([^/]+)\/preview\/native\/resolve-conflict$/
+  );
+  if (resolveConflictMatch && method === "POST") {
+    const sessionId = resolveConflictMatch[1];
+
+    let body: { action?: string } = {};
+    try {
+      body = await req.json();
+    } catch {
+      return error("Invalid JSON body", 400);
+    }
+
+    const action = body.action;
+    if (action !== "use_alternative" && action !== "kill_and_use_original") {
+      return error("Invalid action. Must be 'use_alternative' or 'kill_and_use_original'", 400);
+    }
+
+    try {
+      const result = await nativePreviewService.resolveConflict(sessionId, action);
+
+      if (result.success) {
+        return json({
+          success: true,
+          port: result.port,
+          url: result.url,
+          framework: result.framework,
+        });
+      } else if ("conflict" in result) {
+        // Another conflict (shouldn't happen but handle gracefully)
+        return json({
+          success: false,
+          conflict: result.conflict,
+        });
+      } else {
+        return json({
+          success: false,
+          error: result.error,
+        }, 400);
+      }
+    } catch (e: any) {
+      console.error("[NativePreview] Resolve conflict failed:", e);
+      return json({
+        success: false,
+        error: e.message,
+      }, 500);
     }
   }
 

@@ -1189,7 +1189,7 @@
             title="Working in parallel branch"
           >
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 4.97-4.03 9-9 9"/>
             </svg>
             <span class="text-[11px] font-medium max-w-[100px] truncate">
               {worktreeBranch.replace(/^session\//, '').slice(0, 20)}
@@ -1209,7 +1209,7 @@
               <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700">
                 <div class="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 mb-1">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 4.97-4.03 9-9 9"/>
                   </svg>
                   <span class="text-xs font-semibold uppercase tracking-wide">Parallel Branch</span>
                 </div>
@@ -1247,7 +1247,7 @@
           title={worktreeEnabled ? 'Parallel branch: ON - working in isolated copy' : 'Parallel branch: work on an isolated copy'}
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 4.97-4.03 9-9 9"/>
           </svg>
         </button>
       {/if}

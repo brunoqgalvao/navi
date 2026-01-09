@@ -33,6 +33,30 @@ export interface PreviewComplianceResult {
   needsInstall?: boolean;
 }
 
+/**
+ * Port conflict info - returned when a port is in use by an external process
+ * that is NOT from the same workspace (which would be auto-killed)
+ */
+export interface PortConflictInfo {
+  hasConflict: true;
+  requestedPort: number;
+  alternativePort: number;
+  conflictProcess: {
+    pid: number;
+    name: string;
+    isDevServer: boolean;
+    isSameWorkspace: boolean;  // true if same project different branch (auto-resolved)
+  };
+}
+
+/**
+ * Preview start result variants
+ */
+export type PreviewStartResult =
+  | { success: true; port: number; url: string; framework: string }
+  | { success: false; conflict: PortConflictInfo }
+  | { success: false; error: string };
+
 // Reserved ports that should NEVER be killed or used for previews
 // These are Navi's own services and critical system ports
 const RESERVED_PORTS = new Set([
@@ -74,6 +98,26 @@ interface NativePreview {
   logs: string[];
 }
 
+/**
+ * Pending conflict - stored when a conflict is detected and waiting for user resolution
+ */
+interface PendingConflict {
+  sessionId: string;
+  projectId: string;
+  projectPath: string;
+  branch: string;
+  requestedPort: number;
+  alternativePort: number;
+  conflictProcess: {
+    pid: number;
+    name: string;
+    isDevServer: boolean;
+    isSameWorkspace: boolean;
+  };
+  framework: DetectedFramework;
+  createdAt: number;
+}
+
 class NativePreviewService {
   // Map of sessionId -> NativePreview (one preview per session)
   // This allows multiple sessions to have their own previews running simultaneously
@@ -83,6 +127,10 @@ class NativePreviewService {
   // Port reservations to prevent race conditions during concurrent starts
   // Maps port -> sessionId that has reserved it (before process is spawned)
   private portReservations: Map<number, string> = new Map();
+
+  // Pending conflicts waiting for user resolution
+  // Maps sessionId -> PendingConflict
+  private pendingConflicts: Map<string, PendingConflict> = new Map();
 
   // Mutex-like lock for port operations to prevent race conditions
   private portLock: Promise<void> = Promise.resolve();
@@ -422,15 +470,17 @@ class NativePreviewService {
    * Start a native preview for a session
    *
    * Multi-project behavior:
-   * - Same project, different worktree → stop old, reuse same port
-   * - Different project → find new port, keep both running
+   * - Same workspace (same project, different branch) → auto-kill existing, seamless switch
+   * - Different workspace → return conflict info for user to choose action
+   *
+   * @returns Success with port info, or conflict info for user resolution, or error
    */
   async start(
     sessionId: string,
     projectId: string,
     projectPath: string,
     branch: string
-  ): Promise<{ port: number; url: string; framework: string }> {
+  ): Promise<PreviewStartResult> {
     console.log(`[NativePreview] Starting preview for session ${sessionId}, project ${projectId}`);
     console.log(`[NativePreview] Path: ${projectPath}, Branch: ${branch}`);
 
@@ -440,7 +490,7 @@ class NativePreviewService {
       const suggestionText = compliance.suggestions?.length
         ? `\nSuggestions:\n${compliance.suggestions.map(s => `  - ${s}`).join("\n")}`
         : "";
-      throw new Error(`Cannot preview: ${compliance.reason}${suggestionText}`);
+      return { success: false, error: `Cannot preview: ${compliance.reason}${suggestionText}` };
     }
 
     // Check if there's already a preview for THIS session
@@ -455,6 +505,7 @@ class NativePreviewService {
       ) {
         console.log(`[NativePreview] Already running for this session`);
         return {
+          success: true,
           port: existingPreview.port,
           url: `http://localhost:${existingPreview.port}`,
           framework: existingPreview.framework.name,
@@ -496,50 +547,46 @@ class NativePreviewService {
     let finalPort: number;
 
     try {
-      // CRITICAL: Clear the port BEFORE starting
-      // This handles cases where another dev server (from different worktree, manual start, etc.)
-      // is using the port. We MUST free it since many package.json have hardcoded ports.
-      // Pass sessionId so we DON'T kill other sessions' previews
-      const portResult = await this.ensurePortAvailable(targetPort, projectPath, sessionId);
-      const port = portResult.port;
-      console.log(`[NativePreview] Using port ${port}`);
-      if (portResult.action) {
-        console.log(`[NativePreview] Port action: ${portResult.action} - ${portResult.reason}`);
+      // Check for port conflicts with smart resolution
+      const conflictResult = await this.checkPortConflictSmart(
+        targetPort,
+        projectPath,
+        sessionId,
+        projectId,
+        framework
+      );
+
+      // If there's a conflict requiring user decision, return it
+      if (conflictResult.needsUserDecision) {
+        // Store the pending conflict for later resolution
+        this.pendingConflicts.set(sessionId, {
+          sessionId,
+          projectId,
+          projectPath,
+          branch,
+          requestedPort: targetPort,
+          alternativePort: conflictResult.alternativePort!,
+          conflictProcess: conflictResult.conflictProcess!,
+          framework,
+          createdAt: Date.now(),
+        });
+
+        return {
+          success: false,
+          conflict: {
+            hasConflict: true,
+            requestedPort: targetPort,
+            alternativePort: conflictResult.alternativePort!,
+            conflictProcess: conflictResult.conflictProcess!,
+          },
+        };
       }
 
-      // If we have a hardcoded port and couldn't get it, check why
-      finalPort = port;
-      if (scriptPort && port !== scriptPort) {
-        // Check if another session's preview is using the hardcoded port (including reservations)
-        const otherSessionOnPort = this.isPortReservedByOther(scriptPort, sessionId);
-        if (otherSessionOnPort) {
-          // Another session is using this port - we can't steal it!
-          // The user needs to stop that preview first or change their port config
-          console.error(`[NativePreview] Cannot start: port ${scriptPort} is used by another session (${otherSessionOnPort})`);
-          throw new Error(
-            `Port ${scriptPort} is already in use by another project's preview. ` +
-            `Please stop that preview first, or change the port in your package.json. ` +
-            `Assigned port ${port} but your project has port ${scriptPort} hardcoded.`
-          );
-        }
-
-        // Port is used by something external (not another Navi preview) - try to kill it
-        console.warn(`[NativePreview] Package.json has hardcoded port ${scriptPort}, but we got ${port}`);
-        console.log(`[NativePreview] Attempting to free hardcoded port ${scriptPort}...`);
-        await this.forceKillPort(scriptPort);
-
-        // Verify the port is now free
-        const stillInUse = await portFixer.analyzeConflict(scriptPort, projectPath, false);
-        if (stillInUse) {
-          console.error(`[NativePreview] Could not free port ${scriptPort}`);
-          throw new Error(
-            `Could not free port ${scriptPort}. Another process is using it and couldn't be stopped. ` +
-            `Please manually stop the process using port ${scriptPort} or change your package.json.`
-          );
-        }
-
-        finalPort = scriptPort;
-        console.log(`[NativePreview] Successfully freed hardcoded port ${finalPort}`);
+      // No conflict or auto-resolved - use the determined port
+      finalPort = conflictResult.port;
+      console.log(`[NativePreview] Using port ${finalPort}`);
+      if (conflictResult.action) {
+        console.log(`[NativePreview] Port action: ${conflictResult.action} - ${conflictResult.reason}`);
       }
 
       // Reserve the port BEFORE spawning to prevent race conditions
@@ -624,6 +671,7 @@ class NativePreviewService {
     this.pollHealth(sessionId, projectId);
 
     return {
+      success: true,
       port: finalPort,
       url: `http://localhost:${finalPort}`,
       framework: framework.name,
@@ -911,41 +959,53 @@ class NativePreviewService {
   }
 
   /**
-   * Find next available port, skipping reserved ports and ports with pending reservations
+   * Find next available port, skipping:
+   * - Reserved Navi ports (3001, 3002, etc.)
+   * - Ports with pending reservations
+   * - Ports already used by other Navi previews
+   * - Ports in use by other processes
    */
   private async findSafePort(startPort: number): Promise<number> {
     let port = startPort;
     const maxAttempts = 100; // Prevent infinite loop
+    const net = await import("net");
 
     for (let i = 0; i < maxAttempts; i++) {
-      // Skip Navi reserved ports
+      // 1. Skip Navi reserved ports
       while (RESERVED_PORTS.has(port)) {
+        console.log(`[NativePreview] Port ${port} is reserved for Navi, skipping...`);
         port++;
       }
 
-      // Skip ports with pending reservations
-      while (this.portReservations.has(port)) {
+      // 2. Skip ports with pending reservations
+      if (this.portReservations.has(port)) {
+        console.log(`[NativePreview] Port ${port} has pending reservation, skipping...`);
         port++;
-        // Check reserved again after increment
-        while (RESERVED_PORTS.has(port)) {
-          port++;
-        }
+        continue;
       }
 
-      // Check if port is actually available using portFixer
-      const available = await portFixer.findAvailablePort(port);
+      // 3. Skip ports already used by other Navi previews
+      const usedByPreview = this.findPreviewByPort(port);
+      if (usedByPreview) {
+        console.log(`[NativePreview] Port ${port} used by session ${usedByPreview.sessionId}, skipping...`);
+        port++;
+        continue;
+      }
 
-      // If portFixer returned the same port, it's available
-      if (available === port) {
+      // 4. Check if port is actually free (not used by any process)
+      const isAvailable = await this.isPortAvailable(port, net);
+      if (isAvailable) {
+        console.log(`[NativePreview] Found available port: ${port}`);
         return port;
       }
 
-      // Otherwise, try the next port that portFixer suggests
-      port = available;
+      console.log(`[NativePreview] Port ${port} is in use by external process, skipping...`);
+      port++;
     }
 
-    // Fallback - just return what portFixer gives us
-    return portFixer.findAvailablePort(startPort);
+    // Fallback - shouldn't normally reach here
+    console.warn(`[NativePreview] Could not find free port after ${maxAttempts} attempts, trying portFixer fallback`);
+    return portFixer.findAvailablePort(startPort + maxAttempts);
   }
 
   /**
@@ -969,6 +1029,278 @@ class NativePreviewService {
     }
 
     return null;
+  }
+
+  /**
+   * Smart port conflict checker that determines whether to:
+   * - Auto-kill (same workspace / worktree scenarios)
+   * - Return conflict for user decision (different workspaces)
+   * - Just use the port (no conflict)
+   */
+  private async checkPortConflictSmart(
+    targetPort: number,
+    projectPath: string,
+    sessionId: string,
+    projectId: string,
+    framework: DetectedFramework
+  ): Promise<{
+    port: number;
+    needsUserDecision?: boolean;
+    alternativePort?: number;
+    conflictProcess?: {
+      pid: number;
+      name: string;
+      isDevServer: boolean;
+      isSameWorkspace: boolean;
+    };
+    action?: string;
+    reason?: string;
+  }> {
+    // CRITICAL: Never use reserved Navi ports
+    if (RESERVED_PORTS.has(targetPort)) {
+      console.log(`[NativePreview] Port ${targetPort} is reserved for Navi services, finding new port...`);
+      const newPort = await this.findSafePort(targetPort + 1);
+      return {
+        port: newPort,
+        action: "reassigned",
+        reason: `Port ${targetPort} is reserved for Navi, using ${newPort}`,
+      };
+    }
+
+    // Check if port is reserved by another Navi session
+    const reservedBy = this.isPortReservedByOther(targetPort, sessionId);
+    if (reservedBy) {
+      console.log(`[NativePreview] Port ${targetPort} is reserved by session ${reservedBy}, finding new port...`);
+      const newPort = await this.findSafePort(targetPort + 1);
+      return {
+        port: newPort,
+        action: "reassigned",
+        reason: `Port ${targetPort} reserved by another session, using ${newPort}`,
+      };
+    }
+
+    // Check if port is in use by external process
+    const conflict = await portFixer.analyzeConflict(targetPort, projectPath, false);
+
+    if (!conflict) {
+      // Port is free, use it
+      return { port: targetPort };
+    }
+
+    const processInfo = conflict.conflictingProcess;
+    console.log(`[NativePreview] Port ${targetPort} is in use by ${processInfo.process} (PID: ${processInfo.pid})`);
+
+    // Determine if this is from the same workspace
+    // Same workspace = same project base path (parent directory of worktrees)
+    const isSameWorkspace = this.isSameWorkspace(projectPath, processInfo.projectPath);
+
+    // If same workspace (e.g., different branch of same project), auto-kill seamlessly
+    if (isSameWorkspace && processInfo.isDevServer) {
+      console.log(`[NativePreview] Same workspace detected, auto-killing process on port ${targetPort}...`);
+      await this.forceKillPort(targetPort);
+
+      // Verify port is now free
+      const stillInUse = await portFixer.analyzeConflict(targetPort, projectPath, false);
+      if (!stillInUse) {
+        return {
+          port: targetPort,
+          action: "auto-killed",
+          reason: `Auto-killed same-workspace dev server (${processInfo.process}) to switch branches`,
+        };
+      }
+      // If still in use, fall through to user decision
+    }
+
+    // Different workspace or couldn't auto-kill → ask user
+    // Find an alternative port to offer
+    const alternativePort = await this.findSafePort(targetPort + 1);
+
+    return {
+      port: targetPort,
+      needsUserDecision: true,
+      alternativePort,
+      conflictProcess: {
+        pid: processInfo.pid,
+        name: processInfo.process,
+        isDevServer: processInfo.isDevServer,
+        isSameWorkspace,
+      },
+    };
+  }
+
+  /**
+   * Check if two paths are from the same workspace
+   * This considers worktrees to be part of the same workspace if they share the same project root
+   */
+  private isSameWorkspace(path1: string, path2: string | undefined): boolean {
+    if (!path2) return false;
+
+    // Normalize paths
+    const norm1 = path1.replace(/\/+$/, "");
+    const norm2 = path2.replace(/\/+$/, "");
+
+    // Direct match
+    if (norm1 === norm2) return true;
+
+    // Check if one is a parent of the other (worktree scenario)
+    // Worktrees are typically in .worktrees/ subfolder of the main repo
+    const isWorktreePath = (p: string) => p.includes(".worktrees/") || p.includes("/.worktrees/");
+
+    if (isWorktreePath(norm1) || isWorktreePath(norm2)) {
+      // Extract the base project path (before .worktrees)
+      const getBasePath = (p: string) => {
+        const worktreeIdx = p.indexOf(".worktrees");
+        return worktreeIdx > 0 ? p.slice(0, worktreeIdx - 1) : p;
+      };
+
+      const base1 = getBasePath(norm1);
+      const base2 = getBasePath(norm2);
+
+      return base1 === base2;
+    }
+
+    return false;
+  }
+
+  /**
+   * Resolve a pending port conflict by user choice
+   *
+   * @param sessionId The session with the pending conflict
+   * @param action 'use_alternative' to use the offered alternative port, 'kill_and_use_original' to kill the conflicting process
+   */
+  async resolveConflict(
+    sessionId: string,
+    action: "use_alternative" | "kill_and_use_original"
+  ): Promise<PreviewStartResult> {
+    const pending = this.pendingConflicts.get(sessionId);
+    if (!pending) {
+      return { success: false, error: "No pending conflict found for this session" };
+    }
+
+    // Clear the pending conflict
+    this.pendingConflicts.delete(sessionId);
+
+    const { projectId, projectPath, branch, requestedPort, alternativePort, framework } = pending;
+
+    let portToUse: number;
+
+    if (action === "use_alternative") {
+      portToUse = alternativePort;
+      console.log(`[NativePreview] User chose alternative port ${portToUse}`);
+    } else {
+      // Kill the conflicting process and use the original port
+      console.log(`[NativePreview] User chose to kill process on port ${requestedPort}`);
+      await this.forceKillPort(requestedPort);
+
+      // Verify the port is now free
+      const stillInUse = await portFixer.analyzeConflict(requestedPort, projectPath, false);
+      if (stillInUse) {
+        console.error(`[NativePreview] Could not free port ${requestedPort} after kill`);
+        return {
+          success: false,
+          error: `Could not free port ${requestedPort}. The process may have respawned. Try using the alternative port instead.`,
+        };
+      }
+      portToUse = requestedPort;
+    }
+
+    // Now spawn the preview on the chosen port
+    return this.spawnPreview(sessionId, projectId, projectPath, branch, framework, portToUse);
+  }
+
+  /**
+   * Internal method to spawn a preview on a specific port (used by both start and resolveConflict)
+   */
+  private async spawnPreview(
+    sessionId: string,
+    projectId: string,
+    projectPath: string,
+    branch: string,
+    framework: DetectedFramework,
+    port: number
+  ): Promise<PreviewStartResult> {
+    // Reserve the port
+    this.portReservations.set(port, sessionId);
+    console.log(`[NativePreview] Reserved port ${port} for session ${sessionId}`);
+
+    // Build dev command with port override
+    const devCommand = this.buildDevCommand(framework, port);
+    console.log(`[NativePreview] Command: ${devCommand}`);
+
+    // Spawn process (detached so we can kill the process group)
+    const childProcess = spawn(devCommand, {
+      cwd: projectPath,
+      shell: true,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        PORT: port.toString(),
+        CI: "true",
+        FORCE_COLOR: "1",
+      },
+    });
+
+    const logs: string[] = [];
+
+    // Capture stdout
+    childProcess.stdout?.on("data", (data) => {
+      const lines = data.toString().split("\n").filter((l: string) => l.trim());
+      logs.push(...lines);
+      if (logs.length > this.maxLogLines) {
+        logs.splice(0, logs.length - this.maxLogLines);
+      }
+    });
+
+    // Capture stderr
+    childProcess.stderr?.on("data", (data) => {
+      const lines = data.toString().split("\n").filter((l: string) => l.trim());
+      logs.push(...lines);
+      if (logs.length > this.maxLogLines) {
+        logs.splice(0, logs.length - this.maxLogLines);
+      }
+    });
+
+    // Create the preview object
+    const preview: NativePreview = {
+      sessionId,
+      projectId,
+      projectPath,
+      branch,
+      framework,
+      process: childProcess,
+      port,
+      status: "starting",
+      startedAt: Date.now(),
+      logs,
+    };
+
+    // Handle process exit
+    childProcess.on("exit", (code) => {
+      console.log(`[NativePreview] Process exited with code ${code} for session ${sessionId}`);
+      const existingPreview = this.previews.get(sessionId);
+      if (existingPreview) {
+        existingPreview.status = "error";
+        existingPreview.error = `Process exited with code ${code}`;
+      }
+    });
+
+    // Store preview in the Map
+    this.previews.set(sessionId, preview);
+
+    // Clear the port reservation
+    this.portReservations.delete(port);
+    console.log(`[NativePreview] Active previews: ${this.previews.size}`);
+
+    // Start health check polling
+    this.pollHealth(sessionId, projectId);
+
+    return {
+      success: true,
+      port,
+      url: `http://localhost:${port}`,
+      framework: framework.name,
+    };
   }
 
   /**

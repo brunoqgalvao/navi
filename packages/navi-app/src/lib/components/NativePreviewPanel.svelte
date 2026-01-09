@@ -40,9 +40,11 @@
   // Use the preview proxy to add CORS headers for cross-origin resources (fonts, etc)
   // The proxy at /api/preview/proxy/:port/* handles this and also injects the branch indicator
   const iframeSrc = $derived(() => {
-    if (!currentPort) return currentUrl;
-    // Route through the preview proxy which adds CORS headers
-    return `${getServerUrl()}/api/preview/proxy/${currentPort}/`;
+    const proxyUrl = currentPort
+      ? `${getServerUrl()}/api/preview/proxy/${currentPort}/`
+      : currentUrl;
+    console.log("[NativePreviewPanel] iframeSrc:", { currentPort, currentUrl, proxyUrl });
+    return proxyUrl;
   });
 
   // Sync previewUrl prop to currentUrl
@@ -170,7 +172,7 @@
         currentUrl = result.url || null;
         currentPort = result.port || null;
         pollStatus();
-      } else if (result.error) {
+      } else if ('error' in result && result.error) {
         error = result.error;
         status = "error";
       }
@@ -235,6 +237,11 @@
             console.log("[NativePreviewPanel] URL responding, marking as running");
             status = "running";
             currentUrl = result.url;
+            // CRITICAL: Also update currentPort so iframeSrc uses the proxy
+            if (result.port) {
+              currentPort = result.port;
+            }
+            console.log("[NativePreviewPanel] Set currentPort:", currentPort, "currentUrl:", currentUrl);
             iframeKey = Date.now();
             clearInterval(interval);
           } catch {

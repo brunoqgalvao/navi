@@ -20,6 +20,9 @@ import { portManagerPreviewService } from "../services/port-manager-preview";
  * Generate the branch indicator injection script
  */
 function getBranchIndicatorScript(branch: string, projectName: string): string {
+  // Navi compass SVG icon (black)
+  const naviIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`;
+
   return `
 <!-- Navi Branch Indicator -->
 <script>
@@ -30,17 +33,13 @@ function getBranchIndicatorScript(branch: string, projectName: string): string {
   window.NAVI_PROJECT = ${JSON.stringify(projectName)};
 
   const indicatorHTML = \`
-    <div id="navi-branch-indicator" style="position:fixed;top:12px;right:12px;z-index:999999;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;user-select:none">
-      <div id="navi-branch-badge" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:8px 14px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15),0 2px 4px rgba(0,0,0,0.1);cursor:move;font-size:13px;font-weight:600;backdrop-filter:blur(10px);transition:all 0.2s ease">
-        <span style="font-size:16px;line-height:1">🌿</span>
-        <div style="display:flex;flex-direction:column;gap:2px" id="navi-branch-text">
-          <div style="font-weight:700;letter-spacing:-0.01em">\${window.NAVI_BRANCH}</div>
-          <div style="font-size:10px;opacity:0.85;font-weight:500">\${window.NAVI_PROJECT}</div>
+    <div id="navi-branch-indicator" style="position:fixed;bottom:12px;right:12px;z-index:999999;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;user-select:none">
+      <div id="navi-branch-badge" style="display:flex;align-items:center;gap:6px;background:#fff;color:#000;padding:6px 10px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.12),0 1px 2px rgba(0,0,0,0.08);cursor:move;font-size:11px;font-weight:500;border:1px solid rgba(0,0,0,0.08);transition:all 0.15s ease">
+        <span style="display:flex;align-items:center;color:#000;opacity:0.7">${naviIcon}</span>
+        <div style="display:flex;flex-direction:column;gap:1px" id="navi-branch-text">
+          <div style="font-weight:600;letter-spacing:-0.01em;color:#000">\${window.NAVI_BRANCH}</div>
         </div>
-        <div style="display:flex;gap:4px;margin-left:4px" id="navi-branch-controls">
-          <button id="navi-minimize-btn" title="Minimize" style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.2);border:none;border-radius:4px;color:white;cursor:pointer;font-size:12px">−</button>
-          <button id="navi-close-btn" title="Hide" style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.2);border:none;border-radius:4px;color:white;cursor:pointer;font-size:12px">×</button>
-        </div>
+        <button id="navi-close-btn" title="Hide" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;color:#000;opacity:0.4;cursor:pointer;font-size:14px;margin-left:2px;padding:0">×</button>
       </div>
     </div>
   \`;
@@ -57,37 +56,29 @@ function getBranchIndicatorScript(branch: string, projectName: string): string {
 
     const indicator = document.getElementById('navi-branch-indicator');
     const badge = document.getElementById('navi-branch-badge');
-    const text = document.getElementById('navi-branch-text');
-    const controls = document.getElementById('navi-branch-controls');
-    const minimizeBtn = document.getElementById('navi-minimize-btn');
     const closeBtn = document.getElementById('navi-close-btn');
 
-    let isMinimized = localStorage.getItem('navi-branch-minimized') === 'true';
     let isDragging = false;
     let dragOffset = { x: 0, y: 0 };
 
-    // Restore state
-    if (isMinimized) toggleMinimize(true);
+    // Restore saved position
     const savedPos = localStorage.getItem('navi-branch-position');
     if (savedPos) {
       const pos = JSON.parse(savedPos);
       indicator.style.left = pos.x + 'px';
       indicator.style.top = pos.y + 'px';
+      indicator.style.bottom = 'auto';
       indicator.style.right = 'auto';
     }
 
-    function toggleMinimize(minimize) {
-      isMinimized = minimize;
-      badge.style.padding = minimize ? '6px 10px' : '8px 14px';
-      badge.style.opacity = minimize ? '0.7' : '1';
-      text.style.display = minimize ? 'none' : 'flex';
-      controls.style.display = minimize ? 'none' : 'flex';
-      minimizeBtn.textContent = minimize ? '+' : '−';
-      localStorage.setItem('navi-branch-minimized', minimize.toString());
-    }
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      indicator.style.display = 'none';
+      localStorage.setItem('navi-branch-indicator-hidden', 'true');
+    };
 
-    minimizeBtn.onclick = (e) => { e.stopPropagation(); toggleMinimize(!isMinimized); };
-    closeBtn.onclick = (e) => { e.stopPropagation(); indicator.style.display = 'none'; localStorage.setItem('navi-branch-indicator-hidden', 'true'); };
+    closeBtn.onmouseenter = () => { closeBtn.style.opacity = '0.8'; };
+    closeBtn.onmouseleave = () => { closeBtn.style.opacity = '0.4'; };
 
     badge.onmousedown = (e) => {
       if (e.target.tagName === 'BUTTON') return;
@@ -104,21 +95,22 @@ function getBranchIndicatorScript(branch: string, projectName: string): string {
       const y = e.clientY - dragOffset.y;
       indicator.style.left = x + 'px';
       indicator.style.top = y + 'px';
+      indicator.style.bottom = 'auto';
       indicator.style.right = 'auto';
       localStorage.setItem('navi-branch-position', JSON.stringify({ x, y }));
     };
 
     document.onmouseup = () => { isDragging = false; badge.style.cursor = 'move'; };
 
-    badge.onmouseenter = () => { if (!isDragging) { badge.style.transform = 'translateY(-1px)'; badge.style.opacity = '1'; } };
-    badge.onmouseleave = () => { if (!isDragging) { badge.style.transform = ''; if (isMinimized) badge.style.opacity = '0.7'; } };
+    badge.onmouseenter = () => { if (!isDragging) badge.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15),0 1px 3px rgba(0,0,0,0.1)'; };
+    badge.onmouseleave = () => { if (!isDragging) badge.style.boxShadow = '0 1px 3px rgba(0,0,0,0.12),0 1px 2px rgba(0,0,0,0.08)'; };
 
     // Listen for updates from parent
     window.addEventListener('message', (e) => {
       if (e.data?.type === 'navi:branchInfo') {
         window.NAVI_BRANCH = e.data.branch;
-        document.querySelector('#navi-branch-text div:first-child').textContent = e.data.branch;
-        if (e.data.meta) document.querySelector('#navi-branch-text div:last-child').textContent = e.data.meta;
+        const textEl = document.querySelector('#navi-branch-text div');
+        if (textEl) textEl.textContent = e.data.branch;
       }
     });
 
@@ -299,6 +291,22 @@ export async function handlePreviewProxyRoutes(
           `$1=$2/api/preview/proxy/${port}/$3`
         );
 
+        // Rewrite Next.js RSC resource hints (:HL["/_next/..."])
+        // These are used to preload fonts, scripts, etc. and need to go through the proxy
+        html = html.replace(
+          /:HL\["\/((?!api\/preview\/proxy)_next\/[^"]+)"/g,
+          `:HL["/api/preview/proxy/${port}/$1"`
+        );
+
+        // Also rewrite any other RSC paths that start with /_next/
+        html = html.replace(
+          /"(\/_next\/static\/[^"]+)"/g,
+          (match, path) => {
+            if (path.includes('/api/preview/proxy/')) return match;
+            return `"/api/preview/proxy/${port}${path}"`;
+          }
+        );
+
         // Inject before </body> or at the end
         const script = getBranchIndicatorScript(branch, projectName);
         if (html.includes("</body>")) {
@@ -369,6 +377,22 @@ export async function handlePreviewProxyRoutes(
         js = js.replace(
           /(["'\`])\/((?!api\/preview\/proxy)static\/[^"'\`]+)/g,
           `$1/api/preview/proxy/${port}/$2`
+        );
+
+        // Handle RSC payload font/resource hints in JS chunks
+        // These look like :HL["/_next/static/media/..."]
+        js = js.replace(
+          /:HL\["\/((?!api\/preview\/proxy)_next\/[^"]+)"/g,
+          `:HL["/api/preview/proxy/${port}/$1"`
+        );
+
+        // Handle any standalone /_next/static/ paths in strings
+        js = js.replace(
+          /"(\/_next\/static\/[^"]+)"/g,
+          (match, path) => {
+            if (path.includes('/api/preview/proxy/')) return match;
+            return `"/api/preview/proxy/${port}${path}"`;
+          }
         );
 
         responseHeaders["Content-Length"] = new TextEncoder().encode(js).length.toString();
