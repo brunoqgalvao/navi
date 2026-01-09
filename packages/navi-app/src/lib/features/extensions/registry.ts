@@ -132,7 +132,7 @@ export const DEFAULT_EXTENSIONS: Record<string, Extension> = {
     description: "Agentic task board",
     panelMode: "kanban",
     requiresProject: true,
-    defaultEnabled: false,
+    defaultEnabled: true,
     defaultOrder: 5,
   },
   preview: {

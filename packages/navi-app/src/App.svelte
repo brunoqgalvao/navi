@@ -723,6 +723,9 @@
     } else if (e.key === ',') {
       e.preventDefault();
       showSettings = true;
+    } else if (e.key === 't') {
+      e.preventDefault();
+      toggleKanban();
     }
   }
 
@@ -2369,6 +2372,15 @@
     } else {
       showTerminal = true;
       rightPanelMode = "terminal";
+    }
+  }
+
+  function toggleKanban() {
+    if (showKanban && rightPanelMode === "kanban") {
+      showKanban = false;
+    } else {
+      showKanban = true;
+      rightPanelMode = "kanban";
     }
   }
 
