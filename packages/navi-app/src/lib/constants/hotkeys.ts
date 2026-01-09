@@ -5,6 +5,8 @@ export interface Hotkey {
 
 export const HOTKEYS: Hotkey[] = [
   { key: "Cmd/Ctrl + K", action: "Open search" },
+  { key: "Cmd/Ctrl + J", action: "Quick sessions" },
+  { key: "Cmd/Ctrl + D", action: "Sessions dashboard" },
   { key: "Cmd/Ctrl + P", action: "Toggle preview panel" },
   { key: "Cmd/Ctrl + B", action: "Toggle file browser" },
   { key: "M", action: "Toggle mic recording" },

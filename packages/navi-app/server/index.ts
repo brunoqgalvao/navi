@@ -41,6 +41,7 @@ import { handlePortFixerRoutes } from "./routes/port-fixer";
 import { handleBranchNameRoutes } from "./routes/branch-name";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 import { handleCommandsRoutes } from "./routes/commands";
+import { handleSessionsBoardRoutes } from "./routes/sessions-board";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -403,6 +404,10 @@ const server = Bun.serve({
 
     // Commands routes (custom slash commands)
     response = await handleCommandsRoutes(url, method, req);
+    if (response) return response;
+
+    // Sessions board routes (dashboard view)
+    response = await handleSessionsBoardRoutes(url, method, req, activeProcesses, pendingPermissions);
     if (response) return response;
 
     // Ephemeral chat

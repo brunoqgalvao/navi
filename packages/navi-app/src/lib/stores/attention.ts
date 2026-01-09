@@ -30,7 +30,8 @@ export type AttentionReason =
   | "permission"
   | "awaiting_input"
   | "unread"
-  | "marked_for_review";
+  | "marked_for_review"
+  | "idle";
 
 /**
  * Derived store that computes attention items from recent chats + session status
@@ -39,9 +40,18 @@ export const attentionItems = derived(
   [recentChatsStore, sessionStatus],
   ([$recentChats, $sessionStatus]) => {
     const runningSessions: AttentionItem[] = [];
+    const needsApproval: AttentionItem[] = [];
+    const needsReviewSessions: AttentionItem[] = [];
     const needsInput: AttentionItem[] = [];
+    const idleSessions: AttentionItem[] = [];
+
+    // 8 hours ago in milliseconds
+    const eightHoursAgo = Date.now() - (8 * 60 * 60 * 1000);
 
     for (const chat of $recentChats) {
+      // Skip archived sessions
+      if (chat.archived) continue;
+
       const status = $sessionStatus.get(chat.id);
       const reasons: AttentionReason[] = [];
 
@@ -57,23 +67,42 @@ export const attentionItems = derived(
         continue;
       }
 
+      // Permission requests get their own section (needs approval)
+      if (needsPermission) {
+        needsApproval.push({ session: chat, reasons: ["permission"] });
+        continue;
+      }
+
+      // Marked for review sessions get their own section
+      if (isMarkedForReview) {
+        needsReviewSessions.push({ session: chat, reasons: ["marked_for_review"] });
+        continue;
+      }
+
       // Everything else that needs user attention
-      if (needsPermission) reasons.push("permission");
       if (isAwaitingInput) reasons.push("awaiting_input");
       if (isUnread) reasons.push("unread");
-      if (isMarkedForReview) reasons.push("marked_for_review");
 
       if (reasons.length > 0) {
         needsInput.push({ session: chat, reasons });
+      } else if (chat.updated_at >= eightHoursAgo) {
+        // Idle sessions: updated in last 8 hours, not archived, no active status
+        idleSessions.push({ session: chat, reasons: ["idle"] });
       }
     }
 
     return {
       runningSessions: runningSessions.slice(0, 5),
+      needsApproval: needsApproval.slice(0, 5),
+      needsReviewSessions: needsReviewSessions.slice(0, 5),
       needsInput: needsInput.slice(0, 5),
+      idleSessions: idleSessions.slice(0, 10), // Max 10 idle sessions
       totalRunning: runningSessions.length,
+      totalNeedsApproval: needsApproval.length,
+      totalNeedsReview: needsReviewSessions.length,
       totalNeedsInput: needsInput.length,
-      totalAttention: runningSessions.length + needsInput.length,
+      totalIdle: idleSessions.length,
+      totalAttention: runningSessions.length + needsApproval.length + needsReviewSessions.length + needsInput.length,
       // Legacy aliases for backwards compatibility
       pendingActions: runningSessions.slice(0, 5),
       needsReview: needsInput.slice(0, 5),
@@ -94,6 +123,11 @@ export const runningSessionCount = derived(
 export const needsInputCount = derived(
   attentionItems,
   ($items) => $items.totalNeedsInput
+);
+
+export const idleSessionCount = derived(
+  attentionItems,
+  ($items) => $items.totalIdle
 );
 
 // Legacy aliases

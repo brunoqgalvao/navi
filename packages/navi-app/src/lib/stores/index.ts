@@ -102,6 +102,9 @@ export {
   reviewQueueCount,
   totalAttentionCount,
   sessionNeedsAttention,
+  runningSessionCount,
+  needsInputCount,
+  idleSessionCount,
   type AttentionItem,
   type AttentionReason,
 } from "./attention";

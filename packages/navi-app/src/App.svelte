@@ -88,6 +88,7 @@
   import Settings from "./lib/components/Settings.svelte";
   import ProjectSettings from "./lib/components/ProjectSettings.svelte";
   import SearchModal from "./lib/components/SearchModal.svelte";
+  import QuickSessionsPanel from "./lib/components/QuickSessionsPanel.svelte";
   import NotificationToast from "./lib/components/NotificationToast.svelte";
   import Confetti from "./lib/components/Confetti.svelte";
   import WelcomeScreen from "./lib/components/WelcomeScreenLogo.svelte";
@@ -113,6 +114,7 @@
   import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
   import { handleSessionHierarchyWSEvent } from "./lib/features/session-hierarchy";
+  import { SessionsBoard, type BoardSession } from "./lib/features/sessions-board";
   import { fetchCommands, type CustomCommand } from "./lib/features/commands";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
@@ -282,6 +284,7 @@
   let lastSessionModel = $state("");
   let showSettings = $state(false);
   let showAgentBuilder = $state(false);
+  let showSessionsDashboard = $state(false);
 
   // Derived agents list for sidebar (combine agents + skills from stores)
   let sidebarAgents = $derived([...$agentLibrary, ...$skillLibraryForBuilder].slice(0, 10));
@@ -663,6 +666,7 @@
   });
   let inputRef: HTMLTextAreaElement | undefined = $state(undefined);
   let showSearchModal = $state(false);
+  let showQuickSessions = $state(false);
   let showContextOverflowModal = $state(false);
 
   let showConfetti = $state(false);
@@ -690,7 +694,9 @@
     }
 
     if (e.key === 'Escape') {
-      if (showHotkeysHelp) {
+      if (showQuickSessions) {
+        showQuickSessions = false;
+      } else if (showHotkeysHelp) {
         showHotkeysHelp = false;
       } else if (showSettings) {
         showSettings = false;
@@ -707,6 +713,9 @@
     if (e.key === 'k') {
       e.preventDefault();
       showSearchModal = true;
+    } else if (e.key === 'j') {
+      e.preventDefault();
+      showQuickSessions = !showQuickSessions;
     } else if (e.key === 'p') {
       e.preventDefault();
       showPreview = !showPreview;
@@ -726,6 +735,9 @@
     } else if (e.key === 't') {
       e.preventDefault();
       toggleKanban();
+    } else if (e.key === 'd') {
+      e.preventDefault();
+      showSessionsDashboard = !showSessionsDashboard;
     }
   }
 
@@ -1254,6 +1266,18 @@
     indexProjectFiles(project.path);
     loadProjectContext(project);
     loadClaudeMd(project.path);
+  }
+
+  async function goToSessionById(projectId: string, sessionId: string) {
+    // Fetch the session and then use goToChat
+    try {
+      const sessionData = await api.sessions.get(sessionId);
+      if (sessionData) {
+        goToChat(sessionData);
+      }
+    } catch (e) {
+      console.error("Failed to load session:", e);
+    }
   }
 
   async function createProject() {
@@ -3301,6 +3325,18 @@
       <AgentBuilder onClose={() => showAgentBuilder = false} />
     </div>
   {/if}
+
+  {#if showSessionsDashboard}
+    <div class="fixed inset-0 z-50 bg-white">
+      <SessionsBoard
+        onClose={() => showSessionsDashboard = false}
+        onSessionSelect={(boardSession) => {
+          showSessionsDashboard = false;
+          goToSessionById(boardSession.projectId, boardSession.id);
+        }}
+      />
+    </div>
+  {/if}
   <FeedbackModal
     open={showFeedbackModal}
     onClose={() => {
@@ -3386,6 +3422,12 @@
         console.error("Failed to load sessions:", e);
       }
     }}
+  />
+
+  <QuickSessionsPanel
+    open={showQuickSessions}
+    onClose={() => showQuickSessions = false}
+    onSelectSession={goToChat}
   />
 
   <ContextOverflowModal
