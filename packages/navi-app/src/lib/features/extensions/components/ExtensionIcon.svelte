@@ -39,6 +39,26 @@
   <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <polygon stroke-linecap="round" stroke-linejoin="round" stroke-width="2" points="5,3 19,12 5,21" />
   </svg>
+{:else if icon === "zap"}
+  <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+  </svg>
+{:else if icon === "sliders"}
+  <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <line x1="4" y1="21" x2="4" y2="14" stroke-width="2" stroke-linecap="round" />
+    <line x1="4" y1="10" x2="4" y2="3" stroke-width="2" stroke-linecap="round" />
+    <line x1="12" y1="21" x2="12" y2="12" stroke-width="2" stroke-linecap="round" />
+    <line x1="12" y1="8" x2="12" y2="3" stroke-width="2" stroke-linecap="round" />
+    <line x1="20" y1="21" x2="20" y2="16" stroke-width="2" stroke-linecap="round" />
+    <line x1="20" y1="12" x2="20" y2="3" stroke-width="2" stroke-linecap="round" />
+    <circle cx="4" cy="12" r="2" stroke-width="2" />
+    <circle cx="12" cy="10" r="2" stroke-width="2" />
+    <circle cx="20" cy="14" r="2" stroke-width="2" />
+  </svg>
+{:else if icon === "plug"}
+  <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v4M8 3v4M16 3v4M5 7h14M6 7v5a6 6 0 0012 0V7M12 18v3" />
+  </svg>
 {:else}
   <!-- Fallback: puzzle piece -->
   <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">

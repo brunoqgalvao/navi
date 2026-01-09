@@ -1410,4 +1410,164 @@ export const containerPreviewApi = {
       `/projects/${projectId}/preview/branch/${encodeURIComponent(branch)}`,
       { method: "DELETE" }
     ),
+
+  /** Reset cached preview config (forces re-detection on next start) */
+  resetConfig: (projectId: string) =>
+    request<{ success: boolean; message: string }>(
+      `/projects/${projectId}/preview/config`,
+      { method: "DELETE" }
+    ),
+};
+
+/**
+ * Native Preview API
+ * Lightweight preview system that runs dev servers natively (no Docker).
+ * One preview at a time, auto-switches when changing worktrees.
+ */
+export interface NativePreviewStatus {
+  running: boolean;
+  sessionId?: string;
+  projectId?: string;
+  projectPath?: string;
+  branch?: string;
+  port?: number;
+  url?: string;
+  status?: "starting" | "running" | "error";
+  framework?: string;
+  error?: string;
+  startedAt?: number;
+}
+
+export interface PreviewComplianceResult {
+  canPreview: boolean;
+  reason?: string;
+  framework?: string;
+  suggestions?: string[];
+  /** If package.json was found in a subfolder, this is the resolved path */
+  resolvedPath?: string;
+  /** If true, dependencies will be auto-installed on start */
+  needsInstall?: boolean;
+}
+
+export const nativePreviewApi = {
+  /** Check if preview is possible for a session (compliance check) */
+  checkCompliance: (sessionId: string) =>
+    request<PreviewComplianceResult>(
+      `/sessions/${sessionId}/preview/native/compliance`
+    ),
+
+  /** Start native preview for a session */
+  start: (sessionId: string) =>
+    request<{ success: boolean; port?: number; url?: string; framework?: string; error?: string }>(
+      `/sessions/${sessionId}/preview/native`,
+      { method: "POST" }
+    ),
+
+  /** Stop native preview */
+  stop: (sessionId: string) =>
+    request<{ success: boolean }>(
+      `/sessions/${sessionId}/preview/native`,
+      { method: "DELETE" }
+    ),
+
+  /** Get native preview status for a session */
+  getStatus: (sessionId: string) =>
+    request<NativePreviewStatus>(`/sessions/${sessionId}/preview/native`),
+
+  /** Get logs from native preview */
+  getLogs: (sessionId: string, tail = 50) =>
+    request<{ logs: string[] }>(
+      `/sessions/${sessionId}/preview/native/logs?tail=${tail}`
+    ),
+
+  /** Get global native preview status */
+  getGlobalStatus: () =>
+    request<NativePreviewStatus>("/preview/native/status"),
+};
+
+/**
+ * Port Manager Preview API
+ * LLM-powered port orchestration for running multiple dev servers without conflicts.
+ * Supports multiple instances across different worktrees/branches.
+ */
+export interface PortAllocation {
+  primary: number;
+  backend?: number;
+  additional?: number[];
+}
+
+export interface PortManagerPreviewStatus {
+  running: boolean;
+  id?: string;
+  sessionId?: string;
+  branch?: string;
+  ports?: PortAllocation;
+  url?: string;
+  status?: "starting" | "running" | "error";
+  framework?: string;
+  error?: string;
+}
+
+export interface PortManagerPreviewInfo {
+  id: string;
+  sessionId: string;
+  projectId: string;
+  branch: string;
+  ports: PortAllocation;
+  status: string;
+  framework: string;
+  startedAt: number;
+}
+
+export const portManagerPreviewApi = {
+  /** Start port manager preview for a session */
+  start: (sessionId: string, useLlm: boolean = true) =>
+    request<{ success: boolean; id?: string; ports?: PortAllocation; url?: string; error?: string }>(
+      `/sessions/${sessionId}/preview/port-manager`,
+      { method: "POST", body: JSON.stringify({ useLlm }) }
+    ),
+
+  /** Stop port manager preview for a session */
+  stop: (sessionId: string) =>
+    request<{ success: boolean }>(
+      `/sessions/${sessionId}/preview/port-manager`,
+      { method: "DELETE" }
+    ),
+
+  /** Get port manager preview status for a session */
+  getStatus: (sessionId: string) =>
+    request<PortManagerPreviewStatus>(`/sessions/${sessionId}/preview/port-manager`),
+
+  /** Get logs from port manager preview */
+  getLogs: (sessionId: string, tail = 50) =>
+    request<{ logs: string[] }>(
+      `/sessions/${sessionId}/preview/port-manager/logs?tail=${tail}`
+    ),
+
+  /** List all running port manager previews */
+  list: () =>
+    request<PortManagerPreviewInfo[]>("/port-manager-preview/list"),
+
+  /** Get allocated ports map */
+  getAllocatedPorts: () =>
+    request<{ ports: { port: number; previewId: string }[] }>("/port-manager-preview/ports"),
+
+  /** Stop a specific preview by ID */
+  stopById: (previewId: string) =>
+    request<{ success: boolean }>(
+      `/port-manager-preview/${encodeURIComponent(previewId)}`,
+      { method: "DELETE" }
+    ),
+
+  /** Get status of a specific preview by ID */
+  getStatusById: (previewId: string) =>
+    request<PortManagerPreviewStatus>(
+      `/port-manager-preview/${encodeURIComponent(previewId)}`
+    ),
+
+  /** Get logs for a specific preview by ID */
+  getLogsById: (previewId: string, tail = 50) =>
+    request<{ logs: string[] }>(
+      `/port-manager-preview/${encodeURIComponent(previewId)}/logs?tail=${tail}`
+    ),
 };

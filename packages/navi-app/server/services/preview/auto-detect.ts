@@ -163,6 +163,32 @@ function getDefaultPort(framework: string): number {
 }
 
 /**
+ * Generate the host binding flags for dev server command
+ * Different frameworks use different CLI flags
+ */
+function getHostFlags(framework: string, port: number): string {
+  switch (framework) {
+    case "next":
+      // Next.js uses -H or --hostname, not --host
+      return `--hostname 0.0.0.0 --port ${port}`;
+    case "nuxt":
+      // Nuxt uses --host
+      return `--host 0.0.0.0 --port ${port}`;
+    case "vite":
+    case "sveltekit":
+    case "astro":
+      // Vite-based frameworks use --host
+      return `--host 0.0.0.0 --port ${port}`;
+    case "cra":
+      // Create React App uses HOST env var (set separately), but also accepts --port
+      return `--port ${port}`;
+    default:
+      // Generic: try common flag pattern
+      return `--host 0.0.0.0 --port ${port}`;
+  }
+}
+
+/**
  * Check if project has a backend/server component
  */
 function hasBackendServer(pkgPath: string, packageJson: PackageJson): boolean {
@@ -180,18 +206,89 @@ function hasBackendServer(pkgPath: string, packageJson: PackageJson): boolean {
 }
 
 /**
+ * Find package.json - either at root or in a subfolder
+ * Returns the path to the directory containing package.json and the parsed content
+ */
+function findPackageJson(projectPath: string): { path: string; packageJson: PackageJson; relativePath: string } | null {
+  // First check root
+  const rootPkgPath = join(projectPath, "package.json");
+  if (existsSync(rootPkgPath)) {
+    return {
+      path: projectPath,
+      packageJson: JSON.parse(readFileSync(rootPkgPath, "utf-8")),
+      relativePath: "",
+    };
+  }
+
+  // Check common subdirectory names for nested projects
+  const subDirs = ["app", "web", "client", "frontend", "src", "packages", "apps"];
+
+  for (const dir of subDirs) {
+    const subDirPath = join(projectPath, dir);
+    if (!existsSync(subDirPath)) continue;
+
+    const subPkgPath = join(subDirPath, "package.json");
+    if (existsSync(subPkgPath)) {
+      return {
+        path: subDirPath,
+        packageJson: JSON.parse(readFileSync(subPkgPath, "utf-8")),
+        relativePath: dir,
+      };
+    }
+
+    // Also check one level deeper (e.g., packages/app/package.json)
+    try {
+      const entries = readdirSync(subDirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const nestedPkgPath = join(subDirPath, entry.name, "package.json");
+        if (existsSync(nestedPkgPath)) {
+          return {
+            path: join(subDirPath, entry.name),
+            packageJson: JSON.parse(readFileSync(nestedPkgPath, "utf-8")),
+            relativePath: `${dir}/${entry.name}`,
+          };
+        }
+      }
+    } catch {}
+  }
+
+  // Last resort: scan immediate children for any package.json
+  try {
+    const entries = readdirSync(projectPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const childPkgPath = join(projectPath, entry.name, "package.json");
+      if (existsSync(childPkgPath)) {
+        return {
+          path: join(projectPath, entry.name),
+          packageJson: JSON.parse(readFileSync(childPkgPath, "utf-8")),
+          relativePath: entry.name,
+        };
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+/**
  * Auto-detect project structure and generate preview config
  */
 export async function autoDetectPreviewConfig(projectPath: string): Promise<PreviewSpec> {
-  const packageJsonPath = join(projectPath, "package.json");
+  const pkgInfo = findPackageJson(projectPath);
 
-  if (!existsSync(packageJsonPath)) {
-    throw new Error(`No package.json found at ${projectPath}`);
+  if (!pkgInfo) {
+    throw new Error(`No package.json found at ${projectPath} or its subdirectories. Not a Node.js project.`);
   }
 
-  const packageJson: PackageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
-  const pm = detectPackageManager(projectPath);
-  const isMonorepoProject = isMonorepo(projectPath, packageJson);
+  const { path: pkgPath, packageJson, relativePath } = pkgInfo;
+  const effectivePath = pkgPath;
+  // Try detecting package manager from both root and effective path
+  const pm = detectPackageManager(projectPath) !== "npm"
+    ? detectPackageManager(projectPath)
+    : detectPackageManager(effectivePath);
+  const isMonorepoProject = isMonorepo(effectivePath, packageJson);
 
   let workdir = "/app";
   let framework = "generic";
@@ -224,30 +321,37 @@ export async function autoDetectPreviewConfig(projectPath: string): Promise<Prev
 
       // Build dev command based on what's available
       const scripts = mainPkgJson.scripts || {};
+      const runCmd = pm === "bun" ? "bun run" : `${pm} run`;
       if (hasBackend && scripts.server) {
         // Run backend in background, then frontend
-        devCmd = `(${pm === "bun" ? "bun run" : `${pm} run`} server &) && sleep 3 && ${pm === "bun" ? "bun run" : `${pm} run`} dev -- --host 0.0.0.0 --port ${devPort}`;
+        devCmd = `(${runCmd} server &) && sleep 3 && ${runCmd} dev -- ${getHostFlags(framework, devPort)}`;
         backendPort = 3000; // Default backend port
         devPort = 1420; // Move frontend to different port
       } else if (scripts.dev) {
-        devCmd = `${pm === "bun" ? "bun run" : `${pm} run`} dev -- --host 0.0.0.0 --port ${devPort}`;
+        devCmd = `${runCmd} dev -- ${getHostFlags(framework, devPort)}`;
       } else if (scripts.start) {
-        devCmd = `${pm === "bun" ? "bun run" : `${pm} run`} start`;
+        devCmd = `${runCmd} start`;
       }
     }
   } else {
-    // Single package project
-    framework = detectFramework(projectPath, packageJson);
+    // Single package project (may be in a subfolder)
+    framework = detectFramework(effectivePath, packageJson);
     devPort = getDefaultPort(framework);
-    hasBackend = hasBackendServer(projectPath, packageJson);
+    hasBackend = hasBackendServer(effectivePath, packageJson);
+
+    // Set workdir to the subfolder if package.json was found there
+    if (relativePath) {
+      workdir = `/app/${relativePath}`;
+    }
 
     const scripts = packageJson.scripts || {};
+    const runCmd = pm === "bun" ? "bun run" : `${pm} run`;
 
     // Build dev command
     if (scripts.dev) {
-      devCmd = `${pm === "bun" ? "bun run" : `${pm} run`} dev -- --host 0.0.0.0 --port ${devPort}`;
+      devCmd = `${runCmd} dev -- ${getHostFlags(framework, devPort)}`;
     } else if (scripts.start) {
-      devCmd = `${pm === "bun" ? "bun run" : `${pm} run`} start`;
+      devCmd = `${runCmd} start`;
     }
   }
 

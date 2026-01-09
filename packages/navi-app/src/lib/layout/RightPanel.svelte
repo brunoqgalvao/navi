@@ -16,10 +16,10 @@
   import { KanbanPanel } from "../features/kanban";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
-  import ContainerPreviewPanel from "../components/ContainerPreviewPanel.svelte";
+  import PreviewPanel from "../components/PreviewPanel.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "container-preview";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified";
 
   interface Props {
     mode: PanelMode;
@@ -42,6 +42,8 @@
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
     onNavigateToSession?: (sessionId: string, prompt?: string) => void;
+    /** Callback when preview panel wants to ask Claude for help */
+    onPreviewAskClaude?: (message: string) => void;
   }
 
   let {
@@ -65,6 +67,7 @@
     onTerminalRef,
     onTerminalSendToClaude,
     onNavigateToSession,
+    onPreviewAskClaude,
   }: Props = $props();
 
   // Use worktree path for git if available, otherwise use project path
@@ -264,14 +267,15 @@
           {onNavigateToSession}
         />
       </div>
-    {:else if mode === "container-preview"}
-      <!-- Container Preview panel - full width -->
+    {:else if mode === "preview-unified"}
+      <!-- Unified Preview panel - full width -->
       <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <ContainerPreviewPanel
+        <PreviewPanel
           {projectId}
           {sessionId}
           branch={worktreeBranch}
           previewUrl={containerPreviewUrl}
+          onAskClaude={onPreviewAskClaude}
         />
       </div>
     {/if}

@@ -83,65 +83,62 @@
 </script>
 
 {#if isCompacting}
-  <!-- Compacting indicator -->
-  <div class="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-700">
-    <svg class="w-4 h-4 text-purple-500 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  <!-- Compacting indicator - compact pill -->
+  <div class="inline-flex items-center gap-1.5 px-2 py-1 bg-purple-50/80 border border-purple-200/60 rounded-full text-xs text-purple-700">
+    <svg class="w-3 h-3 text-purple-500 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
     </svg>
-    <span>Compacting context...</span>
-    <span class="text-purple-500 text-xs">Claude is summarizing</span>
+    <span>Compacting...</span>
   </div>
 {:else if isRollback}
-  <!-- Rollback indicator - sophisticated amber style -->
-  <div class="flex items-center gap-2.5 px-3 py-2 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 rounded-lg text-sm shadow-sm">
-    <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  <!-- Rollback indicator - compact pill -->
+  <div class="inline-flex items-center gap-1.5 px-2 py-1 bg-amber-50/80 border border-amber-200/60 rounded-full text-xs">
+    <svg class="w-3 h-3 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
     </svg>
-    <span class="text-amber-800 font-medium">Rolled back to checkpoint</span>
-    <span class="text-amber-600/70 text-xs">New conversation branch</span>
+    <span class="text-amber-700">Rolled back</span>
   </div>
 {:else if isPruned}
-  <!-- Pruned context indicator -->
-  <div class="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
-    <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  <!-- Pruned context indicator - compact pill -->
+  <div class="inline-flex items-center gap-1.5 px-2 py-1 bg-emerald-50/80 border border-emerald-200/60 rounded-full text-xs text-emerald-700">
+    <svg class="w-3 h-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
-    <span>Using pruned context</span>
-    <span class="text-emerald-500 text-xs">({usagePercent}%)</span>
+    <span>Pruned ({usagePercent}%)</span>
   </div>
 {:else if usagePercent >= 80}
-  <div class="context-warning-container relative">
+  <div class="context-warning-container relative inline-block">
     <button
       onclick={() => showOptions = !showOptions}
-      class="flex items-center gap-2 px-3 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg text-sm text-amber-800 transition-colors shadow-sm"
+      class="inline-flex items-center gap-1.5 px-2 py-1 bg-amber-50/80 hover:bg-amber-100/80 border border-amber-200/60 rounded-full text-xs text-amber-700 transition-colors"
     >
-      <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg class="w-3 h-3 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
       </svg>
-      <span>Context {usagePercent}% full</span>
-      <svg class="w-3 h-3 text-amber-600 transition-transform {showOptions ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <span>{usagePercent}%</span>
+      <svg class="w-2.5 h-2.5 text-amber-500 transition-transform {showOptions ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
       </svg>
     </button>
 
     {#if showOptions}
-      <div class="absolute bottom-full left-0 mb-2 w-72 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
-        <div class="px-3 py-2 bg-gray-50 border-b border-gray-100">
-          <p class="text-xs font-medium text-gray-600">Reduce context usage</p>
-          <p class="text-[10px] text-gray-400 mt-0.5">
-            {(inputTokens / 1000).toFixed(1)}k / {(contextWindow / 1000).toFixed(0)}k tokens used
+      <div class="absolute bottom-full left-0 mb-1.5 w-64 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
+        <div class="px-2.5 py-1.5 bg-gray-50 border-b border-gray-100">
+          <p class="text-[11px] font-medium text-gray-600">Reduce context</p>
+          <p class="text-[10px] text-gray-400">
+            {(inputTokens / 1000).toFixed(0)}k / {(contextWindow / 1000).toFixed(0)}k tokens
           </p>
         </div>
-        <div class="py-1">
+        <div class="py-0.5">
           {#each options as option}
             <button
               onclick={option.action}
-              class="w-full px-3 py-2 text-left hover:bg-gray-50 transition-colors flex items-start gap-3"
+              class="w-full px-2.5 py-1.5 text-left hover:bg-gray-50 transition-colors flex items-center gap-2"
             >
-              <span class="text-lg">{option.icon}</span>
+              <span class="text-sm">{option.icon}</span>
               <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium text-gray-700">{option.name}</p>
-                <p class="text-xs text-gray-500 mt-0.5">{option.description}</p>
+                <p class="text-xs font-medium text-gray-700">{option.name}</p>
+                <p class="text-[10px] text-gray-500 leading-tight">{option.description}</p>
               </div>
             </button>
           {/each}

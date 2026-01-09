@@ -629,7 +629,7 @@
   let showKanban = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "container-preview">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified">("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
@@ -2269,6 +2269,12 @@
     sendMessage();
   }
 
+  // Handle "Ask Claude" from Preview Panel error state (auto-sends)
+  function handlePreviewAskClaude(message: string) {
+    inputText = message;
+    sendMessage();
+  }
+
   // Handle "Send to Claude" from Bash tool results (pre-fills input for review)
   function handleBashSendToClaude(context: string) {
     inputText = context;
@@ -2370,7 +2376,7 @@
    * Handle extension toolbar clicks - toggles the corresponding panel
    */
   function handleExtensionClick(mode: string) {
-    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "container-preview";
+    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified";
     const panelMode = mode as PanelMode;
 
     // Check if we're already showing this panel - if so, close it
@@ -2398,7 +2404,7 @@
       case "kanban":
         showKanban = true;
         break;
-      case "container-preview":
+      case "preview-unified":
         showPreview = true;
         break;
     }
@@ -3016,17 +3022,6 @@
               onPermissionDeny={handlePermissionDeny}
               onQuestionAnswer={handleQuestionAnswer}
               emptyState="continue"
-              inputTokens={$session.inputTokens}
-              contextWindow={currentProject?.context_window || 200000}
-              isPruned={hasPrunedContext($session.sessionId || '')}
-              isRollback={hasRollbackContext($session.sessionId || '')}
-              isCompacting={$compactingSessionsStore.has($session.sessionId || '')}
-              onPruneToolResults={() => pruneToolResults($session.sessionId || '')}
-              onSDKCompact={() => sendCommand("/compact")}
-              onStartNewChat={() => startNewChatWithSummary($session.sessionId || '', {
-                createNewChat: createNewChatAction,
-                setInputText: (text) => { inputText = text; }
-              })}
               onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
               onSuggestionClick={(prompt) => { inputText = prompt; }}
               {projectContext}
@@ -3173,7 +3168,7 @@
         else if (mode === "git") showGitPanel = true;
         else if (mode === "terminal") showTerminal = true;
         else if (mode === "kanban") showKanban = true;
-        else if (mode === "container-preview") showPreview = true;
+        else if (mode === "preview-unified") showPreview = true;
       }}
       onClose={closeRightPanel}
       onStartResize={startResizingRight}
@@ -3181,6 +3176,7 @@
       onBrowserUrlChange={(url) => browserUrl = url}
       onTerminalRef={(ref) => terminalRef = ref}
       onTerminalSendToClaude={handleTerminalSendToClaude}
+      onPreviewAskClaude={handlePreviewAskClaude}
       onNavigateToSession={(sessionId, prompt) => {
         // Navigate to the session
         session.setSession($session.projectId!, sessionId);

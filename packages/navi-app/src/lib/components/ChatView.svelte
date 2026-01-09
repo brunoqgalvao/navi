@@ -8,7 +8,6 @@
   import TodoProgress from "./TodoProgress.svelte";
   import StreamingPreview from "./StreamingPreview.svelte";
   import WorkingIndicator from "./WorkingIndicator.svelte";
-  import ContextWarning from "./ContextWarning.svelte";
   import { streamingStore, type StreamingState } from "../handlers";
   import { sessionMessages, loadingSessions, sessionTodos, type ChatMessage, type SessionPaginationState } from "../stores";
   import type { ContentBlock } from "../claude";
@@ -57,15 +56,6 @@
     onQuestionAnswer?: (answers: Record<string, string | string[]>) => void;
     editingMessageId?: string | null;
     editingMessageContent?: string;
-    // Context management
-    inputTokens?: number;
-    contextWindow?: number;
-    isPruned?: boolean;
-    isRollback?: boolean;
-    isCompacting?: boolean;
-    onPruneToolResults?: () => void;
-    onSDKCompact?: () => void;
-    onStartNewChat?: () => void;
     // Background processes
     onOpenProcesses?: () => void;
     onSuggestionClick?: (prompt: string) => void;
@@ -115,14 +105,6 @@
     onQuestionAnswer,
     editingMessageId = null,
     editingMessageContent = $bindable(""),
-    inputTokens = 0,
-    contextWindow = 200000,
-    isPruned = false,
-    isRollback = false,
-    isCompacting = false,
-    onPruneToolResults,
-    onSDKCompact,
-    onStartNewChat,
     onOpenProcesses,
     onSuggestionClick,
     projectContext = null,
@@ -136,10 +118,6 @@
     onSelectHierarchySession,
     onEscalationResolved,
   }: Props = $props();
-
-  const usagePercent = $derived(
-    contextWindow > 0 ? Math.min(100, Math.round((inputTokens / contextWindow) * 100)) : 0
-  );
 
   let messagesMap = $state<Map<string, ChatMessage[]>>(new Map());
   let streamingMap = $state<Map<string, StreamingState>>(new Map());
@@ -389,21 +367,6 @@
     </div>
     {/if}
 
-    {#if (usagePercent >= 80 || isPruned || isRollback || isCompacting) && onPruneToolResults && onStartNewChat}
-      <div class="mt-4">
-        <ContextWarning
-          {usagePercent}
-          {inputTokens}
-          {contextWindow}
-          {isPruned}
-          {isRollback}
-          {isCompacting}
-          {onPruneToolResults}
-          {onSDKCompact}
-          {onStartNewChat}
-        />
-      </div>
-    {/if}
 
     <div style="overflow-anchor: auto; height: 1px;"></div>
   </div>

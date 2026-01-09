@@ -25,8 +25,26 @@ function isTauri(): boolean {
   return typeof import.meta !== "undefined" && !!import.meta.env?.TAURI_PLATFORM;
 }
 
-export const DEV_SERVER_PORT = 3001;
-export const DEV_PTY_PORT = 3002;
+// Check for environment-injected ports (for Docker preview containers)
+// These are set via VITE_NAVI_SERVER_PORT and VITE_NAVI_PTY_PORT env vars
+const ENV_SERVER_PORT = typeof import.meta !== "undefined"
+  ? parseInt(import.meta.env?.VITE_NAVI_SERVER_PORT || "0") || 0
+  : 0;
+const ENV_PTY_PORT = typeof import.meta !== "undefined"
+  ? parseInt(import.meta.env?.VITE_NAVI_PTY_PORT || "0") || 0
+  : 0;
+
+// Check if running in a Navi preview container (NAVI_PREVIEW=true)
+// In preview mode, both frontend and backend run in the same container
+// Frontend uses relative URLs that go through Vite's proxy
+const IS_PREVIEW_MODE = typeof import.meta !== "undefined"
+  ? import.meta.env?.VITE_NAVI_PREVIEW === "true"
+  : false;
+
+// Use environment-injected ports or defaults
+// Note: In preview mode, Vite proxy handles routing to the server
+export const DEV_SERVER_PORT = ENV_SERVER_PORT || 3001;
+export const DEV_PTY_PORT = ENV_PTY_PORT || 3002;
 export const BUNDLED_SERVER_PORT = 3011;
 export const BUNDLED_PTY_PORT = 3012;
 const PORT_SCAN_RANGE = 10;
@@ -116,26 +134,47 @@ function getPtyServerPort(): number {
 }
 
 export function getApiBase(): string {
+  // In preview mode, use relative URLs that go through Vite's proxy
+  if (IS_PREVIEW_MODE) {
+    return "/api";
+  }
   const port = getServerPort();
   return `http://localhost:${port}/api`;
 }
 
 export function getWsUrl(): string {
+  // In preview mode, construct WebSocket URL relative to current host
+  if (IS_PREVIEW_MODE && typeof window !== "undefined") {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${window.location.host}/ws`;
+  }
   const port = getServerPort();
   return `ws://localhost:${port}/ws`;
 }
 
 export function getPtyWsUrl(): string {
+  // PTY is not proxied in preview mode - use internal port
+  if (IS_PREVIEW_MODE && typeof window !== "undefined") {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    // PTY runs on 3002 inside the container
+    return `${protocol}//${window.location.hostname}:3002`;
+  }
   const port = getPtyServerPort();
   return `ws://localhost:${port}`;
 }
 
 export function getPtyApiUrl(): string {
+  if (IS_PREVIEW_MODE && typeof window !== "undefined") {
+    return `http://${window.location.hostname}:3002`;
+  }
   const port = getPtyServerPort();
   return `http://localhost:${port}`;
 }
 
 export function getServerUrl(): string {
+  if (IS_PREVIEW_MODE) {
+    return "";  // Use relative URLs
+  }
   const port = getServerPort();
   return `http://localhost:${port}`;
 }

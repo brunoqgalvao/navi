@@ -70,7 +70,10 @@
 
     // Save to backend
     const orderedIds = newExtensions.map((ext) => ext.id);
-    projectExtensions.reorder(projectId, orderedIds);
+    console.log("[ExtensionTabs] Reordering:", orderedIds);
+    projectExtensions.reorder(projectId, orderedIds).catch(err => {
+      console.error("[ExtensionTabs] Reorder failed:", err);
+    });
 
     dragOverIndex = null;
     draggedIndex = null;

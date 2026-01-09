@@ -879,8 +879,22 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
-  // Use worktree path if session has one, otherwise use project path
-  const workingDirectory = session?.worktree_path || project?.path || process.cwd();
+
+  // Use worktree path if session has one AND the directory still exists
+  // This handles the case where a worktree was merged/deleted but the session still references it
+  let workingDirectory = project?.path || process.cwd();
+  let worktreeWasCleared = false;
+  if (session?.worktree_path) {
+    if (existsSync(session.worktree_path)) {
+      workingDirectory = session.worktree_path;
+    } else {
+      // Worktree was deleted (e.g., after merge), clear it from the session and use project path
+      // Also clears claude_session_id since that session was tied to the worktree cwd
+      console.log(`[${sessionId}] Worktree path no longer exists: ${session.worktree_path}, clearing worktree and claude session, using project path`);
+      sessions.clearWorktree(sessionId!);
+      worktreeWasCleared = true;
+    }
+  }
   const defaultWorkerCwd = join(__dirname, "..");
   const execDir = process.execPath ? dirname(process.execPath) : process.cwd();
   const workerCwd = existsSync(defaultWorkerCwd) ? defaultWorkerCwd : execDir;
@@ -942,10 +956,13 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
     };
   }
 
+  // Don't resume if the worktree was just cleared - the old Claude session was tied to the worktree cwd
+  const effectiveResumeId = worktreeWasCleared ? undefined : (claudeSessionId || session?.claude_session_id);
+
   const inputJson = JSON.stringify({
     prompt: effectivePrompt,
     cwd: workingDirectory,
-    resume: claudeSessionId || session?.claude_session_id,
+    resume: effectiveResumeId,
     model,
     allowedTools: allowedTools || permissionSettings.allowedTools,
     sessionId,

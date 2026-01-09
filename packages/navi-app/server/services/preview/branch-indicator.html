@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    #navi-branch-indicator {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 999999;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+    }
+
+    #navi-branch-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 8px 14px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.1);
+      cursor: move;
+      font-size: 13px;
+      font-weight: 600;
+      backdrop-filter: blur(10px);
+      transition: all 0.2s ease;
+    }
+
+    #navi-branch-badge:hover {
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2), 0 3px 6px rgba(0, 0, 0, 0.15);
+      transform: translateY(-1px);
+    }
+
+    #navi-branch-badge.minimized {
+      padding: 6px 10px;
+      opacity: 0.7;
+    }
+
+    #navi-branch-badge.minimized:hover {
+      opacity: 1;
+    }
+
+    .navi-branch-icon {
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .navi-branch-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      transition: all 0.2s ease;
+    }
+
+    .navi-branch-text.minimized {
+      display: none;
+    }
+
+    .navi-branch-name {
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .navi-branch-meta {
+      font-size: 10px;
+      opacity: 0.85;
+      font-weight: 500;
+    }
+
+    .navi-branch-controls {
+      display: flex;
+      gap: 4px;
+      margin-left: 4px;
+      transition: all 0.2s ease;
+    }
+
+    .navi-branch-controls.minimized {
+      display: none;
+    }
+
+    .navi-branch-btn {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      border-radius: 4px;
+      color: white;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s ease;
+    }
+
+    .navi-branch-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: scale(1.05);
+    }
+
+    .navi-branch-btn:active {
+      transform: scale(0.95);
+    }
+
+    #navi-branch-tooltip {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 8px;
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: all 0.2s ease;
+    }
+
+    #navi-branch-tooltip.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .navi-branch-tooltip-label {
+      color: #999;
+      margin-right: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="navi-branch-indicator">
+    <div id="navi-branch-badge">
+      <span class="navi-branch-icon">🌿</span>
+      <div class="navi-branch-text">
+        <div class="navi-branch-name" id="navi-branch-name">Loading...</div>
+        <div class="navi-branch-meta" id="navi-branch-meta"></div>
+      </div>
+      <div class="navi-branch-controls">
+        <button class="navi-branch-btn" id="navi-minimize-btn" title="Minimize">−</button>
+        <button class="navi-branch-btn" id="navi-close-btn" title="Hide">×</button>
+      </div>
+    </div>
+    <div id="navi-branch-tooltip"></div>
+  </div>
+
+  <script>
+    (function() {
+      const indicator = document.getElementById('navi-branch-indicator');
+      const badge = document.getElementById('navi-branch-badge');
+      const text = document.querySelector('.navi-branch-text');
+      const controls = document.querySelector('.navi-branch-controls');
+      const tooltip = document.getElementById('navi-branch-tooltip');
+      const nameEl = document.getElementById('navi-branch-name');
+      const metaEl = document.getElementById('navi-branch-meta');
+      const minimizeBtn = document.getElementById('navi-minimize-btn');
+      const closeBtn = document.getElementById('navi-close-btn');
+
+      let isMinimized = false;
+      let isDragging = false;
+      let dragOffset = { x: 0, y: 0 };
+
+      // Fetch branch info from parent window or metadata endpoint
+      async function loadBranchInfo() {
+        try {
+          // Try to get from parent window message
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'navi:getBranchInfo' }, '*');
+          }
+
+          // Also try to fetch from metadata if available
+          const currentPort = window.location.port;
+          // Parse branch from URL or container metadata
+          const urlParams = new URLSearchParams(window.location.search);
+          const branch = urlParams.get('navi_branch') || 'unknown';
+
+          updateBadge(branch, 'Container Preview');
+        } catch (e) {
+          console.warn('[Navi] Failed to load branch info:', e);
+          updateBadge('preview', 'Navi Preview');
+        }
+      }
+
+      function updateBadge(branch, meta) {
+        nameEl.textContent = branch;
+        metaEl.textContent = meta;
+      }
+
+      // Listen for messages from parent
+      window.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'navi:branchInfo') {
+          updateBadge(event.data.branch, event.data.meta || 'Container Preview');
+        }
+      });
+
+      // Minimize/expand
+      minimizeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        isMinimized = !isMinimized;
+        badge.classList.toggle('minimized', isMinimized);
+        text.classList.toggle('minimized', isMinimized);
+        controls.classList.toggle('minimized', isMinimized);
+        minimizeBtn.textContent = isMinimized ? '+' : '−';
+      });
+
+      // Close
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        indicator.style.display = 'none';
+        localStorage.setItem('navi-branch-indicator-hidden', 'true');
+      });
+
+      // Dragging
+      badge.addEventListener('mousedown', (e) => {
+        if (e.target.tagName === 'BUTTON') return;
+        isDragging = true;
+        const rect = indicator.getBoundingClientRect();
+        dragOffset.x = e.clientX - rect.left;
+        dragOffset.y = e.clientY - rect.top;
+        badge.style.cursor = 'grabbing';
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        e.preventDefault();
+        indicator.style.left = (e.clientX - dragOffset.x) + 'px';
+        indicator.style.top = (e.clientY - dragOffset.y) + 'px';
+        indicator.style.right = 'auto';
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          badge.style.cursor = 'move';
+        }
+      });
+
+      // Show tooltip on hover (when minimized)
+      badge.addEventListener('mouseenter', () => {
+        if (isMinimized) {
+          tooltip.textContent = nameEl.textContent;
+          tooltip.classList.add('visible');
+        }
+      });
+
+      badge.addEventListener('mouseleave', () => {
+        tooltip.classList.remove('visible');
+      });
+
+      // Check if hidden
+      if (localStorage.getItem('navi-branch-indicator-hidden') === 'true') {
+        indicator.style.display = 'none';
+      }
+
+      // Initialize
+      loadBranchInfo();
+
+      // Allow parent to update branch info dynamically
+      window.naviBranchIndicator = {
+        update: updateBadge,
+        show: () => {
+          indicator.style.display = 'block';
+          localStorage.removeItem('navi-branch-indicator-hidden');
+        },
+        hide: () => {
+          indicator.style.display = 'none';
+          localStorage.setItem('navi-branch-indicator-hidden', 'true');
+        }
+      };
+    })();
+  </script>
+</body>
+</html>

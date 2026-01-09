@@ -9,7 +9,7 @@
   - Stop preview
 -->
 <script lang="ts">
-  import { containerPreviewApi } from "../api";
+  import { containerPreviewApi, getServerUrl } from "../api";
 
   interface Props {
     projectId: string | null;
@@ -29,8 +29,22 @@
   let loading = $state(false);
   let currentUrl = $state(previewUrl);
   let iframeKey = $state(Date.now()); // Used to force iframe refresh
+  let branchIndicatorInjected = $state(false);
 
   const effectiveBranch = $derived(branch || "main");
+
+  // Convert direct URL to proxy URL for iframe (injects branch indicator)
+  // Direct URL: http://localhost:4001 -> Proxy URL: http://localhost:3001/api/preview/proxy/4001/
+  const proxyUrl = $derived(() => {
+    if (!currentUrl) return null;
+    try {
+      const url = new URL(currentUrl);
+      const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+      return `${getServerUrl()}/api/preview/proxy/${port}${url.pathname}`;
+    } catch {
+      return currentUrl; // Fallback to direct URL if parsing fails
+    }
+  });
 
   // Sync previewUrl prop to currentUrl
   $effect(() => {
@@ -103,10 +117,12 @@
         pollStatus();
       } else if (result.error) {
         error = result.error;
+        status = "error";
       }
     } catch (e: any) {
       console.error("[ContainerPreviewPanel] Start error:", e);
       error = e.message;
+      status = "error";
     } finally {
       loading = false;
     }
@@ -178,7 +194,7 @@
 
   function refresh() {
     if (iframeRef && currentUrl) {
-      iframeRef.src = currentUrl;
+      iframeRef.src = proxyUrl() || currentUrl;
     }
   }
 
@@ -221,6 +237,58 @@
       window.open(currentUrl, '_blank');
     }
   }
+
+  async function resetConfig() {
+    if (!projectId) return;
+    try {
+      await containerPreviewApi.resetConfig(projectId);
+      // Show brief success feedback
+      alert("Preview config reset! The next preview will auto-detect your framework again.");
+    } catch (e: any) {
+      alert(`Failed to reset config: ${e.message}`);
+    }
+  }
+
+  // Inject branch indicator into iframe when it loads
+  $effect(() => {
+    if (!iframeRef || status !== "running" || !effectiveBranch) {
+      return;
+    }
+
+    const handleIframeLoad = () => {
+      try {
+        // Send branch info to the iframe
+        const targetOrigin = currentUrl ? new URL(currentUrl).origin : '*';
+        iframeRef?.contentWindow?.postMessage({
+          type: 'navi:branchInfo',
+          branch: effectiveBranch,
+          meta: 'Container Preview'
+        }, targetOrigin);
+      } catch (e) {
+        console.warn('[ContainerPreviewPanel] Could not send branch info:', e);
+      }
+    };
+
+    iframeRef.addEventListener('load', handleIframeLoad);
+    return () => iframeRef?.removeEventListener('load', handleIframeLoad);
+  });
+
+  // Listen for requests from iframe
+  $effect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'navi:getBranchInfo' && effectiveBranch) {
+        const targetOrigin = currentUrl ? new URL(currentUrl).origin : '*';
+        event.source?.postMessage({
+          type: 'navi:branchInfo',
+          branch: effectiveBranch,
+          meta: 'Container Preview'
+        }, { targetOrigin } as any);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  });
 </script>
 
 <div class="flex flex-col h-full bg-gray-50">
@@ -304,7 +372,7 @@
       {#key iframeKey}
         <iframe
           bind:this={iframeRef}
-          src={currentUrl}
+          src={proxyUrl() || currentUrl}
           class="w-full h-full border-0"
           title="Container Preview"
         ></iframe>
@@ -354,6 +422,14 @@
               class="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
             >
               {showErrorLogs ? 'Hide' : 'Show'} Logs
+            </button>
+            <button
+              onclick={resetConfig}
+              disabled={!projectId}
+              class="px-3 py-1.5 text-sm font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors disabled:opacity-50"
+              title="Clear cached config and re-detect framework"
+            >
+              Reset Config
             </button>
           </div>
         </div>
@@ -407,6 +483,15 @@
             {/if}
             Start Preview
           </button>
+          {#if projectId}
+            <button
+              onclick={resetConfig}
+              class="mt-2 text-xs text-gray-400 hover:text-gray-600 hover:underline"
+              title="Clear cached framework detection and re-detect on next start"
+            >
+              Reset cached config
+            </button>
+          {/if}
         {/if}
       </div>
     {/if}

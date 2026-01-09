@@ -15,6 +15,7 @@ export async function handleExtensionRoutes(
   if (projectListMatch && method === "GET") {
     const projectId = projectListMatch[1];
     const extensions = extensionSettings.listByProject(projectId);
+    console.log("[Extensions] Loading for project:", projectId, extensions.map(e => ({ id: e.extension_id, order: e.sort_order })));
     return json({ extensions });
   }
 
@@ -27,11 +28,18 @@ export async function handleExtensionRoutes(
       const body = await req.json();
       const orders = body.orders as { extensionId: string; sortOrder: number }[];
 
+      console.log("[Extensions] Reorder request:", { projectId, orders });
+
       if (!orders || !Array.isArray(orders)) {
         return error("Orders array is required", 400);
       }
 
       extensionSettings.updateOrders(projectId, orders);
+
+      // Verify the save worked
+      const saved = extensionSettings.listByProject(projectId);
+      console.log("[Extensions] After reorder:", saved.map(e => ({ id: e.extension_id, order: e.sort_order })));
+
       return json({ success: true });
     } catch (e: any) {
       return error(e.message || "Failed to update extension order", 500);

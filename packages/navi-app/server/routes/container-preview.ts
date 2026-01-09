@@ -254,6 +254,63 @@ export async function handleContainerPreviewRoutes(
     return json({ success: true });
   }
 
+  // GET /api/preview/branch-indicator.js - Serve the branch indicator injection script
+  if (url.pathname === "/api/preview/branch-indicator.js" && method === "GET") {
+    const fs = await import("fs");
+    const path = await import("path");
+    const scriptPath = path.join(
+      __dirname,
+      "../services/preview/inject-indicator.js"
+    );
+
+    if (fs.existsSync(scriptPath)) {
+      const script = fs.readFileSync(scriptPath, "utf-8");
+      return new Response(script, {
+        headers: {
+          "Content-Type": "application/javascript",
+          "Cache-Control": "no-cache",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+    return error("Branch indicator script not found", 404);
+  }
+
+  // DELETE /api/projects/:projectId/preview/config - Reset cached preview config
+  const resetConfigMatch = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/preview\/config$/
+  );
+  if (resetConfigMatch && method === "DELETE") {
+    const projectId = resetConfigMatch[1];
+
+    // Clear the cached preview config
+    clearProjectPreviewConfig(projectId);
+
+    return json({ success: true, message: "Preview config cache cleared. Next preview will re-detect." });
+  }
+
+  // GET /api/preview/branch-info/:port - Get branch info for a specific port
+  if (url.pathname.match(/^\/api\/preview\/branch-info\/(\d+)$/) && method === "GET") {
+    const portMatch = url.pathname.match(/^\/api\/preview\/branch-info\/(\d+)$/);
+    const port = portMatch![1];
+
+    // Find preview by port
+    const previews = previewService.listPreviews();
+    const preview = previews.find(p => p.url?.includes(`:${port}`));
+
+    if (preview) {
+      const project = preview.projectId ? projects.get(preview.projectId) : null;
+      return json({
+        branch: preview.branch,
+        projectName: project?.name || "Unknown Project",
+        framework: preview.framework?.name || "Unknown",
+        status: preview.status,
+      });
+    }
+
+    return json({ branch: "unknown", projectName: "Unknown", framework: "Unknown", status: "unknown" });
+  }
+
   return null;
 }
 
@@ -290,4 +347,17 @@ function saveProjectPreviewConfig(projectId: string, config: string): void {
   );
   saveDb();
   console.log(`[ContainerPreview] Cached preview config for project ${projectId}`);
+}
+
+/**
+ * Clear cached preview config for a project (forces re-detection)
+ */
+function clearProjectPreviewConfig(projectId: string): void {
+  const db = getDb();
+  db.run(
+    `UPDATE projects SET preview_config = NULL WHERE id = ?`,
+    [projectId]
+  );
+  saveDb();
+  console.log(`[ContainerPreview] Cleared preview config cache for project ${projectId}`);
 }

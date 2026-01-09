@@ -30,6 +30,14 @@ import { handleWorktreeRoutes } from "./routes/worktrees";
 import { handleWorktreePreviewRoutes } from "./routes/worktree-preview";
 // Container-based preview system (Colima/Docker)
 import { handleContainerPreviewRoutes } from "./routes/container-preview";
+// Native preview system (lightweight, no Docker)
+import { handleNativePreviewRoutes } from "./routes/native-preview";
+// Preview proxy with branch indicator injection
+import { handlePreviewProxyRoutes } from "./routes/preview-proxy";
+// Port Manager preview system (LLM-powered port orchestration)
+import { handlePortManagerPreviewRoutes } from "./routes/port-manager-preview";
+// LLM-powered port conflict resolver
+import { handlePortFixerRoutes } from "./routes/port-fixer";
 import { handleBranchNameRoutes } from "./routes/branch-name";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 import { handleCommandsRoutes } from "./routes/commands";
@@ -365,8 +373,24 @@ const server = Bun.serve({
     response = await handleWorktreePreviewRoutes(url, method, req);
     if (response) return response;
 
+    // Native preview routes (lightweight, no Docker)
+    response = await handleNativePreviewRoutes(url, method, req);
+    if (response) return response;
+
     // Container-based preview routes (Colima/Docker)
     response = await handleContainerPreviewRoutes(url, method, req);
+    if (response) return response;
+
+    // Preview proxy routes (injects branch indicator)
+    response = await handlePreviewProxyRoutes(url, method, req);
+    if (response) return response;
+
+    // Port Manager preview routes (LLM-powered port orchestration)
+    response = await handlePortManagerPreviewRoutes(url, method, req);
+    if (response) return response;
+
+    // Port fixer routes (LLM-powered conflict resolution)
+    response = await handlePortFixerRoutes(url, method, req);
     if (response) return response;
 
     // Branch name generation (LLM-powered)

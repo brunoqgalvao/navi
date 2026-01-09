@@ -124,6 +124,11 @@ export async function initDb() {
     db.run("ALTER TABLE messages ADD COLUMN is_final INTEGER DEFAULT 0");
   } catch {}
 
+  // Container preview config caching
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN preview_config TEXT");
+  } catch {}
+
   // Until Done (Ralph loop) mode columns
   try {
     db.run("ALTER TABLE sessions ADD COLUMN until_done_mode INTEGER DEFAULT 0");
@@ -201,12 +206,6 @@ export async function initDb() {
   } catch {}
   try {
     db.run("CREATE INDEX idx_sessions_agent_status ON sessions(agent_status)");
-  } catch {}
-
-  // Preview configuration - auto-detected and cached per project
-  // Stores JSON with: image, ports, commands, workdir, env, resources
-  try {
-    db.run("ALTER TABLE projects ADD COLUMN preview_config TEXT");
   } catch {}
 
   db.run(`
@@ -703,7 +702,7 @@ export const sessions = {
     ),
   clearWorktree: (id: string) =>
     run(
-      "UPDATE sessions SET worktree_path = NULL, worktree_branch = NULL, worktree_base_branch = NULL, updated_at = ? WHERE id = ?",
+      "UPDATE sessions SET worktree_path = NULL, worktree_branch = NULL, worktree_base_branch = NULL, claude_session_id = NULL, updated_at = ? WHERE id = ?",
       [Date.now(), id]
     ),
   listWithWorktrees: (projectId: string) =>

@@ -164,6 +164,15 @@ export function createWorktree(
   // Get current branch as base
   const baseBranch = getCurrentBranch(repoPath);
 
+  // Check if the repo has any commits (HEAD must be valid for worktrees)
+  try {
+    execSync("git rev-parse HEAD", { cwd: repoPath, encoding: "utf-8", stdio: "pipe" });
+  } catch {
+    throw new Error(
+      "Cannot create a parallel branch: this repository has no commits yet. Please make an initial commit first."
+    );
+  }
+
   // Create the worktree with new branch from current HEAD
   execSync(`git worktree add -b "${branch}" "${worktreePath}"`, {
     cwd: repoPath,

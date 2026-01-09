@@ -233,9 +233,14 @@ export class ContainerManager {
     const devCmd = spec?.commands?.dev || framework.devCommand;
 
     // Build environment variables
+    // VITE_NAVI_PREVIEW is exposed to the frontend so it knows to use internal container ports
+    // VITE_NAVI_BRANCH injects branch name for the indicator
     const envVars: string[] = [
       "-e", "NODE_ENV=development",
       "-e", "NAVI_PREVIEW=true",
+      "-e", "VITE_NAVI_PREVIEW=true",
+      "-e", `VITE_NAVI_BRANCH=${branch}`,
+      "-e", `NAVI_BRANCH=${branch}`,
     ];
 
     if (spec?.env) {
