@@ -838,6 +838,11 @@
     }
   });
 
+  // Update browser tab title when project changes
+  $effect(() => {
+    document.title = currentProject?.name ? `${currentProject.name} - Navi` : 'Navi';
+  });
+
   $effect(() => {
     if ($session.selectedModel !== lastSessionModel) {
       lastSessionModel = $session.selectedModel;
