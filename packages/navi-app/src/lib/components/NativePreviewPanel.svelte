@@ -365,8 +365,8 @@ Can you help fix this issue so the preview can start successfully?`;
     <div class="flex items-center gap-2 flex-1 min-w-0">
       <span class="text-lg">⚡</span>
       <div class="flex items-center gap-1.5">
-        <span class="w-2 h-2 rounded-full {status === 'running' ? 'bg-green-500' : status === 'starting' ? 'bg-yellow-500 animate-pulse' : status === 'error' ? 'bg-red-500' : 'bg-gray-400'}"></span>
-        <span class="text-sm font-medium text-gray-700 capitalize">{status}</span>
+        <span class="w-2 h-2 rounded-full {status === 'running' ? 'bg-green-500' : status === 'starting' ? 'bg-yellow-500 animate-pulse' : status === 'error' ? 'bg-red-500' : status === 'conflict' ? 'bg-amber-500' : 'bg-gray-400'}"></span>
+        <span class="text-sm font-medium text-gray-700 capitalize">{status === 'conflict' ? 'port conflict' : status}</span>
       </div>
       {#if currentUrl}
         <span class="text-xs text-gray-400 truncate font-mono">{currentUrl}</span>
