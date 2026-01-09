@@ -604,6 +604,29 @@ To read an artifact's content, use the Read tool with the file path.
       decisions: recentDecisions,
     };
   }
+
+  // ============================================================================
+  // Cleanup
+  // ============================================================================
+
+  /**
+   * Clean up runtime state for a deleted session.
+   * Called when a session is permanently deleted.
+   */
+  cleanup(sessionId: string) {
+    this.runtimeSessions.delete(sessionId);
+    console.log(`[SessionManager] Cleaned up runtime state for session ${sessionId}`);
+  }
+
+  /**
+   * Get memory stats for debugging
+   */
+  getMemoryStats() {
+    return {
+      runtimeSessions: this.runtimeSessions.size,
+      eventHandlers: this.eventHandlers.size,
+    };
+  }
 }
 
 // Singleton instance

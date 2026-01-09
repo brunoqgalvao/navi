@@ -258,8 +258,15 @@ const server = Bun.serve({
     // Memory stats endpoint for debugging
     if (url.pathname === "/api/debug/memory") {
       const memoryUsage = process.memoryUsage();
+      // Dynamically import services to get their stats
+      const { sessionManager } = await import("./services/session-manager");
+      const { nativePreviewService } = await import("./services/native-preview");
       return json({
         serverMaps: getMemoryStats(),
+        sessionManager: sessionManager.getMemoryStats(),
+        nativePreview: {
+          activePreviews: nativePreviewService.getStatus() ? 1 : 0,
+        },
         process: {
           heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + "MB",
           heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024) + "MB",

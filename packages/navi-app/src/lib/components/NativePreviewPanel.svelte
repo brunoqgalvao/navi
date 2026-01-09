@@ -41,6 +41,10 @@
   let currentProjectId = $state<string | null>(null);
   let currentBranch = $state<string | null>(null);
 
+  // Track active polling intervals for cleanup
+  let statusPollInterval: ReturnType<typeof setInterval> | null = null;
+  let logsPollInterval: ReturnType<typeof setInterval> | null = null;
+
   const effectiveBranch = $derived(branch || "main");
   const normalizeBranch = (value: string | null | undefined) => (value ?? "main").trim();
 
@@ -290,6 +294,16 @@
     return () => clearInterval(interval);
   });
 
+  // Cleanup all polling intervals on component unmount
+  $effect(() => {
+    return () => {
+      if (statusPollInterval) {
+        clearInterval(statusPollInterval);
+        statusPollInterval = null;
+      }
+    };
+  });
+
   async function stopPreview() {
     if (!sessionId) return;
     loading = true;
@@ -339,7 +353,12 @@
   function pollStatus() {
     if (!sessionId) return;
     console.log("[NativePreviewPanel] Starting status polling...");
-    const interval = setInterval(async () => {
+    // Clear any existing interval first
+    if (statusPollInterval) {
+      clearInterval(statusPollInterval);
+      statusPollInterval = null;
+    }
+    statusPollInterval = setInterval(async () => {
       try {
         const result = await nativePreviewApi.getStatus(sessionId!);
         console.log("[NativePreviewPanel] Poll result:", result.status);
@@ -351,12 +370,14 @@
           currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
           framework = result.framework || null;
           iframeKey = Date.now();
-          clearInterval(interval);
+          if (statusPollInterval) clearInterval(statusPollInterval);
+          statusPollInterval = null;
         } else if (result.status === "error" || !result.running) {
           status = "error";
           error = result.error || "Preview failed";
           await fetchServerLogs(); showLogsDrawer = true;
-          clearInterval(interval);
+          if (statusPollInterval) clearInterval(statusPollInterval);
+          statusPollInterval = null;
         } else if (result.status === "starting" && result.url) {
           // Check if URL is responding
           try {
@@ -372,16 +393,22 @@
             currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
             console.log("[NativePreviewPanel] Set currentPort:", currentPort, "currentUrl:", currentUrl);
             iframeKey = Date.now();
-            clearInterval(interval);
+            if (statusPollInterval) clearInterval(statusPollInterval);
+            statusPollInterval = null;
           } catch {
             // Not responding yet, keep polling
           }
         }
       } catch {
-        clearInterval(interval);
+        if (statusPollInterval) clearInterval(statusPollInterval);
+        statusPollInterval = null;
       }
     }, 2000);
-    setTimeout(() => clearInterval(interval), 60000); // 1 minute timeout
+    // Timeout after 60s
+    setTimeout(() => {
+      if (statusPollInterval) clearInterval(statusPollInterval);
+      statusPollInterval = null;
+    }, 60000);
   }
 
   function refresh() {

@@ -1,6 +1,8 @@
 import { json } from "../utils/response";
 import { projects, sessions, messages, searchIndex, pendingQuestions, type Message } from "../db";
 import { enableUntilDone, disableUntilDone, getUntilDoneSessions, cleanupSessionState } from "../websocket/handler";
+import { nativePreviewService } from "../services/native-preview";
+import { sessionManager } from "../services/session-manager";
 
 export function createSessionApprovedAllSet(): Set<string> {
   return new Set<string>();
@@ -68,6 +70,10 @@ export async function handleSessionRoutes(
     if (method === "DELETE") {
       // Clean up server-side state (WebSocket maps, active processes, etc.) before deleting
       cleanupSessionState(id);
+      // Stop any running preview for this session
+      await nativePreviewService.stopForSession(id);
+      // Clean up session manager runtime state
+      sessionManager.cleanup(id);
       searchIndex.removeSession(id);
       sessions.delete(id);
       return json({ success: true });

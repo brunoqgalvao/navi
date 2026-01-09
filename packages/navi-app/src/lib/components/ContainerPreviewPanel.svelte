@@ -31,6 +31,9 @@
   let iframeKey = $state(Date.now()); // Used to force iframe refresh
   let branchIndicatorInjected = $state(false);
 
+  // Track active polling interval for cleanup
+  let statusPollInterval: ReturnType<typeof setInterval> | null = null;
+
   const effectiveBranch = $derived(branch || "main");
 
   // Convert direct URL to proxy URL for iframe (injects branch indicator)
@@ -156,7 +159,12 @@
   function pollStatus() {
     if (!projectId) return;
     console.log("[ContainerPreviewPanel] Starting status polling...");
-    const interval = setInterval(async () => {
+    // Clear any existing interval first
+    if (statusPollInterval) {
+      clearInterval(statusPollInterval);
+      statusPollInterval = null;
+    }
+    statusPollInterval = setInterval(async () => {
       try {
         const result = await containerPreviewApi.getStatusByBranch(projectId!, effectiveBranch);
         console.log("[ContainerPreviewPanel] Poll result:", result.status);
@@ -165,12 +173,14 @@
           currentUrl = result.url || null;
           // Force iframe refresh by updating the key
           iframeKey = Date.now();
-          clearInterval(interval);
+          if (statusPollInterval) clearInterval(statusPollInterval);
+          statusPollInterval = null;
         } else if (result.status === "error") {
           status = "error";
           error = result.error || "Preview failed";
           await fetchErrorLogs();
-          clearInterval(interval);
+          if (statusPollInterval) clearInterval(statusPollInterval);
+          statusPollInterval = null;
         } else if (result.status === "starting" && result.url) {
           // Server says "starting" but let's check if URL is actually responding
           try {
@@ -180,17 +190,33 @@
             status = "running";
             currentUrl = result.url;
             iframeKey = Date.now();
-            clearInterval(interval);
+            if (statusPollInterval) clearInterval(statusPollInterval);
+            statusPollInterval = null;
           } catch {
             // URL not responding yet, keep polling
           }
         }
       } catch {
-        clearInterval(interval);
+        if (statusPollInterval) clearInterval(statusPollInterval);
+        statusPollInterval = null;
       }
     }, 2000);
-    setTimeout(() => clearInterval(interval), 120000);
+    // Timeout after 120s
+    setTimeout(() => {
+      if (statusPollInterval) clearInterval(statusPollInterval);
+      statusPollInterval = null;
+    }, 120000);
   }
+
+  // Cleanup on component unmount
+  $effect(() => {
+    return () => {
+      if (statusPollInterval) {
+        clearInterval(statusPollInterval);
+        statusPollInterval = null;
+      }
+    };
+  });
 
   function refresh() {
     if (iframeRef && currentUrl) {

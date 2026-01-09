@@ -24,6 +24,9 @@
   let previewUrl = $state<string | null>(null);
   let previewLoading = $state(false);
 
+  // Track active polling interval for cleanup
+  let activeInterval: ReturnType<typeof setInterval> | null = null;
+
   const isPreviewActive = $derived(
     previewStatus === "running" || previewStatus === "starting" || previewStatus === "paused"
   );
@@ -106,24 +109,46 @@
 
   function pollPreviewStatus() {
     if (!projectId) return;
-    const interval = setInterval(async () => {
+    // Clear any existing interval first
+    if (activeInterval) {
+      clearInterval(activeInterval);
+      activeInterval = null;
+    }
+    activeInterval = setInterval(async () => {
       try {
         const status = await containerPreviewApi.getStatusByBranch(projectId!, effectiveBranch);
         if (status.status === "running") {
           previewStatus = "running";
           previewUrl = status.url || null;
           onPreviewUrlChange?.(previewUrl);
-          clearInterval(interval);
+          if (activeInterval) clearInterval(activeInterval);
+          activeInterval = null;
         } else if (status.status === "error" || (!status.running && status.exists)) {
           previewStatus = status.status as any || "error";
-          clearInterval(interval);
+          if (activeInterval) clearInterval(activeInterval);
+          activeInterval = null;
         }
       } catch {
-        clearInterval(interval);
+        if (activeInterval) clearInterval(activeInterval);
+        activeInterval = null;
       }
     }, 2000);
-    setTimeout(() => clearInterval(interval), 120000);
+    // Timeout after 120s
+    setTimeout(() => {
+      if (activeInterval) clearInterval(activeInterval);
+      activeInterval = null;
+    }, 120000);
   }
+
+  // Cleanup on component unmount
+  $effect(() => {
+    return () => {
+      if (activeInterval) {
+        clearInterval(activeInterval);
+        activeInterval = null;
+      }
+    };
+  });
 </script>
 
 {#if projectId}
