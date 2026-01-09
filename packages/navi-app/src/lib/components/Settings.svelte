@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, costsApi, containerPreviewApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project, type ContainerPreview } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, onboardingComplete, tour, showArchivedWorkspaces, uiScale, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
+  import { advancedMode, debugMode, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
 
@@ -407,24 +407,24 @@
 
 {#if open}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30"
+    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30 dark:bg-black/50"
     onclick={handleBackdropClick}
     role="dialog"
     aria-modal="true"
     tabindex="-1"
   >
-    <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+    <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+      <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-3">
-          <div class="p-2 bg-gray-100 rounded-lg">
-            <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
+            <svg class="w-5 h-5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
-          <h3 class="font-semibold text-lg text-gray-900">Settings</h3>
+          <h3 class="font-semibold text-lg text-gray-900 dark:text-gray-100">Settings</h3>
         </div>
-        <button onclick={onClose} class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+        <button onclick={onClose} class="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -432,12 +432,12 @@
       </div>
 
       <div class="flex flex-1 min-h-0">
-        <div class="w-48 border-r border-gray-100 bg-gray-50/50 p-3 shrink-0">
+        <div class="w-48 border-r border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 p-3 shrink-0">
           <nav class="space-y-1">
             {#each tabs as tab}
               <button
                 onclick={() => activeTab = tab.id}
-                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors {activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'}"
+                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors {activeTab === tab.id ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm border border-gray-200 dark:border-gray-600' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-white/50 dark:hover:bg-gray-700/50'}"
               >
                 <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={tab.icon} />
@@ -452,7 +452,7 @@
         <div class="flex-1 overflow-y-auto p-6">
           {#if loading}
             <div class="flex items-center justify-center h-full">
-              <svg class="w-8 h-8 animate-spin text-gray-400" fill="none" viewBox="0 0 24 24">
+              <svg class="w-8 h-8 animate-spin text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
@@ -460,59 +460,59 @@
           {:else if activeTab === "api"}
             <div class="space-y-6 max-w-2xl">
               <div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-1">API Keys</h4>
-                <p class="text-sm text-gray-500">Configure your API keys for Claude and other services.</p>
+                <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">API Keys</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Configure your API keys for Claude and other services.</p>
               </div>
 
               <div class="space-y-4">
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-start gap-4">
-                    <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center text-orange-600 font-bold shrink-0">C</div>
+                    <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex items-center justify-center text-orange-600 dark:text-orange-400 font-bold shrink-0">C</div>
                     <div class="flex-1 space-y-4">
                       <div class="flex items-center justify-between">
                         <div>
-                          <h5 class="font-medium text-gray-900">Claude (Anthropic)</h5>
-                          <p class="text-sm text-gray-500">Required for AI conversations</p>
+                          <h5 class="font-medium text-gray-900 dark:text-gray-100">Claude (Anthropic)</h5>
+                          <p class="text-sm text-gray-500 dark:text-gray-400">Required for AI conversations</p>
                         </div>
                         {#if hasOAuth && hasAnthropicKey}
-                          <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">
+                          <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">
                             Using {authMethod === "oauth" ? "OAuth" : "API Key"}
                           </span>
                         {:else if authMethod === "oauth"}
-                          <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">OAuth Connected</span>
+                          <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">OAuth Connected</span>
                         {:else if authMethod === "api_key"}
-                          <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">API Key Set</span>
+                          <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">API Key Set</span>
                         {:else}
-                          <span class="text-xs font-medium text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">Not Configured</span>
+                          <span class="text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2.5 py-1 rounded-full">Not Configured</span>
                         {/if}
                       </div>
 
                       <div class="flex items-center gap-3 text-sm">
-                        <span class="text-gray-600">Claude CLI:</span>
+                        <span class="text-gray-600 dark:text-gray-400">Claude CLI:</span>
                         {#if claudeInstalled}
-                          <span class="text-green-600">Installed</span>
+                          <span class="text-green-600 dark:text-green-400">Installed</span>
                         {:else}
-                          <span class="text-gray-400">Not Found</span>
+                          <span class="text-gray-400 dark:text-gray-500">Not Found</span>
                         {/if}
                       </div>
 
                       <div class="space-y-3 pt-2">
-                        <div class="text-xs font-medium text-gray-500 uppercase tracking-wide">OAuth</div>
+                        <div class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">OAuth</div>
                         {#if hasOAuth && !showOAuthSetup}
-                          <div class="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2.5">
-                            <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <div class="flex items-center gap-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2.5">
+                            <svg class="w-4 h-4 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                             </svg>
-                            <span class="text-sm text-gray-600">Connected via Claude CLI</span>
+                            <span class="text-sm text-gray-600 dark:text-gray-300">Connected via Claude CLI</span>
                           </div>
                           <button
                             onclick={() => showOAuthSetup = true}
-                            class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                            class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors"
                           >
                             Re-authenticate
                           </button>
                         {:else if showOAuthSetup}
-                          <div class="bg-gray-900 rounded-lg p-3 font-mono text-sm">
+                          <div class="bg-gray-900 dark:bg-black rounded-lg p-3 font-mono text-sm">
                             <div class="flex items-center justify-between">
                               <code class="text-emerald-400">claude login</code>
                               <button
@@ -526,18 +526,18 @@
                               </button>
                             </div>
                           </div>
-                          <p class="text-xs text-gray-500">Run this command in your terminal, then click "I've logged in"</p>
+                          <p class="text-xs text-gray-500 dark:text-gray-400">Run this command in your terminal, then click "I've logged in"</p>
                           <div class="flex gap-2">
                             <button
                               onclick={() => showOAuthSetup = false}
-                              class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg px-4 py-2 transition-colors"
+                              class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 transition-colors"
                             >
                               Cancel
                             </button>
                             <button
                               onclick={checkOAuthStatus}
                               disabled={checkingOAuth}
-                              class="text-sm font-medium bg-gray-900 text-white rounded-lg px-4 py-2 hover:bg-black transition-colors disabled:opacity-50"
+                              class="text-sm font-medium bg-gray-900 dark:bg-gray-700 text-white rounded-lg px-4 py-2 hover:bg-black dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
                             >
                               {checkingOAuth ? "Checking..." : "I've logged in"}
                             </button>
@@ -546,7 +546,7 @@
                           <button
                             onclick={() => showOAuthSetup = true}
                             disabled={!claudeInstalled}
-                            class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {claudeInstalled ? "Setup OAuth" : "Install Claude CLI first"}
                           </button>
@@ -554,18 +554,18 @@
                       </div>
 
                       <div class="space-y-3 pt-2">
-                        <div class="text-xs font-medium text-gray-500 uppercase tracking-wide">API Key</div>
+                        <div class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">API Key</div>
                         {#if hasAnthropicKey && anthropicKeyPreview && !showAnthropicInput}
-                        <div class="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2.5">
-                          <code class="text-sm font-mono text-gray-600">{anthropicKeyPreview}</code>
-                          <span class="text-xs text-gray-400">stored</span>
+                        <div class="flex items-center gap-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2.5">
+                          <code class="text-sm font-mono text-gray-600 dark:text-gray-300">{anthropicKeyPreview}</code>
+                          <span class="text-xs text-gray-400 dark:text-gray-500">stored</span>
                         </div>
                       {/if}
 
                       {#if !showAnthropicInput}
                         <button
                           onclick={() => showAnthropicInput = true}
-                          class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                          class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors"
                         >
                           {hasAnthropicKey ? "Update API Key" : "Add API Key"}
                         </button>
@@ -575,23 +575,23 @@
                             type="password"
                             bind:value={anthropicKeyInput}
                             placeholder="sk-ant-..."
-                            class="w-full bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm font-mono focus:border-gray-900 focus:outline-none transition-colors"
+                            class="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2.5 text-sm font-mono focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none transition-colors text-gray-900 dark:text-gray-100"
                             onkeydown={(e) => e.key === "Enter" && saveAnthropicKey()}
                           />
                           {#if anthropicError}
-                            <p class="text-sm text-red-600">{anthropicError}</p>
+                            <p class="text-sm text-red-600 dark:text-red-400">{anthropicError}</p>
                           {/if}
                           <div class="flex gap-2">
                             <button
                               onclick={() => { showAnthropicInput = false; anthropicKeyInput = ""; anthropicError = null; }}
-                              class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg px-4 py-2 transition-colors"
+                              class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 transition-colors"
                             >
                               Cancel
                             </button>
                             <button
                               onclick={saveAnthropicKey}
                               disabled={savingAnthropic}
-                              class="text-sm font-medium bg-gray-900 text-white rounded-lg px-4 py-2 hover:bg-black transition-colors disabled:opacity-50"
+                              class="text-sm font-medium bg-gray-900 dark:bg-gray-700 text-white rounded-lg px-4 py-2 hover:bg-black dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
                             >
                               {savingAnthropic ? "Saving..." : "Save"}
                             </button>
@@ -599,17 +599,17 @@
                         </div>
                       {/if}
 
-                        <p class="text-xs text-gray-500">
-                          Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" class="text-blue-600 hover:underline">console.anthropic.com</a>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
+                          Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">console.anthropic.com</a>
                         </p>
                       </div>
 
                       {#if hasOAuth && hasAnthropicKey}
-                        <div class="mt-4 pt-4 border-t border-gray-200">
+                        <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                           <div class="flex items-center justify-between">
                             <div>
-                              <span class="text-sm font-medium text-gray-700">Active Method</span>
-                              <p class="text-xs text-gray-500 mt-0.5">You have both OAuth and API key configured</p>
+                              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Active Method</span>
+                              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">You have both OAuth and API key configured</p>
                             </div>
                             <div class="flex items-center gap-2">
                               <button
@@ -624,7 +624,7 @@
                                   }
                                 }}
                                 disabled={switchingAuth}
-                                class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors {authMethod === 'oauth' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+                                class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors {authMethod === 'oauth' ? 'bg-gray-900 dark:bg-gray-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
                               >
                                 OAuth
                               </button>
@@ -640,7 +640,7 @@
                                   }
                                 }}
                                 disabled={switchingAuth}
-                                class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors {authMethod === 'api_key' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+                                class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors {authMethod === 'api_key' ? 'bg-gray-900 dark:bg-gray-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
                               >
                                 API Key
                               </button>
@@ -652,37 +652,37 @@
                   </div>
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-start gap-4">
-                    <div class="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0">
-                      <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center shrink-0">
+                      <svg class="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                       </svg>
                     </div>
                     <div class="flex-1 space-y-4">
                       <div class="flex items-center justify-between">
                         <div>
-                          <h5 class="font-medium text-gray-900">OpenAI</h5>
-                          <p class="text-sm text-gray-500">Used for voice-to-text transcription</p>
+                          <h5 class="font-medium text-gray-900 dark:text-gray-100">OpenAI</h5>
+                          <p class="text-sm text-gray-500 dark:text-gray-400">Used for voice-to-text transcription</p>
                         </div>
                         {#if hasOpenAIKey}
-                          <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">Configured</span>
+                          <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">Configured</span>
                         {:else}
-                          <span class="text-xs font-medium text-gray-500 bg-gray-200 px-2.5 py-1 rounded-full">Optional</span>
+                          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-700 px-2.5 py-1 rounded-full">Optional</span>
                         {/if}
                       </div>
 
                       {#if hasOpenAIKey && openAIKeyPreview && !showOpenAIInput}
-                        <div class="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2.5">
-                          <code class="text-sm font-mono text-gray-600">{openAIKeyPreview}</code>
-                          <span class="text-xs text-gray-400">from environment</span>
+                        <div class="flex items-center gap-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2.5">
+                          <code class="text-sm font-mono text-gray-600 dark:text-gray-300">{openAIKeyPreview}</code>
+                          <span class="text-xs text-gray-400 dark:text-gray-500">from environment</span>
                         </div>
                       {/if}
 
                       {#if !showOpenAIInput}
                         <button
                           onclick={() => showOpenAIInput = true}
-                          class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                          class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors"
                         >
                           {hasOpenAIKey ? "Update API Key" : "Add API Key"}
                         </button>
@@ -692,23 +692,23 @@
                             type="password"
                             bind:value={openAIKeyInput}
                             placeholder="sk-..."
-                            class="w-full bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm font-mono focus:border-gray-900 focus:outline-none transition-colors"
+                            class="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2.5 text-sm font-mono focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none transition-colors text-gray-900 dark:text-gray-100"
                             onkeydown={(e) => e.key === "Enter" && saveOpenAIKey()}
                           />
                           {#if openAIError}
-                            <p class="text-sm text-red-600">{openAIError}</p>
+                            <p class="text-sm text-red-600 dark:text-red-400">{openAIError}</p>
                           {/if}
                           <div class="flex gap-2">
                             <button
                               onclick={() => { showOpenAIInput = false; openAIKeyInput = ""; openAIError = null; }}
-                              class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg px-4 py-2 transition-colors"
+                              class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 transition-colors"
                             >
                               Cancel
                             </button>
                             <button
                               onclick={saveOpenAIKey}
                               disabled={savingOpenAI}
-                              class="text-sm font-medium bg-gray-900 text-white rounded-lg px-4 py-2 hover:bg-black transition-colors disabled:opacity-50"
+                              class="text-sm font-medium bg-gray-900 dark:bg-gray-700 text-white rounded-lg px-4 py-2 hover:bg-black dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
                             >
                               {savingOpenAI ? "Saving..." : "Save"}
                             </button>
@@ -716,38 +716,38 @@
                         </div>
                       {/if}
 
-                      <p class="text-xs text-gray-500">
-                        Get your key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" class="text-blue-600 hover:underline">platform.openai.com</a>
+                      <p class="text-xs text-gray-500 dark:text-gray-400">
+                        Get your key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">platform.openai.com</a>
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-start gap-4">
-                    <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center shrink-0">
-                      <span class="text-purple-600 font-bold text-sm">Z</span>
+                    <div class="w-10 h-10 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center shrink-0">
+                      <span class="text-purple-600 dark:text-purple-400 font-bold text-sm">Z</span>
                     </div>
                     <div class="flex-1 space-y-4">
                       <div class="flex items-center justify-between">
                         <div>
-                          <h5 class="font-medium text-gray-900">Z.ai (GLM-4.7)</h5>
-                          <p class="text-sm text-gray-500">Access GLM models for coding</p>
+                          <h5 class="font-medium text-gray-900 dark:text-gray-100">Z.ai (GLM-4.7)</h5>
+                          <p class="text-sm text-gray-500 dark:text-gray-400">Access GLM models for coding</p>
                         </div>
                         {#if hasZaiKey}
-                          <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">Configured</span>
+                          <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">Configured</span>
                         {:else}
-                          <span class="text-xs font-medium text-gray-500 bg-gray-200 px-2.5 py-1 rounded-full">Optional</span>
+                          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-700 px-2.5 py-1 rounded-full">Optional</span>
                         {/if}
                       </div>
 
                       {#if hasZaiKey && zaiKeyPreview && !showZaiInput}
-                        <div class="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2.5">
-                          <code class="text-sm font-mono text-gray-600">{zaiKeyPreview}</code>
-                          <span class="text-xs text-gray-400">stored</span>
+                        <div class="flex items-center gap-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2.5">
+                          <code class="text-sm font-mono text-gray-600 dark:text-gray-300">{zaiKeyPreview}</code>
+                          <span class="text-xs text-gray-400 dark:text-gray-500">stored</span>
                           <button
                             onclick={deleteZaiKey}
-                            class="ml-auto text-xs text-red-500 hover:text-red-700"
+                            class="ml-auto text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
                           >
                             Remove
                           </button>
@@ -757,7 +757,7 @@
                       {#if !showZaiInput}
                         <button
                           onclick={() => showZaiInput = true}
-                          class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                          class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors"
                         >
                           {hasZaiKey ? "Update API Key" : "Add API Key"}
                         </button>
@@ -767,23 +767,23 @@
                             type="password"
                             bind:value={zaiKeyInput}
                             placeholder="Your Z.ai API key"
-                            class="w-full bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm font-mono focus:border-gray-900 focus:outline-none transition-colors"
+                            class="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2.5 text-sm font-mono focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none transition-colors text-gray-900 dark:text-gray-100"
                             onkeydown={(e) => e.key === "Enter" && saveZaiKey()}
                           />
                           {#if zaiError}
-                            <p class="text-sm text-red-600">{zaiError}</p>
+                            <p class="text-sm text-red-600 dark:text-red-400">{zaiError}</p>
                           {/if}
                           <div class="flex gap-2">
                             <button
                               onclick={() => { showZaiInput = false; zaiKeyInput = ""; zaiError = null; }}
-                              class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg px-4 py-2 transition-colors"
+                              class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 transition-colors"
                             >
                               Cancel
                             </button>
                             <button
                               onclick={saveZaiKey}
                               disabled={savingZai}
-                              class="text-sm font-medium bg-gray-900 text-white rounded-lg px-4 py-2 hover:bg-black transition-colors disabled:opacity-50"
+                              class="text-sm font-medium bg-gray-900 dark:bg-gray-700 text-white rounded-lg px-4 py-2 hover:bg-black dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
                             >
                               {savingZai ? "Saving..." : "Save"}
                             </button>
@@ -791,8 +791,8 @@
                         </div>
                       {/if}
 
-                      <p class="text-xs text-gray-500">
-                        Get your key from <a href="https://z.ai/subscribe" target="_blank" rel="noopener" class="text-blue-600 hover:underline">z.ai</a> ($3/month for GLM Coding Plan)
+                      <p class="text-xs text-gray-500 dark:text-gray-400">
+                        Get your key from <a href="https://z.ai/subscribe" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">z.ai</a> ($3/month for GLM Coding Plan)
                       </p>
                     </div>
                   </div>
@@ -803,42 +803,42 @@
           {:else if activeTab === "permissions"}
             <div class="space-y-6 max-w-2xl">
               <div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-1">Tool Permissions</h4>
-                <p class="text-sm text-gray-500">Control which tools Claude can use and which require confirmation.</p>
+                <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Tool Permissions</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Control which tools Claude can use and which require confirmation.</p>
               </div>
 
               {#if permissionSettings}
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5 space-y-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 space-y-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h5 class="font-medium text-gray-900">Auto-accept all tools</h5>
-                      <p class="text-sm text-gray-500">Skip confirmation for all tool uses (not recommended)</p>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Auto-accept all tools</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Skip confirmation for all tool uses (not recommended)</p>
                     </div>
                     <button
                       onclick={toggleAutoAccept}
                       disabled={savingPermissions}
-                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {permissionSettings.autoAcceptAll ? 'bg-amber-500' : 'bg-gray-300'}"
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {permissionSettings.autoAcceptAll ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'}"
                     >
                       <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {permissionSettings.autoAcceptAll ? 'translate-x-6' : 'translate-x-1'}"></span>
                     </button>
                   </div>
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5 space-y-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 space-y-5">
                   <div>
-                    <h5 class="font-medium text-gray-900 mb-1">Allowed Tools</h5>
-                    <p class="text-sm text-gray-500 mb-4">Which tools Claude is allowed to use</p>
+                    <h5 class="font-medium text-gray-900 dark:text-gray-100 mb-1">Allowed Tools</h5>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Which tools Claude is allowed to use</p>
                     <div class="grid grid-cols-2 gap-2">
                       {#each defaultTools as tool}
-                        <label class="flex items-center gap-3 cursor-pointer bg-white border border-gray-200 rounded-lg px-3 py-2 hover:border-gray-300 transition-colors">
+                        <label class="flex items-center gap-3 cursor-pointer bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
                           <input
                             type="checkbox"
                             checked={permissionSettings.allowedTools.includes(tool)}
                             onchange={() => toggleAllowedTool(tool)}
                             disabled={savingPermissions}
-                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            class="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
                           />
-                          <span class="text-sm text-gray-900">{tool}</span>
+                          <span class="text-sm text-gray-900 dark:text-gray-100">{tool}</span>
                         </label>
                       {/each}
                     </div>
@@ -846,25 +846,25 @@
                 </div>
 
                 {#if !permissionSettings.autoAcceptAll}
-                  <div class="bg-amber-50 rounded-xl border border-amber-200 p-5 space-y-5">
+                  <div class="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-5 space-y-5">
                     <div>
-                      <h5 class="font-medium text-amber-900 mb-1">Require Confirmation</h5>
-                      <p class="text-sm text-amber-700 mb-4">These tools will show a confirmation dialog before executing</p>
+                      <h5 class="font-medium text-amber-900 dark:text-amber-200 mb-1">Require Confirmation</h5>
+                      <p class="text-sm text-amber-700 dark:text-amber-300 mb-4">These tools will show a confirmation dialog before executing</p>
                       <div class="grid grid-cols-2 gap-2">
                         {#each defaultTools as tool}
                           {@const isAllowed = permissionSettings.allowedTools.includes(tool)}
                           {@const isDangerous = dangerousTools.includes(tool)}
-                          <label class="flex items-center gap-3 cursor-pointer bg-white border border-amber-200 rounded-lg px-3 py-2 hover:border-amber-300 transition-colors {!isAllowed ? 'opacity-50' : ''}">
+                          <label class="flex items-center gap-3 cursor-pointer bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 hover:border-amber-300 dark:hover:border-amber-700 transition-colors {!isAllowed ? 'opacity-50' : ''}">
                             <input
                               type="checkbox"
                               checked={permissionSettings.requireConfirmation.includes(tool)}
                               onchange={() => toggleRequireConfirmation(tool)}
                               disabled={savingPermissions || !isAllowed}
-                              class="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                              class="rounded border-amber-300 dark:border-amber-700 text-amber-600 focus:ring-amber-500"
                             />
-                            <span class="text-sm text-gray-900">{tool}</span>
+                            <span class="text-sm text-gray-900 dark:text-gray-100">{tool}</span>
                             {#if isDangerous}
-                              <span class="text-xs text-amber-600 ml-auto">!</span>
+                              <span class="text-xs text-amber-600 dark:text-amber-400 ml-auto">!</span>
                             {/if}
                           </label>
                         {/each}
@@ -872,7 +872,7 @@
                     </div>
                   </div>
 
-                  <p class="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                  <p class="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3">
                     Tools marked with <span class="font-bold">!</span> are potentially dangerous. When a tool requires confirmation, you'll see a dialog before it executes.
                   </p>
                 {/if}
@@ -882,16 +882,16 @@
           {:else if activeTab === "claude-md"}
             <div class="space-y-6">
               <div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-1">Default CLAUDE.md Template</h4>
-                <p class="text-sm text-gray-500">This template is automatically copied to new projects as their CLAUDE.md file.</p>
+                <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Default CLAUDE.md Template</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">This template is automatically copied to new projects as their CLAUDE.md file.</p>
               </div>
 
               <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-600">Status:</span>
+                <span class="text-sm text-gray-600 dark:text-gray-400">Status:</span>
                 {#if defaultClaudeMdExists}
-                  <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">Custom Template</span>
+                  <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">Custom Template</span>
                 {:else}
-                  <span class="text-xs font-medium text-gray-500 bg-gray-200 px-2.5 py-1 rounded-full">Using Default</span>
+                  <span class="text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-700 px-2.5 py-1 rounded-full">Using Default</span>
                 {/if}
               </div>
 
@@ -900,47 +900,47 @@
                   <textarea
                     bind:value={claudeMdDraft}
                     rows="20"
-                    class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm font-mono focus:border-gray-900 focus:outline-none transition-colors resize-none"
+                    class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 text-sm font-mono focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none transition-colors resize-none text-gray-900 dark:text-gray-100"
                     placeholder="# Project Instructions..."
                   ></textarea>
                   <div class="flex gap-3">
                     <button
                       onclick={cancelEditingClaudeMd}
-                      class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg px-4 py-2 transition-colors"
+                      class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       onclick={saveClaudeMd}
                       disabled={savingClaudeMd}
-                      class="text-sm font-medium bg-gray-900 text-white rounded-lg px-4 py-2 hover:bg-black transition-colors disabled:opacity-50"
+                      class="text-sm font-medium bg-gray-900 dark:bg-gray-700 text-white rounded-lg px-4 py-2 hover:bg-black dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
                     >
                       {savingClaudeMd ? "Saving..." : "Save Template"}
                     </button>
                   </div>
                 </div>
               {:else}
-                <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 max-h-96 overflow-y-auto">
-                  <pre class="text-sm font-mono text-gray-700 whitespace-pre-wrap">{defaultClaudeMd}</pre>
+                <div class="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 max-h-96 overflow-y-auto">
+                  <pre class="text-sm font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{defaultClaudeMd}</pre>
                 </div>
                 <button
                   onclick={startEditingClaudeMd}
-                  class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                  class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors"
                 >
                   Edit Template
                 </button>
               {/if}
 
-              <p class="text-sm text-gray-500">
-                When you select a project, if it doesn't have a <code class="bg-gray-200 px-1.5 py-0.5 rounded font-mono text-xs">CLAUDE.md</code> file, this template will be copied to create one.
+              <p class="text-sm text-gray-500 dark:text-gray-400">
+                When you select a project, if it doesn't have a <code class="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded font-mono text-xs">CLAUDE.md</code> file, this template will be copied to create one.
               </p>
             </div>
 
           {:else if activeTab === "skills"}
             <div class="space-y-6">
               <div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-1">Skill Library</h4>
-                <p class="text-sm text-gray-500">Skills customize Claude's behavior. Enable them globally or per-project.</p>
+                <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Skill Library</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Skills customize Claude's behavior. Enable them globally or per-project.</p>
               </div>
 
               <SkillLibrary />
@@ -949,17 +949,17 @@
           {:else if activeTab === "features"}
             <div class="space-y-6 max-w-2xl">
               <div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-1">Features</h4>
-                <p class="text-sm text-gray-500">Configure optional features and behaviors.</p>
+                <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Features</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Configure optional features and behaviors.</p>
               </div>
 
               <div class="space-y-4">
                 <!-- Check for Updates -->
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h5 class="font-medium text-gray-900">Software Updates</h5>
-                      <p class="text-sm text-gray-500">
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Software Updates</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">
                         {#if $currentAppVersion}
                           Current version: v{$currentAppVersion}
                         {:else}
@@ -969,11 +969,11 @@
                     </div>
                     <div class="flex items-center gap-3">
                       {#if $updateAvailable}
-                        <span class="text-xs font-medium text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full">
+                        <span class="text-xs font-medium text-blue-700 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2.5 py-1 rounded-full">
                           v{$updateAvailable.version} available
                         </span>
                       {:else if updateCheckResult === "up-to-date"}
-                        <span class="text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">
+                        <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">
                           Up to date
                         </span>
                       {/if}
@@ -983,15 +983,15 @@
                   <div class="mt-4 space-y-3">
                     {#if $isDownloadingUpdate}
                       <div class="flex items-center gap-3">
-                        <div class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                           <div
                             class="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
                             style="width: {$updateDownloadProgress}%"
                           ></div>
                         </div>
-                        <span class="text-sm font-medium text-gray-600">{$updateDownloadProgress}%</span>
+                        <span class="text-sm font-medium text-gray-600 dark:text-gray-300">{$updateDownloadProgress}%</span>
                       </div>
-                      <p class="text-sm text-gray-500">Downloading update... App will restart automatically.</p>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Downloading update... App will restart automatically.</p>
                     {:else if $updateAvailable}
                       <div class="flex items-center gap-3">
                         <button
@@ -1003,22 +1003,22 @@
                         <button
                           onclick={handleCheckForUpdates}
                           disabled={$isCheckingUpdate}
-                          class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors disabled:opacity-50"
+                          class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors disabled:opacity-50"
                         >
                           {$isCheckingUpdate ? "Checking..." : "Check Again"}
                         </button>
                       </div>
                       {#if $updateAvailable.notes && $updateAvailable.notes !== "No release notes available"}
-                        <div class="bg-white border border-gray-200 rounded-lg p-3 mt-2">
-                          <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">What's New</p>
-                          <p class="text-sm text-gray-700">{$updateAvailable.notes}</p>
+                        <div class="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 mt-2">
+                          <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">What's New</p>
+                          <p class="text-sm text-gray-700 dark:text-gray-300">{$updateAvailable.notes}</p>
                         </div>
                       {/if}
                     {:else}
                       <button
                         onclick={handleCheckForUpdates}
                         disabled={$isCheckingUpdate}
-                        class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors disabled:opacity-50 flex items-center gap-2"
+                        class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors disabled:opacity-50 flex items-center gap-2"
                       >
                         {#if $isCheckingUpdate}
                           <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -1036,26 +1036,26 @@
                     {/if}
 
                     {#if updateCheckError}
-                      <p class="text-sm text-red-600">{updateCheckError}</p>
+                      <p class="text-sm text-red-600 dark:text-red-400">{updateCheckError}</p>
                     {/if}
 
                     {#if $updateError}
-                      <p class="text-sm text-red-600">{$updateError}</p>
+                      <p class="text-sm text-red-600 dark:text-red-400">{$updateError}</p>
                     {/if}
                   </div>
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h5 class="font-medium text-gray-900">UI Zoom Level</h5>
-                      <p class="text-sm text-gray-500">Adjust the interface scale like browser zoom</p>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">UI Zoom Level</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Adjust the interface scale like browser zoom</p>
                     </div>
                     <div class="flex items-center gap-2">
                       <button
                         onclick={() => uiScale.decrease()}
                         disabled={$uiScale <= 75}
-                        class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         title="Zoom out"
                       >
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1065,7 +1065,7 @@
                       <select
                         value={$uiScale}
                         onchange={(e) => uiScale.set(parseInt(e.currentTarget.value) as 75 | 80 | 85 | 90 | 95 | 100 | 105 | 110)}
-                        class="w-20 text-center text-sm bg-white border border-gray-300 rounded-lg px-2 py-1.5 focus:border-gray-900 focus:outline-none font-medium"
+                        class="w-20 text-center text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1.5 focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none font-medium text-gray-900 dark:text-gray-100"
                       >
                         {#each uiScale.levels as level}
                           <option value={level}>{level}%</option>
@@ -1074,7 +1074,7 @@
                       <button
                         onclick={() => uiScale.increase()}
                         disabled={$uiScale >= 110}
-                        class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         title="Zoom in"
                       >
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1084,23 +1084,67 @@
                       {#if $uiScale !== 100}
                         <button
                           onclick={() => uiScale.reset()}
-                          class="text-xs text-gray-500 hover:text-gray-700 ml-1"
+                          class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 ml-1"
                         >
                           Reset
                         </button>
                       {/if}
                     </div>
                   </div>
-                  <p class="text-sm text-gray-500 mt-3 bg-gray-100 rounded-lg px-3 py-2">
+                  <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
                     Tip: Use ⌘+ / ⌘- keyboard shortcuts for quick zoom
                   </p>
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <!-- Theme / Dark Mode -->
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h5 class="font-medium text-gray-900">Auto-generate chat titles</h5>
-                      <p class="text-sm text-gray-500">Use AI to create descriptive titles for new chats</p>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Appearance</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Choose your preferred color theme</p>
+                    </div>
+                    <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+                      <button
+                        onclick={() => theme.set("light")}
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors {$theme === 'light' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                        Light
+                      </button>
+                      <button
+                        onclick={() => theme.set("dark")}
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors {$theme === 'dark' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                        </svg>
+                        Dark
+                      </button>
+                      <button
+                        onclick={() => theme.set("system")}
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors {$theme === 'system' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        System
+                      </button>
+                    </div>
+                  </div>
+                  {#if $theme === 'system'}
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                      Currently using {theme.getSystemTheme()} mode based on your system preference
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Auto-generate chat titles</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Use AI to create descriptive titles for new chats</p>
                     </div>
                     <button
                       onclick={toggleAutoTitle}
@@ -1111,116 +1155,116 @@
                   </div>
 
                   {#if autoTitleEnabled}
-                    <p class="text-sm text-gray-500 mt-3 bg-gray-100 rounded-lg px-3 py-2">
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
                       Uses {hasOpenAIKey ? "GPT-4o-mini" : hasAnthropicKey ? "Claude Haiku" : "your API"} for title generation (~$0.0001 per title)
                     </p>
                   {/if}
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h5 class="font-medium text-gray-900">Advanced Mode</h5>
-                      <p class="text-sm text-gray-500">Show reasoning history and system prompt info</p>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Advanced Mode</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Show reasoning history and system prompt info</p>
                     </div>
                     <button
                       onclick={() => advancedMode.toggle()}
-                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$advancedMode ? 'bg-gray-900' : 'bg-gray-300'}"
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$advancedMode ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
                     >
                       <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$advancedMode ? 'translate-x-6' : 'translate-x-1'}"></span>
                     </button>
                   </div>
-                  
+
                   {#if $advancedMode}
-                    <p class="text-sm text-gray-500 mt-3 bg-gray-100 rounded-lg px-3 py-2">
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
                       Tool calls will be collapsible. You can view loaded CLAUDE.md and system context.
                     </p>
                   {/if}
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h5 class="font-medium text-gray-900">Debug Mode</h5>
-                      <p class="text-sm text-gray-500">Show SDK event timeline and raw message data</p>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Debug Mode</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Show SDK event timeline and raw message data</p>
                     </div>
                     <button
                       onclick={() => debugMode.toggle()}
-                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$debugMode ? 'bg-gray-900' : 'bg-gray-300'}"
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$debugMode ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
                     >
                       <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$debugMode ? 'translate-x-6' : 'translate-x-1'}"></span>
                     </button>
                   </div>
-                  
+
                   {#if $debugMode}
-                    <p class="text-sm text-gray-500 mt-3 bg-gray-100 rounded-lg px-3 py-2">
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
                       Timeline view shows all SDK events chronologically. Useful for debugging and understanding the execution flow.
                     </p>
                   {/if}
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h5 class="font-medium text-gray-900">Show Archived Workspaces</h5>
-                      <p class="text-sm text-gray-500">Display archived workspaces in the sidebar</p>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Show Archived Workspaces</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Display archived workspaces in the sidebar</p>
                     </div>
                     <button
                       onclick={() => showArchivedWorkspaces.toggle()}
-                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$showArchivedWorkspaces ? 'bg-gray-900' : 'bg-gray-300'}"
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$showArchivedWorkspaces ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
                     >
                       <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$showArchivedWorkspaces ? 'translate-x-6' : 'translate-x-1'}"></span>
                     </button>
                   </div>
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h5 class="font-medium text-gray-900">Show Onboarding</h5>
-                      <p class="text-sm text-gray-500">View the welcome screen and setup wizard again</p>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Show Onboarding</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">View the welcome screen and setup wizard again</p>
                     </div>
                     <button
                       onclick={() => { onboardingComplete.reset(); onClose(); }}
-                      class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                      class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors"
                     >
                       Show Onboarding
                     </button>
                   </div>
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <h5 class="font-medium text-gray-900">Feature Tour</h5>
-                      <p class="text-sm text-gray-500">Take a guided tour of the app's features</p>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Feature Tour</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Take a guided tour of the app's features</p>
                     </div>
                     <button
                       onclick={() => { onClose(); setTimeout(() => { tour.reset(); tour.start("main"); }, 100); }}
-                      class="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-4 py-2 transition-colors"
+                      class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors"
                     >
                       Start Tour
                     </button>
                   </div>
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div>
-                    <h5 class="font-medium text-gray-900 mb-1">Storage Locations</h5>
-                    <p class="text-sm text-gray-500 mb-4">Where your data is stored on disk</p>
+                    <h5 class="font-medium text-gray-900 dark:text-gray-100 mb-1">Storage Locations</h5>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Where your data is stored on disk</p>
                   </div>
                   <div class="space-y-2 text-sm">
-                    <div class="flex justify-between items-center bg-white border border-gray-200 rounded-lg px-3 py-2">
-                      <span class="text-gray-600">Configuration</span>
-                      <code class="bg-gray-100 px-2 py-0.5 rounded font-mono text-xs">~/.claude-code-ui/</code>
+                    <div class="flex justify-between items-center bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2">
+                      <span class="text-gray-600 dark:text-gray-300">Configuration</span>
+                      <code class="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono text-xs">~/.claude-code-ui/</code>
                     </div>
-                    <div class="flex justify-between items-center bg-white border border-gray-200 rounded-lg px-3 py-2">
-                      <span class="text-gray-600">Audio backups</span>
-                      <code class="bg-gray-100 px-2 py-0.5 rounded font-mono text-xs">~/.claude-code-ui/audio-backups/</code>
+                    <div class="flex justify-between items-center bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2">
+                      <span class="text-gray-600 dark:text-gray-300">Audio backups</span>
+                      <code class="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono text-xs">~/.claude-code-ui/audio-backups/</code>
                     </div>
-                    <div class="flex justify-between items-center bg-white border border-gray-200 rounded-lg px-3 py-2">
-                      <span class="text-gray-600">Default CLAUDE.md</span>
-                      <code class="bg-gray-100 px-2 py-0.5 rounded font-mono text-xs">~/.claude-code-ui/default-claude.md</code>
+                    <div class="flex justify-between items-center bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2">
+                      <span class="text-gray-600 dark:text-gray-300">Default CLAUDE.md</span>
+                      <code class="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono text-xs">~/.claude-code-ui/default-claude.md</code>
                     </div>
                   </div>
                 </div>
@@ -1352,8 +1396,8 @@
             <div class="space-y-6">
               <div class="flex items-start justify-between gap-4">
                 <div>
-                  <h4 class="text-lg font-semibold text-gray-900 mb-1">Usage Analytics</h4>
-                  <p class="text-sm text-gray-500">Track your API usage, tokens, and costs over time.</p>
+                  <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Usage Analytics</h4>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">Track your API usage, tokens, and costs over time.</p>
                 </div>
                 <div class="min-w-[200px]">
                   <MultiSelect
@@ -1367,49 +1411,49 @@
 
               {#if loadingAnalytics}
                 <div class="flex items-center justify-center py-12">
-                  <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                  <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
                 </div>
               {:else if analytics}
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
-                    <div class="text-xs text-gray-500 uppercase tracking-wide">Total Cost</div>
-                    <div class="text-xl font-semibold text-gray-900 font-mono">${(analytics.totalEver || 0).toFixed(4)}</div>
+                  <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Total Cost</div>
+                    <div class="text-xl font-semibold text-gray-900 dark:text-gray-100 font-mono">${(analytics.totalEver || 0).toFixed(4)}</div>
                   </div>
-                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
-                    <div class="text-xs text-gray-500 uppercase tracking-wide">Today</div>
-                    <div class="text-xl font-semibold text-gray-900 font-mono">${(analytics.totalToday || 0).toFixed(4)}</div>
+                  <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Today</div>
+                    <div class="text-xl font-semibold text-gray-900 dark:text-gray-100 font-mono">${(analytics.totalToday || 0).toFixed(4)}</div>
                   </div>
-                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
-                    <div class="text-xs text-gray-500 uppercase tracking-wide">API Calls</div>
-                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalCalls || 0).toLocaleString()}</div>
+                  <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">API Calls</div>
+                    <div class="text-xl font-semibold text-gray-900 dark:text-gray-100">{(analytics.totalCalls || 0).toLocaleString()}</div>
                   </div>
-                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
-                    <div class="text-xs text-gray-500 uppercase tracking-wide">Sessions</div>
-                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalSessions || 0).toLocaleString()}</div>
+                  <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Sessions</div>
+                    <div class="text-xl font-semibold text-gray-900 dark:text-gray-100">{(analytics.totalSessions || 0).toLocaleString()}</div>
                   </div>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
-                    <div class="text-xs text-gray-500 uppercase tracking-wide">Messages</div>
-                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalMessages || 0).toLocaleString()}</div>
+                  <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Messages</div>
+                    <div class="text-xl font-semibold text-gray-900 dark:text-gray-100">{(analytics.totalMessages || 0).toLocaleString()}</div>
                   </div>
-                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
-                    <div class="text-xs text-gray-500 uppercase tracking-wide">Input Tokens</div>
-                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalInputTokens || 0).toLocaleString()}</div>
+                  <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Input Tokens</div>
+                    <div class="text-xl font-semibold text-gray-900 dark:text-gray-100">{(analytics.totalInputTokens || 0).toLocaleString()}</div>
                   </div>
-                  <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
-                    <div class="text-xs text-gray-500 uppercase tracking-wide">Output Tokens</div>
-                    <div class="text-xl font-semibold text-gray-900">{(analytics.totalOutputTokens || 0).toLocaleString()}</div>
+                  <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Output Tokens</div>
+                    <div class="text-xl font-semibold text-gray-900 dark:text-gray-100">{(analytics.totalOutputTokens || 0).toLocaleString()}</div>
                   </div>
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between mb-4">
-                    <h5 class="font-medium text-gray-900">Activity / Costs</h5>
+                    <h5 class="font-medium text-gray-900 dark:text-gray-100">Activity / Costs</h5>
                     <select
                       bind:value={activityView}
-                      class="text-sm bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:border-gray-900 focus:outline-none"
+                      class="text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none text-gray-900 dark:text-gray-100"
                     >
                       <option value="daily">Daily (30 days)</option>
                       <option value="hourly">Hourly (7 days)</option>
@@ -1418,7 +1462,7 @@
 
                   {#if activityView === "daily"}
                     {#if analytics.dailyCosts.length === 0}
-                      <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                      <p class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No data yet</p>
                     {:else}
                       {@const maxCost = Math.max(...analytics.dailyCosts.map(d => d.total_cost), 0.0001)}
                       <div class="h-32 flex items-end gap-0.5 mb-2">
@@ -1426,10 +1470,10 @@
                           {@const barHeight = Math.max((day.total_cost / maxCost) * 128, 2)}
                           <div class="flex-1 group relative">
                             <div
-                              class="w-full bg-blue-400 rounded-t transition-all hover:bg-blue-500"
+                              class="w-full bg-blue-400 dark:bg-blue-500 rounded-t transition-all hover:bg-blue-500 dark:hover:bg-blue-600"
                               style="height: {barHeight}px"
                             ></div>
-                            <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg pointer-events-none left-1/2 -translate-x-1/2">
+                            <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 dark:bg-black text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg pointer-events-none left-1/2 -translate-x-1/2">
                               <div class="font-medium">{day.date}</div>
                               <div class="text-gray-300">${(day.total_cost || 0).toFixed(4)}</div>
                               <div class="text-gray-400">{((day.input_tokens || 0) + (day.output_tokens || 0)).toLocaleString()} tokens</div>
@@ -1438,14 +1482,14 @@
                           </div>
                         {/each}
                       </div>
-                      <div class="flex justify-between text-xs text-gray-400">
+                      <div class="flex justify-between text-xs text-gray-400 dark:text-gray-500">
                         <span>{analytics.dailyCosts[0]?.date}</span>
                         <span>{analytics.dailyCosts[analytics.dailyCosts.length - 1]?.date}</span>
                       </div>
                     {/if}
                   {:else}
                     {#if analytics.hourlyCosts.length === 0}
-                      <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                      <p class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No data yet</p>
                     {:else}
                       {@const sortedHourly = [...analytics.hourlyCosts].sort((a, b) => a.hour.localeCompare(b.hour))}
                       {@const maxHourlyCost = Math.max(...sortedHourly.map(h => h.total_cost || 0), 0.0001)}
@@ -1454,10 +1498,10 @@
                           {@const barHeight = Math.max(((hour.total_cost || 0) / maxHourlyCost) * 128, 2)}
                           <div class="flex-1 min-w-[4px] group relative">
                             <div
-                              class="w-full bg-emerald-400 rounded-t transition-all hover:bg-emerald-500"
+                              class="w-full bg-emerald-400 dark:bg-emerald-500 rounded-t transition-all hover:bg-emerald-500 dark:hover:bg-emerald-600"
                               style="height: {barHeight}px"
                             ></div>
-                            <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg pointer-events-none left-1/2 -translate-x-1/2">
+                            <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 dark:bg-black text-white text-xs px-2 py-1.5 rounded whitespace-nowrap z-10 shadow-lg pointer-events-none left-1/2 -translate-x-1/2">
                               <div class="font-medium">{hour.hour.split(' ')[0]}</div>
                               <div class="text-gray-300">{hour.hour.split(' ')[1] || hour.hour}</div>
                               <div class="text-gray-300">${(hour.total_cost || 0).toFixed(4)}</div>
@@ -1466,7 +1510,7 @@
                           </div>
                         {/each}
                       </div>
-                      <div class="flex justify-between text-xs text-gray-400">
+                      <div class="flex justify-between text-xs text-gray-400 dark:text-gray-500">
                         <span>{sortedHourly[0]?.hour.split(' ')[0] || ''}</span>
                         <span>{sortedHourly[sortedHourly.length - 1]?.hour.split(' ')[0] || ''}</span>
                       </div>
@@ -1474,20 +1518,20 @@
                   {/if}
                 </div>
 
-                <div class="bg-gray-50 rounded-xl border border-gray-200 p-5">
-                  <h5 class="font-medium text-gray-900 mb-4">{activityView === "daily" ? "Daily" : "Hourly"} Breakdown</h5>
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <h5 class="font-medium text-gray-900 dark:text-gray-100 mb-4">{activityView === "daily" ? "Daily" : "Hourly"} Breakdown</h5>
                   {#if activityView === "daily"}
                     {#if analytics.dailyCosts.length === 0}
-                      <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                      <p class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No data yet</p>
                     {:else}
                       <div class="space-y-1 max-h-[250px] overflow-y-auto">
                         {#each [...analytics.dailyCosts].reverse() as day}
-                          <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
-                            <span class="text-sm text-gray-600">{day.date}</span>
+                          <div class="flex items-center justify-between bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2">
+                            <span class="text-sm text-gray-600 dark:text-gray-300">{day.date}</span>
                             <div class="flex items-center gap-4">
-                              <span class="text-xs text-gray-400">{day.entry_count || 0} calls</span>
-                              <span class="text-xs text-blue-500">{((day.input_tokens || 0) + (day.output_tokens || 0)).toLocaleString()} tok</span>
-                              <span class="font-mono text-sm text-gray-900 w-20 text-right">${(day.total_cost || 0).toFixed(4)}</span>
+                              <span class="text-xs text-gray-400 dark:text-gray-500">{day.entry_count || 0} calls</span>
+                              <span class="text-xs text-blue-500 dark:text-blue-400">{((day.input_tokens || 0) + (day.output_tokens || 0)).toLocaleString()} tok</span>
+                              <span class="font-mono text-sm text-gray-900 dark:text-gray-100 w-20 text-right">${(day.total_cost || 0).toFixed(4)}</span>
                             </div>
                           </div>
                         {/each}
@@ -1495,19 +1539,19 @@
                     {/if}
                   {:else}
                     {#if analytics.hourlyCosts.length === 0}
-                      <p class="text-sm text-gray-500 text-center py-4">No data yet</p>
+                      <p class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No data yet</p>
                     {:else}
                       <div class="space-y-1 max-h-[250px] overflow-y-auto">
                         {#each [...analytics.hourlyCosts].sort((a, b) => b.hour.localeCompare(a.hour)) as hour}
                           {@const [date, time] = hour.hour.split(' ')}
-                          <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                          <div class="flex items-center justify-between bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2">
                             <div class="flex items-center gap-2">
-                              <span class="text-sm text-gray-600">{date}</span>
-                              <span class="text-xs text-gray-400">{time || ''}</span>
+                              <span class="text-sm text-gray-600 dark:text-gray-300">{date}</span>
+                              <span class="text-xs text-gray-400 dark:text-gray-500">{time || ''}</span>
                             </div>
                             <div class="flex items-center gap-4">
-                              <span class="text-xs text-gray-400">{hour.entry_count || 0} calls</span>
-                              <span class="font-mono text-sm text-gray-900 w-20 text-right">${(hour.total_cost || 0).toFixed(4)}</span>
+                              <span class="text-xs text-gray-400 dark:text-gray-500">{hour.entry_count || 0} calls</span>
+                              <span class="font-mono text-sm text-gray-900 dark:text-gray-100 w-20 text-right">${(hour.total_cost || 0).toFixed(4)}</span>
                             </div>
                           </div>
                         {/each}
@@ -1518,12 +1562,12 @@
 
                 <button
                   onclick={loadAnalytics}
-                  class="w-full py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg transition-colors"
+                  class="w-full py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg transition-colors"
                 >
                   Refresh Analytics
                 </button>
               {:else}
-                <p class="text-sm text-gray-500 text-center py-8">Failed to load analytics</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 text-center py-8">Failed to load analytics</p>
               {/if}
             </div>
           {/if}

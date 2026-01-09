@@ -3,7 +3,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Refined, minimal scrollbar for light theme */
+/* Refined, minimal scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -17,6 +17,14 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #d1d5db; /* gray-300 */
+}
+
+/* Dark mode scrollbar */
+.dark ::-webkit-scrollbar-thumb {
+  background: #374151; /* gray-700 */
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #4b5563; /* gray-600 */
 }
 
 /* Ultra-thin sidebar scrollbar */
@@ -35,8 +43,22 @@
   background: #9ca3af;
 }
 
+/* Dark mode sidebar scrollbar */
+.dark .sidebar-scroll::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+.dark .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
 body {
   @apply bg-white text-gray-900 antialiased;
+}
+
+/* Dark mode body */
+.dark body,
+html.dark body {
+  @apply bg-gray-900 text-gray-100;
 }
 
 /* Text streaming shimmer effect */
@@ -406,4 +428,24 @@ pre.hljs {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Dark mode chat reference pills */
+.dark .chat-reference {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+  border-color: #4338ca;
+}
+
+.dark .chat-reference:hover {
+  background: linear-gradient(135deg, #312e81 0%, #3730a3 100%);
+  border-color: #4f46e5;
+}
+
+.dark .chat-reference-title {
+  color: #a5b4fc;
+}
+
+/* Dark mode drop indicator */
+.dark .drop-indicator-line::before {
+  background: #818cf8;
 }

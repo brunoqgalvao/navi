@@ -71,6 +71,7 @@ export {
   attachedFiles,
   chatViewMode,
   uiScale,
+  theme,
   isConnected,
   unreadNotificationCount,
   activeNotifications,
@@ -82,7 +83,7 @@ export {
 // References store
 export { textReferences, terminalReferences, chatReferences } from "./references";
 
-export type { UIScaleLevel, FileBrowserState, ProjectStatusInfo } from "./ui";
+export type { UIScaleLevel, FileBrowserState, ProjectStatusInfo, ThemeMode } from "./ui";
 
 // Cost stores
 export { costStore } from "./costs";

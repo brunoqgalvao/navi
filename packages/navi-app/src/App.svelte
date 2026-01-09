@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference } from "./lib/stores";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill } from "./lib/api";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree } from "./lib/actions";
@@ -2763,16 +2763,16 @@
 <TourOverlay tourSteps={TOUR_STEPS} />
 
 {#if serverError}
-<div class="flex h-screen bg-white items-center justify-center">
+<div class="flex h-screen bg-white dark:bg-gray-900 items-center justify-center">
   <div class="text-center p-8 max-w-md">
-    <div class="w-16 h-16 mx-auto mb-6 rounded-full bg-red-100 flex items-center justify-center">
+    <div class="w-16 h-16 mx-auto mb-6 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
       <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
       </svg>
     </div>
-    <h1 class="text-xl font-semibold text-gray-900 mb-2">Server Connection Failed</h1>
-    <p class="text-gray-600 mb-6">{serverError}</p>
-    <button 
+    <h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Server Connection Failed</h1>
+    <p class="text-gray-600 dark:text-gray-400 mb-6">{serverError}</p>
+    <button
       onclick={retryServerConnection}
       class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
     >
@@ -2781,7 +2781,7 @@
   </div>
 </div>
 {:else}
-<div class="flex h-screen bg-white text-gray-900 font-sans overflow-hidden selection:bg-blue-100 selection:text-blue-900">
+<div class="flex h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans overflow-hidden selection:bg-blue-100 dark:selection:bg-blue-900 selection:text-blue-900 dark:selection:text-blue-100">
 
   <!-- Sidebar -->
   <Sidebar
@@ -2861,10 +2861,10 @@
   <div class="flex-1 flex min-w-0 min-h-0 overflow-hidden">
 
   <!-- Chat Area -->
-  <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-white relative overflow-hidden">
+  <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-900 relative overflow-hidden">
 
     <!-- Navigation History (top-left) -->
-    <div class="absolute top-3 left-3 z-20 bg-white/95 border border-gray-200 rounded-lg shadow-sm">
+    <div class="absolute top-3 left-3 z-20 bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
       <NavHistoryButton onNavigate={handleNavHistoryNavigate} />
     </div>
 
@@ -2874,10 +2874,10 @@
       {#if $advancedMode}
       <button
         onclick={() => showDebugInfo = true}
-        class={`p-2 border rounded-lg shadow-sm transition-all group ${showDebugInfo ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
+        class={`p-2 border rounded-lg shadow-sm transition-all group ${showDebugInfo ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}
         title="Session Debug Info"
       >
-        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+        <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:text-gray-500 dark:group-hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
       </button>
       {/if}
       <ExtensionToolbar
@@ -2911,15 +2911,15 @@
 
         <!-- Header (Mobile/Simplified) -->
 
-        <header class="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white/95 md:hidden z-10 sticky top-0">
+        <header class="h-14 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 bg-white/95 dark:bg-gray-800/95 md:hidden z-10 sticky top-0">
 
-            <button onclick={() => session.setProject(null)} class="text-gray-500">
+            <button onclick={() => session.setProject(null)} class="text-gray-500 dark:text-gray-400">
 
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7"></path></svg>
 
             </button>
 
-            <span class="font-medium text-gray-900 text-sm">{currentProject.name}</span>
+            <span class="font-medium text-gray-900 dark:text-gray-100 text-sm">{currentProject.name}</span>
 
             <div class={`w-2 h-2 rounded-full ${$isConnected ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
 
@@ -3058,7 +3058,7 @@
         </div>
 
         <!-- Input Area -->
-        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent" data-tour="chat-input">
+        <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent dark:from-gray-900 dark:via-gray-900" data-tour="chat-input">
 
             <div class="w-full max-w-3xl pointer-events-auto relative">
                 <!-- Process Manager - positioned top right above input -->

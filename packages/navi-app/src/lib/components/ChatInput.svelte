@@ -849,15 +849,15 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="relative group rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border transition-all duration-200 {isShellCommand(value) ? 'bg-[#1a1b26] border-[#3d59a1] focus-within:border-[#7aa2f7] shadow-[0_8px_30px_rgb(0,0,0,0.3)]' : 'bg-white focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)]'} {isDraggingOver ? 'border-blue-400 bg-blue-50/30' : isShellCommand(value) ? '' : 'border-gray-200 focus-within:border-gray-300'}"
+  class="relative group rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.6)] border transition-all duration-200 {isShellCommand(value) ? 'bg-[#1a1b26] border-[#3d59a1] focus-within:border-[#7aa2f7] shadow-[0_8px_30px_rgb(0,0,0,0.3)]' : 'bg-white dark:bg-gray-800 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.8)]'} {isDraggingOver ? 'border-blue-400 bg-blue-50/30 dark:border-blue-500 dark:bg-blue-900/30' : isShellCommand(value) ? '' : 'border-gray-200 dark:border-gray-700 focus-within:border-gray-300 dark:focus-within:border-gray-600'}"
   ondragenter={handleDragEnter}
   ondragleave={handleDragLeave}
   ondragover={handleDragOver}
   ondrop={handleDrop}
 >
   {#if isDraggingOver}
-    <div class="absolute inset-0 flex items-center justify-center bg-blue-50/80 rounded-xl z-10 pointer-events-none">
-      <div class="flex items-center gap-2 text-blue-600">
+    <div class="absolute inset-0 flex items-center justify-center bg-blue-50/80 dark:bg-blue-900/80 rounded-xl z-10 pointer-events-none">
+      <div class="flex items-center gap-2 text-blue-600 dark:text-blue-400">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
         </svg>
@@ -868,20 +868,20 @@
 
   <!-- Quote preview -->
   {#if parsedQuote}
-    <div class="mx-3 mt-2 mb-1 rounded-lg border border-indigo-200 bg-indigo-50/50 overflow-hidden">
-      <div class="flex items-center justify-between px-3 py-1.5 border-b border-indigo-200/50 bg-indigo-100/30">
+    <div class="mx-3 mt-2 mb-1 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/30 overflow-hidden">
+      <div class="flex items-center justify-between px-3 py-1.5 border-b border-indigo-200/50 dark:border-indigo-800/50 bg-indigo-100/30 dark:bg-indigo-900/40">
         <div class="flex items-center gap-2">
-          <svg class="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4z"></path>
           </svg>
-          <span class="text-xs font-medium text-indigo-700">Quoting</span>
+          <span class="text-xs font-medium text-indigo-700 dark:text-indigo-300">Quoting</span>
           {#if parsedQuote.source}
-            <span class="text-xs text-indigo-500 font-mono truncate max-w-[200px]">{parsedQuote.source}</span>
+            <span class="text-xs text-indigo-500 dark:text-indigo-400 font-mono truncate max-w-[200px]">{parsedQuote.source}</span>
           {/if}
         </div>
         <button
           onclick={clearQuote}
-          class="p-1 rounded hover:bg-indigo-200/50 text-indigo-400 hover:text-indigo-600 transition-colors"
+          class="p-1 rounded hover:bg-indigo-200/50 dark:hover:bg-indigo-800/50 text-indigo-400 dark:text-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
           title="Remove quote"
         >
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -890,7 +890,7 @@
         </button>
       </div>
       <div class="px-3 py-2 max-h-24 overflow-y-auto">
-        <pre class="text-xs text-indigo-900 font-sans whitespace-pre-wrap break-words leading-relaxed">{parsedQuote.content.length > 200 ? parsedQuote.content.slice(0, 200) + '...' : parsedQuote.content}</pre>
+        <pre class="text-xs text-indigo-900 dark:text-indigo-100 font-sans whitespace-pre-wrap break-words leading-relaxed">{parsedQuote.content.length > 200 ? parsedQuote.content.slice(0, 200) + '...' : parsedQuote.content}</pre>
       </div>
     </div>
   {/if}
@@ -945,11 +945,11 @@
       >
         {#each highlightedSegments as segment}
           {#if segment.type === "chat"}
-            <span class="bg-blue-100 text-blue-700 rounded-md px-0.5 -mx-0.5 box-decoration-clone">{segment.text}</span>
+            <span class="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-md px-0.5 -mx-0.5 box-decoration-clone">{segment.text}</span>
           {:else if segment.type === "terminal"}
-            <span class="bg-green-100 text-green-700 rounded-md px-0.5 -mx-0.5 box-decoration-clone">{segment.text}</span>
+            <span class="bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded-md px-0.5 -mx-0.5 box-decoration-clone">{segment.text}</span>
           {:else if segment.type === "file"}
-            <span class="bg-purple-100 text-purple-700 rounded-md px-0.5 -mx-0.5 box-decoration-clone">{segment.text}</span>
+            <span class="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded-md px-0.5 -mx-0.5 box-decoration-clone">{segment.text}</span>
           {:else}
             <span class="text-transparent">{segment.text}</span>
           {/if}
@@ -966,9 +966,9 @@
       onscroll={syncScroll}
       placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : "Message Claude... (@ files, @terminal, @chat, ! shell)"}
       {disabled}
-      class="w-full bg-transparent border-none rounded-xl pl-4 pr-24 {isShellCommand(value) ? 'pt-8 text-[#c0caf5] placeholder-[#565f89] font-mono' : 'pt-3.5 placeholder-gray-400'} pb-3.5 focus:outline-none focus:ring-0 resize-none min-h-[56px] text-[15px] disabled:opacity-50 overflow-y-auto relative z-[1]"
+      class="w-full bg-transparent border-none rounded-xl pl-4 pr-24 {isShellCommand(value) ? 'pt-8 text-[#c0caf5] placeholder-[#565f89] font-mono' : 'pt-3.5 placeholder-gray-400 dark:placeholder-gray-500'} pb-3.5 focus:outline-none focus:ring-0 resize-none min-h-[56px] text-[15px] disabled:opacity-50 overflow-y-auto relative z-[1]"
       rows="1"
-      style={!isShellCommand(value) && highlightedSegments.some(s => s.type !== "text") ? "color: transparent; caret-color: #111;" : "color: #111;"}
+      style={!isShellCommand(value) && highlightedSegments.some(s => s.type !== "text") ? "color: transparent; caret-color: #111;" : ""}
     ></textarea>
 
     <!-- Action buttons - positioned inside textarea area -->
@@ -981,7 +981,7 @@
       {#if loading}
         <button
           onclick={onStop}
-          class="p-1.5 text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-all"
+          class="p-1.5 text-red-500 bg-red-50 dark:bg-red-900/30 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-all"
           title="Stop generation"
         >
           <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
@@ -990,7 +990,7 @@
         <button
           onclick={handleSubmit}
           disabled={disabled || !value.trim()}
-          class="p-1.5 rounded-lg transition-all disabled:opacity-30 {isShellCommand(value) ? 'text-[#9ece6a] hover:bg-[#9ece6a]/20' : 'text-gray-400 bg-transparent hover:bg-gray-100 hover:text-gray-900 disabled:hover:bg-transparent'}"
+          class="p-1.5 rounded-lg transition-all disabled:opacity-30 {isShellCommand(value) ? 'text-[#9ece6a] hover:bg-[#9ece6a]/20' : 'text-gray-400 dark:text-gray-500 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100 disabled:hover:bg-transparent'}"
           title={isShellCommand(value) ? "Run command (Enter)" : "Send message"}
         >
           {#if isShellCommand(value)}
@@ -1007,29 +1007,29 @@
     </div>
 
     {#if showFilePicker}
-      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
+      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
         <!-- Special options (chat, terminal) -->
         {#if filteredSpecialOptions.length > 0}
-          <div class="px-3 py-1.5 border-b border-gray-100 text-[10px] text-gray-400 font-medium uppercase tracking-wide">
+          <div class="px-3 py-1.5 border-b border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">
             Reference
           </div>
           {#each filteredSpecialOptions as option, i}
             <button
               onclick={() => selectSpecialOption(option)}
-              class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2 {i === filePickerIndex ? (option.color === 'blue' ? 'bg-blue-50' : 'bg-green-50') : ''}"
+              class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 {i === filePickerIndex ? (option.color === 'blue' ? 'bg-blue-50 dark:bg-blue-900/30' : 'bg-green-50 dark:bg-green-900/30') : ''}"
             >
               {#if option.id === "chat"}
-                <svg class="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
                 </svg>
               {:else}
-                <svg class="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-4 h-4 text-green-500 dark:text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                 </svg>
               {/if}
               <div class="min-w-0 flex-1">
-                <div class="text-sm text-gray-900">@{option.label}</div>
-                <div class="text-xs text-gray-400">{option.description}</div>
+                <div class="text-sm text-gray-900 dark:text-gray-100">@{option.label}</div>
+                <div class="text-xs text-gray-400 dark:text-gray-500">{option.description}</div>
               </div>
             </button>
           {/each}
@@ -1037,7 +1037,7 @@
 
         <!-- Files -->
         {#if filteredFiles.length > 0 || availableFiles.length === 0}
-          <div class="px-3 py-1.5 border-b border-t border-gray-100 text-[10px] text-gray-400 font-medium uppercase tracking-wide">
+          <div class="px-3 py-1.5 border-b border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">
             Files
           </div>
         {/if}
@@ -1045,19 +1045,19 @@
           {@const adjustedIndex = i + filteredSpecialOptions.length}
           <button
             onclick={() => selectFile(file)}
-            class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2 {adjustedIndex === filePickerIndex ? 'bg-blue-50' : ''}"
+            class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 {adjustedIndex === filePickerIndex ? 'bg-blue-50 dark:bg-blue-900/30' : ''}"
           >
-            <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
             </svg>
             <div class="min-w-0 flex-1">
-              <div class="text-sm text-gray-900 truncate">{file.name}</div>
-              <div class="text-xs text-gray-400 truncate">{file.path.replace(projectPath || "", "")}</div>
+              <div class="text-sm text-gray-900 dark:text-gray-100 truncate">{file.name}</div>
+              <div class="text-xs text-gray-400 dark:text-gray-500 truncate">{file.path.replace(projectPath || "", "")}</div>
             </div>
           </button>
         {/each}
         {#if filteredFiles.length === 0 && filteredSpecialOptions.length === 0}
-          <div class="px-3 py-4 text-sm text-gray-500 text-center">
+          <div class="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
             {availableFiles.length === 0 ? "Loading files..." : "No matching files"}
           </div>
         {/if}
@@ -1065,9 +1065,9 @@
     {/if}
 
     {#if showTerminalPicker}
-      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
-        <div class="px-3 py-2 border-b border-gray-100 text-xs text-gray-500 font-medium flex items-center gap-2">
-          <svg class="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
+        <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 font-medium flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 text-green-500 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
           </svg>
           Active Terminals
@@ -1075,24 +1075,24 @@
         {#each filteredTerminals as terminal, i}
           <button
             onclick={() => selectTerminal(terminal)}
-            class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2 {i === terminalPickerIndex ? 'bg-green-50' : ''}"
+            class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 {i === terminalPickerIndex ? 'bg-green-50 dark:bg-green-900/30' : ''}"
           >
-            <svg class="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-green-500 dark:text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
             </svg>
             <div class="min-w-0 flex-1">
-              <div class="text-sm text-gray-900 truncate">{terminal.name}</div>
-              <div class="text-xs text-gray-400 truncate font-mono">
+              <div class="text-sm text-gray-900 dark:text-gray-100 truncate">{terminal.name}</div>
+              <div class="text-xs text-gray-400 dark:text-gray-500 truncate font-mono">
                 {terminal.cwd ? terminal.cwd.split('/').slice(-2).join('/') : terminal.terminalId}
               </div>
             </div>
             {#if terminal.pid}
-              <span class="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded font-mono">PID {terminal.pid}</span>
+              <span class="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded font-mono">PID {terminal.pid}</span>
             {/if}
           </button>
         {/each}
         {#if filteredTerminals.length === 0}
-          <div class="px-3 py-4 text-sm text-gray-500 text-center">
+          <div class="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
             {availableTerminals.length === 0 ? "Loading terminals..." : "No active terminals"}
           </div>
         {/if}
@@ -1100,9 +1100,9 @@
     {/if}
 
     {#if showChatPicker}
-      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
-        <div class="px-3 py-2 border-b border-gray-100 text-xs text-gray-500 font-medium flex items-center gap-2">
-          <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
+        <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 font-medium flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
           </svg>
           Recent Chats
@@ -1110,21 +1110,21 @@
         {#each filteredChats as chat, i}
           <button
             onclick={() => selectChat(chat)}
-            class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2 {i === chatPickerIndex ? 'bg-blue-50' : ''}"
+            class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 {i === chatPickerIndex ? 'bg-blue-50 dark:bg-blue-900/30' : ''}"
           >
-            <svg class="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
             </svg>
             <div class="min-w-0 flex-1">
-              <div class="text-sm text-gray-900 truncate">{chat.title}</div>
-              <div class="text-xs text-gray-400 truncate">
+              <div class="text-sm text-gray-900 dark:text-gray-100 truncate">{chat.title}</div>
+              <div class="text-xs text-gray-400 dark:text-gray-500 truncate">
                 {chat.messageCount} messages
               </div>
             </div>
           </button>
         {/each}
         {#if filteredChats.length === 0}
-          <div class="px-3 py-4 text-sm text-gray-500 text-center">
+          <div class="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
             {availableChats.length === 0 ? "Loading chats..." : "No matching chats"}
           </div>
         {/if}
@@ -1132,9 +1132,9 @@
     {/if}
 
     {#if showCommandPicker}
-      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
-        <div class="px-3 py-2 border-b border-gray-100 text-xs text-gray-500 font-medium flex items-center gap-2">
-          <svg class="w-3.5 h-3.5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
+        <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 font-medium flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 text-orange-500 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
           </svg>
           Commands
@@ -1142,9 +1142,9 @@
         {#each filteredCommands as command, i}
           <button
             onclick={() => selectCommand(command)}
-            class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2 {i === commandPickerIndex ? 'bg-orange-50' : ''}"
+            class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 {i === commandPickerIndex ? 'bg-orange-50 dark:bg-orange-900/30' : ''}"
           >
-            <svg class="w-4 h-4 {command.isBuiltIn ? 'text-orange-500' : 'text-purple-500'} flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 {command.isBuiltIn ? 'text-orange-500 dark:text-orange-400' : 'text-purple-500 dark:text-purple-400'} flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {#if command.isBuiltIn}
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
               {:else}
@@ -1153,23 +1153,23 @@
               {/if}
             </svg>
             <div class="min-w-0 flex-1">
-              <div class="text-sm text-gray-900 flex items-center gap-1">
+              <div class="text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1">
                 <span class="font-mono">/{command.name}</span>
                 {#if command.argsHint}
-                  <span class="text-gray-400 text-xs">{command.argsHint}</span>
+                  <span class="text-gray-400 dark:text-gray-500 text-xs">{command.argsHint}</span>
                 {/if}
               </div>
-              <div class="text-xs text-gray-400 truncate">{command.description}</div>
+              <div class="text-xs text-gray-400 dark:text-gray-500 truncate">{command.description}</div>
             </div>
             {#if command.isBuiltIn}
-              <span class="text-[10px] px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded">built-in</span>
+              <span class="text-[10px] px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-300 rounded">built-in</span>
             {:else}
-              <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">skill</span>
+              <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300 rounded">skill</span>
             {/if}
           </button>
         {/each}
         {#if filteredCommands.length === 0}
-          <div class="px-3 py-4 text-sm text-gray-500 text-center">
+          <div class="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
             No matching commands
           </div>
         {/if}
@@ -1179,13 +1179,13 @@
 
   <!-- Toolbar - icon buttons on the left -->
   {#if !isShellCommand(value)}
-    <div class="border-t border-gray-100 px-2 py-1.5 flex items-center gap-1">
+    <div class="border-t border-gray-100 dark:border-gray-700 px-2 py-1.5 flex items-center gap-1">
       <!-- Active Worktree indicator (for sessions with worktree) -->
       {#if worktreeBranch}
         <div class="relative">
           <button
             onclick={() => showWorktreeMenu = !showWorktreeMenu}
-            class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-150 bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+            class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-150 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/50"
             title="Working in parallel branch"
           >
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1205,22 +1205,22 @@
               class="fixed inset-0 z-40"
               onclick={() => showWorktreeMenu = false}
             ></div>
-            <div class="absolute bottom-full left-0 mb-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl py-2 z-50">
-              <div class="px-3 py-2 border-b border-gray-100">
-                <div class="flex items-center gap-2 text-emerald-600 mb-1">
+            <div class="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-2 z-50">
+              <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+                <div class="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 mb-1">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                   </svg>
                   <span class="text-xs font-semibold uppercase tracking-wide">Parallel Branch</span>
                 </div>
-                <p class="text-[11px] text-gray-500 leading-relaxed">
-                  Working in isolated copy. Changes don't affect <span class="font-medium text-gray-700">{worktreeBaseBranch || 'main'}</span> until merged.
+                <p class="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                  Working in isolated copy. Changes don't affect <span class="font-medium text-gray-700 dark:text-gray-300">{worktreeBaseBranch || 'main'}</span> until merged.
                 </p>
               </div>
 
-              <div class="px-3 py-2 border-b border-gray-100">
-                <div class="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Branch</div>
-                <div class="text-sm text-gray-800 font-mono truncate" title={worktreeBranch}>
+              <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+                <div class="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Branch</div>
+                <div class="text-sm text-gray-800 dark:text-gray-200 font-mono truncate" title={worktreeBranch}>
                   {worktreeBranch.replace(/^session\//, '')}
                 </div>
               </div>
@@ -1228,7 +1228,7 @@
               <div class="px-2 pt-2 space-y-1">
                 <button
                   onclick={() => { showWorktreeMenu = false; onMergeWorktree?.(); }}
-                  class="w-full px-3 py-2 text-left text-sm text-emerald-700 hover:bg-emerald-50 rounded-lg flex items-center gap-2.5 transition-colors font-medium"
+                  class="w-full px-3 py-2 text-left text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg flex items-center gap-2.5 transition-colors font-medium"
                 >
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
@@ -1243,7 +1243,7 @@
         <!-- Parallel Branch toggle (only for new chats in git repos) -->
         <button
           onclick={handleToggle}
-          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {worktreeEnabled ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}"
+          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {worktreeEnabled ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
           title={worktreeEnabled ? 'Parallel branch: ON - working in isolated copy' : 'Parallel branch: work on an isolated copy'}
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1255,7 +1255,7 @@
       <!-- Loop/Until Done toggle -->
       <button
         onclick={() => onToggleUntilDone?.()}
-        class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {untilDoneEnabled ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}"
+        class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {untilDoneEnabled ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
         title={untilDoneEnabled ? 'Loop mode: ON - Claude keeps working until done' : 'Loop mode: auto-continue until task complete'}
       >
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1267,14 +1267,14 @@
       <div class="relative">
         <button
           onclick={() => showSkillsMenu = !showSkillsMenu}
-          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {activeSkills.length > 0 ? 'bg-purple-100 text-purple-600 hover:bg-purple-200' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}"
+          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {activeSkills.length > 0 ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
           title={activeSkills.length > 0 ? `Skills: ${activeSkills.length} active` : 'Skills: none active'}
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
             <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
           </svg>
           {#if activeSkills.length > 0}
-            <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-purple-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+            <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-purple-500 dark:bg-purple-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
               {activeSkills.length}
             </span>
           {/if}
@@ -1286,9 +1286,9 @@
             class="fixed inset-0 z-40"
             onclick={() => showSkillsMenu = false}
           ></div>
-          <div class="absolute bottom-full left-0 mb-2 w-56 bg-white border border-gray-200 rounded-xl shadow-xl py-2 z-50">
-            <div class="px-3 py-2 text-[11px] text-gray-500 font-semibold uppercase tracking-wider border-b border-gray-100 flex items-center gap-2">
-              <svg class="w-3.5 h-3.5 text-purple-500" fill="currentColor" viewBox="0 0 24 24">
+          <div class="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-2 z-50">
+            <div class="px-3 py-2 text-[11px] text-gray-500 dark:text-gray-400 font-semibold uppercase tracking-wider border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+              <svg class="w-3.5 h-3.5 text-purple-500 dark:text-purple-400" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
               </svg>
               {activeSkills.length > 0 ? `Active Skills (${activeSkills.length})` : 'No Skills Active'}
@@ -1296,17 +1296,17 @@
             {#if activeSkills.length > 0}
               <div class="py-1 max-h-48 overflow-y-auto">
                 {#each activeSkills as skill}
-                  <div class="px-3 py-2 text-sm text-gray-700 flex items-center gap-2.5 hover:bg-gray-50 transition-colors">
+                  <div class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                     <span class="w-2 h-2 rounded-full bg-gradient-to-br from-purple-400 to-fuchsia-500 flex-shrink-0"></span>
                     <span class="truncate">{skill.name}</span>
                   </div>
                 {/each}
               </div>
             {/if}
-            <div class="border-t border-gray-100 pt-2 px-2">
+            <div class="border-t border-gray-100 dark:border-gray-700 pt-2 px-2">
               <button
                 onclick={() => { showSkillsMenu = false; onManageSkills?.(); }}
-                class="w-full px-3 py-2 text-left text-sm text-purple-600 hover:bg-purple-50 rounded-lg flex items-center gap-2.5 transition-colors font-medium"
+                class="w-full px-3 py-2 text-left text-sm text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg flex items-center gap-2.5 transition-colors font-medium"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>

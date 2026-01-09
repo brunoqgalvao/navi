@@ -8,6 +8,7 @@ export default {
     './index.html',
     './src/**/*.{html,js,svelte,ts}'
   ],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
@@ -23,6 +24,20 @@ export default {
           800: `hsl(${accentHue}, ${accentSaturation}%, 30%)`,
           900: `hsl(${accentHue}, ${accentSaturation}%, 20%)`,
           950: `hsl(${accentHue}, ${accentSaturation}%, 12%)`,
+        },
+        // Dark mode background colors
+        dark: {
+          50:  '#f9fafb',
+          100: '#1e1e2e',
+          200: '#1a1a28',
+          300: '#16161f',
+          400: '#13131a',
+          500: '#0f0f14',
+          600: '#0c0c10',
+          700: '#09090c',
+          800: '#060608',
+          900: '#030304',
+          950: '#010101',
         },
       },
     },
