@@ -373,6 +373,25 @@ export async function initDb() {
     db.run("ALTER TABLE kanban_cards ADD COLUMN blocked INTEGER DEFAULT 0");
   } catch {}
 
+  // Command settings table - per-workspace/global command configuration
+  db.run(`
+    CREATE TABLE IF NOT EXISTS command_settings (
+      id TEXT PRIMARY KEY,
+      command_name TEXT NOT NULL,
+      scope TEXT NOT NULL CHECK(scope IN ('global', 'workspace')),
+      project_id TEXT,
+      enabled INTEGER DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
+      config TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(command_name, scope, project_id),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_command_settings_scope ON command_settings(scope, project_id);
+    CREATE INDEX IF NOT EXISTS idx_command_settings_name ON command_settings(command_name);
+  `);
+
   // Session decisions table - shared decisions across session tree
   db.run(`
     CREATE TABLE IF NOT EXISTS session_decisions (
@@ -2053,4 +2072,199 @@ export const sessionArtifacts = {
 
   deleteByRoot: (rootSessionId: string) =>
     run("DELETE FROM session_artifacts WHERE root_session_id = ?", [rootSessionId]),
+};
+
+// ============================================================================
+// Command Settings (Workspace/Global Command Management)
+// ============================================================================
+
+export type CommandScope = "global" | "workspace";
+
+export interface CommandSetting {
+  id: string;
+  command_name: string;
+  scope: CommandScope;
+  project_id: string | null;
+  enabled: number;
+  sort_order: number;
+  config: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export const commandSettings = {
+  // List all global command settings
+  listGlobal: (): CommandSetting[] =>
+    queryAll<CommandSetting>(
+      "SELECT * FROM command_settings WHERE scope = 'global' ORDER BY sort_order ASC",
+      []
+    ),
+
+  // List command settings for a specific workspace/project
+  listByProject: (projectId: string): CommandSetting[] =>
+    queryAll<CommandSetting>(
+      "SELECT * FROM command_settings WHERE scope = 'workspace' AND project_id = ? ORDER BY sort_order ASC",
+      [projectId]
+    ),
+
+  // Get a specific command setting
+  get: (commandName: string, scope: CommandScope, projectId?: string | null): CommandSetting | undefined => {
+    if (scope === "global") {
+      return queryOne<CommandSetting>(
+        "SELECT * FROM command_settings WHERE command_name = ? AND scope = 'global'",
+        [commandName]
+      );
+    }
+    return queryOne<CommandSetting>(
+      "SELECT * FROM command_settings WHERE command_name = ? AND scope = 'workspace' AND project_id = ?",
+      [commandName, projectId]
+    );
+  },
+
+  // Create or update a command setting
+  upsert: (
+    commandName: string,
+    scope: CommandScope,
+    projectId: string | null,
+    enabled: boolean,
+    sortOrder?: number,
+    config?: string | null
+  ) => {
+    const now = Date.now();
+    const existing = commandSettings.get(commandName, scope, projectId);
+
+    if (existing) {
+      run(
+        `UPDATE command_settings
+         SET enabled = ?, sort_order = COALESCE(?, sort_order), config = COALESCE(?, config), updated_at = ?
+         WHERE id = ?`,
+        [enabled ? 1 : 0, sortOrder, config, now, existing.id]
+      );
+    } else {
+      const id = crypto.randomUUID();
+      run(
+        `INSERT INTO command_settings (id, command_name, scope, project_id, enabled, sort_order, config, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, commandName, scope, projectId, enabled ? 1 : 0, sortOrder ?? 0, config || null, now, now]
+      );
+    }
+  },
+
+  // Toggle enabled status for a command
+  toggleEnabled: (commandName: string, scope: CommandScope, projectId: string | null, enabled: boolean) => {
+    const existing = commandSettings.get(commandName, scope, projectId);
+    if (existing) {
+      run(
+        "UPDATE command_settings SET enabled = ?, updated_at = ? WHERE id = ?",
+        [enabled ? 1 : 0, Date.now(), existing.id]
+      );
+    } else {
+      commandSettings.upsert(commandName, scope, projectId, enabled);
+    }
+  },
+
+  // Update config for a command
+  updateConfig: (commandName: string, scope: CommandScope, projectId: string | null, config: string) => {
+    const existing = commandSettings.get(commandName, scope, projectId);
+    if (existing) {
+      run(
+        "UPDATE command_settings SET config = ?, updated_at = ? WHERE id = ?",
+        [config, Date.now(), existing.id]
+      );
+    }
+  },
+
+  // Update sort order for a single command
+  updateOrder: (commandName: string, scope: CommandScope, projectId: string | null, sortOrder: number) => {
+    const existing = commandSettings.get(commandName, scope, projectId);
+    if (existing) {
+      run(
+        "UPDATE command_settings SET sort_order = ?, updated_at = ? WHERE id = ?",
+        [sortOrder, Date.now(), existing.id]
+      );
+    } else {
+      commandSettings.upsert(commandName, scope, projectId, true, sortOrder);
+    }
+  },
+
+  // Batch update sort orders
+  updateOrders: (scope: CommandScope, projectId: string | null, orders: { commandName: string; sortOrder: number }[]) => {
+    const now = Date.now();
+    for (const { commandName, sortOrder } of orders) {
+      const existing = commandSettings.get(commandName, scope, projectId);
+      if (existing) {
+        run(
+          "UPDATE command_settings SET sort_order = ?, updated_at = ? WHERE id = ?",
+          [sortOrder, now, existing.id]
+        );
+      } else {
+        const id = crypto.randomUUID();
+        run(
+          `INSERT INTO command_settings (id, command_name, scope, project_id, enabled, sort_order, config, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 1, ?, NULL, ?, ?)`,
+          [id, commandName, scope, projectId, sortOrder, now, now]
+        );
+      }
+    }
+  },
+
+  // Delete a specific command setting
+  delete: (commandName: string, scope: CommandScope, projectId: string | null) => {
+    if (scope === "global") {
+      run(
+        "DELETE FROM command_settings WHERE command_name = ? AND scope = 'global'",
+        [commandName]
+      );
+    } else {
+      run(
+        "DELETE FROM command_settings WHERE command_name = ? AND scope = 'workspace' AND project_id = ?",
+        [commandName, projectId]
+      );
+    }
+  },
+
+  // Delete all command settings for a project
+  deleteByProject: (projectId: string) =>
+    run("DELETE FROM command_settings WHERE project_id = ?", [projectId]),
+
+  // Check if a command is enabled (respects scope hierarchy: workspace overrides global)
+  isEnabled: (commandName: string, projectId?: string | null): boolean => {
+    // First check workspace-level setting
+    if (projectId) {
+      const workspaceSetting = commandSettings.get(commandName, "workspace", projectId);
+      if (workspaceSetting) {
+        return workspaceSetting.enabled === 1;
+      }
+    }
+
+    // Fall back to global setting
+    const globalSetting = commandSettings.get(commandName, "global", null);
+    if (globalSetting) {
+      return globalSetting.enabled === 1;
+    }
+
+    // Default: enabled
+    return true;
+  },
+
+  // Get merged settings for a project (global + workspace overrides)
+  getMergedSettings: (projectId: string | null): Map<string, CommandSetting> => {
+    const merged = new Map<string, CommandSetting>();
+
+    // Start with global settings
+    const globalSettings = commandSettings.listGlobal();
+    for (const setting of globalSettings) {
+      merged.set(setting.command_name, setting);
+    }
+
+    // Override with workspace settings if projectId provided
+    if (projectId) {
+      const workspaceSettings = commandSettings.listByProject(projectId);
+      for (const setting of workspaceSettings) {
+        merged.set(setting.command_name, setting);
+      }
+    }
+
+    return merged;
+  },
 };
