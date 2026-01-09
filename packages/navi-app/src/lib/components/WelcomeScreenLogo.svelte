@@ -31,7 +31,7 @@
 </script>
 
 <div 
-  class="fixed inset-0 z-[200] flex items-center justify-center bg-white transition-opacity duration-500"
+  class="fixed inset-0 z-[200] flex items-center justify-center bg-white dark:bg-gray-900 transition-opacity duration-500"
   class:opacity-0={phase === "done"}
   class:pointer-events-none={phase === "done"}
 >
@@ -83,6 +83,10 @@
   .logo-svg.fade-out {
     opacity: 0;
     transform: scale(0.7);
+  }
+
+  :global(.dark) .logo-svg g {
+    stroke: #d4d4d8;
   }
 
   .left-bracket {
@@ -141,6 +145,10 @@
     letter-spacing: -0.02em;
     opacity: 0;
     transition: opacity 0.4s ease, transform 0.4s ease;
+  }
+
+  :global(.dark) .navi-text {
+    color: #f5f5f5;
   }
 
   .navi-text.show {

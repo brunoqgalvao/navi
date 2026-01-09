@@ -1,4 +1,4 @@
-import { writable, derived } from "svelte/store";
+import { writable, derived, get } from "svelte/store";
 import type { Notification, NotificationOptions, TourStep, AttachedFile, ChatViewMode, ProjectStatusType } from "./types";
 import { sessionStatus } from "./session";
 
@@ -11,6 +11,7 @@ const SHOW_ARCHIVED_KEY = "claude-code-ui-show-archived";
 const TOUR_COMPLETE_KEY = "claude-code-ui-tours-complete";
 const CHAT_VIEW_MODE_KEY = "claude-code-ui-chat-view-mode";
 const UI_SCALE_KEY = "claude-code-ui-scale";
+const THEME_KEY = "claude-code-ui-theme";
 
 // Onboarding store
 function createOnboardingStore() {
@@ -436,6 +437,83 @@ function createUIScaleStore() {
   };
 }
 
+// Theme store (light, dark, system)
+export type ThemeMode = "light" | "dark" | "system";
+
+function createThemeStore() {
+  const getSystemTheme = (): "light" | "dark" => {
+    if (typeof window === "undefined") return "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  };
+
+  const stored = typeof window !== "undefined" ? localStorage.getItem(THEME_KEY) as ThemeMode | null : null;
+  const initial: ThemeMode = stored && ["light", "dark", "system"].includes(stored) ? stored : "system";
+
+  const { subscribe, set } = writable<ThemeMode>(initial);
+
+  // Derived resolved theme (actual light/dark, never "system")
+  const resolvedTheme = derived({ subscribe }, ($theme) =>
+    $theme === "system" ? getSystemTheme() : $theme
+  );
+
+  const applyTheme = (mode: ThemeMode) => {
+    if (typeof document === "undefined") return;
+    const resolved = mode === "system" ? getSystemTheme() : mode;
+    const html = document.documentElement;
+    if (resolved === "dark") {
+      html.classList.add("dark");
+    } else {
+      html.classList.remove("dark");
+    }
+  };
+
+  // Apply initial theme on load
+  if (typeof window !== "undefined") {
+    applyTheme(initial);
+
+    // Listen for system theme changes
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      let current: ThemeMode = "system";
+      subscribe(v => current = v)();
+      if (current === "system") {
+        applyTheme("system");
+      }
+    });
+  }
+
+  return {
+    subscribe,
+    resolvedTheme,
+    set: (mode: ThemeMode) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(THEME_KEY, mode);
+      }
+      applyTheme(mode);
+      set(mode);
+    },
+    toggle: () => {
+      // Need to create store to use get
+      const store = { subscribe };
+      const current = get(store);
+      // Cycle through: light -> dark -> system -> light
+      let next: ThemeMode;
+      if (current === "light") {
+        next = "dark";
+      } else if (current === "dark") {
+        next = "system";
+      } else {
+        next = "light";
+      }
+      if (typeof window !== "undefined") {
+        localStorage.setItem(THEME_KEY, next);
+      }
+      applyTheme(next);
+      set(next);
+    },
+    getSystemTheme,
+  };
+}
+
 // Export store instances
 export const onboardingComplete = createOnboardingStore();
 export const advancedMode = createAdvancedModeStore();
@@ -447,6 +525,7 @@ export const notifications = createNotificationsStore();
 export const attachedFiles = createAttachedFilesStore();
 export const chatViewMode = createChatViewModeStore();
 export const uiScale = createUIScaleStore();
+export const theme = createThemeStore();
 export const isConnected = writable(false);
 
 // Derived stores

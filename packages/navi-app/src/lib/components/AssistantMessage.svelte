@@ -188,12 +188,12 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="flex-1 min-w-0 relative space-y-2" onclick={onMessageClick}>
       <!-- Hover actions -->
-      <div class="absolute -top-5 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5 z-20">
+      <div class="absolute -top-5 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm px-1 py-0.5 z-20">
         <CopyButton text={copyText} />
         <div class="relative">
           <button
             onclick={(e) => { e.stopPropagation(); showMenu = !showMenu; }}
-            class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+            class="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 rounded transition-colors"
             title="More actions"
           >
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -201,21 +201,21 @@
             </svg>
           </button>
           {#if showMenu}
-            <div class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
-              <button onclick={() => { onRollback?.(); showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            <div class="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 z-50">
+              <button onclick={() => { onRollback?.(); showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2">
                 <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path>
                 </svg>
                 Rollback to here
               </button>
-              <button onclick={() => { onFork?.(); showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              <button onclick={() => { onFork?.(); showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2">
                 <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
                 </svg>
                 Fork from here
               </button>
-              <div class="border-t border-gray-100 my-1"></div>
-              <button onclick={() => { showDeleteConfirm = true; showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+              <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+              <button onclick={() => { showDeleteConfirm = true; showMenu = false; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                 </svg>
@@ -224,13 +224,13 @@
             </div>
           {/if}
           {#if showDeleteConfirm}
-            <div class="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-50">
-              <p class="text-sm text-gray-700 mb-3">Delete this message?</p>
+            <div class="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 z-50">
+              <p class="text-sm text-gray-700 dark:text-gray-300 mb-3">Delete this message?</p>
               <div class="flex justify-end gap-2">
-                <button onclick={() => showDeleteConfirm = false} class="px-2 py-1 text-xs text-gray-600 hover:text-gray-800">
+                <button onclick={() => showDeleteConfirm = false} class="px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">
                   Cancel
                 </button>
-                <button onclick={() => { onDelete?.(); showDeleteConfirm = false; }} class="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">
+                <button onclick={() => { onDelete?.(); showDeleteConfirm = false; }} class="px-2 py-1 text-xs bg-red-600 dark:bg-red-700 text-white rounded hover:bg-red-700 dark:hover:bg-red-800">
                   Delete
                 </button>
               </div>
@@ -273,21 +273,21 @@
           <div class="overflow-hidden">
             <button
               onclick={() => toggleBlock(originalIdx)}
-              class="w-full flex items-center gap-2 py-1 text-left rounded hover:bg-gray-50 transition-colors -ml-1 pl-1"
+              class="w-full flex items-center gap-2 py-1 text-left rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors -ml-1 pl-1"
             >
               {#if isLoading}
-                <svg class="w-4 h-4 text-gray-400 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                <svg class="w-4 h-4 text-gray-400 dark:text-gray-500 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"></circle>
                   <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
               {:else}
-                <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d={getToolIconPath(tool.name)} />
                 </svg>
               {/if}
-              <span class="text-sm text-gray-600">{tool.name}</span>
+              <span class="text-sm text-gray-600 dark:text-gray-400">{tool.name}</span>
               {#if summary}
-                <span class="text-sm text-gray-400 truncate font-mono flex-1">{summary}</span>
+                <span class="text-sm text-gray-400 dark:text-gray-500 truncate font-mono flex-1">{summary}</span>
               {/if}
               {#if result}
                 {#if result.is_error}
@@ -301,7 +301,7 @@
                 {/if}
               {/if}
               <svg
-                class="w-3.5 h-3.5 text-gray-300 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
+                class="w-3.5 h-3.5 text-gray-300 dark:text-gray-600 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
                 fill="none" stroke="currentColor" viewBox="0 0 24 24"
               >
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
@@ -312,7 +312,7 @@
                 <ToolRenderer {tool} toolResult={result ? { content: String(result.content || ''), is_error: result.is_error } : undefined} {onPreview} {onRunInTerminal} {onSendToClaude} hideHeader={true} />
                 {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch', 'Bash'].includes(tool.name)}
                   <div class="pt-1">
-                    <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50' : 'text-gray-600 bg-gray-50'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{result.content}</pre>
+                    <pre class="text-xs {result.is_error ? 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20' : 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{result.content}</pre>
                   </div>
                 {/if}
               </div>
@@ -322,7 +322,7 @@
       {:else if item.type === "text"}
         {@const text = (item as TextBlock).text}
         {@const rendered = renderTextContent(text)}
-        <div class="text-sm leading-relaxed text-gray-800 markdown-body">
+        <div class="text-sm leading-relaxed text-gray-800 dark:text-gray-200 markdown-body">
           <MermaidRenderer content={rendered.genuiResult.processedContent} {renderMarkdown} {jsonBlocksMap} {shellBlocksMap} {onRunInTerminal} />
           {#if rendered.mediaResult.items.length > 0}
             <div class="my-4">
@@ -353,29 +353,29 @@
       {:else if item.type === "thinking"}
         {@const thinking = (item as ThinkingBlock).thinking}
         {@const expanded = expandedBlocks.has(idx)}
-        <div class="rounded-lg border border-purple-200 bg-purple-50/20 overflow-hidden">
+        <div class="rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50/20 dark:bg-purple-900/20 overflow-hidden">
           <button
             onclick={() => toggleBlock(idx)}
-            class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-purple-50 transition-colors"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
           >
             <span class="text-xs">💭</span>
-            <span class="text-xs font-medium text-purple-700">Thinking</span>
-            <span class="text-xs text-purple-400 truncate flex-1">
+            <span class="text-xs font-medium text-purple-700 dark:text-purple-300">Thinking</span>
+            <span class="text-xs text-purple-400 dark:text-purple-500 truncate flex-1">
               {thinking.slice(0, 60)}{thinking.length > 60 ? "..." : ""}
             </span>
             <svg
-              class="w-3.5 h-3.5 text-purple-400 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
+              class="w-3.5 h-3.5 text-purple-400 dark:text-purple-600 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
               fill="none" stroke="currentColor" viewBox="0 0 24 24"
             >
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
             </svg>
           </button>
           {#if expanded}
-            <div class="px-3 pb-2 pt-1 border-t border-purple-100 relative">
+            <div class="px-3 pb-2 pt-1 border-t border-purple-100 dark:border-purple-800 relative">
               <div class="absolute top-1 right-3">
                 <CopyButton text={thinking} />
               </div>
-              <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono bg-purple-50 rounded p-2 pr-8 max-h-48 overflow-y-auto">{thinking}</pre>
+              <pre class="text-xs text-purple-700 dark:text-purple-300 whitespace-pre-wrap font-mono bg-purple-50 dark:bg-purple-900/30 rounded p-2 pr-8 max-h-48 overflow-y-auto">{thinking}</pre>
             </div>
           {/if}
         </div>

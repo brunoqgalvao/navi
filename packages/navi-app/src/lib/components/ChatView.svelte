@@ -323,7 +323,7 @@
         {:else if msg.role === 'system'}
           {@const content = typeof msg.content === 'string' ? msg.content : ''}
           {@const isError = content.startsWith('Error:')}
-          <div class="w-full {isError ? 'bg-red-50 border-red-100 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-500'} border rounded-lg px-4 py-2.5 text-xs break-all">
+          <div class="w-full {isError ? 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800 text-red-800 dark:text-red-300' : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400'} border rounded-lg px-4 py-2.5 text-xs break-all">
             {content}
           </div>
         {:else if msg.role === 'assistant'}
