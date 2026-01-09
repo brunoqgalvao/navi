@@ -8,7 +8,7 @@
   - Compliance checking (validates project can be previewed)
 -->
 <script lang="ts">
-  import { nativePreviewApi, getServerUrl, type PreviewComplianceResult } from "../api";
+  import { nativePreviewApi, getServerUrl, type PreviewComplianceResult, type PortConflictInfo } from "../api";
 
   interface Props {
     projectId: string | null;
@@ -23,7 +23,7 @@
   let { projectId, sessionId, branch, previewUrl, onClose, onAskClaude }: Props = $props();
 
   let iframeRef = $state<HTMLIFrameElement | null>(null);
-  let status = $state<"stopped" | "starting" | "running" | "error" | "switching" | "unavailable">("stopped");
+  let status = $state<"stopped" | "starting" | "running" | "error" | "switching" | "unavailable" | "conflict">("stopped");
   let error = $state<string | null>(null);
   let errorLogs = $state<string[]>([]);
   let showErrorLogs = $state(false);
@@ -34,6 +34,8 @@
   let framework = $state<string | null>(null);
   let compliance = $state<PreviewComplianceResult | null>(null);
   let checkingCompliance = $state(false);
+  let portConflict = $state<PortConflictInfo | null>(null);
+  let resolvingConflict = $state(false);
 
   const effectiveBranch = $derived(branch || "main");
 
@@ -163,6 +165,7 @@
     }
     loading = true;
     error = null;
+    portConflict = null;
     try {
       console.log("[NativePreviewPanel] Calling nativePreviewApi.start");
       const result = await nativePreviewApi.start(sessionId);
@@ -172,6 +175,10 @@
         currentUrl = result.url || null;
         currentPort = result.port || null;
         pollStatus();
+      } else if ('conflict' in result && result.conflict) {
+        // Port conflict detected - show dialog for user to choose
+        portConflict = result.conflict;
+        status = "conflict";
       } else if ('error' in result && result.error) {
         error = result.error;
         status = "error";
@@ -182,6 +189,39 @@
       status = "error";
     } finally {
       loading = false;
+    }
+  }
+
+  async function resolvePortConflict(action: 'use_alternative' | 'kill_and_use_original') {
+    if (!sessionId || !portConflict) return;
+
+    resolvingConflict = true;
+    try {
+      console.log("[NativePreviewPanel] Resolving conflict with action:", action);
+      const result = await nativePreviewApi.resolveConflict(sessionId, action);
+      console.log("[NativePreviewPanel] Resolve result:", result);
+
+      if (result.success) {
+        portConflict = null;
+        status = "starting";
+        currentUrl = result.url || null;
+        currentPort = result.port || null;
+        pollStatus();
+      } else if ('conflict' in result && result.conflict) {
+        // Another conflict (shouldn't happen often)
+        portConflict = result.conflict;
+      } else if ('error' in result && result.error) {
+        error = result.error;
+        status = "error";
+        portConflict = null;
+      }
+    } catch (e: any) {
+      console.error("[NativePreviewPanel] Resolve conflict error:", e);
+      error = e.message;
+      status = "error";
+      portConflict = null;
+    } finally {
+      resolvingConflict = false;
     }
   }
 
@@ -492,6 +532,78 @@ Can you help fix this issue so the preview can start successfully?`;
             No logs available
           </div>
         {/if}
+      </div>
+    {:else if status === "conflict" && portConflict}
+      <!-- Port conflict dialog -->
+      <div class="flex flex-col items-center justify-center h-full text-gray-500 p-8">
+        <div class="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mb-4">
+          <svg class="w-8 h-8 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+        </div>
+        <p class="text-lg font-medium text-gray-700">Port Conflict Detected</p>
+        <p class="text-sm text-gray-500 mt-2 text-center max-w-md">
+          Port <span class="font-mono font-medium text-amber-700">{portConflict.requestedPort}</span> is already in use by
+          <span class="font-medium">{portConflict.conflictProcess.name}</span>
+          {#if portConflict.conflictProcess.isDevServer}
+            <span class="text-gray-400">(dev server)</span>
+          {/if}
+        </p>
+
+        <div class="mt-6 flex flex-col gap-3 w-full max-w-sm">
+          <!-- Option 1: Use alternative port -->
+          <button
+            onclick={() => resolvePortConflict('use_alternative')}
+            disabled={resolvingConflict}
+            class="w-full px-4 py-3 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {#if resolvingConflict}
+              <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="32" />
+              </svg>
+            {:else}
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            {/if}
+            Use port {portConflict.alternativePort} instead
+          </button>
+
+          <!-- Option 2: Kill and use original -->
+          <button
+            onclick={() => resolvePortConflict('kill_and_use_original')}
+            disabled={resolvingConflict}
+            class="w-full px-4 py-3 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {#if resolvingConflict}
+              <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="32" />
+              </svg>
+            {:else}
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            {/if}
+            Stop existing process & use port {portConflict.requestedPort}
+          </button>
+
+          <!-- Cancel -->
+          <button
+            onclick={() => { portConflict = null; status = "stopped"; }}
+            disabled={resolvingConflict}
+            class="w-full px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+
+        <p class="text-xs text-gray-400 mt-4 text-center max-w-sm">
+          {#if portConflict.conflictProcess.isDevServer}
+            The existing process appears to be a dev server from another project.
+          {:else}
+            The existing process may be important. Use caution when stopping it.
+          {/if}
+        </p>
       </div>
     {:else if status === "unavailable"}
       <!-- Preview not available for this project -->
