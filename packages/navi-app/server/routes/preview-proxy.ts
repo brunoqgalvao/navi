@@ -19,6 +19,195 @@ import { portManagerPreviewService } from "../services/port-manager-preview";
 /**
  * Generate the branch indicator injection script
  */
+/**
+ * Known OAuth/auth provider domains that block iframe embedding
+ * These need to be opened in a new window instead
+ */
+const OAUTH_DOMAINS = [
+  'accounts.google.com',
+  'appleid.apple.com',
+  'github.com/login',
+  'github.com/sessions',
+  'login.microsoftonline.com',
+  'login.live.com',
+  'facebook.com/login',
+  'facebook.com/v',
+  'api.twitter.com',
+  'twitter.com/i/oauth',
+  'x.com/i/oauth',
+  'discord.com/oauth',
+  'discord.com/login',
+  'slack.com/oauth',
+  'linkedin.com/oauth',
+  'auth0.com',
+  'okta.com',
+  'clerk.dev',
+  'clerk.com',
+  'supabase.co/auth',
+  'supabase.com/auth',
+  'firebase.google.com',
+  'securetoken.googleapis.com',
+];
+
+/**
+ * Generate script to intercept OAuth redirects and open them in a new window
+ */
+function getOAuthInterceptScript(): string {
+  return `
+<!-- Navi OAuth Interceptor -->
+<script>
+(function() {
+  if (window.__NAVI_OAUTH_INTERCEPT_LOADED) return;
+  window.__NAVI_OAUTH_INTERCEPT_LOADED = true;
+
+  const OAUTH_PATTERNS = ${JSON.stringify(OAUTH_DOMAINS)};
+
+  function isOAuthUrl(url) {
+    if (!url) return false;
+    try {
+      const parsed = new URL(url, window.location.origin);
+      const fullUrl = parsed.hostname + parsed.pathname;
+      return OAUTH_PATTERNS.some(pattern => fullUrl.includes(pattern));
+    } catch { return false; }
+  }
+
+  function openOAuthPopup(url) {
+    console.log('[Navi] Opening OAuth in popup:', url);
+    const width = 500;
+    const height = 700;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    return window.__naviOriginalOpen.call(
+      window,
+      url,
+      'navi_oauth_popup',
+      'width=' + width + ',height=' + height + ',left=' + left + ',top=' + top + ',popup=yes,scrollbars=yes'
+    );
+  }
+
+  // Store original functions FIRST before anything else can modify them
+  window.__naviOriginalOpen = window.open;
+  const originalAssign = window.location.assign.bind(window.location);
+  const originalReplace = window.location.replace.bind(window.location);
+
+  // Intercept link clicks (capture phase)
+  document.addEventListener('click', function(e) {
+    const link = e.target.closest('a[href]');
+    if (link && isOAuthUrl(link.href)) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      openOAuthPopup(link.href);
+      return false;
+    }
+  }, true);
+
+  // Intercept form submissions
+  document.addEventListener('submit', function(e) {
+    const form = e.target;
+    if (form && form.action && isOAuthUrl(form.action)) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      openOAuthPopup(form.action);
+      return false;
+    }
+  }, true);
+
+  // Intercept window.location.assign
+  window.location.assign = function(url) {
+    if (isOAuthUrl(url)) {
+      openOAuthPopup(url);
+      return;
+    }
+    return originalAssign(url);
+  };
+
+  // Intercept window.location.replace
+  window.location.replace = function(url) {
+    if (isOAuthUrl(url)) {
+      openOAuthPopup(url);
+      return;
+    }
+    return originalReplace(url);
+  };
+
+  // Intercept window.open
+  window.open = function(url, target, features) {
+    if (url && isOAuthUrl(url)) {
+      return openOAuthPopup(url);
+    }
+    return window.__naviOriginalOpen.call(window, url, target, features);
+  };
+
+  // CRITICAL: Intercept window.location.href setter
+  // This is how most frameworks (Supabase, NextAuth, etc.) redirect to OAuth
+  try {
+    const locationProxy = new Proxy(window.location, {
+      set: function(target, prop, value) {
+        if (prop === 'href' && isOAuthUrl(value)) {
+          openOAuthPopup(value);
+          return true;
+        }
+        target[prop] = value;
+        return true;
+      },
+      get: function(target, prop) {
+        const value = target[prop];
+        if (typeof value === 'function') {
+          if (prop === 'assign') return window.location.assign;
+          if (prop === 'replace') return window.location.replace;
+          return value.bind(target);
+        }
+        return value;
+      }
+    });
+
+    // Try to replace window.location (won't work in all browsers, but worth trying)
+    try {
+      Object.defineProperty(window, 'location', {
+        get: function() { return locationProxy; },
+        configurable: true
+      });
+    } catch(e) {
+      // Can't replace location, use navigation API fallback
+    }
+  } catch(e) {
+    console.log('[Navi] Could not proxy location:', e);
+  }
+
+  // Fallback: Use Navigation API if available (modern browsers)
+  if (window.navigation) {
+    window.navigation.addEventListener('navigate', function(e) {
+      if (e.destination && e.destination.url && isOAuthUrl(e.destination.url)) {
+        e.preventDefault();
+        openOAuthPopup(e.destination.url);
+      }
+    });
+  }
+
+  // Last resort fallback: beforeunload check
+  window.addEventListener('beforeunload', function(e) {
+    // Check if we're navigating to OAuth (can't fully prevent, but can warn)
+    const pendingUrl = document.activeElement?.href;
+    if (pendingUrl && isOAuthUrl(pendingUrl)) {
+      openOAuthPopup(pendingUrl);
+      e.preventDefault();
+      return '';
+    }
+  });
+
+  // Notify parent that OAuth intercept is active
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: 'navi:oauthInterceptActive' }, '*');
+  }
+
+  console.log('[Navi] OAuth intercept active - OAuth logins will open in popup');
+})();
+</script>
+`;
+}
+
 function getBranchIndicatorScript(branch: string, projectName: string): string {
   // Navi compass SVG icon (black)
   const naviIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`;
@@ -258,6 +447,7 @@ export async function handlePreviewProxyRoutes(
         // Inject a <base> tag to ensure all relative URLs go through the proxy
         // This fixes issues with CSS, JS, fonts, and images that use relative paths
         const baseTag = `<base href="/api/preview/proxy/${port}/">`;
+
         if (html.includes("<head>")) {
           html = html.replace("<head>", `<head>${baseTag}`);
         } else if (html.includes("<HEAD>")) {
@@ -307,14 +497,18 @@ export async function handlePreviewProxyRoutes(
           }
         );
 
-        // Inject before </body> or at the end
-        const script = getBranchIndicatorScript(branch, projectName);
+        // Inject OAuth interceptor and branch indicator before </body> or at the end
+        // Note: Fetch interceptor is already injected in <head> above
+        const oauthScript = getOAuthInterceptScript();
+        const branchScript = getBranchIndicatorScript(branch, projectName);
+        const injectedScripts = oauthScript + branchScript;
+
         if (html.includes("</body>")) {
-          html = html.replace("</body>", `${script}</body>`);
+          html = html.replace("</body>", `${injectedScripts}</body>`);
         } else if (html.includes("</html>")) {
-          html = html.replace("</html>", `${script}</html>`);
+          html = html.replace("</html>", `${injectedScripts}</html>`);
         } else {
-          html += script;
+          html += injectedScripts;
         }
 
         // Override content headers for modified HTML
@@ -340,6 +534,13 @@ export async function handlePreviewProxyRoutes(
         css = css.replace(
           new RegExp(`url\\(['"]?//localhost:${port}/`, 'g'),
           `url(/api/preview/proxy/${port}/`
+        );
+
+        // CRITICAL: Rewrite relative paths starting with / (like /_next/static/media/...)
+        // These are what Next.js uses for fonts and the browser resolves them wrong
+        css = css.replace(
+          /url\(\s*['"]?\/((?!api\/preview\/proxy)[^'"\s)]+)/g,
+          `url(/api/preview/proxy/${port}/$1`
         );
 
         responseHeaders["Content-Type"] = "text/css; charset=utf-8";

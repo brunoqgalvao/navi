@@ -280,7 +280,7 @@ export async function initDb() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       sort_order INTEGER DEFAULT 0,
-      collapsed INTEGER DEFAULT 0,
+      collapsed INTEGER DEFAULT 1,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -644,16 +644,57 @@ export interface SessionWithProject extends Session {
   project_name: string;
 }
 
+// Optimized session type for sidebar display (excludes heavy fields like deliverable/escalation JSON)
+export interface SessionSidebar {
+  id: string;
+  project_id: string;
+  title: string;
+  claude_session_id: string | null;
+  model: string | null;
+  total_cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  pinned: number;
+  favorite: number;
+  archived: number;
+  sort_order: number;
+  created_at: number;
+  updated_at: number;
+  worktree_path: string | null;
+  worktree_branch: string | null;
+  auto_accept_all: number;
+  marked_for_review: number;
+}
+
+// Columns used for sidebar display (avoids SELECT * overhead with large JSON columns)
+const SIDEBAR_COLUMNS = `id, project_id, title, claude_session_id, model, total_cost_usd,
+  input_tokens, output_tokens, pinned, favorite, archived, sort_order,
+  created_at, updated_at, worktree_path, worktree_branch, auto_accept_all, marked_for_review`;
+
 export const sessions = {
+  // Optimized query for sidebar - excludes heavy columns like deliverable, escalation, context_excerpt
+  listByProjectLight: (projectId: string, includeArchived: boolean = false) =>
+    queryAll<SessionSidebar>(`SELECT ${SIDEBAR_COLUMNS} FROM sessions WHERE project_id = ? ${includeArchived ? '' : 'AND (archived = 0 OR archived IS NULL)'} ORDER BY pinned DESC, favorite DESC, sort_order ASC, updated_at DESC`, [projectId]),
+  // Full query when all columns are needed
   listByProject: (projectId: string, includeArchived: boolean = false) =>
     queryAll<Session>(`SELECT * FROM sessions WHERE project_id = ? ${includeArchived ? '' : 'AND (archived = 0 OR archived IS NULL)'} ORDER BY pinned DESC, favorite DESC, sort_order ASC, updated_at DESC`, [projectId]),
-  listRecent: (limit: number = 10, includeArchived: boolean = false) =>
-    queryAll<SessionWithProject>(`
-      SELECT s.*, p.name as project_name 
-      FROM sessions s 
+  // Optimized recent sessions for sidebar
+  listRecentLight: (limit: number = 10, includeArchived: boolean = false) =>
+    queryAll<SessionSidebar & { project_name: string }>(`
+      SELECT ${SIDEBAR_COLUMNS.split(',').map(c => `s.${c.trim()}`).join(', ')}, p.name as project_name
+      FROM sessions s
       LEFT JOIN projects p ON s.project_id = p.id
       ${includeArchived ? '' : 'WHERE (p.archived = 0 OR p.archived IS NULL) AND (s.archived = 0 OR s.archived IS NULL)'}
-      ORDER BY s.updated_at DESC 
+      ORDER BY s.updated_at DESC
+      LIMIT ?
+    `, [limit]),
+  listRecent: (limit: number = 10, includeArchived: boolean = false) =>
+    queryAll<SessionWithProject>(`
+      SELECT s.*, p.name as project_name
+      FROM sessions s
+      LEFT JOIN projects p ON s.project_id = p.id
+      ${includeArchived ? '' : 'WHERE (p.archived = 0 OR p.archived IS NULL) AND (s.archived = 0 OR s.archived IS NULL)'}
+      ORDER BY s.updated_at DESC
       LIMIT ?
     `, [limit]),
   get: (id: string) => queryOne<Session>("SELECT * FROM sessions WHERE id = ?", [id]),

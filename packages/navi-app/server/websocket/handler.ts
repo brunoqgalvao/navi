@@ -91,6 +91,76 @@ const pendingQuestions = new Map<string, { sessionId: string; payload: any }>();
 const sessionApprovedAll = new Set<string>();
 const connectedClients = new Set<any>();
 
+/**
+ * Clean up all server-side state for a session.
+ * Call this when a session is deleted to prevent memory leaks.
+ */
+export function cleanupSessionState(sessionId: string) {
+  console.log(`[Memory] Cleaning up server state for session ${sessionId}`);
+
+  // Clean active processes
+  const active = activeProcesses.get(sessionId);
+  if (active) {
+    active.process.kill("SIGTERM");
+    activeProcesses.delete(sessionId);
+  }
+
+  // Clean session approval state
+  sessionApprovedAll.delete(sessionId);
+
+  // Clean until-done state
+  untilDoneSessions.delete(sessionId);
+
+  // Clean pending permissions for this session
+  for (const [reqId, req] of pendingPermissions) {
+    if (req.sessionId === sessionId) {
+      pendingPermissions.delete(reqId);
+    }
+  }
+
+  // Clean pending questions for this session
+  for (const [reqId, req] of pendingQuestions) {
+    if (req.sessionId === sessionId) {
+      pendingQuestions.delete(reqId);
+    }
+  }
+
+  // Clean pending escalations for this session
+  for (const [reqId, esc] of pendingEscalations) {
+    if (esc.sessionId === sessionId) {
+      pendingEscalations.delete(reqId);
+    }
+  }
+
+  // Clean child session workers
+  const childWorker = childSessionWorkers.get(sessionId);
+  if (childWorker) {
+    childWorker.kill("SIGTERM");
+    childSessionWorkers.delete(sessionId);
+  }
+
+  // Clean stream capture
+  deleteStreamCapture(sessionId);
+
+  console.log(`[Memory] Session ${sessionId} cleanup complete`);
+}
+
+/**
+ * Get current memory stats for debugging
+ */
+export function getMemoryStats() {
+  return {
+    activeProcesses: activeProcesses.size,
+    pendingPermissions: pendingPermissions.size,
+    pendingQuestions: pendingQuestions.size,
+    sessionApprovedAll: sessionApprovedAll.size,
+    untilDoneSessions: untilDoneSessions.size,
+    pendingEscalations: pendingEscalations.size,
+    childSessionWorkers: childSessionWorkers.size,
+    connectedClients: connectedClients.size,
+  };
+}
+
 // Until Done mode tracking
 interface UntilDoneState {
   enabled: boolean;

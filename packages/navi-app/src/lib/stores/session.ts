@@ -11,7 +11,43 @@ export interface SessionPaginationState {
   isLoadingMore: boolean;
 }
 
-// Session messages store with pagination support
+// LRU Cache configuration for memory management
+const MAX_SESSIONS_IN_MEMORY = 10; // Keep only last 10 sessions' messages in memory
+const recentlyAccessedSessions: string[] = []; // Track access order for LRU eviction
+
+function trackSessionAccess(sessionId: string) {
+  const idx = recentlyAccessedSessions.indexOf(sessionId);
+  if (idx !== -1) {
+    recentlyAccessedSessions.splice(idx, 1);
+  }
+  recentlyAccessedSessions.push(sessionId);
+}
+
+function evictOldSessions(map: Map<string, ChatMessage[]>, paginationMap: Map<string, SessionPaginationState>, currentSessionId?: string) {
+  // Only evict if we're over the limit
+  if (recentlyAccessedSessions.length <= MAX_SESSIONS_IN_MEMORY) return;
+
+  // Find sessions to evict (oldest first, but never the current session)
+  const toEvict: string[] = [];
+  for (const sessionId of recentlyAccessedSessions) {
+    if (sessionId !== currentSessionId && toEvict.length < recentlyAccessedSessions.length - MAX_SESSIONS_IN_MEMORY) {
+      toEvict.push(sessionId);
+    }
+  }
+
+  // Evict old sessions
+  for (const sessionId of toEvict) {
+    map.delete(sessionId);
+    paginationMap.delete(sessionId);
+    const idx = recentlyAccessedSessions.indexOf(sessionId);
+    if (idx !== -1) {
+      recentlyAccessedSessions.splice(idx, 1);
+    }
+    console.log(`[Memory] Evicted session ${sessionId} from message cache (LRU)`);
+  }
+}
+
+// Session messages store with pagination support and LRU eviction
 function createSessionMessagesStore() {
   const { subscribe, set, update } = writable<Map<string, ChatMessage[]>>(new Map());
   const paginationStore = writable<Map<string, SessionPaginationState>>(new Map());
@@ -21,8 +57,15 @@ function createSessionMessagesStore() {
     set,
     update,
     paginationStore,
+    // Get current cache stats for debugging
+    getCacheStats: () => ({
+      sessionsInMemory: recentlyAccessedSessions.length,
+      maxSessions: MAX_SESSIONS_IN_MEMORY,
+      sessionIds: [...recentlyAccessedSessions],
+    }),
     addMessage: (sessionId: string, msg: ChatMessage) =>
       update((map) => {
+        trackSessionAccess(sessionId);
         const msgs = map.get(sessionId) || [];
         map.set(sessionId, [...msgs, msg]);
         return new Map(map);
@@ -50,18 +93,30 @@ function createSessionMessagesStore() {
       }),
     setMessages: (sessionId: string, msgs: ChatMessage[]) =>
       update((map) => {
+        trackSessionAccess(sessionId);
         map.set(sessionId, msgs);
+        // Evict old sessions after adding new one
+        paginationStore.update((pMap) => {
+          evictOldSessions(map, pMap, sessionId);
+          return pMap;
+        });
         return new Map(map);
       }),
     // Set messages with pagination metadata
     setMessagesPaginated: (sessionId: string, msgs: ChatMessage[], total: number, hasMore: boolean) => {
+      trackSessionAccess(sessionId);
       update((map) => {
         map.set(sessionId, msgs);
         return new Map(map);
       });
-      paginationStore.update((map) => {
-        map.set(sessionId, { total, loadedCount: msgs.length, hasMore, isLoadingMore: false });
-        return new Map(map);
+      paginationStore.update((pMap) => {
+        pMap.set(sessionId, { total, loadedCount: msgs.length, hasMore, isLoadingMore: false });
+        // Evict old sessions after setting new pagination data
+        // Need to get the messages map for eviction
+        let messagesMap: Map<string, ChatMessage[]> = new Map();
+        subscribe((m) => { messagesMap = m; })();
+        evictOldSessions(messagesMap, pMap, sessionId);
+        return new Map(pMap);
       });
     },
     // Prepend older messages (for "load more")
@@ -102,6 +157,11 @@ function createSessionMessagesStore() {
       return result;
     },
     clearSession: (sessionId: string) => {
+      // Remove from LRU tracking
+      const idx = recentlyAccessedSessions.indexOf(sessionId);
+      if (idx !== -1) {
+        recentlyAccessedSessions.splice(idx, 1);
+      }
       update((map) => {
         map.delete(sessionId);
         return new Map(map);
@@ -860,3 +920,83 @@ export const currentWorkspace = derived(
     return $sessionWorkspaces.get($currentSession.sessionId) || null;
   }
 );
+
+// ============================================================================
+// MEMORY MANAGEMENT: Auxiliary store cleanup
+// ============================================================================
+
+// Track which auxiliary sessions have been accessed (for LRU eviction)
+const auxiliarySessionsAccessed: string[] = [];
+const MAX_AUXILIARY_SESSIONS = 10;
+
+/**
+ * Clean up auxiliary data (todos, debug, events, workspaces) for old sessions.
+ * Called automatically when switching sessions to prevent memory bloat.
+ * Keeps data for the last N sessions accessed.
+ */
+export function cleanupAuxiliaryStores(currentSessionId: string) {
+  // Track the current session access
+  const idx = auxiliarySessionsAccessed.indexOf(currentSessionId);
+  if (idx !== -1) {
+    auxiliarySessionsAccessed.splice(idx, 1);
+  }
+  auxiliarySessionsAccessed.push(currentSessionId);
+
+  // If under limit, no cleanup needed
+  if (auxiliarySessionsAccessed.length <= MAX_AUXILIARY_SESSIONS) {
+    return;
+  }
+
+  // Find sessions to evict (oldest first, but never current)
+  const toEvict: string[] = [];
+  for (const sessionId of auxiliarySessionsAccessed) {
+    if (sessionId !== currentSessionId && toEvict.length < auxiliarySessionsAccessed.length - MAX_AUXILIARY_SESSIONS) {
+      toEvict.push(sessionId);
+    }
+  }
+
+  // Evict old sessions from auxiliary stores
+  for (const sessionId of toEvict) {
+    sessionTodos.clearSession(sessionId);
+    sessionEvents.clearSession(sessionId);
+    sessionWorkspaces.clearSession(sessionId);
+    // Don't clear sessionStatus - it's used for sidebar indicators
+    // Don't clear sessionModels - small data, needed for model dropdown
+    // Don't clear sessionDrafts - user might want to return to draft
+
+    // Remove from tracking
+    const evictIdx = auxiliarySessionsAccessed.indexOf(sessionId);
+    if (evictIdx !== -1) {
+      auxiliarySessionsAccessed.splice(evictIdx, 1);
+    }
+    console.log(`[Memory] Evicted auxiliary data for session ${sessionId}`);
+  }
+}
+
+/**
+ * Get current memory stats for debugging (frontend)
+ */
+export function getClientMemoryStats() {
+  let messagesCount = 0;
+  let todosCount = 0;
+  let eventsCount = 0;
+
+  sessionMessages.subscribe((map) => {
+    messagesCount = map.size;
+  })();
+
+  sessionTodos.subscribe((map) => {
+    todosCount = map.size;
+  })();
+
+  sessionEvents.subscribe((map) => {
+    eventsCount = map.size;
+  })();
+
+  return {
+    messagesCache: sessionMessages.getCacheStats(),
+    auxiliarySessions: auxiliarySessionsAccessed.length,
+    todosStored: todosCount,
+    eventsStored: eventsCount,
+  };
+}

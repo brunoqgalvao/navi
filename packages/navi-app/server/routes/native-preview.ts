@@ -202,7 +202,18 @@ export async function handleNativePreviewRoutes(
   );
   if (statusMatch && method === "GET") {
     const sessionId = statusMatch[1];
-    const status = nativePreviewService.getBySession(sessionId);
+    const session = sessions.get(sessionId);
+
+    // First try direct session lookup
+    let status = nativePreviewService.getBySession(sessionId);
+
+    // If no preview found for this session, check if there's one running
+    // for the same project+branch (started by a different session)
+    if (!status.running && session?.project_id) {
+      const branch = session.worktree_branch || "main";
+      status = nativePreviewService.getByProjectAndBranch(session.project_id, branch);
+    }
+
     return json(status);
   }
 

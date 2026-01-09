@@ -48,6 +48,9 @@ export {
   currentWorkspace,
   sessionModels,
   projectWorkspaces,
+  // Memory management utilities
+  cleanupAuxiliaryStores,
+  getClientMemoryStats,
 } from "./session";
 
 export type { ProjectWorkspace, SessionPaginationState } from "./session";

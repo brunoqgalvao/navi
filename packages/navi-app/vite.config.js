@@ -26,14 +26,19 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: host || false,
-    // HMR configuration - enabled when TAURI_DEV_HOST is set, otherwise default
+    // HMR configuration - always use explicit config to ensure WebSocket connects to correct port
+    // This is critical when viewing through a proxy (like native preview on port 3001)
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 1421,
+          port: 1420,
         }
-      : undefined,
+      : {
+          protocol: "ws",
+          host: "localhost",
+          port: 1420,
+        },
     watch: {
       // Use a custom function to ONLY watch the src directory
       // This prevents any external file changes from triggering HMR

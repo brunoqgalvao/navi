@@ -242,6 +242,7 @@
   let draggedFolderId = $state<string | null>(null);
   let sessionMenuId = $state<string | null>(null);
   let projectMenuId = $state<string | null>(null);
+  let chatsMenuOpen = $state(false);
   let folderMenuId = $state<string | null>(null);
 
   let showNewFolderInput = $state(false);
@@ -584,6 +585,30 @@
     return projects.filter(p => (p.folder_id || null) === folderId);
   }
 
+  // Aggregate project statuses for all folders (bubble up counts) - reactive derived state
+  const folderStatusMap = $derived.by(() => {
+    const map = new Map<string, { attentionCount: number; runningCount: number }>();
+
+    for (const folder of folders) {
+      const folderProjects = projects.filter(p => p.folder_id === folder.id);
+      let attentionCount = 0;
+      let runningCount = 0;
+
+      for (const proj of folderProjects) {
+        if (proj.archived) continue;
+        const status = $projectStatus.get(proj.id);
+        if (status) {
+          attentionCount += status.attentionCount;
+          runningCount += status.runningCount;
+        }
+      }
+
+      map.set(folder.id, { attentionCount, runningCount });
+    }
+
+    return map;
+  });
+
   function relativeTime(timestamp: number | null | undefined): string {
     if (!timestamp) return "Never";
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -602,6 +627,7 @@
     projectMenuId = null;
     folderMenuId = null;
     showOpenInMenu = false;
+    chatsMenuOpen = false;
   }
 </script>
 
@@ -730,7 +756,13 @@
                   {:else}
                     <span class="flex-1 text-[12px] font-medium text-gray-600 dark:text-gray-400 truncate">{folder.name}</span>
                   {/if}
-                  <span class="text-[10px] text-gray-400 dark:text-gray-500">{getProjectsInFolder(folder.id).length}</span>
+                  {#if folderStatusMap.get(folder.id)?.attentionCount || folderStatusMap.get(folder.id)?.runningCount}
+                    <WorkspaceCountBadge
+                      attentionCount={folderStatusMap.get(folder.id)?.attentionCount ?? 0}
+                      runningCount={folderStatusMap.get(folder.id)?.runningCount ?? 0}
+                      size="sm"
+                    />
+                  {/if}
                   <StarButton active={folderPinned} onclick={(e) => onToggleFolderPin(folder, e)} size="sm" />
                   <div class="relative">
                     <button
@@ -1097,20 +1129,34 @@
                 {$blockedCount}
               </span>
             {/if}
-            <button
-              onclick={onArchiveAllNonStarred}
-              class="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 rounded transition-colors"
-              title="Archive all non-starred chats"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4l3 3m0 0l3-3m-3 3V9"></path></svg>
-            </button>
-            <button
-              onclick={() => showArchivedWorkspaces.toggle()}
-              class="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors {$showArchivedWorkspaces ? 'bg-gray-200 text-gray-600' : ''}"
-              title={$showArchivedWorkspaces ? 'Hide archived' : 'Show archived'}
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
-            </button>
+            <div class="relative">
+              <button
+                onclick={(e) => { e.stopPropagation(); chatsMenuOpen = !chatsMenuOpen; }}
+                class="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 rounded transition-colors"
+                title="Chat options"
+              >
+                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
+              </button>
+              {#if chatsMenuOpen}
+                <div class="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-[60]">
+                  <button
+                    onclick={(e) => { e.stopPropagation(); showArchivedWorkspaces.toggle(); chatsMenuOpen = false; }}
+                    class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                    {$showArchivedWorkspaces ? 'Hide archived' : 'Show archived'}
+                  </button>
+                  <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+                  <button
+                    onclick={(e) => { e.stopPropagation(); onArchiveAllNonStarred(); chatsMenuOpen = false; }}
+                    class="w-full px-3 py-1.5 text-left text-sm text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30 flex items-center gap-2"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4l3 3m0 0l3-3m-3 3V9"></path></svg>
+                    Archive all non-starred
+                  </button>
+                </div>
+              {/if}
+            </div>
             <button onclick={onCreateNewChat} class="text-[10px] font-medium bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded transition-colors border border-gray-200 dark:border-gray-600">+ New</button>
           </div>
         </div>

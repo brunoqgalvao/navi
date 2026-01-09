@@ -53,6 +53,7 @@ import {
   getPendingPermissions,
   getSessionApprovedAll,
   getActiveProcesses,
+  getMemoryStats,
 } from "./websocket/handler";
 import { findAvailablePort } from "./utils/port";
 
@@ -252,6 +253,21 @@ const server = Bun.serve({
     // Ports discovery endpoint
     if (url.pathname === "/ports") {
       return json({ server: PORT, pty: PORT + 1 });
+    }
+
+    // Memory stats endpoint for debugging
+    if (url.pathname === "/api/debug/memory") {
+      const memoryUsage = process.memoryUsage();
+      return json({
+        serverMaps: getMemoryStats(),
+        process: {
+          heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + "MB",
+          heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024) + "MB",
+          external: Math.round(memoryUsage.external / 1024 / 1024) + "MB",
+          rss: Math.round(memoryUsage.rss / 1024 / 1024) + "MB",
+        },
+        timestamp: Date.now(),
+      });
     }
 
     // Try each route handler in order

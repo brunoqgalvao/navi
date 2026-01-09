@@ -25,8 +25,9 @@
   let iframeRef = $state<HTMLIFrameElement | null>(null);
   let status = $state<"stopped" | "starting" | "running" | "error" | "switching" | "unavailable" | "conflict">("stopped");
   let error = $state<string | null>(null);
-  let errorLogs = $state<string[]>([]);
-  let showErrorLogs = $state(false);
+  let serverLogs = $state<string[]>([]);
+  let showLogsDrawer = $state(false);
+  let logsDrawerHeight = $state(200); // Default drawer height in pixels
   let loading = $state(false);
   let currentUrl = $state(previewUrl);
   let currentPort = $state<number | null>(null);
@@ -36,17 +37,22 @@
   let checkingCompliance = $state(false);
   let portConflict = $state<PortConflictInfo | null>(null);
   let resolvingConflict = $state(false);
+  // Track the project ID to avoid unnecessary reloads when switching sessions within same project
+  let currentProjectId = $state<string | null>(null);
+  let currentBranch = $state<string | null>(null);
 
   const effectiveBranch = $derived(branch || "main");
+  const normalizeBranch = (value: string | null | undefined) => (value ?? "main").trim();
 
-  // Use the preview proxy to add CORS headers for cross-origin resources (fonts, etc)
-  // The proxy at /api/preview/proxy/:port/* handles this and also injects the branch indicator
+  // Load the preview directly from localhost - no proxy needed
+  // This allows Next.js client-side navigation to work correctly
+  // Branch indicator can be injected at the project level (like Google Analytics)
   const iframeSrc = $derived(() => {
-    const proxyUrl = currentPort
-      ? `${getServerUrl()}/api/preview/proxy/${currentPort}/`
+    const directUrl = currentPort
+      ? `http://localhost:${currentPort}/`
       : currentUrl;
-    console.log("[NativePreviewPanel] iframeSrc:", { currentPort, currentUrl, proxyUrl });
-    return proxyUrl;
+    console.log("[NativePreviewPanel] iframeSrc:", { currentPort, currentUrl, directUrl });
+    return directUrl;
   });
 
   // Sync previewUrl prop to currentUrl
@@ -102,9 +108,27 @@
       console.log("[NativePreviewPanel] Session status:", result);
 
       if (result.running) {
+        // Check if this is the same project/port/branch - if so, don't reload iframe
+        const normalizedEffectiveBranch = normalizeBranch(effectiveBranch);
+        const normalizedResultBranch = normalizeBranch(result.branch ?? effectiveBranch);
+        const isSamePreview = currentPort === result.port
+          && currentProjectId === result.projectId
+          && normalizedResultBranch === normalizedEffectiveBranch;
+        console.log("[NativePreviewPanel] Preview comparison:", {
+          currentPort,
+          currentProjectId,
+          effectiveBranch: normalizedEffectiveBranch,
+          resultPort: result.port,
+          resultProjectId: result.projectId,
+          resultBranch: normalizedResultBranch,
+          isSamePreview,
+        });
+
         // This session's project has a preview running
         currentUrl = result.url || null;
         currentPort = result.port || null;
+        currentProjectId = result.projectId ?? currentProjectId ?? null;
+        currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
         framework = result.framework || null;
         error = result.error || null;
 
@@ -113,13 +137,23 @@
           pollStatus();
         } else if (result.status === "error") {
           status = "error";
-          await fetchErrorLogs();
+          await fetchServerLogs(); showLogsDrawer = true;
         } else {
           status = "running";
+          // Only update iframeKey if this is a different preview
+          // (switching sessions within same project should NOT reload)
+          if (!isSamePreview && currentPort) {
+            console.log("[NativePreviewPanel] Different preview detected, refreshing iframe");
+            iframeKey = Date.now();
+          } else {
+            console.log("[NativePreviewPanel] Same preview, keeping iframe");
+          }
         }
       } else {
         // No preview running for this session's project
         status = "stopped";
+        currentProjectId = null;
+        currentBranch = null;
       }
     } catch (e) {
       console.error("[NativePreviewPanel] checkStatusAndMaybeSwitch error:", e);
@@ -136,6 +170,8 @@
       if (result.running) {
         currentUrl = result.url || null;
         currentPort = result.port || null;
+        currentProjectId = result.projectId ?? currentProjectId ?? null;
+        currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
         framework = result.framework || null;
         error = result.error || null;
 
@@ -144,7 +180,7 @@
           pollStatus();
         } else if (result.status === "error") {
           status = "error";
-          await fetchErrorLogs();
+          await fetchServerLogs(); showLogsDrawer = true;
         } else {
           status = "running";
         }
@@ -174,6 +210,8 @@
         status = "starting";
         currentUrl = result.url || null;
         currentPort = result.port || null;
+        currentProjectId = projectId;
+        currentBranch = effectiveBranch;
         pollStatus();
       } else if ('conflict' in result && result.conflict) {
         // Port conflict detected - show dialog for user to choose
@@ -206,6 +244,8 @@
         status = "starting";
         currentUrl = result.url || null;
         currentPort = result.port || null;
+        currentProjectId = projectId;
+        currentBranch = effectiveBranch;
         pollStatus();
       } else if ('conflict' in result && result.conflict) {
         // Another conflict (shouldn't happen often)
@@ -225,16 +265,30 @@
     }
   }
 
-  async function fetchErrorLogs() {
+  async function fetchServerLogs() {
     if (!sessionId) return;
     try {
-      const result = await nativePreviewApi.getLogs(sessionId, 50);
-      errorLogs = result.logs || [];
-      showErrorLogs = true;
+      const result = await nativePreviewApi.getLogs(sessionId, 100);
+      serverLogs = result.logs || [];
     } catch (e) {
-      console.error("[NativePreviewPanel] Failed to fetch error logs:", e);
+      console.error("[NativePreviewPanel] Failed to fetch server logs:", e);
     }
   }
+
+  function toggleLogsDrawer() {
+    showLogsDrawer = !showLogsDrawer;
+    if (showLogsDrawer) {
+      fetchServerLogs();
+    }
+  }
+
+  // Auto-refresh logs when drawer is open and preview is running
+  $effect(() => {
+    if (!showLogsDrawer || status !== "running") return;
+
+    const interval = setInterval(fetchServerLogs, 3000);
+    return () => clearInterval(interval);
+  });
 
   async function stopPreview() {
     if (!sessionId) return;
@@ -244,8 +298,39 @@
       status = "stopped";
       currentUrl = null;
       currentPort = null;
+      currentProjectId = null;
+      currentBranch = null;
     } catch (e: any) {
       error = e.message;
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function restartPreview() {
+    if (!sessionId) return;
+    loading = true;
+    error = null;
+    try {
+      // Stop first, then start
+      await nativePreviewApi.stop(sessionId);
+      status = "starting";
+      const result = await nativePreviewApi.start(sessionId);
+      if (result.success) {
+        currentUrl = result.url || null;
+        currentPort = result.port || null;
+        currentProjectId = projectId;
+        currentBranch = effectiveBranch;
+        pollStatus();
+      } else if ('error' in result && result.error) {
+        error = result.error;
+        status = "error";
+        await fetchServerLogs();
+        showLogsDrawer = true;
+      }
+    } catch (e: any) {
+      error = e.message;
+      status = "error";
     } finally {
       loading = false;
     }
@@ -262,13 +347,15 @@
           status = "running";
           currentUrl = result.url || null;
           currentPort = result.port || null;
+          currentProjectId = result.projectId ?? currentProjectId ?? projectId ?? null;
+          currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
           framework = result.framework || null;
           iframeKey = Date.now();
           clearInterval(interval);
         } else if (result.status === "error" || !result.running) {
           status = "error";
           error = result.error || "Preview failed";
-          await fetchErrorLogs();
+          await fetchServerLogs(); showLogsDrawer = true;
           clearInterval(interval);
         } else if (result.status === "starting" && result.url) {
           // Check if URL is responding
@@ -281,6 +368,8 @@
             if (result.port) {
               currentPort = result.port;
             }
+            currentProjectId = result.projectId ?? currentProjectId ?? projectId ?? null;
+            currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
             console.log("[NativePreviewPanel] Set currentPort:", currentPort, "currentUrl:", currentUrl);
             iframeKey = Date.now();
             clearInterval(interval);
@@ -301,7 +390,7 @@
     }
   }
 
-  async function viewLogs() {
+  async function openLogsInWindow() {
     if (!sessionId) return;
     try {
       const result = await nativePreviewApi.getLogs(sessionId, 200);
@@ -345,8 +434,8 @@
     if (!onAskClaude) return;
 
     // Build a helpful message for Claude with the error context
-    const logsContext = errorLogs.length > 0
-      ? `\n\nDev server logs:\n\`\`\`\n${errorLogs.slice(-30).join('\n')}\n\`\`\``
+    const logsContext = serverLogs.length > 0
+      ? `\n\nDev server logs:\n\`\`\`\n${serverLogs.slice(-30).join('\n')}\n\`\`\``
       : '';
 
     const message = `The preview failed to start with the following error:
@@ -398,12 +487,22 @@ Can you help fix this issue so the preview can start successfully?`;
           </svg>
         </button>
         <button
-          onclick={viewLogs}
-          class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
-          title="View logs"
+          onclick={toggleLogsDrawer}
+          class="p-1.5 {showLogsDrawer ? 'text-emerald-600 bg-emerald-50' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'} rounded transition-colors"
+          title="{showLogsDrawer ? 'Hide' : 'Show'} server logs"
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </button>
+        <button
+          onclick={restartPreview}
+          disabled={loading}
+          class="p-1.5 text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded transition-colors disabled:opacity-50"
+          title="Restart dev server"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
           </svg>
         </button>
         <button
@@ -474,64 +573,43 @@ Can you help fix this issue so the preview can start successfully?`;
         <p class="text-sm text-gray-400 mt-1">Running locally, no container overhead</p>
       </div>
     {:else if status === "error"}
-      <div class="flex flex-col h-full overflow-hidden">
-        <div class="flex-shrink-0 p-6 text-center border-b border-gray-100">
-          <div class="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-3">
-            <svg class="w-6 h-6 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M15 9l-6 6M9 9l6 6" />
-            </svg>
-          </div>
-          <p class="text-base font-medium text-gray-700">Preview failed to start</p>
-          {#if error}
-            <p class="text-sm text-red-600 mt-1">{error}</p>
-          {/if}
-          <div class="flex items-center justify-center gap-2 mt-3 flex-wrap">
-            <button
-              onclick={startPreview}
-              disabled={loading}
-              class="px-3 py-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors"
-            >
-              Try Again
-            </button>
-            <button
-              onclick={() => showErrorLogs = !showErrorLogs}
-              class="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-            >
-              {showErrorLogs ? 'Hide' : 'Show'} Logs
-            </button>
-            {#if onAskClaude}
-              <button
-                onclick={askClaudeToFix}
-                class="px-3 py-1.5 text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors flex items-center gap-1.5"
-              >
-                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3m9 0a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3"/>
-                </svg>
-                Ask Claude
-              </button>
-            {/if}
-          </div>
+      <div class="flex flex-col items-center justify-center h-full text-gray-500 p-8">
+        <div class="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mb-3">
+          <svg class="w-6 h-6 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M15 9l-6 6M9 9l6 6" />
+          </svg>
         </div>
-
-        {#if showErrorLogs && errorLogs.length > 0}
-          <div class="flex-1 overflow-auto bg-gray-900 p-4">
-            <div class="mb-2 flex items-center justify-between">
-              <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">Dev Server Logs</span>
-              <button
-                onclick={fetchErrorLogs}
-                class="text-xs text-gray-400 hover:text-gray-300"
-              >
-                Refresh
-              </button>
-            </div>
-            <pre class="text-xs font-mono text-gray-300 whitespace-pre-wrap">{#each errorLogs as line}<div class="py-0.5 hover:bg-gray-800 px-1 -mx-1 rounded">{line}</div>{/each}</pre>
-          </div>
-        {:else if showErrorLogs}
-          <div class="flex-1 flex items-center justify-center text-gray-400 text-sm">
-            No logs available
-          </div>
+        <p class="text-base font-medium text-gray-700">Preview failed to start</p>
+        {#if error}
+          <p class="text-sm text-red-600 mt-1 text-center max-w-sm">{error}</p>
         {/if}
+        <div class="flex items-center justify-center gap-2 mt-4 flex-wrap">
+          <button
+            onclick={startPreview}
+            disabled={loading}
+            class="px-3 py-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors"
+          >
+            Try Again
+          </button>
+          <button
+            onclick={toggleLogsDrawer}
+            class="px-3 py-1.5 text-sm font-medium {showLogsDrawer ? 'text-emerald-700 bg-emerald-50' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'} rounded-lg transition-colors"
+          >
+            {showLogsDrawer ? 'Hide' : 'View'} Logs
+          </button>
+          {#if onAskClaude}
+            <button
+              onclick={askClaudeToFix}
+              class="px-3 py-1.5 text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3m9 0a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3"/>
+              </svg>
+              Ask Claude
+            </button>
+          {/if}
+        </div>
       </div>
     {:else if status === "conflict" && portConflict}
       <!-- Port conflict dialog -->
@@ -692,4 +770,85 @@ Can you help fix this issue so the preview can start successfully?`;
       </div>
     {/if}
   </div>
+
+  <!-- Bottom Logs Drawer -->
+  {#if showLogsDrawer && (status === "running" || status === "starting" || status === "error")}
+    <div
+      class="flex-shrink-0 border-t border-gray-200 bg-gray-900 flex flex-col"
+      style="height: {logsDrawerHeight}px;"
+    >
+      <!-- Drawer Header with resize handle -->
+      <div
+        class="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700 cursor-ns-resize select-none"
+        onmousedown={(e) => {
+          const startY = e.clientY;
+          const startHeight = logsDrawerHeight;
+          const onMouseMove = (moveEvent: MouseEvent) => {
+            const delta = startY - moveEvent.clientY;
+            logsDrawerHeight = Math.max(100, Math.min(500, startHeight + delta));
+          };
+          const onMouseUp = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+          };
+          document.addEventListener('mousemove', onMouseMove);
+          document.addEventListener('mouseup', onMouseUp);
+        }}
+      >
+        <div class="flex items-center gap-2">
+          <!-- Resize grip indicator -->
+          <div class="flex flex-col gap-0.5">
+            <div class="w-6 h-0.5 bg-gray-600 rounded"></div>
+            <div class="w-6 h-0.5 bg-gray-600 rounded"></div>
+          </div>
+          <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">Server Logs</span>
+          {#if serverLogs.length > 0}
+            <span class="text-xs text-gray-500">({serverLogs.length} lines)</span>
+          {/if}
+        </div>
+        <div class="flex items-center gap-1">
+          <button
+            onclick={fetchServerLogs}
+            class="p-1 text-gray-400 hover:text-gray-200 rounded transition-colors"
+            title="Refresh logs"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+          </button>
+          <button
+            onclick={openLogsInWindow}
+            class="p-1 text-gray-400 hover:text-gray-200 rounded transition-colors"
+            title="Open in new window"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </button>
+          <button
+            onclick={() => showLogsDrawer = false}
+            class="p-1 text-gray-400 hover:text-gray-200 rounded transition-colors"
+            title="Close drawer"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Logs Content -->
+      <div class="flex-1 overflow-auto p-3 font-mono text-xs">
+        {#if serverLogs.length > 0}
+          {#each serverLogs as line}
+            <div class="py-0.5 text-gray-300 hover:bg-gray-800 px-1 -mx-1 rounded whitespace-pre-wrap break-all">{line}</div>
+          {/each}
+        {:else}
+          <div class="flex items-center justify-center h-full text-gray-500 text-sm">
+            No logs yet...
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </div>

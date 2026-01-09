@@ -1,6 +1,6 @@
 import { json } from "../utils/response";
 import { projects, sessions, messages, searchIndex, pendingQuestions, type Message } from "../db";
-import { enableUntilDone, disableUntilDone, getUntilDoneSessions } from "../websocket/handler";
+import { enableUntilDone, disableUntilDone, getUntilDoneSessions, cleanupSessionState } from "../websocket/handler";
 
 export function createSessionApprovedAllSet(): Set<string> {
   return new Set<string>();
@@ -16,7 +16,8 @@ export async function handleSessionRoutes(
   if (url.pathname === "/api/sessions/recent" && method === "GET") {
     const limit = parseInt(url.searchParams.get("limit") || "10");
     const includeArchived = url.searchParams.get("includeArchived") === "true";
-    return json(sessions.listRecent(limit, includeArchived));
+    // Use light query for sidebar (excludes heavy JSON columns)
+    return json(sessions.listRecentLight(limit, includeArchived));
   }
 
   if (url.pathname === "/api/sessions/active" && method === "GET") {
@@ -33,7 +34,8 @@ export async function handleSessionRoutes(
     const projectId = sessionsMatch[1];
     if (method === "GET") {
       const includeArchived = url.searchParams.get("includeArchived") === "true";
-      return json(sessions.listByProject(projectId, includeArchived));
+      // Use light query for sidebar (excludes heavy JSON columns)
+      return json(sessions.listByProjectLight(projectId, includeArchived));
     }
     if (method === "POST") {
       const body = await req.json();
@@ -64,6 +66,8 @@ export async function handleSessionRoutes(
       return json(sessions.get(id));
     }
     if (method === "DELETE") {
+      // Clean up server-side state (WebSocket maps, active processes, etc.) before deleting
+      cleanupSessionState(id);
       searchIndex.removeSession(id);
       sessions.delete(id);
       return json({ success: true });

@@ -5,6 +5,7 @@ import {
   sessionDrafts,
   sessionStatus,
   sessionModels,
+  cleanupAuxiliaryStores,
   type ChatMessage,
 } from "../stores";
 import { streamingStore } from "../handlers";
@@ -132,6 +133,9 @@ export async function selectSession(s: Session) {
   // Restore draft for new session
   const drafts = get(sessionDrafts);
   callbacks.setInputText(drafts.get(s.id) || "");
+
+  // Clean up auxiliary data from old sessions (LRU eviction)
+  cleanupAuxiliaryStores(s.id);
 
   currentSession.setSession(s.id, s.claude_session_id);
   currentSession.setCost(s.total_cost_usd || 0);

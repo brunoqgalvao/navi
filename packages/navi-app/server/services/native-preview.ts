@@ -873,6 +873,53 @@ class NativePreviewService {
   }
 
   /**
+   * Find preview by project ID and branch
+   * Used when switching sessions within the same workspace - the preview
+   * might be running under a different session's ID but same project/branch
+   */
+  private findByProjectAndBranch(projectId: string, branch: string): NativePreview | undefined {
+    for (const preview of this.previews.values()) {
+      if (preview.projectId === projectId && preview.branch === branch) {
+        return preview;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Get preview status by project ID and branch
+   * Public method for route handlers to find previews across sessions
+   */
+  getByProjectAndBranch(projectId: string, branch: string): {
+    running: boolean;
+    port?: number;
+    url?: string;
+    status?: string;
+    framework?: string;
+    error?: string;
+    branch?: string;
+    projectId?: string;
+    sessionId?: string;
+  } {
+    const preview = this.findByProjectAndBranch(projectId, branch);
+    if (!preview) {
+      return { running: false };
+    }
+
+    return {
+      running: true,
+      port: preview.port,
+      url: `http://localhost:${preview.port}`,
+      status: preview.status,
+      framework: preview.framework.name,
+      error: preview.error,
+      branch: preview.branch,
+      projectId: preview.projectId,
+      sessionId: preview.sessionId,
+    };
+  }
+
+  /**
    * Get current preview by session ID
    */
   getBySession(sessionId: string): {
@@ -1471,23 +1518,66 @@ class NativePreviewService {
   }
 
   /**
-   * Check if a port is available
+   * Check if a port is available using multiple methods:
+   * 1. lsof system check (most reliable)
+   * 2. net.createServer on multiple interfaces (fallback)
    */
-  private isPortAvailable(port: number, net: any): Promise<boolean> {
-    return new Promise((resolve) => {
-      const server = net.createServer();
+  private async isPortAvailable(port: number, net: any): Promise<boolean> {
+    // Method 1: Use lsof to check if any process is listening on this port (most reliable)
+    try {
+      const { execSync } = await import("child_process");
+      const result = execSync(`lsof -ti :${port} 2>/dev/null || true`, {
+        encoding: "utf-8",
+        timeout: 3000,
+      }).trim();
 
-      server.once("error", () => {
-        resolve(false);
+      if (result) {
+        // Port is in use by process(es)
+        const pids = result.split("\n").filter(p => p);
+        console.log(`[NativePreview] Port ${port} in use by PIDs: ${pids.join(", ")} (lsof check)`);
+        return false;
+      }
+    } catch (e) {
+      // lsof failed, fall through to socket check
+      console.log(`[NativePreview] lsof check failed for port ${port}, using socket check`);
+    }
+
+    // Method 2: Try to bind to the port on multiple interfaces
+    const interfaces = ["127.0.0.1", "0.0.0.0", "::"];
+
+    for (const host of interfaces) {
+      const inUse = await new Promise<boolean>((resolve) => {
+        const server = net.createServer();
+        const timeout = setTimeout(() => {
+          server.close();
+          resolve(false); // Timeout - assume available
+        }, 1000);
+
+        server.once("error", (err: any) => {
+          clearTimeout(timeout);
+          if (err.code === "EADDRINUSE") {
+            resolve(true); // Port is in use
+          } else {
+            resolve(false); // Interface not available or other error
+          }
+        });
+
+        server.once("listening", () => {
+          clearTimeout(timeout);
+          server.close();
+          resolve(false); // Port is available
+        });
+
+        server.listen(port, host);
       });
 
-      server.once("listening", () => {
-        server.close();
-        resolve(true);
-      });
+      if (inUse) {
+        console.log(`[NativePreview] Port ${port} in use on ${host} (socket check)`);
+        return false;
+      }
+    }
 
-      server.listen(port, "localhost");
-    });
+    return true;
   }
 
   /**
