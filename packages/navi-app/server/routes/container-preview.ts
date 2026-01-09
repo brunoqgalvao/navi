@@ -5,18 +5,56 @@
  * Replaces native process-based previews with Docker containers via Colima.
  */
 import { json, error } from "../utils/response";
-import { sessions, projects } from "../db";
+import { sessions, projects, saveDb } from "../db";
 import {
   previewService,
   getInstallInstructions,
   type PreviewContainer,
 } from "../services/preview";
+import { getDb } from "../db";
 
 export async function handleContainerPreviewRoutes(
   url: URL,
   method: string,
   req: Request
 ): Promise<Response | null> {
+  // GET /api/projects/:projectId/preview/branch/:branch - Get preview by branch
+  const branchStatusMatch = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/preview\/branch\/(.+)$/
+  );
+  if (branchStatusMatch && method === "GET") {
+    const projectId = branchStatusMatch[1];
+    const branch = decodeURIComponent(branchStatusMatch[2]);
+
+    const preview = previewService.getPreviewByBranch(projectId, branch);
+    if (!preview) {
+      return json({ running: false, exists: false });
+    }
+
+    previewService.markAccessed(preview.id);
+
+    return json({
+      exists: true,
+      running: preview.status === "running" || preview.status === "starting",
+      status: preview.status,
+      url: preview.url,
+      slug: preview.slug,
+      branch: preview.branch,
+      framework: preview.framework?.name,
+      startedAt: preview.startedAt,
+      error: preview.error,
+    });
+  }
+
+  // DELETE /api/projects/:projectId/preview/branch/:branch - Stop preview by branch
+  if (branchStatusMatch && method === "DELETE") {
+    const projectId = branchStatusMatch[1];
+    const branch = decodeURIComponent(branchStatusMatch[2]);
+
+    await previewService.stopPreviewByBranch(projectId, branch);
+    return json({ success: true });
+  }
+
   // GET /api/preview/status - Get preview system status
   if (url.pathname === "/api/preview/status" && method === "GET") {
     const state = previewService.getState();
@@ -84,13 +122,22 @@ export async function handleContainerPreviewRoutes(
       return error("No path available for preview", 400);
     }
 
+    // Get cached preview config from database
+    const cachedConfig = getProjectPreviewConfig(project.id);
+
     try {
-      const preview = await previewService.startPreview(
+      const { preview, detectedConfig } = await previewService.startPreview(
         sessionId,
         project.id,
         previewPath,
-        branch
+        branch,
+        cachedConfig
       );
+
+      // If new config was detected, cache it for future use
+      if (detectedConfig && !cachedConfig) {
+        saveProjectPreviewConfig(project.id, detectedConfig);
+      }
 
       return json({
         success: true,
@@ -215,4 +262,32 @@ export async function handleContainerPreviewRoutes(
  */
 export async function cleanupContainerPreview(sessionId: string): Promise<void> {
   await previewService.stopPreviewBySession(sessionId);
+}
+
+/**
+ * Get cached preview config for a project from the database
+ */
+function getProjectPreviewConfig(projectId: string): string | null {
+  const db = getDb();
+  const result = db.exec(
+    `SELECT preview_config FROM projects WHERE id = ?`,
+    [projectId]
+  );
+  if (result.length > 0 && result[0].values.length > 0) {
+    return result[0].values[0][0] as string | null;
+  }
+  return null;
+}
+
+/**
+ * Save detected preview config to the database
+ */
+function saveProjectPreviewConfig(projectId: string, config: string): void {
+  const db = getDb();
+  db.run(
+    `UPDATE projects SET preview_config = ? WHERE id = ?`,
+    [config, projectId]
+  );
+  saveDb();
+  console.log(`[ContainerPreview] Cached preview config for project ${projectId}`);
 }

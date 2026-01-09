@@ -628,7 +628,8 @@
   let showKanban = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "container-preview">("preview");
+  let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
   let projectFileIndex = $state<Map<string, string>>(new Map());
@@ -2356,11 +2357,18 @@
   }
 
   /**
-   * Handle extension toolbar clicks - opens the corresponding panel
+   * Handle extension toolbar clicks - toggles the corresponding panel
    */
   function handleExtensionClick(mode: string) {
-    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban";
+    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "container-preview";
     const panelMode = mode as PanelMode;
+
+    // Check if we're already showing this panel - if so, close it
+    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban;
+    if (isPanelOpen && rightPanelMode === panelMode) {
+      closeRightPanel();
+      return;
+    }
 
     // Set the right panel mode and show flag based on extension
     switch (panelMode) {
@@ -2379,6 +2387,9 @@
         break;
       case "kanban":
         showKanban = true;
+        break;
+      case "container-preview":
+        showPreview = true;
         break;
     }
     rightPanelMode = panelMode;
@@ -3118,7 +3129,9 @@
       sessionId={$session.sessionId || null}
       projectPath={currentProject?.path || null}
       worktreePath={currentSessionData?.worktree_path}
+      worktreeBranch={currentSessionData?.worktree_branch}
       {previewSource}
+      {containerPreviewUrl}
       {browserUrl}
       isResizing={isResizingRight}
       {terminalInitialCommand}
@@ -3130,6 +3143,7 @@
         else if (mode === "git") showGitPanel = true;
         else if (mode === "terminal") showTerminal = true;
         else if (mode === "kanban") showKanban = true;
+        else if (mode === "container-preview") showPreview = true;
       }}
       onClose={closeRightPanel}
       onStartResize={startResizingRight}

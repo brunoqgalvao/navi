@@ -1297,6 +1297,7 @@ export const worktreeApi = {
  */
 export interface ContainerPreview {
   id: string;
+  sessionId: string;
   url: string;
   slug: string;
   status: "pending" | "starting" | "running" | "paused" | "stopped" | "error";
@@ -1308,6 +1309,7 @@ export interface ContainerPreview {
 
 export interface ContainerPreviewStatus {
   running: boolean;
+  exists?: boolean;
   status?: string;
   url?: string;
   slug?: string;
@@ -1392,5 +1394,20 @@ export const containerPreviewApi = {
     request<{ success: boolean }>(
       `/sessions/${sessionId}/preview/container/unpause`,
       { method: "POST" }
+    ),
+
+  // Branch-scoped APIs (preferred)
+
+  /** Get container preview status by branch */
+  getStatusByBranch: (projectId: string, branch: string) =>
+    request<ContainerPreviewStatus>(
+      `/projects/${projectId}/preview/branch/${encodeURIComponent(branch)}`
+    ),
+
+  /** Stop container preview by branch */
+  stopByBranch: (projectId: string, branch: string) =>
+    request<{ success: boolean }>(
+      `/projects/${projectId}/preview/branch/${encodeURIComponent(branch)}`,
+      { method: "DELETE" }
     ),
 };

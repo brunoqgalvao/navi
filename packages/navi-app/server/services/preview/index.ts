@@ -24,6 +24,7 @@ import type {
 export * from "./types";
 export { getInstallInstructions } from "./runtime-detector";
 export { loadPreviewSpec, type PreviewSpec } from "./spec";
+export { autoDetectPreviewConfig, getOrDetectPreviewConfig } from "./auto-detect";
 
 class PreviewService {
   private state: PreviewState;
@@ -101,28 +102,32 @@ class PreviewService {
   }
 
   /**
-   * Start a preview for a session
+   * Start a preview for a branch (branch-scoped, not session-scoped)
+   * @param cachedConfig - Optional cached config from database (JSON string)
+   * @returns The preview container and optionally the newly detected config
    */
   async startPreview(
     sessionId: string,
     projectId: string,
     projectPath: string,
-    branch: string
-  ): Promise<PreviewContainer> {
+    branch: string,
+    cachedConfig?: string | null
+  ): Promise<{ preview: PreviewContainer; detectedConfig?: string }> {
     await this.ensureReady();
 
-    // Check if we already have a preview for this session
-    const existing = this.findPreviewBySession(sessionId);
+    // BRANCH-SCOPED: Check if we already have a preview for this branch+project
+    const existing = this.findPreviewByBranch(projectId, branch);
     if (existing) {
       // If paused, unpause it
       if (existing.status === "paused") {
         await this.unpausePreview(existing.id);
-        return existing;
+        return { preview: existing };
       }
-      // If running or starting, return as-is
+      // If running or starting, return as-is (don't create duplicate!)
       if (existing.status === "running" || existing.status === "starting") {
         existing.lastAccessedAt = Date.now();
-        return existing;
+        console.log(`[Preview] Reusing existing preview for branch ${branch}: ${existing.url}`);
+        return { preview: existing };
       }
       // Otherwise, clean it up and create new
       await this.stopPreview(existing.id);
@@ -138,13 +143,14 @@ class PreviewService {
     const framework = await detectFramework(projectPath, true);
     console.log(`[Preview] Detected: ${describeFramework(framework)}`);
 
-    // Create container
-    const container = await this.containerManager.createContainer(
+    // Create container (will auto-detect config if not cached)
+    const { container, detectedConfig } = await this.containerManager.createContainer(
       sessionId,
       projectId,
       projectPath,
       branch,
-      framework
+      framework,
+      cachedConfig
     );
 
     this.state.containers.set(container.id, container);
@@ -152,7 +158,7 @@ class PreviewService {
     // Start health polling for this container
     this.pollContainerHealth(container.id);
 
-    return container;
+    return { preview: container, detectedConfig };
   }
 
   /**
@@ -204,6 +210,23 @@ class PreviewService {
    */
   getPreviewBySession(sessionId: string): PreviewContainer | undefined {
     return this.findPreviewBySession(sessionId);
+  }
+
+  /**
+   * Get preview by branch (branch-scoped lookup)
+   */
+  getPreviewByBranch(projectId: string, branch: string): PreviewContainer | undefined {
+    return this.findPreviewByBranch(projectId, branch);
+  }
+
+  /**
+   * Stop preview by branch
+   */
+  async stopPreviewByBranch(projectId: string, branch: string): Promise<void> {
+    const container = this.findPreviewByBranch(projectId, branch);
+    if (container) {
+      await this.stopPreview(container.id);
+    }
   }
 
   /**
@@ -281,6 +304,15 @@ class PreviewService {
     return undefined;
   }
 
+  private findPreviewByBranch(projectId: string, branch: string): PreviewContainer | undefined {
+    for (const container of Array.from(this.state.containers.values())) {
+      if (container.projectId === projectId && container.branch === branch) {
+        return container;
+      }
+    }
+    return undefined;
+  }
+
   private async evictOldestContainer(): Promise<void> {
     let oldest: PreviewContainer | null = null;
 
@@ -320,12 +352,23 @@ class PreviewService {
         return;
       }
 
-      // Check container health
-      const healthy = await this.containerManager.isHealthy(current.containerId);
+      // Check container health by hitting the URL directly
+      let healthy = false;
+      if (current.url) {
+        try {
+          const response = await fetch(current.url, {
+            method: 'HEAD',
+            signal: AbortSignal.timeout(5000)
+          });
+          healthy = response.ok;
+        } catch {
+          healthy = false;
+        }
+      }
 
       if (healthy) {
         current.status = "running";
-        console.log(`[Preview] Container ${current.slug} is healthy`);
+        console.log(`[Preview] Container ${current.slug} is healthy at ${current.url}`);
         return;
       }
 

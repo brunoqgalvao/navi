@@ -203,6 +203,12 @@ export async function initDb() {
     db.run("CREATE INDEX idx_sessions_agent_status ON sessions(agent_status)");
   } catch {}
 
+  // Preview configuration - auto-detected and cached per project
+  // Stores JSON with: image, ports, commands, workdir, env, resources
+  try {
+    db.run("ALTER TABLE projects ADD COLUMN preview_config TEXT");
+  } catch {}
+
   db.run(`
     CREATE TABLE IF NOT EXISTS cost_entries (
       id TEXT PRIMARY KEY,

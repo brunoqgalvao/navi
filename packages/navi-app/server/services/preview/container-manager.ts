@@ -10,6 +10,7 @@ import { createHash } from "crypto";
 
 import type { DetectedFramework, PreviewConfig, PreviewContainer, PreviewStatus } from "./types";
 import { loadPreviewSpec, getSpecPorts, getPrimaryPort, type PreviewSpec } from "./spec";
+import { getOrDetectPreviewConfig } from "./auto-detect";
 
 const execAsync = promisify(exec);
 
@@ -158,22 +159,28 @@ export class ContainerManager {
 
   /**
    * Create and start a preview container
+   * @param cachedConfig - Optional cached config from database (avoids re-detection)
+   * @returns The container and optionally the newly detected config (JSON string)
    */
   async createContainer(
     sessionId: string,
     projectId: string,
     projectPath: string,
     branch: string,
-    framework: DetectedFramework
-  ): Promise<PreviewContainer> {
+    framework: DetectedFramework,
+    cachedConfig?: string | null
+  ): Promise<{ container: PreviewContainer; detectedConfig?: string }> {
     const id = generateId(projectPath, branch);
     const slug = generateSlug(projectPath, branch);
     const containerName = `navi-prev-${id}`;
     const nodeModulesVolume = `navi-nm-${hashPath(projectPath)}`;
 
-    // Load preview spec if available
-    const spec = loadPreviewSpec(projectPath);
-    const hasSpec = spec !== null;
+    // Auto-detect preview config (or use cached/spec file)
+    const spec = await getOrDetectPreviewConfig(projectPath, cachedConfig);
+    const hasSpec = true; // Always true now since we auto-detect
+
+    // Track if we generated a new config (for caching in DB)
+    const isNewlyDetected = !cachedConfig;
 
     // Get ports from spec or use defaults
     const specPorts = spec ? getSpecPorts(spec) : [];
@@ -283,9 +290,9 @@ export class ContainerManager {
       // Image
       image,
 
-      // Startup command
+      // Startup command - workdir is already set via -w flag, no need to cd
       "sh", "-c",
-      `cd /app && echo "[Navi Preview] Installing dependencies..." && ${installCmd} && echo "[Navi Preview] Running setup..." && ${setupCmds} && echo "[Navi Preview] Starting dev server..." && ${devCmd}`,
+      `echo "[Navi Preview] Installing dependencies..." && ${installCmd} && echo "[Navi Preview] Running setup..." && ${setupCmds} && echo "[Navi Preview] Starting dev server..." && ${devCmd}`,
     ];
 
     console.log(`[Preview] Creating container: ${containerName}`);
@@ -314,7 +321,11 @@ export class ContainerManager {
       lastAccessedAt: Date.now(),
     };
 
-    return container;
+    // Return the container and the detected config if it was newly generated
+    return {
+      container,
+      detectedConfig: isNewlyDetected ? JSON.stringify(spec) : undefined,
+    };
   }
 
   /**
@@ -366,26 +377,30 @@ export class ContainerManager {
   }
 
   /**
-   * Check if container's dev server is healthy (responding on port 3000)
+   * Check if container's dev server is healthy (responding on the mapped port from host)
    */
   async isHealthy(containerId: string): Promise<boolean> {
     try {
-      await docker(
-        `exec ${containerId} wget -q --spider http://localhost:3000 2>/dev/null`,
+      // Get the host port mapping for this container
+      const portOutput = await docker(
+        `port ${containerId}`,
         5000
       );
-      return true;
+
+      // Parse first port mapping (e.g., "1420/tcp -> 0.0.0.0:4003")
+      const match = portOutput.match(/-> 0\.0\.0\.0:(\d+)/);
+      if (!match) return false;
+
+      const hostPort = match[1];
+
+      // Check from host side using fetch
+      const response = await fetch(`http://localhost:${hostPort}`, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(5000)
+      });
+      return response.ok;
     } catch {
-      // Try curl as fallback (some containers don't have wget)
-      try {
-        await docker(
-          `exec ${containerId} curl -sf http://localhost:3000 >/dev/null 2>&1`,
-          5000
-        );
-        return true;
-      } catch {
-        return false;
-      }
+      return false;
     }
   }
 

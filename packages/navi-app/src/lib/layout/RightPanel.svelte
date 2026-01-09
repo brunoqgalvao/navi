@@ -16,9 +16,10 @@
   import { KanbanPanel } from "../features/kanban";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
+  import ContainerPreviewPanel from "../components/ContainerPreviewPanel.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "container-preview";
 
   interface Props {
     mode: PanelMode;
@@ -27,7 +28,9 @@
     sessionId: string | null;
     projectPath: string | null;
     worktreePath?: string | null;  // Use this for git operations when in a worktree
+    worktreeBranch?: string | null;  // Current branch for container preview
     previewSource: string | null;
+    containerPreviewUrl?: string | null;  // URL for container preview
     browserUrl: string;
     isResizing: boolean;
     terminalInitialCommand?: string;
@@ -48,7 +51,9 @@
     sessionId,
     projectPath,
     worktreePath = null,
+    worktreeBranch = null,
     previewSource,
+    containerPreviewUrl = null,
     browserUrl,
     isResizing,
     terminalInitialCommand = "",
@@ -257,6 +262,16 @@
         <KanbanPanel
           {projectId}
           {onNavigateToSession}
+        />
+      </div>
+    {:else if mode === "container-preview"}
+      <!-- Container Preview panel - full width -->
+      <div class="flex-1 flex flex-col w-full overflow-hidden">
+        <ContainerPreviewPanel
+          {projectId}
+          {sessionId}
+          branch={worktreeBranch}
+          previewUrl={containerPreviewUrl}
         />
       </div>
     {/if}
