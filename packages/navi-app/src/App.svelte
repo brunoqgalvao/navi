@@ -94,6 +94,7 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
+  import ContextWarning from "./lib/components/ContextWarning.svelte";
   import MergeModal from "./lib/components/MergeModal.svelte";
   import { QueuedMessagesPanel } from "./lib/components/queue";
   import ProcessManager from "./lib/components/ProcessManager.svelte";
@@ -816,6 +817,10 @@
   let currentSessionLoading = $derived($session.sessionId && $loadingSessions.has($session.sessionId));
   let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.sessionId === $session.sessionId).length : 0);
   let showOnboarding = $derived(!$onboardingComplete);
+
+  // Context usage percentage for current session
+  const contextWindow = $derived(currentProject?.context_window || 200000);
+  const usagePercent = $derived(contextWindow > 0 ? Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100)) : 0);
   let activeSkills = $state<Skill[]>([]);
   let customCommands = $state<CustomCommand[]>([]);
 
@@ -3069,6 +3074,26 @@
                 <!-- Queued Messages Panel -->
                 {#if $session.sessionId && currentSessionLoading}
                     <QueuedMessagesPanel sessionId={$session.sessionId} />
+                {/if}
+
+                <!-- Context Warning - attached to top of input -->
+                {#if $session.sessionId && (usagePercent >= 80 || hasPrunedContext($session.sessionId) || hasRollbackContext($session.sessionId) || $compactingSessionsStore.has($session.sessionId))}
+                <div class="mb-0">
+                    <ContextWarning
+                        {usagePercent}
+                        inputTokens={$session.inputTokens}
+                        contextWindow={currentProject?.context_window || 200000}
+                        isPruned={hasPrunedContext($session.sessionId)}
+                        isRollback={hasRollbackContext($session.sessionId)}
+                        isCompacting={$compactingSessionsStore.has($session.sessionId)}
+                        onPruneToolResults={() => pruneToolResults($session.sessionId || '')}
+                        onSDKCompact={() => sendCommand("/compact")}
+                        onStartNewChat={() => startNewChatWithSummary($session.sessionId || '', {
+                            createNewChat: createNewChatAction,
+                            setInputText: (text) => { inputText = text; }
+                        })}
+                    />
+                </div>
                 {/if}
 
                 <ChatInput
