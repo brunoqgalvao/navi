@@ -238,6 +238,17 @@ jobs:
           find artifacts -type f \( -name "*.dmg" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" \) -exec cp {} packages/landing-page/public/downloads/ \;
           ls -la packages/landing-page/public/downloads/
 
+      - name: Upload releases to GCS
+        run: |
+          echo "Uploading release artifacts to GCS bucket..."
+          for file in packages/landing-page/public/downloads/*; do
+            if [ -f "$file" ]; then
+              gsutil cp "$file" gs://navi-releases/
+              echo "Uploaded: $(basename $file)"
+            fi
+          done
+          echo "GCS uploads complete. Files available at https://storage.googleapis.com/navi-releases/"
+
       - name: Generate update manifest
         id: manifest
         run: |

@@ -364,6 +364,9 @@ app.delete('/api/releases/:version', async (req, res) => {
   }
 });
 
+// GCS bucket for releases (no GitHub login required)
+const GCS_RELEASES_URL = 'https://storage.googleapis.com/navi-releases';
+
 // Public endpoint - get app info (version, download links)
 app.get('/api/app-info', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -376,10 +379,10 @@ app.get('/api/app-info', async (req, res) => {
     return res.json({
       version,
       downloads: {
-        macosArm: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_aarch64.dmg`,
-        macosIntel: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_x64.dmg`,
-        linux: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_amd64.AppImage`,
-        windows: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_x64-setup.exe`
+        macosArm: `${GCS_RELEASES_URL}/Navi_${version}_aarch64.dmg`,
+        macosIntel: `${GCS_RELEASES_URL}/Navi_${version}_x64.dmg`,
+        linux: `${GCS_RELEASES_URL}/Navi_${version}_amd64.AppImage`,
+        windows: `${GCS_RELEASES_URL}/Navi_${version}_x64-setup.exe`
       }
     });
   }
@@ -392,16 +395,16 @@ app.get('/api/app-info', async (req, res) => {
       LIMIT 1
     `;
 
-    const version = release?.version || '0.2.1';
+    const version = release?.version || '1.1.0';
 
     res.json({
       version,
       pubDate: release?.pub_date,
       downloads: {
-        macosArm: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_aarch64.dmg`,
-        macosIntel: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_x64.dmg`,
-        linux: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_amd64.AppImage`,
-        windows: `https://github.com/brunoqgalvao/navi/releases/download/v${version}/Navi_${version}_x64-setup.exe`
+        macosArm: `${GCS_RELEASES_URL}/Navi_${version}_aarch64.dmg`,
+        macosIntel: `${GCS_RELEASES_URL}/Navi_${version}_x64.dmg`,
+        linux: `${GCS_RELEASES_URL}/Navi_${version}_amd64.AppImage`,
+        windows: `${GCS_RELEASES_URL}/Navi_${version}_x64-setup.exe`
       }
     });
   } catch (err) {

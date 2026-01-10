@@ -3,60 +3,72 @@ name: gemini-cli
 description: Use when the user asks to run Gemini CLI, Google Gemini for code tasks, or references Gemini for analysis, code generation, or automated editing
 ---
 
-# Gemini CLI Skill Guide
+# Gemini CLI Skill Guide (v0.23.0+)
 
-## Available Models (December 2025)
+## Available Models (January 2026)
 
 | Model | Description | Best For |
 |-------|-------------|----------|
-| `gemini-2.5-pro` | Most capable, 1M token context | Complex tasks, large codebases (DEFAULT) |
-| `gemini-2.5-flash` | Fast, efficient | Quick tasks, lower latency |
-| `gemini-3-pro` | Latest agentic model | Advanced agent workflows |
-
-## Authentication
-
-Gemini CLI supports multiple auth methods (check with user if issues):
-- **Google OAuth** (default): Free tier - 60 req/min, 1,000 req/day
-- **API Key**: `GEMINI_API_KEY` env var - Free tier 100 req/day
-- **Vertex AI**: Enterprise with `GOOGLE_GENAI_USE_VERTEXAI=true`
+| `gemini-2.5-pro` | Latest flagship, 1M context | Complex reasoning, coding (DEFAULT) |
+| `gemini-2.5-flash` | Fast, cost-effective | Quick tasks, high throughput |
+| `gemini-2.0-flash` | Previous generation fast | Balanced speed/capability |
+| `gemini-1.5-pro` | Stable production model | Long context tasks |
 
 ## Running a Task
 
-1. Ask the user which model to use (default: `gemini-2.5-pro`) in a **single prompt**.
-2. Determine if task needs file writes or shell commands (affects approval mode).
-3. Assemble the command:
+1. Ask the user which model to run (default: `gemini-2.5-pro`) AND which approval mode (`default`, `auto_edit`, `yolo`) in a **single prompt**.
+2. Select approval mode based on task:
+   - `default` - Prompt for approval on each action
+   - `auto_edit` - Auto-approve file edits only
+   - `yolo` - Auto-approve all actions (use with caution)
+3. Assemble command with options:
    - `-m, --model <MODEL>` (e.g., `-m gemini-2.5-pro`)
-   - `-p "PROMPT"` (non-interactive mode)
-   - `--yolo` (auto-approve all actions - USE WITH CAUTION)
-   - `--include-directories PATH1,PATH2` (add context directories)
-   - `--output-format json` (structured output for parsing)
-   - `--output-format stream-json` (real-time event streaming)
-4. For scripting/automation, always use `-p` flag for non-interactive mode.
-5. **After completion**: Inform user they can continue interactively with just `gemini`.
+   - `--approval-mode <default|auto_edit|yolo>`
+   - `-y, --yolo` (shortcut for `--approval-mode yolo`)
+   - `-s, --sandbox` (run in sandbox mode)
+   - `--include-directories <PATH>` (add additional directories)
+   - `-r, --resume <latest|INDEX>` (resume previous session)
+   - `-o, --output-format <text|json|stream-json>` (output format)
+4. **Non-interactive one-shot**: `gemini "your prompt here"` (positional argument)
+5. **Interactive after prompt**: `gemini -i "initial prompt"`
+6. **Resume syntax**: `gemini -r latest` or `gemini -r 5`
+7. **After completion**: Inform user they can resume with `gemini -r latest`.
+
+> **Note**: The `-p/--prompt` flag is **deprecated**. Use positional arguments instead.
 
 ### Quick Reference
 
-| Use case | Command |
-|----------|---------|
-| Interactive session | `gemini` |
-| Single prompt | `gemini -p "prompt"` |
-| With specific model | `gemini -m gemini-2.5-pro -p "prompt"` |
-| Auto-approve (yolo) | `gemini -m gemini-2.5-pro --yolo -p "prompt"` |
-| JSON output | `gemini -m gemini-2.5-pro -p "prompt" --output-format json` |
-| Stream events | `gemini -m gemini-2.5-pro -p "prompt" --output-format stream-json` |
-| With extra dirs | `gemini -m gemini-2.5-pro --include-directories ./src,./tests -p "prompt"` |
+| Use case | Approval mode | Command |
+|----------|---------------|---------|
+| Read-only review | `default` | `gemini -m gemini-2.5-pro "prompt"` |
+| Auto file edits | `auto_edit` | `gemini -m gemini-2.5-pro --approval-mode auto_edit "prompt"` |
+| Full auto (YOLO) | `yolo` | `gemini -m gemini-2.5-pro -y "prompt"` |
+| Sandboxed | `default` | `gemini -m gemini-2.5-pro -s "prompt"` |
+| With extra dirs | Match task | `gemini -m gemini-2.5-pro --include-directories /path/to/other "prompt"` |
+| Resume latest | Inherited | `gemini -r latest` |
+| Resume specific | Inherited | `gemini -r 5` |
+| Interactive mode | Match task | `gemini -i "start with this prompt"` |
+| JSON output | Match task | `gemini -m gemini-2.5-pro -o json "prompt"` |
+| Stream JSON | Match task | `gemini -m gemini-2.5-pro -o stream-json "prompt"` |
 
-## Interactive Commands (in-session)
+## Session Management
 
 | Command | Description |
 |---------|-------------|
-| `/help` | Show available commands |
-| `/memory` | View/manage conversation memory |
-| `/stats` | Show token usage statistics |
-| `/tools` | List available tools |
-| `/mcp` | Manage MCP server connections |
-| `/bug` | Report issues directly |
-| `@server` | Call MCP server (e.g., `@github`, `@slack`) |
+| `gemini --list-sessions` | List available sessions |
+| `gemini -r latest` | Resume most recent session |
+| `gemini -r <INDEX>` | Resume session by index |
+| `gemini --delete-session <INDEX>` | Delete a session |
+
+## MCP & Extensions
+
+| Command | Description |
+|---------|-------------|
+| `gemini mcp` | Manage MCP servers |
+| `gemini -l` / `--list-extensions` | List available extensions |
+| `gemini -e ext1 ext2` | Use specific extensions only |
+| `--allowed-mcp-server-names` | Specify allowed MCP servers |
+| `--allowed-tools` | Tools that run without confirmation |
 
 ## Built-in Tools
 
@@ -66,44 +78,31 @@ Gemini CLI has these tools enabled by default:
 - **Web fetch**: Retrieve web content
 - **Google Search**: Grounded search for current information
 
-## MCP Integration
-
-Configure MCP servers in `~/.gemini/settings.json`:
-```json
-{
-  "mcpServers": {
-    "github": { "command": "mcp-server-github" },
-    "slack": { "command": "mcp-server-slack" }
-  }
-}
-```
-
-Usage: `@github List my open pull requests`
-
 ## Project Context
 
 Create `GEMINI.md` in project root for project-specific instructions (similar to CLAUDE.md).
 
 ## Following Up
 
-- After task completion, offer to continue interactively or with follow-up prompts.
-- For complex multi-step tasks, suggest using interactive mode.
-- Mention available MCP integrations if relevant to task.
+- After every `gemini` command, confirm next steps or offer to resume.
+- Resume preserves original model and approval mode.
+- Restate configuration when proposing follow-up actions.
 
 ## Error Handling
 
+- Stop and report failures on non-zero exit; request direction before retry.
+- Ask permission before using `-y`/`--yolo` mode.
+- Summarize warnings/partial results and ask how to proceed.
 - Check authentication if getting 401/403 errors.
-- Verify model availability - some models require specific auth tiers.
-- For quota issues, suggest switching to API key auth or waiting.
-- If tools fail, check `--yolo` vs approval mode settings.
-- Stop and report failures; request direction before retry.
+- For quota issues, suggest switching auth methods or waiting.
 
-## Comparison with Other CLIs
+## Key Differences from Codex
 
-| Feature | Gemini CLI | Codex CLI | Claude Code |
-|---------|------------|-----------|-------------|
-| Free tier | 1000 req/day | ChatGPT Plus | API credits |
-| Context window | 1M tokens | Varies | 200K tokens |
-| Web search | Built-in | --search flag | WebSearch tool |
-| MCP support | Yes | Yes | Yes |
-| Session resume | Checkpoints | resume --last | --resume |
+| Feature | Gemini CLI | Codex CLI |
+|---------|------------|-----------|
+| One-shot syntax | `gemini "prompt"` | `codex exec "prompt"` |
+| Auto mode | `-y` or `--approval-mode yolo` | `--full-auto` |
+| Sandbox | `-s` | `--sandbox <mode>` |
+| Resume | `-r latest` | `resume --last` |
+| Interactive | `-i "prompt"` | Default interactive |
+| Output format | `-o json/stream-json` | N/A |

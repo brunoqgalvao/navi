@@ -657,6 +657,20 @@ class NativePreviewService {
       if (existingPreview) {
         existingPreview.status = "error";
         existingPreview.error = `Process exited with code ${code}`;
+        // Auto-remove crashed previews after 30 seconds to allow UI to show error
+        setTimeout(() => {
+          const preview = this.previews.get(sessionId);
+          if (preview?.status === "error") {
+            console.log(`[NativePreview] Auto-removing crashed preview for session ${sessionId}`);
+            this.previews.delete(sessionId);
+            // Also clean up any port reservations
+            for (const [port, reservedSession] of this.portReservations.entries()) {
+              if (reservedSession === sessionId) {
+                this.portReservations.delete(port);
+              }
+            }
+          }
+        }, 30000);
       }
     });
 
@@ -1329,6 +1343,20 @@ class NativePreviewService {
       if (existingPreview) {
         existingPreview.status = "error";
         existingPreview.error = `Process exited with code ${code}`;
+        // Auto-remove crashed previews after 30 seconds to allow UI to show error
+        setTimeout(() => {
+          const preview = this.previews.get(sessionId);
+          if (preview?.status === "error") {
+            console.log(`[NativePreview] Auto-removing crashed preview for session ${sessionId}`);
+            this.previews.delete(sessionId);
+            // Also clean up any port reservations
+            for (const [port, reservedSession] of this.portReservations.entries()) {
+              if (reservedSession === sessionId) {
+                this.portReservations.delete(port);
+              }
+            }
+          }
+        }, 30000);
       }
     });
 

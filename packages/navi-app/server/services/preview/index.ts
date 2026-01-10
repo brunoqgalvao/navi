@@ -169,6 +169,8 @@ class PreviewService {
     if (!container) return;
 
     await this.containerManager.stopContainer(container.containerId);
+    // Release the port so it can be reused
+    this.containerManager.releasePort(container.port);
     this.state.containers.delete(id);
   }
 

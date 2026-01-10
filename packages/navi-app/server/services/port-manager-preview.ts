@@ -256,6 +256,13 @@ class PortManagerPreviewService {
         preview.status = "error";
         preview.error = `Process exited with code ${code}`;
         this.releasePorts(preview.ports);
+        // Auto-remove crashed previews after 30 seconds to allow UI to show error
+        setTimeout(() => {
+          if (this.previews.get(id)?.status === "error") {
+            console.log(`[PortManagerPreview] Auto-removing crashed preview ${id}`);
+            this.previews.delete(id);
+          }
+        }, 30000);
       }
     });
 
