@@ -1,8 +1,8 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { spawn } from "child_process";
 import { json } from "../utils/response";
 import { globalSettings } from "../db";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
+import { getSDK } from "../utils/sdk-loader";
 
 export async function handleAuthRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/auth/status") {
@@ -48,6 +48,7 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
 
     let hasOAuth = false;
     try {
+      const { query } = await getSDK();
       const q = query({
         prompt: "",
         options: {

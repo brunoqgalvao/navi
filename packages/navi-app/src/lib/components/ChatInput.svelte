@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference } from "../stores";
+  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode } from "../stores";
   import FileAttachment from "./FileAttachment.svelte";
   import ReferenceChip from "./ReferenceChip.svelte";
   import TerminalReferenceChip from "./TerminalReferenceChip.svelte";
   import ChatReferenceChip from "./ChatReferenceChip.svelte";
   import AudioRecorder from "./AudioRecorder.svelte";
+  import CloudExecutionToggle from "./CloudExecutionToggle.svelte";
   import { getApiBase } from "../config";
 
   interface FileEntry {
@@ -55,6 +56,10 @@
     // Worktree mode - for existing sessions with worktree
     worktreeBranch?: string | null;
     worktreeBaseBranch?: string | null;
+    // Cloud execution mode
+    executionMode?: ExecutionMode;
+    cloudBranch?: string;
+    cloudBranches?: string[];
     onSubmit: () => void;
     onStop?: () => void;
     onPreview?: (path: string) => void;
@@ -65,11 +70,13 @@
     onCreateWithWorktree?: (description: string, message: string) => void;
     onMergeWorktree?: () => void;
     onArchiveSession?: () => void;
+    onExecutionModeChange?: (mode: ExecutionMode) => void;
+    onCloudBranchChange?: (branch: string) => void;
     // Slash commands from SDK
     slashCommands?: SlashCommand[];
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession, slashCommands = [] }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, slashCommands = [] }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
@@ -1250,6 +1257,18 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 4.97-4.03 9-9 9"/>
           </svg>
         </button>
+      {/if}
+
+      <!-- Cloud Execution Toggle -->
+      {#if onExecutionModeChange}
+        <CloudExecutionToggle
+          mode={executionMode}
+          branch={cloudBranch}
+          branches={cloudBranches}
+          {isGitRepo}
+          onModeChange={onExecutionModeChange}
+          onBranchChange={onCloudBranchChange}
+        />
       {/if}
 
       <!-- Loop/Until Done toggle -->

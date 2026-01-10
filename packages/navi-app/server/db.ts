@@ -185,6 +185,10 @@ export async function initDb() {
   try {
     db.run("ALTER TABLE sessions ADD COLUMN archived_at INTEGER");
   } catch {}
+  // Agent type for native UI (browser, coding, research, etc.)
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN agent_type TEXT");
+  } catch {}
 
   // Backlog feature - sessions can be added to backlog for later
   try {
@@ -195,6 +199,20 @@ export async function initDb() {
   } catch {}
   try {
     db.run("ALTER TABLE sessions ADD COLUMN backlog_note TEXT");
+  } catch {}
+
+  // Cloud execution mode - run agents in E2B cloud sandboxes
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN execution_mode TEXT DEFAULT 'local'");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN cloud_repo_url TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN cloud_branch TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN e2b_sandbox_id TEXT");
   } catch {}
 
   // Indexes for multi-session queries
@@ -428,6 +446,38 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_session_artifacts_root ON session_artifacts(root_session_id);
   `);
 
+  // Cloud executions table - track E2B cloud sandbox executions
+  db.run(`
+    CREATE TABLE IF NOT EXISTS cloud_executions (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      e2b_sandbox_id TEXT,
+      status TEXT DEFAULT 'pending',
+      stage TEXT,
+      repo_url TEXT,
+      branch TEXT,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      duration_ms INTEGER,
+      exit_code INTEGER,
+      error_message TEXT,
+      modified_files TEXT,
+      synced_files TEXT,
+      e2b_cost_usd REAL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_cloud_executions_session ON cloud_executions(session_id);
+    CREATE INDEX IF NOT EXISTS idx_cloud_executions_status ON cloud_executions(status);
+  `);
+
+  // Add new columns if they don't exist (migration for existing DBs)
+  try {
+    db.run("ALTER TABLE cloud_executions ADD COLUMN synced_files TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE cloud_executions ADD COLUMN e2b_cost_usd REAL");
+  } catch {}
+
   saveDb()
   return db;
 }
@@ -509,6 +559,7 @@ export interface Session {
   role: string | null;
   task: string | null;
   agent_status: AgentStatus;
+  agent_type: string | null;  // 'browser' | 'coding' | 'research' | etc. for native UI
   deliverable: string | null;  // JSON string of Deliverable
   escalation: string | null;   // JSON string of Escalation
   delivered_at: number | null;
@@ -517,6 +568,11 @@ export interface Session {
   in_backlog: number;
   backlog_added_at: number | null;
   backlog_note: string | null;
+  // Cloud execution mode
+  execution_mode: "local" | "cloud";
+  cloud_repo_url: string | null;
+  cloud_branch: string | null;
+  e2b_sandbox_id: string | null;
   // Timestamps
   created_at: number;
   updated_at: number;
@@ -785,6 +841,121 @@ export const sessions = {
       [id, project_id, title, worktree_path, worktree_branch, worktree_base_branch, created_at, updated_at]
     ),
 
+  // Cloud execution mode methods
+  setExecutionMode: (id: string, mode: "local" | "cloud", repoUrl?: string, branch?: string) =>
+    run(
+      "UPDATE sessions SET execution_mode = ?, cloud_repo_url = ?, cloud_branch = ?, updated_at = ? WHERE id = ?",
+      [mode, repoUrl || null, branch || null, Date.now(), id]
+    ),
+  setE2bSandboxId: (id: string, sandboxId: string | null) =>
+    run("UPDATE sessions SET e2b_sandbox_id = ?, updated_at = ? WHERE id = ?", [sandboxId, Date.now(), id]),
+  createWithCloudMode: (
+    id: string,
+    project_id: string,
+    title: string,
+    execution_mode: "local" | "cloud",
+    cloud_repo_url: string | null,
+    cloud_branch: string | null,
+    created_at: number,
+    updated_at: number
+  ) =>
+    run(
+      "INSERT INTO sessions (id, project_id, title, execution_mode, cloud_repo_url, cloud_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, project_id, title, execution_mode, cloud_repo_url, cloud_branch, created_at, updated_at]
+    ),
+};
+
+// Cloud execution tracking
+export interface CloudExecution {
+  id: string;
+  session_id: string;
+  e2b_sandbox_id: string | null;
+  status: "pending" | "cloning" | "checkout" | "executing" | "syncing" | "completed" | "failed" | "cancelled";
+  stage: string | null;
+  repo_url: string | null;
+  branch: string | null;
+  started_at: number;
+  completed_at: number | null;
+  duration_ms: number | null;
+  exit_code: number | null;
+  error_message: string | null;
+  modified_files: string | null; // JSON array of file paths
+  synced_files: string | null;   // JSON array of synced file paths
+  e2b_cost_usd: number | null;   // Estimated E2B compute cost
+}
+
+export const cloudExecutions = {
+  list: (sessionId: string) =>
+    queryAll<CloudExecution>(
+      "SELECT * FROM cloud_executions WHERE session_id = ? ORDER BY started_at DESC",
+      [sessionId]
+    ),
+  get: (id: string) => queryOne<CloudExecution>("SELECT * FROM cloud_executions WHERE id = ?", [id]),
+  getLatest: (sessionId: string) =>
+    queryOne<CloudExecution>(
+      "SELECT * FROM cloud_executions WHERE session_id = ? ORDER BY started_at DESC LIMIT 1",
+      [sessionId]
+    ),
+  create: (
+    id: string,
+    sessionId: string,
+    repoUrl: string | null,
+    branch: string | null
+  ) => {
+    const now = Date.now();
+    run(
+      "INSERT INTO cloud_executions (id, session_id, status, repo_url, branch, started_at) VALUES (?, ?, 'pending', ?, ?, ?)",
+      [id, sessionId, repoUrl, branch, now]
+    );
+  },
+  updateStatus: (id: string, status: CloudExecution["status"], stage?: string) =>
+    run(
+      "UPDATE cloud_executions SET status = ?, stage = ? WHERE id = ?",
+      [status, stage || null, id]
+    ),
+  setSandboxId: (id: string, sandboxId: string) =>
+    run("UPDATE cloud_executions SET e2b_sandbox_id = ? WHERE id = ?", [sandboxId, id]),
+  complete: (
+    id: string,
+    exitCode: number,
+    modifiedFiles: string[],
+    syncedFiles: string[],
+    durationMs: number,
+    e2bCostUsd: number
+  ) => {
+    const now = Date.now();
+    run(
+      "UPDATE cloud_executions SET status = 'completed', exit_code = ?, modified_files = ?, synced_files = ?, duration_ms = ?, e2b_cost_usd = ?, completed_at = ? WHERE id = ?",
+      [exitCode, JSON.stringify(modifiedFiles), JSON.stringify(syncedFiles), durationMs, e2bCostUsd, now, id]
+    );
+  },
+  fail: (id: string, errorMessage: string, durationMs: number, e2bCostUsd: number) => {
+    const now = Date.now();
+    run(
+      "UPDATE cloud_executions SET status = 'failed', error_message = ?, duration_ms = ?, e2b_cost_usd = ?, completed_at = ? WHERE id = ?",
+      [errorMessage, durationMs, e2bCostUsd, now, id]
+    );
+  },
+  // Get total E2B cost for a session
+  getTotalCost: (sessionId: string): number => {
+    const result = queryOne<{ total: number }>(
+      "SELECT COALESCE(SUM(e2b_cost_usd), 0) as total FROM cloud_executions WHERE session_id = ?",
+      [sessionId]
+    );
+    return result?.total || 0;
+  },
+  // Get total E2B cost for all sessions
+  getTotalCostAll: (): number => {
+    const result = queryOne<{ total: number }>(
+      "SELECT COALESCE(SUM(e2b_cost_usd), 0) as total FROM cloud_executions"
+    );
+    return result?.total || 0;
+  },
+  cancel: (id: string) =>
+    run(
+      "UPDATE cloud_executions SET status = 'cancelled', completed_at = ? WHERE id = ?",
+      [Date.now(), id]
+    ),
 };
 
 export const messages = {
@@ -1831,6 +2002,7 @@ export const sessionHierarchy = {
       role: string;
       task: string;
       model?: string;
+      agentType?: string;  // 'browser' | 'coding' | 'research' | etc. for native UI
     }
   ): Session | null => {
     const parent = sessions.get(parentSessionId);
@@ -1862,9 +2034,9 @@ export const sessionHierarchy = {
     run(
       `INSERT INTO sessions (
         id, project_id, title, model,
-        parent_session_id, root_session_id, depth, role, task, agent_status,
+        parent_session_id, root_session_id, depth, role, task, agent_status, agent_type,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?, ?)`,
       [
         config.id,
         parent.project_id,
@@ -1875,6 +2047,7 @@ export const sessionHierarchy = {
         newDepth,
         config.role,
         config.task,
+        config.agentType || null,
         now,
         now,
       ]

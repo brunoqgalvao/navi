@@ -369,6 +369,51 @@ export type SessionHierarchyMessage =
   | SessionDecisionLoggedMessage
   | SessionArtifactCreatedMessage;
 
+// Cloud execution message types
+export interface CloudExecutionStartedMessage {
+  type: "cloud_execution_started";
+  uiSessionId?: string;
+  executionId: string;
+  repoUrl?: string;
+  branch?: string;
+}
+
+export interface CloudStageMessage {
+  type: "cloud_stage";
+  uiSessionId?: string;
+  executionId: string;
+  stage: "starting" | "cloning" | "checkout" | "executing" | "syncing" | "completed" | "failed";
+  message?: string;
+}
+
+export interface CloudOutputMessage {
+  type: "cloud_output";
+  uiSessionId?: string;
+  executionId: string;
+  stream: "stdout" | "stderr";
+  data: string;
+}
+
+export interface CloudResultMessage {
+  type: "cloud_result";
+  uiSessionId?: string;
+  executionId: string;
+  success: boolean;
+  exitCode: number;
+  modifiedFiles?: string[];
+  syncedFiles?: string[];
+  duration: number;
+  estimatedCostUsd?: number;
+  error?: string;
+}
+
+export interface CloudErrorMessage {
+  type: "cloud_error";
+  uiSessionId?: string;
+  executionId: string;
+  error: string;
+}
+
 export type ClaudeMessage =
   | SystemMessage
   | AssistantMessage
@@ -383,6 +428,11 @@ export type ClaudeMessage =
   | AuthStatusMessage
   | UnknownMessage
   | SessionHierarchyMessage
+  | CloudExecutionStartedMessage
+  | CloudStageMessage
+  | CloudOutputMessage
+  | CloudResultMessage
+  | CloudErrorMessage
   | { type: "connected" }
   | { type: "aborted"; sessionId?: string; uiSessionId?: string }
   | { type: "ui_command"; command: string; payload: Record<string, unknown> }
@@ -449,6 +499,10 @@ export class ClaudeClient {
     allowedTools?: string[];
     model?: string;
     historyContext?: string;
+    // Cloud execution options
+    executionMode?: "local" | "cloud";
+    cloudRepoUrl?: string;
+    cloudBranch?: string;
   }) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected to server");

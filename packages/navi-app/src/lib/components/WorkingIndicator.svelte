@@ -1,5 +1,7 @@
 <script lang="ts">
-  type Variant = "pulse" | "spin" | "dots";
+  import DoodleThinking from "./DoodleThinking.svelte";
+
+  type Variant = "pulse" | "spin" | "dots" | "doodle";
   type Size = "xs" | "sm" | "md" | "lg";
   type Color = "gray" | "blue" | "indigo" | "purple" | "green" | "orange" | "red";
 
@@ -12,6 +14,14 @@
   }
 
   let { variant = "spin", size = "sm", color = "gray", label, class: className = "" }: Props = $props();
+
+  // Map WorkingIndicator sizes to DoodleThinking sizes
+  const doodleSizeMap: Record<Size, "sm" | "md" | "lg"> = {
+    xs: "sm",
+    sm: "sm",
+    md: "md",
+    lg: "lg",
+  };
 
   const sizeMap: Record<Size, string> = {
     xs: "w-1.5 h-1.5",
@@ -65,4 +75,6 @@
       <span class="text-xs {colors.text}">{label}</span>
     {/if}
   </span>
+{:else if variant === "doodle"}
+  <DoodleThinking size={doodleSizeMap[size]} {label} class={className} />
 {/if}

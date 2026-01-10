@@ -941,63 +941,117 @@ Response:
 
 ## Viewing Process & Terminal Logs
 
-Claude can view logs from background processes and terminal sessions directly. **Always fetch and display logs in your response** rather than asking the user to run commands or open previews.
+Claude has **built-in MCP tools** to view process and terminal logs. Use these tools directly - no curl commands needed.
 
-### View Background Process Logs
+### MCP Tools Available
 
-```bash
-# List all background processes
-curl -s http://localhost:3001/api/background-processes | jq '.[] | {id, label, status, command}'
+**`mcp__navi-context__view_processes`** - View background processes
+- List all: `view_processes()`
+- View logs: `view_processes(processId: "abc123", lines: 50)`
+- Filter: `view_processes(status: "running")`
 
-# Get output from a specific process (last 50 lines)
-curl -s "http://localhost:3001/api/background-processes/{processId}/output?lines=50" | jq -r '.output[]'
-```
+**`mcp__navi-context__view_terminal`** - View terminal output
+- List all: `view_terminal()`
+- View output: `view_terminal(terminalId: "xyz789", lines: 30)`
+- Check errors: `view_terminal(terminalId: "xyz789", checkErrors: true)`
 
-### View Terminal Session Logs
+### When to Use These Tools
 
-```bash
-# List active terminal sessions
-curl -s http://localhost:3001/api/terminal/pty | jq '.[] | {terminalId, name, cwd}'
+- **After starting a dev server** - Check if it started correctly and what port it's on
+- **When debugging errors** - View recent terminal output to see what went wrong
+- **Before asking the user** - Check logs yourself first to understand the issue
+- **When a process fails** - View the exit code and error output
 
-# Get terminal buffer (last 50 lines)
-curl -s "http://localhost:3001/api/terminal/pty/{terminalId}/buffer?lines=50" | jq -r '.lines[]'
+### Example Workflow
 
-# Check for errors in terminal output
-curl -s "http://localhost:3001/api/terminal/pty/{terminalId}/errors" | jq '.'
-```
-
-### Best Practices
-
-1. **Fetch logs directly** - Don't ask the user to run commands. Just fetch and display the relevant output.
-2. **Check for errors first** - Use the `/errors` endpoint to quickly detect issues before fetching full logs.
-3. **Show relevant portions** - Fetch last 20-50 lines unless more context is needed.
-4. **Strip ANSI codes** for readability when displaying in chat.
-
-### Example: Debug a failing process
-
-```bash
-# 1. Check process status
-curl -s http://localhost:3001/api/background-processes/{id} | jq '{status, exitCode, label}'
-
-# 2. Get the logs
-curl -s "http://localhost:3001/api/background-processes/{id}/output?lines=30" | jq -r '.output[]'
-```
+1. User reports "my dev server isn't working"
+2. Call `view_processes()` to see running processes
+3. If a process shows `status: "failed"`, call `view_processes(processId: "...", lines: 50)` to see logs
+4. Report the issue directly to the user with relevant log snippets
 
 ### Opening Logs in Preview Panel (Optional)
 
-If the user wants to browse logs interactively, you can open them in the Preview panel:
+To let the user browse logs interactively in the Preview panel:
 
 ```bash
-# Open process logs in preview
 curl -s -X POST http://localhost:3001/api/ui/logs \
   -H "Content-Type: application/json" \
-  -d '{"processId": "..."}'
-
-# Open terminal logs in preview
-curl -s -X POST http://localhost:3001/api/ui/logs \
-  -H "Content-Type: application/json" \
-  -d '{"terminalId": "..."}'
+  -d '{"processId": "..."}' # or {"terminalId": "..."}
 ```
+
+---
+
+## Dashboard Management
+
+Projects can have a custom dashboard that replaces the default empty state. The dashboard is defined in `.claude/dashboard.md` and supports interactive widgets.
+
+### Get Dashboard
+
+```bash
+curl "http://localhost:3001/api/dashboard?path=/path/to/project"
+```
+
+Response:
+```json
+{
+  "exists": true,
+  "dashboard": { "raw": "# My Dashboard\n..." },
+  "path": "/path/to/project/.claude/dashboard.md"
+}
+```
+
+### Save Dashboard
+
+```bash
+curl -X POST http://localhost:3001/api/dashboard \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/path/to/project", "content": "# My Dashboard\n..."}'
+```
+
+### Execute Dashboard Action
+
+```bash
+curl -X POST http://localhost:3001/api/dashboard/action \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/path/to/project", "command": "bun run dev"}'
+```
+
+### Dashboard Format
+
+Dashboards are markdown files with special code blocks that become interactive widgets. See the `dashboard` skill for the full format specification.
+
+**Quick reference:**
+
+```markdown
+# Project Name
+
+Regular markdown content here.
+
+## Quick Actions
+\`\`\`actions
+- name: "🚀 Deploy"
+  command: "bun run deploy"
+- name: "🧪 Test"
+  command: "bun test"
+\`\`\`
+
+## Recent Commits
+\`\`\`widget:git-log
+limit: 5
+\`\`\`
+
+## Preview
+\`\`\`widget:preview
+url: http://localhost:3000
+height: 300
+\`\`\`
+```
+
+When users ask to:
+- "Add a deploy button" → Edit `.claude/dashboard.md`, add actions block
+- "Show git history on dashboard" → Add `widget:git-log` block
+- "Create a dashboard" → Generate full `.claude/dashboard.md` file
+- "Add a preview widget" → Add `widget:preview` with their URL
 
 ---
 

@@ -19,6 +19,9 @@
     "tauri:dev": "concurrently \"bun run server\" \"bun run pty\" \"bun run tauri dev\""
   },
   "license": "MIT",
+  "bin": {
+    "navi-integrations": "./server/integrations/cli.ts"
+  },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.75",
     "@friendofsvelte/mermaid": "^0.0.4",
@@ -34,10 +37,13 @@
     "@types/three": "^0.182.0",
     "adm-zip": "^0.5.16",
     "archiver": "^7.0.1",
+    "chart.js": "^4.5.1",
     "diff": "^8.0.2",
+    "e2b": "^2.9.1",
     "highlight.js": "^11.11.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.0.0",
+    "lucide-svelte": "^0.562.0",
     "marked": "^17.0.1",
     "node-pty": "^1.1.0",
     "sql.js": "^1.13.0",

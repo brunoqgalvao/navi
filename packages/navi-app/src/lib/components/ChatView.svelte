@@ -15,6 +15,7 @@
   import EmptyStateWelcome from "./EmptyStateWelcome.svelte";
   import SessionBreadcrumbs from "../features/session-hierarchy/components/SessionBreadcrumbs.svelte";
   import EscalationBanner from "../features/session-hierarchy/components/EscalationBanner.svelte";
+  import ChildSessionsPanel from "../features/session-hierarchy/components/ChildSessionsPanel.svelte";
   import { sessionHierarchyApi, parseEscalation, type Escalation } from "../features/session-hierarchy";
   import { loadMoreMessages } from "../actions/session-actions";
 
@@ -340,6 +341,15 @@
       </div>
     {/if}
 
+    <!-- Child sessions panel - show when this session has spawned children -->
+    {#if sessionId && sessionHierarchy && !sessionHierarchy.hasParent}
+      <ChildSessionsPanel
+        parentSessionId={sessionId}
+        onSelectSession={(sess) => onSelectHierarchySession?.(sess)}
+        onResolveEscalation={(id) => onEscalationResolved?.()}
+      />
+    {/if}
+
     {#if pendingPermissionRequest}
       <PermissionRequest
         requestId={pendingPermissionRequest.requestId}
@@ -363,7 +373,7 @@
       <TodoProgress {todos} showWhenEmpty={false} />
     {:else if isLoading && !isStreaming}
     <div class="h-8 flex items-center">
-      <WorkingIndicator variant="dots" size="xs" color="gray" label="Thinking..." />
+      <WorkingIndicator variant="doodle" size="md" label="Thinking..." />
     </div>
     {/if}
 

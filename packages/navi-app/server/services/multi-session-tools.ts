@@ -33,6 +33,15 @@ Use this for:
 - Specialized tasks that need focused attention
 - Breaking down complex work into manageable pieces
 
+Available agent types with native UI:
+- 'browser': Web browsing, research, URL analysis (shows visited URLs, page previews)
+- 'coding': Code implementation, file editing (shows files changed, diff preview)
+- 'runner': Command execution, builds, tests (shows command output, progress)
+- 'research': Deep analysis, findings synthesis
+- 'planning': Task breakdown, architecture design
+- 'reviewer': Code/document review, quality checks
+- 'general': Fallback for miscellaneous tasks
+
 The child agent has its own context window and can spawn its own children (up to depth 3).
 You will receive their deliverable when they complete.
 
@@ -53,6 +62,12 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
           type: "string",
           description:
             "Clear description of what the child should accomplish. Be specific about deliverables.",
+        },
+        agent_type: {
+          type: "string",
+          description:
+            "Type of agent to spawn - determines UI and capabilities. Choose based on task nature.",
+          enum: ["browser", "coding", "runner", "research", "planning", "reviewer", "general"],
         },
         model: {
           type: "string",

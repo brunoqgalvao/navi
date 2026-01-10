@@ -1,8 +1,8 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { json } from "../utils/response";
 import { projects, sessions, searchIndex } from "../db";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
 import { resolveNaviClaudeAuth } from "../utils/navi-auth";
+import { getSDK } from "../utils/sdk-loader";
 
 export async function handleProjectRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/projects") {
@@ -120,6 +120,7 @@ export async function handleProjectRoutes(url: URL, method: string, req: Request
       try {
         const prompt = `Analyze this project directory and provide a brief summary (2-3 sentences) of what this project is about, its main technologies, and current state. Be concise.`;
 
+        const { query } = await getSDK();
         const q = query({
           prompt,
           options: {

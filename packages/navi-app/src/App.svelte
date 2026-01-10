@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode } from "./lib/stores";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill } from "./lib/api";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree } from "./lib/actions";
@@ -95,6 +95,7 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
+  import CloudExecutionStatus from "./lib/components/CloudExecutionStatus.svelte";
   import ContextWarning from "./lib/components/ContextWarning.svelte";
   import MergeModal from "./lib/components/MergeModal.svelte";
   import { QueuedMessagesPanel } from "./lib/components/queue";
@@ -106,11 +107,13 @@
   import UpdateChecker from "./lib/components/UpdateChecker.svelte";
   import ConnectivityBanner from "./lib/components/ConnectivityBanner.svelte";
   import ProjectEmptyState from "./lib/components/ProjectEmptyState.svelte";
+  import ProjectLanding from "./lib/components/ProjectLanding.svelte";
   import NewProjectModal from "./lib/components/NewProjectModal.svelte";
   import ProjectPermissionsModal from "./lib/components/ProjectPermissionsModal.svelte";
   import FeedbackModal from "./lib/components/FeedbackModal.svelte";
   import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
+  import { ExperimentalAgentsPanel, SelfHealingWidget } from "./lib/components/agents";
   import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
   import { handleSessionHierarchyWSEvent } from "./lib/features/session-hierarchy";
@@ -285,6 +288,8 @@
   let showSettings = $state(false);
   let showAgentBuilder = $state(false);
   let showSessionsDashboard = $state(false);
+  let sessionsDashboardProjectId = $state<string | undefined>(undefined);
+  let showExperimentalAgents = $state(false);
 
   // Derived agents list for sidebar (combine agents + skills from stores)
   let sidebarAgents = $derived([...$agentLibrary, ...$skillLibraryForBuilder].slice(0, 10));
@@ -317,6 +322,60 @@
   let untilDoneEnabled = $derived(currentUntilDone?.enabled ?? false);
   let untilDoneIteration = $derived(currentUntilDone?.iteration ?? 0);
   let untilDoneMaxIterations = 10; // Default max iterations
+
+  // Cloud execution state
+  let cloudBranches = $state<string[]>([]);
+  let currentExecutionSettings = $derived(
+    $session.sessionId ? executionModeStore.get($session.sessionId, get(executionModeStore)) : { mode: "local" as ExecutionMode }
+  );
+  let executionMode = $derived(currentExecutionSettings.mode);
+  let cloudBranch = $derived(currentExecutionSettings.branch || "main");
+
+  // Current cloud execution status for the active session
+  let currentCloudExecution = $derived(
+    $session.sessionId ? cloudExecutionStore.get($session.sessionId, get(cloudExecutionStore)) : undefined
+  );
+  let showCloudStatus = $derived(
+    currentCloudExecution && !["completed", "failed"].includes(currentCloudExecution.stage)
+  );
+
+  // Load branches when project changes and it's a git repo
+  async function loadCloudBranches() {
+    if (!currentProjectIsGitRepo || !currentProject?.path) {
+      cloudBranches = [];
+      return;
+    }
+    try {
+      const { getBranches } = await import("./lib/features/git/api");
+      const branchData = await getBranches(currentProject.path);
+      cloudBranches = [branchData.current, ...branchData.local.filter(b => b !== branchData.current)];
+    } catch (e) {
+      console.warn("Failed to load branches for cloud execution:", e);
+      cloudBranches = ["main"];
+    }
+  }
+
+  function handleExecutionModeChange(mode: ExecutionMode) {
+    const sessionId = $session.sessionId;
+    if (sessionId) {
+      // Get git remote URL for cloud execution
+      const repoUrl = currentProjectIsGitRepo ? getGitRemoteUrl() : undefined;
+      executionModeStore.setMode(sessionId, mode, repoUrl, cloudBranch);
+    }
+  }
+
+  function handleCloudBranchChange(branch: string) {
+    const sessionId = $session.sessionId;
+    if (sessionId) {
+      executionModeStore.setBranch(sessionId, branch);
+    }
+  }
+
+  function getGitRemoteUrl(): string | undefined {
+    // TODO: Get actual remote URL from git status
+    // For now, return undefined - the cloud executor will need the repo URL passed explicitly
+    return undefined;
+  }
 
   const messageHandler = useMessageHandler({
     getCurrentSessionId: () => $session.sessionId,
@@ -737,7 +796,32 @@
       toggleKanban();
     } else if (e.key === 'd') {
       e.preventDefault();
-      showSessionsDashboard = !showSessionsDashboard;
+      if (showSessionsDashboard) {
+        // Close
+        showSessionsDashboard = false;
+        sessionsDashboardProjectId = undefined;
+      } else {
+        // Open with current project context if in a project
+        sessionsDashboardProjectId = currentProject?.id;
+        showSessionsDashboard = true;
+      }
+    }
+
+    // Experimental agent shortcuts (Cmd/Ctrl + Shift + key)
+    if (e.shiftKey && isMod) {
+      if (e.key === 'A' || e.key === 'a') {
+        e.preventDefault();
+        showExperimentalAgents = !showExperimentalAgents;
+      } else if (e.key === 'H' || e.key === 'h') {
+        e.preventDefault();
+        toggleSelfHealing();
+      } else if (e.key === 'R' || e.key === 'r') {
+        e.preventDefault();
+        spawnQuickAgent('red-team');
+      } else if (e.key === 'F' || e.key === 'f') {
+        e.preventDefault();
+        spawnQuickAgent('healer-agent');
+      }
     }
   }
 
@@ -958,6 +1042,33 @@
 
       client.onMessage((msg) => {
         messageHandler.handleMessage(msg);
+
+        // Handle cloud execution messages
+        if (msg.type === "cloud_execution_started") {
+          cloudExecutionStore.start(
+            msg.uiSessionId || "",
+            msg.executionId,
+            msg.repoUrl,
+            msg.branch
+          );
+        } else if (msg.type === "cloud_stage") {
+          cloudExecutionStore.setStage(msg.uiSessionId || "", msg.stage, msg.message);
+        } else if (msg.type === "cloud_output") {
+          cloudExecutionStore.addOutput(msg.uiSessionId || "", msg.data);
+        } else if (msg.type === "cloud_result") {
+          cloudExecutionStore.complete(
+            msg.uiSessionId || "",
+            msg.success,
+            msg.duration,
+            msg.estimatedCostUsd,
+            msg.error
+          );
+          // Clear loading state
+          loadingSessions.update(s => { s.delete(msg.uiSessionId || ""); return new Set(s); });
+        } else if (msg.type === "cloud_error") {
+          cloudExecutionStore.complete(msg.uiSessionId || "", false, 0, 0, msg.error);
+          loadingSessions.update(s => { s.delete(msg.uiSessionId || ""); return new Set(s); });
+        }
       });
     }).catch(() => {
       // Error already set in startSidecar
@@ -1216,6 +1327,10 @@
     try {
       const gitStatus = await getGitStatus(project.path);
       currentProjectIsGitRepo = gitStatus.isGitRepo;
+      // Load branches for cloud execution if it's a git repo
+      if (gitStatus.isGitRepo) {
+        loadCloudBranches();
+      }
     } catch (e) {
       currentProjectIsGitRepo = false;
     }
@@ -2124,7 +2239,10 @@
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
 
     const historyCtx = $sessionHistoryContext.get(currentSessionId);
-    
+
+    // Get execution mode settings for this session
+    const execSettings = executionModeStore.get(currentSessionId, get(executionModeStore));
+
     client.query({
       prompt: messageContent,
       projectId: $session.projectId || undefined,
@@ -2132,6 +2250,10 @@
       claudeSessionId: $session.claudeSessionId || undefined,
       model: $session.selectedModel || undefined,
       historyContext: historyCtx,
+      // Cloud execution options
+      executionMode: execSettings.mode,
+      cloudRepoUrl: execSettings.repoUrl,
+      cloudBranch: execSettings.branch,
     });
 
     if (historyCtx) {
@@ -2405,6 +2527,68 @@
     } else {
       showKanban = true;
       rightPanelMode = "kanban";
+    }
+  }
+
+  // Experimental agent functions
+  async function toggleSelfHealing() {
+    if (!currentProject) {
+      showError({ message: "Select a project first" });
+      return;
+    }
+    try {
+      const res = await fetch(`${getServerUrl()}/api/experimental/healing/${currentProject.id}`);
+      const data = await res.json();
+
+      if (data.running) {
+        await fetch(`${getServerUrl()}/api/experimental/healing/stop`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: currentProject.id })
+        });
+        showSuccess("Self-Healing Stopped");
+      } else {
+        await fetch(`${getServerUrl()}/api/experimental/healing/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: currentProject.id })
+        });
+        showSuccess("Self-Healing Started", "Watching for build errors");
+      }
+    } catch (e: any) {
+      showError({ message: e.message });
+    }
+  }
+
+  async function spawnQuickAgent(agentType: string) {
+    if (!$session.sessionId) {
+      showError({ message: "Start a chat session first" });
+      return;
+    }
+
+    const tasks: Record<string, string> = {
+      "red-team": `Perform a security analysis of the current project at ${currentProject?.path || "."}. Look for vulnerabilities, injection risks, auth issues, and edge cases.`,
+      "healer-agent": `Run type check and fix any TypeScript or build errors in the project at ${currentProject?.path || "."}`,
+    };
+
+    try {
+      const res = await fetch(`${getServerUrl()}/api/experimental/agents/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: $session.sessionId,
+          agentType,
+          task: tasks[agentType] || "Analyze the codebase",
+          context: {}
+        })
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+
+      const data = await res.json();
+      showSuccess("Agent Spawned", `${agentType} is working on your task`);
+    } catch (e: any) {
+      showError({ message: e.message });
     }
   }
 
@@ -2898,6 +3082,7 @@
     onToggleFolderPin={toggleFolderPin}
     onNewProjectInFolder={(folderId) => { newProjectTargetFolderId = folderId; showNewProjectModal = true; }}
     onOpenProjectInNewWindow={openProjectInNewWindow}
+    onOpenSessionsBoard={(projectId) => { sessionsDashboardProjectId = projectId; showSessionsDashboard = true; }}
     onOpenAgentBuilder={() => showAgentBuilder = true}
     agents={sidebarAgents}
     onSelectAgent={(agent) => {
@@ -3024,7 +3209,8 @@
 
         <div class="flex-1 overflow-y-auto p-4 md:p-0 scroll-smooth" bind:this={messagesContainer} onscroll={handleMessagesScroll}>
           {#if currentMessages.length === 0 && !$session.sessionId}
-            <ProjectEmptyState
+            <ProjectLanding
+              projectPath={currentProject?.path || ''}
               projectName={currentProject.name}
               projectDescription={currentProject?.description}
               {claudeMdContent}
@@ -3033,6 +3219,25 @@
               onShowClaudeMd={() => showClaudeMdModal = true}
             />
           {:else}
+            <!-- Cloud Execution Status -->
+            {#if currentCloudExecution}
+              <div class="px-4 max-w-4xl mx-auto">
+                <CloudExecutionStatus
+                  executionId={currentCloudExecution.executionId}
+                  stage={currentCloudExecution.stage}
+                  stageMessage={currentCloudExecution.stageMessage}
+                  repoUrl={currentCloudExecution.repoUrl}
+                  branch={currentCloudExecution.branch}
+                  outputLines={currentCloudExecution.outputLines}
+                  duration={currentCloudExecution.duration}
+                  estimatedCostUsd={currentCloudExecution.estimatedCostUsd}
+                  success={currentCloudExecution.success}
+                  error={currentCloudExecution.error}
+                  onCancel={() => stopGeneration()}
+                />
+              </div>
+            {/if}
+
             <ChatView
               sessionId={$session.sessionId}
               projectPath={currentProject?.path || ''}
@@ -3145,12 +3350,17 @@
                     isNewChat={$session.isPending || !$session.sessionId || currentMessages.length === 0}
                     worktreeBranch={currentSessionData?.worktree_branch}
                     worktreeBaseBranch={currentSessionData?.worktree_base_branch}
+                    {executionMode}
+                    {cloudBranch}
+                    {cloudBranches}
                     onSubmit={sendMessage}
                     onStop={stopGeneration}
                     onPreview={openPreview}
                     onExecCommand={handleExecCommand}
                     onManageSkills={() => { projectSettingsInitialTab = "skills"; showProjectSettings = true; }}
                     onToggleUntilDone={toggleUntilDone}
+                    onExecutionModeChange={handleExecutionModeChange}
+                    onCloudBranchChange={handleCloudBranchChange}
                     onCreateWithWorktree={async (description, message) => {
                       const newSessionId = await createNewChatWithWorktree(description);
                       if (newSessionId && message.trim()) {
@@ -3327,11 +3537,14 @@
   {/if}
 
   {#if showSessionsDashboard}
-    <div class="fixed inset-0 z-50 bg-white">
+    <div class="fixed inset-0 z-50 bg-white dark:bg-gray-900">
       <SessionsBoard
-        onClose={() => showSessionsDashboard = false}
+        projectId={sessionsDashboardProjectId}
+        projectName={sessionsDashboardProjectId ? sidebarProjects.find(p => p.id === sessionsDashboardProjectId)?.name : undefined}
+        onClose={() => { showSessionsDashboard = false; sessionsDashboardProjectId = undefined; }}
         onSessionSelect={(boardSession) => {
           showSessionsDashboard = false;
+          sessionsDashboardProjectId = undefined;
           goToSessionById(boardSession.projectId, boardSession.id);
         }}
       />
@@ -3461,7 +3674,7 @@
         </div>
         <div class="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
           {#each HOTKEYS as hotkey}
-            <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors">
+            <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors {hotkey.category === 'experimental' ? 'bg-amber-50' : ''}">
               <span class="text-sm text-gray-600">{hotkey.action}</span>
               <kbd class="px-2 py-1 text-xs font-mono bg-gray-100 border border-gray-200 rounded text-gray-700">{hotkey.key}</kbd>
             </div>
@@ -3470,6 +3683,36 @@
         <div class="px-6 py-3 bg-gray-50 border-t border-gray-100">
           <p class="text-xs text-gray-500 text-center">Press <kbd class="px-1.5 py-0.5 font-mono bg-gray-200 rounded text-gray-600">?</kbd> anytime to toggle this help</p>
         </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Experimental Agents Panel -->
+  {#if showExperimentalAgents}
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30" onclick={() => showExperimentalAgents = false} role="dialog" aria-modal="true" tabindex="-1">
+      <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200" onclick={(e) => e.stopPropagation()}>
+        <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="p-1.5 bg-amber-100 rounded-lg">
+              <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <h3 class="font-semibold text-sm text-gray-900">Experimental Agents</h3>
+            <span class="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">Beta</span>
+          </div>
+          <button onclick={() => showExperimentalAgents = false} class="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <ExperimentalAgentsPanel />
+        {#if currentProject}
+          <div class="px-4 pb-4 border-t border-gray-100 pt-3">
+            <SelfHealingWidget />
+          </div>
+        {/if}
       </div>
     </div>
   {/if}

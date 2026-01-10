@@ -48,12 +48,16 @@ export {
   currentWorkspace,
   sessionModels,
   projectWorkspaces,
+  // Cloud execution mode
+  executionModeStore,
+  defaultExecutionMode,
+  cloudExecutionStore,
   // Memory management utilities
   cleanupAuxiliaryStores,
   getClientMemoryStats,
 } from "./session";
 
-export type { ProjectWorkspace, SessionPaginationState } from "./session";
+export type { ProjectWorkspace, SessionPaginationState, ExecutionMode, CloudExecutionSettings, CloudExecutionState, CloudExecutionStage } from "./session";
 
 // Project stores
 export {

@@ -4,6 +4,7 @@
   import MermaidRenderer from "./MermaidRenderer.svelte";
   import ToolRenderer from "./ToolRenderer.svelte";
   import SubagentBlock from "./SubagentBlock.svelte";
+  import { AgentCard } from "./agents";
   import SubagentModal from "./SubagentModal.svelte";
   import MediaDisplay from "./MediaDisplay.svelte";
   import GenerativeUI from "./experimental/GenerativeUI.svelte";
@@ -177,6 +178,27 @@
     return 'toolUse' in item && 'originalIndex' in item;
   }
 
+  /**
+   * Extract text content from tool result content.
+   * MCP tools return content as [{type: "text", text: "..."}] arrays.
+   * Regular tools may return a string directly.
+   */
+  function extractToolResultContent(content: unknown): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content
+        .filter((item: any) => item?.type === 'text' && typeof item?.text === 'string')
+        .map((item: any) => item.text)
+        .join('\n');
+    }
+    if (content && typeof content === 'object' && 'text' in content) {
+      return String((content as any).text);
+    }
+    return '';
+  }
+
   const groupedContent = $derived(groupToolBlocks(content, toolResults));
 </script>
 
@@ -247,17 +269,16 @@
         {#if isTaskTool(tool)}
           {@const taskDescription = tool.input?.description || tool.input?.prompt?.slice(0, 100) || "Subagent task"}
           {@const taskSubagentType = tool.input?.subagent_type || "general-purpose"}
-          {@const _ = console.log("[AssistantMessage] Task tool found, id:", tool.id)}
-          <SubagentBlock
+          {@const taskPrompt = tool.input?.prompt || ""}
+          <AgentCard
             toolUseId={tool.id}
             description={taskDescription}
             subagentType={taskSubagentType}
+            prompt={taskPrompt}
             updates={getSubagentForTool(tool.id)}
             isActive={activeSubagents.has(tool.id)}
             elapsedTime={activeSubagents.get(tool.id)?.elapsed}
-            {renderMarkdown}
-            {onMessageClick}
-            onOpenModal={() => openSubagentModal = { toolUseId: tool.id, description: taskDescription, subagentType: taskSubagentType }}
+            onExpand={() => openSubagentModal = { toolUseId: tool.id, description: taskDescription, subagentType: taskSubagentType }}
           />
         {:else if isTodoWrite(tool)}
           {@const expanded = expandedBlocks.has(originalIdx)}
@@ -308,11 +329,12 @@
               </svg>
             </button>
             {#if expanded}
+              {@const resultContent = result ? extractToolResultContent(result.content) : ''}
               <div class="pl-6 pt-1 space-y-2">
-                <ToolRenderer {tool} toolResult={result ? { content: String(result.content || ''), is_error: result.is_error } : undefined} {onPreview} {onRunInTerminal} {onSendToClaude} hideHeader={true} />
+                <ToolRenderer {tool} toolResult={result ? { content: resultContent, is_error: result.is_error } : undefined} {onPreview} {onRunInTerminal} {onSendToClaude} hideHeader={true} />
                 {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch', 'Bash'].includes(tool.name)}
                   <div class="pt-1">
-                    <pre class="text-xs {result.is_error ? 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20' : 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{result.content}</pre>
+                    <pre class="text-xs {result.is_error ? 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20' : 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{resultContent}</pre>
                   </div>
                 {/if}
               </div>

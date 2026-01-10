@@ -1150,5 +1150,144 @@ export async function handleSkillRoutes(url: URL, method: string, req: Request):
     }
   }
 
+  // POST /api/skills/generate - Generate a skill from conversation context
+  // Used by the Skill Scout proactive hook
+  if (url.pathname === "/api/skills/generate" && method === "POST") {
+    try {
+      const body = await req.json();
+      const { projectPath, skillName, description, pattern, conversationSummary } = body;
+
+      if (!skillName || !description) {
+        return json({ error: "skillName and description are required" }, 400);
+      }
+
+      const slug = slugify(skillName);
+      validateSlug(slug);
+
+      if (skillsDb.getBySlug(slug)) {
+        return json({ error: `Skill "${slug}" already exists` }, 400);
+      }
+
+      // Use Claude to generate a proper skill from the context
+      const apiKey = globalSettings.get("anthropicApiKey") as string | null;
+      if (!apiKey) {
+        return json({ error: "No API key configured" }, 400);
+      }
+
+      const systemPrompt = `You are a skill generator for Claude Code. Generate a complete SKILL.md file based on the provided context.
+
+The skill should:
+1. Have clear, actionable instructions
+2. Include examples where helpful
+3. Specify which tools are typically needed
+4. Be focused and specific
+
+Return ONLY the markdown content for the SKILL.md file body (without the frontmatter - that will be added separately).
+Do not wrap in code blocks. Just return the raw markdown instructions.`;
+
+      const userPrompt = `Generate a skill based on this context:
+
+Skill Name: ${skillName}
+Description: ${description}
+Pattern Identified: ${pattern}
+
+Conversation that led to this:
+${conversationSummary}
+
+Generate comprehensive instructions for this skill that can be reused in future conversations.`;
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4000,
+          system: systemPrompt,
+          messages: [{ role: "user", content: userPrompt }],
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const generatedBody = result.content?.[0]?.text || "";
+
+      if (!generatedBody) {
+        throw new Error("Failed to generate skill content");
+      }
+
+      // Determine where to save the skill
+      let skillDir: string;
+      if (projectPath) {
+        // Save to project skills directory
+        const projectSkillsDir = getProjectSkillsDir(projectPath);
+        if (!existsSync(projectSkillsDir)) {
+          mkdirSync(projectSkillsDir, { recursive: true });
+        }
+        skillDir = safeJoin(projectSkillsDir, slug);
+      } else {
+        // Save to global skill library
+        skillDir = safeJoin(SKILL_LIBRARY_PATH, slug);
+      }
+
+      mkdirSync(skillDir, { recursive: true });
+
+      // Create the SKILL.md file
+      const skillMd = serializeSkillMd({
+        frontmatter: {
+          name: skillName,
+          description,
+          version: "1.0.0",
+          "allowed-tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+        },
+        body: generatedBody,
+      });
+
+      writeFileSync(join(skillDir, "SKILL.md"), skillMd);
+
+      // Only add to DB if saved to library (not project-specific)
+      if (!projectPath) {
+        const contentHash = calculateSkillHash(skillDir);
+        const now = Date.now();
+        const id = crypto.randomUUID();
+
+        skillsDb.create({
+          id,
+          slug,
+          name: skillName,
+          description,
+          version: "1.0.0",
+          allowed_tools: JSON.stringify(["Read", "Write", "Edit", "Bash", "Glob", "Grep"]),
+          license: null,
+          category: "generated",
+          tags: JSON.stringify(["auto-generated", "skill-scout"]),
+          content_hash: contentHash,
+          source_type: "generated",
+          source_url: null,
+          source_version: null,
+          created_at: now,
+          updated_at: now,
+        });
+      }
+
+      return json({
+        success: true,
+        slug,
+        path: skillDir,
+        isProjectSkill: !!projectPath,
+      }, 201);
+    } catch (e: any) {
+      console.error("Skill generation failed:", e);
+      return json({ error: e.message || "Failed to generate skill" }, 500);
+    }
+  }
+
   return null;
 }

@@ -1,9 +1,9 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { json } from "../utils/response";
 import { globalSettings, DEFAULT_TOOLS, DANGEROUS_TOOLS } from "../db";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
 import { resolveNaviClaudeAuth, formatAuthForLog } from "../utils/navi-auth";
 import { describePath, writeDebugLog } from "../utils/logging";
+import { getSDK } from "../utils/sdk-loader";
 
 export async function handleConfigRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/config") {
@@ -201,8 +201,9 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
       claudeCode: describePath(runtimeOptions.pathToClaudeCodeExecutable),
     });
 
-    let q: ReturnType<typeof query> | null = null;
+    let q: any = null;
     try {
+      const { query } = await getSDK();
       q = query({
         prompt: "",
         options: {

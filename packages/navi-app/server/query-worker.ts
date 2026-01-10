@@ -825,6 +825,157 @@ The deliverable will be sent to your parent, who will incorporate it into their 
   ],
 });
 
+// ============================================================================
+// Navi Context Tools - View process/terminal logs
+// ============================================================================
+
+const NAVI_API_BASE = process.env.NAVI_API_URL || "http://localhost:3001";
+
+async function fetchNaviApi(path: string): Promise<any> {
+  try {
+    const res = await fetch(`${NAVI_API_BASE}${path}`);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    }
+    return res.json();
+  } catch (e: any) {
+    return { error: e.message };
+  }
+}
+
+function stripAnsiCodes(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "");
+}
+
+const naviContextServer = createSdkMcpServer({
+  name: "navi-context",
+  version: "1.0.0",
+  tools: [
+    tool(
+      "view_processes",
+      `List and view output from background processes (dev servers, builds, etc).
+Use this to check what processes are running and view their logs.
+This is useful when debugging issues or checking if a dev server started correctly.`,
+      {
+        processId: z.string().optional().describe("Specific process ID to view logs for. If omitted, lists all processes."),
+        lines: z.number().optional().default(30).describe("Number of log lines to retrieve (default: 30)"),
+        status: z.enum(["running", "completed", "failed", "killed"]).optional().describe("Filter by status"),
+      },
+      async (args) => {
+        if (args.processId) {
+          // Get specific process logs
+          const proc = await fetchNaviApi(`/api/background-processes/${args.processId}`);
+          if (proc.error) {
+            return { content: [{ type: "text" as const, text: `Error: ${proc.error}` }] };
+          }
+
+          const output = await fetchNaviApi(`/api/background-processes/${args.processId}/output?lines=${args.lines || 30}`);
+          const logs = (output.output || []).map(stripAnsiCodes).join("\n");
+
+          return {
+            content: [{
+              type: "text" as const,
+              text: `## Process: ${proc.label || proc.id}
+**Status:** ${proc.status}${proc.exitCode !== undefined ? ` (exit: ${proc.exitCode})` : ""}
+**Command:** \`${proc.command}\`
+**CWD:** ${proc.cwd}
+**Ports:** ${proc.ports?.length ? proc.ports.join(", ") : "none detected"}
+
+### Output (last ${args.lines || 30} lines):
+\`\`\`
+${logs || "(no output)"}
+\`\`\``,
+            }],
+          };
+        }
+
+        // List all processes
+        const statusFilter = args.status ? `?status=${args.status}` : "";
+        const processes = await fetchNaviApi(`/api/background-processes${statusFilter}`);
+
+        if (processes.error) {
+          return { content: [{ type: "text" as const, text: `Error: ${processes.error}` }] };
+        }
+
+        if (!processes.length) {
+          return { content: [{ type: "text" as const, text: "No background processes running." }] };
+        }
+
+        const list = processes.map((p: any) =>
+          `- **${p.label || p.id}** [${p.status}]: \`${p.command.slice(0, 50)}${p.command.length > 50 ? "..." : ""}\`${p.ports?.length ? ` (ports: ${p.ports.join(", ")})` : ""}`
+        ).join("\n");
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: `## Background Processes (${processes.length})\n${list}\n\nUse \`view_processes\` with a processId to see logs.`,
+          }],
+        };
+      }
+    ),
+
+    tool(
+      "view_terminal",
+      `View output from a terminal session.
+Use this to check what's happening in the user's terminal, look for errors, or get context about recent commands.`,
+      {
+        terminalId: z.string().optional().describe("Specific terminal ID. If omitted, lists all terminals."),
+        lines: z.number().optional().default(30).describe("Number of lines to retrieve (default: 30)"),
+        checkErrors: z.boolean().optional().default(false).describe("If true, also check for error patterns"),
+      },
+      async (args) => {
+        if (args.terminalId) {
+          // Get terminal buffer
+          const buffer = await fetchNaviApi(`/api/terminal/pty/${args.terminalId}/buffer?lines=${args.lines || 30}`);
+
+          if (buffer.error) {
+            return { content: [{ type: "text" as const, text: `Error: ${buffer.error}` }] };
+          }
+
+          const logs = (buffer.lines || []).map(stripAnsiCodes).join("\n");
+
+          let errorInfo = "";
+          if (args.checkErrors) {
+            const errors = await fetchNaviApi(`/api/terminal/pty/${args.terminalId}/errors`);
+            if (errors.hasErrors) {
+              errorInfo = `\n\n### ⚠️ Errors Detected:\n\`\`\`\n${errors.errorLines.map(stripAnsiCodes).join("\n")}\n\`\`\``;
+            }
+          }
+
+          return {
+            content: [{
+              type: "text" as const,
+              text: `## Terminal Output (last ${args.lines || 30} lines):\n\`\`\`\n${logs || "(empty)"}\n\`\`\`${errorInfo}`,
+            }],
+          };
+        }
+
+        // List all terminals
+        const terminals = await fetchNaviApi("/api/terminal/pty");
+
+        if (terminals.error) {
+          return { content: [{ type: "text" as const, text: `Error: ${terminals.error}` }] };
+        }
+
+        if (!terminals.length) {
+          return { content: [{ type: "text" as const, text: "No active terminal sessions." }] };
+        }
+
+        const list = terminals.map((t: any) =>
+          `- **${t.name || t.terminalId}** (PID: ${t.pid}) - ${t.cwd}`
+        ).join("\n");
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: `## Active Terminals (${terminals.length})\n${list}\n\nUse \`view_terminal\` with a terminalId to see output.`,
+          }],
+        };
+      }
+    ),
+  ],
+});
+
 function send(msg: any) {
   console.log(JSON.stringify(msg));
 }
@@ -1112,10 +1263,12 @@ async function runQuery(input: WorkerInput) {
     console.error(`[Worker] requireConfirmation:`, requireConfirmation);
     console.error(`[Worker] autoAllowedTools:`, autoAllowedTools);
 
-    // Build MCP servers - always include user-interaction, conditionally include multi-session
+    // Build MCP servers - always include user-interaction and navi-context
     const mcpServers: Record<string, any> = {
       "user-interaction": userInteractionServer,
+      "navi-context": naviContextServer,
     };
+    console.error(`[Worker] Navi context MCP server enabled (view_processes, view_terminal)`);
 
     // Enable multi-session tools if enabled (for all sessions that can spawn or are children)
     if (multiSession?.enabled) {

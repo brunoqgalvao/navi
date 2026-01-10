@@ -42,6 +42,18 @@ import { handleBranchNameRoutes } from "./routes/branch-name";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 import { handleCommandsRoutes } from "./routes/commands";
 import { handleSessionsBoardRoutes } from "./routes/sessions-board";
+// Dashboard feature (isolated - remove import to disable)
+import { handleDashboardRoutes } from "./routes/dashboard";
+// OAuth Integrations (Google, GitHub, etc.)
+import { handleIntegrationsRoutes } from "./routes/integrations";
+// Experimental Features (Ensemble Consensus, Self-Healing, Experimental Agents)
+import { handleExperimentalRoutes, initExperimentalWebSocket } from "./routes/experimental";
+// Project Memory (for proactive hooks)
+import { handleMemoryRoutes } from "./routes/memory";
+// Proactive Hooks (cheap Haiku analysis)
+import { handleProactiveHooksRoutes } from "./routes/proactive-hooks";
+// Cloud Execution (E2B sandboxes)
+import { handleCloudExecutionRoutes } from "./routes/cloud-execution";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -59,6 +71,10 @@ import { findAvailablePort } from "./utils/port";
 
 // Initialize database
 await initDb();
+
+// Initialize integrations table (must be after initDb)
+import { initIntegrationsTable } from "./integrations/db";
+initIntegrationsTable();
 
 // Install global error handler for PTY crashes
 installPtyErrorHandler();
@@ -305,6 +321,14 @@ const server = Bun.serve({
     response = await handleGitRoutes(url, method, req);
     if (response) return response;
 
+    // Dashboard routes (isolated feature)
+    response = await handleDashboardRoutes(url, method, req);
+    if (response) return response;
+
+    // Experimental features routes (Ensemble Consensus, Self-Healing, Agents)
+    response = await handleExperimentalRoutes(url, method, req);
+    if (response) return response;
+
     // Filesystem routes
     response = await handleFilesystemRoutes(url, method, req);
     if (response) return response;
@@ -329,6 +353,10 @@ const server = Bun.serve({
     response = await handleAuthRoutes(url, method, req);
     if (response) return response;
 
+    // Integrations routes (OAuth)
+    response = await handleIntegrationsRoutes(url, method, req);
+    if (response) return response;
+
     // Config routes
     response = await handleConfigRoutes(url, method, req);
     if (response) return response;
@@ -347,6 +375,14 @@ const server = Bun.serve({
 
     // Skill routes
     response = await handleSkillRoutes(url, method, req);
+    if (response) return response;
+
+    // Memory routes (project memory for proactive hooks)
+    response = await handleMemoryRoutes(url, method, req);
+    if (response) return response;
+
+    // Proactive hooks routes (cheap Haiku analysis)
+    response = await handleProactiveHooksRoutes(url, method, req);
     if (response) return response;
 
     // Agent routes
@@ -375,6 +411,10 @@ const server = Bun.serve({
 
     // Deploy routes (Navi Cloud)
     response = await handleDeployRoutes(url, method, req);
+    if (response) return response;
+
+    // Cloud Execution routes (E2B)
+    response = await handleCloudExecutionRoutes(url, method, req);
     if (response) return response;
 
     // Background process routes
@@ -452,6 +492,9 @@ addProcessEventListener((event: ProcessEvent) => {
     ...event,
   });
 });
+
+// Initialize experimental features WebSocket broadcasting
+initExperimentalWebSocket(broadcastToClients);
 
 console.log(`Claude Code UI Server running on http://localhost:${PORT}`);
 console.log(`WebSocket endpoint: ws://localhost:${PORT}/ws`);

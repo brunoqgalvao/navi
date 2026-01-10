@@ -68,6 +68,7 @@
     onToggleFolderPin: (folder: WorkspaceFolder, e: Event) => void;
     onNewProjectInFolder: (folderId: string) => void;
     onOpenProjectInNewWindow: (project: Project) => void;
+    onOpenSessionsBoard?: (projectId?: string) => void;
     onOpenAgentBuilder?: () => void;
     agents?: { id: string; name: string; type: "agent" | "skill"; description?: string }[];
     onSelectAgent?: (agent: { id: string; name: string; type: "agent" | "skill"; description?: string }) => void;
@@ -129,6 +130,7 @@
     onToggleFolderPin,
     onNewProjectInFolder,
     onOpenProjectInNewWindow,
+    onOpenSessionsBoard,
     onOpenAgentBuilder,
     agents = [],
     onSelectAgent,
@@ -152,6 +154,34 @@
     const hasChildren = sessions.some(s => (s as any).parent_session_id === currentSess.id);
     return hasParent || hasChildren;
   });
+
+  // Get the root session ID for the tree (walk up to find the root)
+  let rootSessionIdForTree = $derived(() => {
+    const currentSess = sessions.find(s => s.id === $session.sessionId);
+    if (!currentSess) return $session.sessionId;
+    // If has root_session_id, use that
+    if ((currentSess as any).root_session_id) {
+      return (currentSess as any).root_session_id;
+    }
+    // If no parent, this is the root
+    if (!(currentSess as any).parent_session_id) {
+      return currentSess.id;
+    }
+    // Walk up to find root
+    let rootId = currentSess.id;
+    let current = currentSess;
+    while ((current as any).parent_session_id) {
+      const parent = sessions.find(s => s.id === (current as any).parent_session_id);
+      if (parent) {
+        rootId = parent.id;
+        current = parent;
+      } else {
+        break;
+      }
+    }
+    return rootId;
+  });
+
   let sidebarSearchQuery = $state("");
   let searchResults = $state<SearchResult[]>([]);
   let isSearching = $state(false);
@@ -211,13 +241,13 @@
     let result: Session[];
 
     if (!query) {
-      // No search - show all sessions
-      result = sessions;
+      // No search - show all sessions, but exclude child sessions (they appear in tree only)
+      result = sessions.filter(s => !(s as any).parent_session_id);
     } else {
       // Search active - filter to sessions that appear in search results
       const matchingSessionIds = searchMatchInfo().keys();
       const matchSet = new Set(matchingSessionIds);
-      result = sessions.filter(s => matchSet.has(s.id));
+      result = sessions.filter(s => matchSet.has(s.id) && !(s as any).parent_session_id);
     }
 
     // Sort: starred first, then by recency
@@ -851,6 +881,10 @@
                                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                                   Open in New Window
                                 </button>
+                                <button onclick={(e) => { e.stopPropagation(); onOpenSessionsBoard?.(proj.id); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path></svg>
+                                  Sessions Board
+                                </button>
                                 <button onclick={(e) => { onToggleProjectArchive(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
                                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
                                   {proj.archived ? 'Unarchive' : 'Archive'}
@@ -944,6 +978,10 @@
                           <button onclick={(e) => { e.stopPropagation(); onOpenProjectInNewWindow(proj); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                             Open in New Window
+                          </button>
+                          <button onclick={(e) => { e.stopPropagation(); onOpenSessionsBoard?.(proj.id); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path></svg>
+                            Sessions Board
                           </button>
                           <button onclick={(e) => { onToggleProjectArchive(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
@@ -1178,7 +1216,7 @@
             {#if sessionTreeExpanded}
               <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-1 border border-gray-100 dark:border-gray-700">
                 <SessionTree
-                  rootSessionId={$session.sessionId}
+                  rootSessionId={rootSessionIdForTree() || $session.sessionId}
                   currentSessionId={$session.sessionId}
                   onSelectSession={(sess) => onSelectHierarchySession?.(sess)}
                   onResolveEscalation={(id) => onResolveEscalation?.(id)}
