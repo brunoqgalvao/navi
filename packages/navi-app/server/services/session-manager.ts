@@ -41,6 +41,7 @@ export interface SpawnConfig {
   task: string;
   model?: string;
   context?: string; // Additional context to pass to the child
+  agentType?: string; // 'browser' | 'coding' | 'runner' | etc. for native UI
 }
 
 export interface ContextQuery {
@@ -131,6 +132,7 @@ class SessionManager {
       role: config.role,
       task: config.task,
       model: config.model,
+      agentType: config.agentType,  // Pass agent type for native UI
     });
 
     if (child) {

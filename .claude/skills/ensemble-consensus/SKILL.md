@@ -2,7 +2,10 @@
 name: ensemble-consensus
 description: Run prompts through multiple LLMs and synthesize the best answer. Use when you need high confidence, second opinions, or consensus on important decisions like architecture, security review, or complex code.
 tools: Read, Write, Bash
+experimental: true
 ---
+
+> **EXPERIMENTAL**: This skill is experimental and may change or be removed.
 
 # Ensemble Consensus - Multi-Model Voting
 

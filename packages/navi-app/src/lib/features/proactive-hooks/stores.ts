@@ -31,7 +31,8 @@ function createEnabledStore() {
   const stored = typeof window !== "undefined"
     ? localStorage.getItem(HOOKS_ENABLED_KEY)
     : null;
-  const { subscribe, set } = writable(stored !== "false"); // Default enabled
+  // Default DISABLED - experimental feature
+  const { subscribe, set } = writable(stored === "true");
 
   return {
     subscribe,

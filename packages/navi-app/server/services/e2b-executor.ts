@@ -1,4 +1,7 @@
 /**
+ * @deprecated This service is deprecated and scheduled for removal.
+ * E2B cloud execution has been superseded by Navi Cloud.
+ *
  * E2B Cloud Executor Service
  *
  * Runs Claude Code agents in E2B cloud sandboxes for isolated execution.

@@ -131,7 +131,7 @@ function createKanbanStore() {
     async dispatchCard(
       projectId: string,
       cardId: string
-    ): Promise<{ sessionId: string; prompt: string }> {
+    ): Promise<{ sessionId: string; prompt: string; autoSend: boolean }> {
       const result = await kanbanApi.dispatchCard(projectId, cardId);
       update((state) => {
         const cards = state.get(projectId) || [];
@@ -142,7 +142,7 @@ function createKanbanStore() {
         }
         return new Map(state);
       });
-      return { sessionId: result.sessionId, prompt: result.prompt };
+      return { sessionId: result.sessionId, prompt: result.prompt, autoSend: result.autoSend };
     },
 
     /**

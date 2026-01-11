@@ -1,4 +1,7 @@
 /**
+ * @deprecated This service is deprecated and scheduled for removal.
+ * Overlaps with multi-session agents system.
+ *
  * Experimental Native Agents
  *
  * These are specialized subagent types that can be spawned by the session manager

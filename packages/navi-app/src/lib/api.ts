@@ -28,10 +28,28 @@ export interface Project {
   auto_accept_all?: number;
   archived?: number;
   folder_id?: string | null;
+  // Multi-backend support
+  default_backend?: BackendId | null;
   created_at: number;
   updated_at: number;
   session_count?: number;
   last_activity?: number | null;
+}
+
+// Multi-backend types
+export type BackendId = "claude" | "codex" | "gemini";
+
+export interface BackendInfo {
+  id: BackendId;
+  name: string;
+  description: string;
+  installed: boolean;
+  version?: string;
+  path?: string;
+  models?: string[];
+  defaultModel?: string;
+  supportsCallbackPermissions?: boolean;
+  supportsResume?: boolean;
 }
 
 export interface Session {
@@ -58,6 +76,18 @@ export interface Session {
   worktree_path?: string | null;
   worktree_branch?: string | null;
   worktree_base_branch?: string | null;
+  // Session hierarchy (multi-agent)
+  parent_session_id?: string | null;
+  root_session_id?: string | null;
+  depth?: number;
+  role?: string | null;
+  task?: string | null;
+  agent_status?: string | null;
+  agent_type?: string | null;
+  escalation?: string | null;
+  deliverable?: string | null;
+  // Multi-backend support
+  backend?: BackendId | null;
   created_at: number;
   updated_at: number;
   project_name?: string;
@@ -216,7 +246,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: { title?: string; model?: string }) =>
+    update: (id: string, data: { title?: string; model?: string; backend?: BackendId }) =>
       request<Session>(`/sessions/${id}`, {
         method: "PATCH",
         body: JSON.stringify(data),
@@ -1600,4 +1630,26 @@ export const portManagerPreviewApi = {
     request<{ logs: string[] }>(
       `/port-manager-preview/${encodeURIComponent(previewId)}/logs?tail=${tail}`
     ),
+};
+
+// =============================================================================
+// Backend API (Multi-backend support: Claude, Codex, Gemini)
+// =============================================================================
+
+export const backendsApi = {
+  /** List all backends with installation status */
+  list: () => request<BackendInfo[]>("/backends"),
+
+  /** List only installed backends */
+  listInstalled: () => request<BackendInfo[]>("/backends/installed"),
+
+  /** Get specific backend info */
+  get: (id: BackendId) => request<BackendInfo>(`/backends/${id}`),
+
+  /** Get all models grouped by backend */
+  getAllModels: () => request<Record<BackendId, string[]>>("/backends/models"),
+
+  /** Get models for a specific backend */
+  getModels: (id: BackendId) =>
+    request<{ models: string[]; default: string }>(`/backends/${id}/models`),
 };

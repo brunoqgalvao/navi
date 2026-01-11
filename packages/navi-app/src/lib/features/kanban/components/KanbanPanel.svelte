@@ -8,7 +8,7 @@
 
   interface Props {
     projectId: string;
-    onNavigateToSession?: (sessionId: string, prompt?: string) => void;
+    onNavigateToSession?: (sessionId: string, prompt?: string, autoSend?: boolean) => void;
   }
 
   let { projectId, onNavigateToSession }: Props = $props();
@@ -56,11 +56,18 @@
   }
 
   async function handleDispatchCard(card: KanbanCard) {
+    if (!projectId) {
+      showError({ title: "Failed to start task", message: "No project selected" });
+      return;
+    }
     try {
-      const { sessionId, prompt } = await kanbanStore.dispatchCard(projectId, card.id);
+      console.log("[Kanban] Dispatching card:", { projectId, cardId: card.id, cardTitle: card.title });
+      const { sessionId, prompt, autoSend } = await kanbanStore.dispatchCard(projectId, card.id);
+      console.log("[Kanban] Dispatch success:", { sessionId, autoSend });
       showSuccess("Task started", `Chat created for "${card.title}"`);
-      onNavigateToSession?.(sessionId, prompt);
+      onNavigateToSession?.(sessionId, prompt, autoSend);
     } catch (error) {
+      console.error("[Kanban] Dispatch failed:", error);
       showError({ title: "Failed to start task", message: String(error) });
     }
   }

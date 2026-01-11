@@ -1,8 +1,97 @@
 import { spawn } from "child_process";
-import { json } from "../utils/response";
+import { json, error as errorResponse } from "../utils/response";
 import { globalSettings } from "../db";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
 import { getSDK } from "../utils/sdk-loader";
+import { createHash, randomBytes } from "crypto";
+
+// ============================================
+// USER AUTH (for gated features like Email)
+// ============================================
+
+const AGENTMAIL_API_BASE = "https://api.agentmail.to/v0";
+
+// In-memory user store (replace with DB later)
+interface NaviUser {
+  id: string;
+  email: string;
+  passwordHash: string;
+  name?: string;
+  naviEmail: string;
+  createdAt: number;
+}
+
+const naviUsers = new Map<string, NaviUser>();
+
+// Session store
+interface NaviSession {
+  userId: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+const naviSessions = new Map<string, NaviSession>();
+
+function hashPassword(password: string, salt: string): string {
+  return createHash("sha256").update(password + salt).digest("hex");
+}
+
+function generateSessionToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
+async function createNaviInbox(username: string): Promise<string | null> {
+  const apiKey = process.env.AGENTMAIL_API_KEY;
+  if (!apiKey) {
+    console.error("[Auth] AGENTMAIL_API_KEY not set");
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${AGENTMAIL_API_BASE}/inboxes`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: username,
+        display_name: `Navi - ${username}`,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[Auth] Failed to create inbox:", errorText);
+      return null;
+    }
+
+    const result = await response.json() as { inbox_id: string };
+    return result.inbox_id;
+  } catch (e) {
+    console.error("[Auth] Error creating inbox:", e);
+    return null;
+  }
+}
+
+function getSessionFromRequest(req: Request): string | null {
+  const cookie = req.headers.get("cookie");
+  if (!cookie) return null;
+  const match = cookie.match(/navi_session=([^;]+)/);
+  return match ? match[1] : null;
+}
+
+function getUserFromSession(sessionToken: string): NaviUser | null {
+  const session = naviSessions.get(sessionToken);
+  if (!session) return null;
+  if (Date.now() > session.expiresAt) {
+    naviSessions.delete(sessionToken);
+    return null;
+  }
+  return naviUsers.get(session.userId) || null;
+}
+
+// ============================================
 
 export async function handleAuthRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/auth/status") {
@@ -206,6 +295,178 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
         }, 400));
       }, 2000);
     });
+  }
+
+  // ============================================
+  // USER AUTH ROUTES (for gated features)
+  // ============================================
+
+  // GET /api/auth/me - Get current Navi user
+  if (url.pathname === "/api/auth/me" && method === "GET") {
+    const sessionToken = getSessionFromRequest(req);
+    if (!sessionToken) {
+      return errorResponse("Not authenticated", 401);
+    }
+
+    const user = getUserFromSession(sessionToken);
+    if (!user) {
+      return errorResponse("Not authenticated", 401);
+    }
+
+    return json({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      naviEmail: user.naviEmail,
+      createdAt: user.createdAt,
+    });
+  }
+
+  // POST /api/auth/signup - Create Navi account
+  if (url.pathname === "/api/auth/signup" && method === "POST") {
+    try {
+      const body = await req.json() as {
+        email: string;
+        password: string;
+        name?: string;
+      };
+
+      if (!body.email || !body.password) {
+        return errorResponse("Email and password required", 400);
+      }
+
+      if (body.password.length < 8) {
+        return errorResponse("Password must be at least 8 characters", 400);
+      }
+
+      // Check if user exists
+      for (const user of naviUsers.values()) {
+        if (user.email === body.email) {
+          return errorResponse("Email already registered", 400);
+        }
+      }
+
+      // Generate username for AgentMail
+      const emailUsername = body.email.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+      const naviUsername = `navi-${emailUsername}-${randomBytes(4).toString("hex")}`;
+
+      // Create AgentMail inbox
+      const naviEmail = await createNaviInbox(naviUsername);
+      if (!naviEmail) {
+        return errorResponse("Failed to create Navi email. Please try again.", 500);
+      }
+
+      // Create user
+      const userId = randomBytes(16).toString("hex");
+      const salt = randomBytes(16).toString("hex");
+      const passwordHash = hashPassword(body.password, salt) + ":" + salt;
+
+      const user: NaviUser = {
+        id: userId,
+        email: body.email,
+        passwordHash,
+        name: body.name,
+        naviEmail,
+        createdAt: Date.now(),
+      };
+
+      naviUsers.set(userId, user);
+
+      // Create session
+      const sessionToken = generateSessionToken();
+      naviSessions.set(sessionToken, {
+        userId,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
+      });
+
+      console.log(`[Auth] User created: ${body.email} with Navi email: ${naviEmail}`);
+
+      const response = json({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        naviEmail: user.naviEmail,
+        createdAt: user.createdAt,
+      });
+
+      response.headers.set("Set-Cookie", `navi_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`);
+      return response;
+    } catch (e) {
+      console.error("[Auth] Signup error:", e);
+      return errorResponse("Sign up failed", 500);
+    }
+  }
+
+  // POST /api/auth/signin - Sign in to Navi
+  if (url.pathname === "/api/auth/signin" && method === "POST") {
+    try {
+      const body = await req.json() as {
+        email: string;
+        password: string;
+      };
+
+      if (!body.email || !body.password) {
+        return errorResponse("Email and password required", 400);
+      }
+
+      // Find user
+      let foundUser: NaviUser | null = null;
+      for (const user of naviUsers.values()) {
+        if (user.email === body.email) {
+          foundUser = user;
+          break;
+        }
+      }
+
+      if (!foundUser) {
+        return errorResponse("Invalid email or password", 401);
+      }
+
+      // Check password
+      const [storedHash, salt] = foundUser.passwordHash.split(":");
+      const inputHash = hashPassword(body.password, salt);
+
+      if (inputHash !== storedHash) {
+        return errorResponse("Invalid email or password", 401);
+      }
+
+      // Create session
+      const sessionToken = generateSessionToken();
+      naviSessions.set(sessionToken, {
+        userId: foundUser.id,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      });
+
+      console.log(`[Auth] User signed in: ${body.email}`);
+
+      const response = json({
+        id: foundUser.id,
+        email: foundUser.email,
+        name: foundUser.name,
+        naviEmail: foundUser.naviEmail,
+        createdAt: foundUser.createdAt,
+      });
+
+      response.headers.set("Set-Cookie", `navi_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`);
+      return response;
+    } catch (e) {
+      console.error("[Auth] Signin error:", e);
+      return errorResponse("Sign in failed", 500);
+    }
+  }
+
+  // POST /api/auth/signout - Sign out of Navi
+  if (url.pathname === "/api/auth/signout" && method === "POST") {
+    const sessionToken = getSessionFromRequest(req);
+    if (sessionToken) {
+      naviSessions.delete(sessionToken);
+    }
+
+    const response = json({ success: true });
+    response.headers.set("Set-Cookie", `navi_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+    return response;
   }
 
   return null;

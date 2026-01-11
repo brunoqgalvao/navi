@@ -5,6 +5,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions, getNaviAuthOverridesFromEnv } from "./utils/claude-code";
+import { getAgentDefinition, inferAgentTypeFromRole } from "./agent-types";
+import { agentLoader, type ResolvedAgent, type AgentBundle } from "./services/agent-loader";
 
 interface SkillInfo {
   name: string;
@@ -412,12 +414,17 @@ interface MultiSessionContext {
   depth: number;
   role?: string;
   task?: string;
+  agentType?: string;  // 'browser' | 'coding' | 'runner' | etc.
   parentTask?: string;
   siblingRoles?: string[];
   recentDecisions?: string[];
 }
 
 function buildMultiSessionSystemPrompt(ctx: MultiSessionContext): string {
+  // Get agent-specific system prompt based on agent type
+  const effectiveType = ctx.agentType || (ctx.role ? inferAgentTypeFromRole(ctx.role) : "general");
+  const agentDef = getAgentDefinition(effectiveType);
+
   const siblingsText = ctx.siblingRoles && ctx.siblingRoles.length > 0
     ? `You have sibling agents working on: ${ctx.siblingRoles.join(", ")}`
     : "You are the only child agent at this level.";
@@ -429,22 +436,21 @@ function buildMultiSessionSystemPrompt(ctx: MultiSessionContext): string {
   const canSpawn = ctx.depth < 2; // Max depth is 3, so depth 0, 1 can spawn
 
   return `
-## Multi-Session Agent Context
+# ${agentDef.displayName}
 
-You are a specialized agent working on a specific task within a larger project.
+${agentDef.systemPrompt}
 
-### Your Role: ${ctx.role || "agent"}
+---
 
-### Your Task
+## Your Assigned Task
 ${ctx.task || "Complete the assigned work"}
 
-### Context
-- Parent's task: ${ctx.parentTask || "Unknown"}
+## Context
+- **Parent's task**: ${ctx.parentTask || "Unknown"}
 - ${siblingsText}
 - Session depth: ${ctx.depth} of 3 (max)${decisionsText}
 
-### Available Multi-Session Tools
-You have access to these coordination tools via MCP:
+## Multi-Session Coordination Tools (via MCP)
 
 ${canSpawn ? `- **spawn_agent**: Create child agents for subtasks (you can spawn up to ${3 - ctx.depth - 1} more levels)` : "- spawn_agent: NOT AVAILABLE (max depth reached)"}
 - **get_context**: Query parent, siblings, or project-wide decisions/artifacts
@@ -452,17 +458,17 @@ ${canSpawn ? `- **spawn_agent**: Create child agents for subtasks (you can spawn
 - **escalate**: Request help when blocked (parent first, then human)
 - **deliver**: Complete your task and return results to parent
 
-### Guidelines
+## Agent Guidelines
 
 1. **Focus on YOUR specific task.** Don't duplicate work siblings are doing.
 2. **Use get_context sparingly** to coordinate with siblings if needed.
 3. **Log important decisions** so others can see them (architecture, API contracts, tech choices).
 4. **Only escalate if you truly cannot proceed.** Try to resolve issues yourself first.
-5. **Deliver when your task is COMPLETE**, not before.
+5. **Deliver when your task is COMPLETE** - this is required to signal completion.
 6. **Be efficient** - don't spawn agents for trivial work you can do yourself.
 7. **Coordinate with siblings** - check what decisions they've made before making conflicting ones.
 
-### Important Notes
+## Important Notes
 
 - Your deliverable will be sent to your parent agent, who will incorporate it into their work.
 - After you call \`deliver\`, your session will be archived.
@@ -477,6 +483,8 @@ interface WorkerInput {
   model?: string;
   allowedTools?: string[];
   sessionId?: string;
+  // Selected agent (e.g., "coder", "img3d") - if set, uses agent's system prompt
+  agentId?: string;
   permissionSettings?: {
     autoAcceptAll: boolean;
     requireConfirmation: string[];
@@ -567,6 +575,7 @@ const pendingContextRequests = new Map<string, (result: { content: string; metad
 const pendingEscalationRequests = new Map<string, (result: { action: string; content: string }) => void>();
 const pendingDeliverRequests = new Map<string, (result: { success: boolean }) => void>();
 const pendingDecisionRequests = new Map<string, (result: { success: boolean; decisionId?: string }) => void>();
+const pendingWaitRequests = new Map<string, (result: { skipped: boolean }) => void>();
 
 // Create MCP server with multi-session tools
 const multiSessionServer = createSdkMcpServer({
@@ -582,6 +591,15 @@ Use this for:
 - Specialized tasks that need focused attention
 - Breaking down complex work into manageable pieces
 
+Available agent types with native UI:
+- 'browser': Web browsing, research, URL analysis (shows visited URLs, page previews)
+- 'coding': Code implementation, file editing (shows files changed, diff preview)
+- 'runner': Command execution, builds, tests (shows command output, progress)
+- 'research': Deep analysis, findings synthesis
+- 'planning': Task breakdown, architecture design
+- 'reviewer': Code/document review, quality checks
+- 'general': Fallback for miscellaneous tasks
+
 The child agent has its own context window and can spawn its own children (up to depth 3).
 You will receive their deliverable when they complete.
 
@@ -590,6 +608,7 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
         title: z.string().describe("Short title for the child session (e.g., 'Build Login Form')"),
         role: z.string().describe("The role/specialty of the child agent (e.g., 'frontend', 'backend', 'researcher', 'architect')"),
         task: z.string().describe("Clear description of what the child should accomplish. Be specific about deliverables."),
+        agent_type: z.enum(["browser", "coding", "runner", "research", "planning", "reviewer", "general"]).optional().describe("Type of agent to spawn - determines UI and capabilities. Choose based on task nature."),
         model: z.enum(["opus", "sonnet", "haiku"]).optional().describe("Optional: Model to use (defaults to parent's model). Use 'haiku' for simpler tasks."),
         context: z.string().optional().describe("Optional: Additional context to pass to the child that they should know."),
       },
@@ -602,6 +621,7 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
           title: args.title,
           role: args.role,
           task: args.task,
+          agent_type: args.agent_type,
           model: args.model,
           context: args.context,
         });
@@ -622,7 +642,7 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
         return {
           content: [{
             type: "text" as const,
-            text: `Spawned child agent '${args.role}' to work on: ${args.task}
+            text: `Spawned ${args.agent_type || 'general'} agent '${args.role}' to work on: ${args.task}
 
 Child session ID: ${result.childSessionId}
 
@@ -973,6 +993,65 @@ Use this to check what's happening in the user's terminal, look for errors, or g
         };
       }
     ),
+
+    tool(
+      "wait",
+      `Pause execution for a specified duration. Use this when you need to:
+- Wait for a server to start up
+- Give a process time to initialize
+- Wait for a file to be written
+- Allow time for a background task to complete
+
+The user will see a countdown and can skip the wait if needed.
+Prefer this over bash sleep commands for better UX.`,
+      {
+        seconds: z.number().min(1).max(300).describe("How many seconds to wait (1-300)"),
+        reason: z.string().optional().describe("Why you're waiting (shown to user, e.g., 'Waiting for dev server to start')"),
+      },
+      async (args) => {
+        const requestId = crypto.randomUUID();
+        const startTime = Date.now();
+
+        // Send wait start message to UI
+        send({
+          type: "session_wait_start",
+          requestId,
+          seconds: args.seconds,
+          reason: args.reason || "Waiting...",
+        });
+
+        // Wait for either timeout or skip signal from UI
+        const result = await Promise.race([
+          new Promise<{ skipped: boolean }>((resolve) => {
+            pendingWaitRequests.set(requestId, resolve);
+          }),
+          new Promise<{ skipped: boolean }>((resolve) => {
+            setTimeout(() => {
+              pendingWaitRequests.delete(requestId);
+              resolve({ skipped: false });
+            }, args.seconds * 1000);
+          }),
+        ]);
+
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        // Send wait end message to UI
+        send({
+          type: "session_wait_end",
+          requestId,
+          skipped: result.skipped,
+        });
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: result.skipped
+              ? `Wait skipped by user after ${elapsed}s (originally ${args.seconds}s)`
+              : `Waited ${elapsed}s${args.reason ? ` (${args.reason})` : ""}`,
+          }],
+        };
+      }
+    ),
   ],
 });
 
@@ -1136,7 +1215,10 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
 let sessionApprovedAll = false;
 
 async function runQuery(input: WorkerInput) {
-  const { prompt, cwd, resume, model, allowedTools, sessionId, permissionSettings, multiSession } = input;
+  const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession } = input;
+
+  // Debug: Log multiSession state
+  console.error(`[Worker] multiSession received:`, JSON.stringify(multiSession, null, 2));
 
   // Clear any stray API keys from environment - Navi controls auth exclusively
   delete process.env.ANTHROPIC_API_KEY;
@@ -1222,14 +1304,91 @@ async function runQuery(input: WorkerInput) {
   try {
     console.error(`[Worker] Starting query with cwd: ${cwd}`);
     console.error(`[Worker] permissionSettings:`, permissionSettings);
-    
+
+    // Load skills from project and global directories
     const skills = loadAllSkills(cwd);
     console.error(`[Worker] Loaded ${skills.length} skills:`, skills.map(s => s.name));
 
-    const agents = loadAllAgents(cwd);
+    // Load all Navi Agents using the new unified loader
+    const naviAgentsMap = await agentLoader.loadAllAgents(cwd);
+    console.error(`[Worker] Loaded ${naviAgentsMap.size} Navi Agents:`, Array.from(naviAgentsMap.keys()));
+
+    // Convert Navi Agents to SDK subagent format for Task tool spawning
+    // Each Navi Agent can be spawned as a subagent, plus we collect their defined subagents
+    const sdkSubagents: Record<string, any> = {};
+
+    naviAgentsMap.forEach((naviAgent, id) => {
+      // Add the Navi Agent itself as a spawnable subagent
+      sdkSubagents[id] = {
+        description: naviAgent.description,
+        prompt: naviAgent.prompt,
+        ...(naviAgent.model && { model: naviAgent.model }),
+        ...(naviAgent.tools?.allowed && { tools: naviAgent.tools.allowed }),
+      };
+
+      // Also add any SDK subagents defined within this Navi Agent
+      if (naviAgent.subagents) {
+        for (const [subId, subagent] of Object.entries(naviAgent.subagents)) {
+          // Prefix with parent agent id to avoid collisions
+          const fullSubagentId = `${id}:${subId}`;
+          sdkSubagents[fullSubagentId] = subagent;
+        }
+      }
+    });
+
+    console.error(`[Worker] Total SDK subagents available: ${Object.keys(sdkSubagents).length}`);
 
     // Build system prompt append with skills
     let systemPromptAppend = buildSystemPromptAppend(skills);
+
+    // =========================================================================
+    // AGENT RESOLUTION: Apply full agent configuration
+    // =========================================================================
+    let resolvedAgent: ResolvedAgent | null = null;
+    let agentModel = model; // May be overridden by agent
+    let agentTools: string[] | null = null; // May be overridden by agent
+    let agentSkillsToLoad: string[] = []; // Additional skills from agent
+
+    if (agentId) {
+      const defaultModel = (model as "haiku" | "sonnet" | "opus") || "sonnet";
+      resolvedAgent = await agentLoader.resolveAgent(agentId, cwd, defaultModel);
+
+      if (resolvedAgent) {
+        console.error(`[Worker] Resolved agent @${agentId}:`);
+        console.error(`[Worker]   - Model: ${resolvedAgent.resolvedModel}`);
+        console.error(`[Worker]   - Tools: ${resolvedAgent.resolvedAllowedTools.join(", ")}`);
+        console.error(`[Worker]   - Skills: ${resolvedAgent.resolvedSkills.join(", ")}`);
+        console.error(`[Worker]   - Source: ${resolvedAgent.source}`);
+
+        // Apply agent's model preference (unless explicitly overridden by caller)
+        if (!model && resolvedAgent.model) {
+          agentModel = resolvedAgent.resolvedModel;
+          console.error(`[Worker] Using agent's model preference: ${agentModel}`);
+        }
+
+        // Apply agent's tool restrictions
+        if (resolvedAgent.tools?.allowed && resolvedAgent.tools.allowed.length > 0) {
+          agentTools = resolvedAgent.resolvedAllowedTools;
+          console.error(`[Worker] Using agent's tool restrictions: ${agentTools.length} tools`);
+        }
+
+        // Track agent's skills for loading
+        agentSkillsToLoad = resolvedAgent.resolvedSkills;
+
+        // Build agent system prompt section
+        const agentPrompt = `<agent name="${agentId}" source="${resolvedAgent.source}">
+${resolvedAgent.prompt}
+</agent>
+
+You are currently acting as the @${agentId} agent. Follow the instructions above for this agent's behavior and personality.
+
+`;
+        systemPromptAppend = agentPrompt + systemPromptAppend;
+        console.error(`[Worker] Using agent: @${agentId}`);
+      } else {
+        console.error(`[Worker] Agent @${agentId} not found, proceeding without agent`);
+      }
+    }
 
     // Add multi-session context if this is a child session
     if (multiSession?.enabled && multiSession.parentSessionId) {
@@ -1240,7 +1399,9 @@ async function runQuery(input: WorkerInput) {
 
     console.error(`[Worker] System prompt append (${systemPromptAppend.length} chars)`);
 
-    const allTools = allowedTools || [
+    // Determine final tools list
+    // Priority: 1. Explicit allowedTools param, 2. Agent's tools, 3. Default tools
+    const defaultTools = [
       "Read",
       "Write",
       "Edit",
@@ -1256,12 +1417,15 @@ async function runQuery(input: WorkerInput) {
       // Multi-session tools exposed via MCP server (mcp__multi-session__*)
     ];
 
+    const allTools = allowedTools || agentTools || defaultTools;
+
     const requireConfirmation = permissionSettings?.requireConfirmation || [];
     const autoAllowedTools = allTools.filter(t => !requireConfirmation.includes(t));
 
-    console.error(`[Worker] allTools:`, allTools);
-    console.error(`[Worker] requireConfirmation:`, requireConfirmation);
-    console.error(`[Worker] autoAllowedTools:`, autoAllowedTools);
+    console.error(`[Worker] Final tools configuration:`);
+    console.error(`[Worker]   - allTools (${allTools.length}):`, allTools);
+    console.error(`[Worker]   - requireConfirmation:`, requireConfirmation);
+    console.error(`[Worker]   - autoAllowedTools (${autoAllowedTools.length}):`, autoAllowedTools);
 
     // Build MCP servers - always include user-interaction and navi-context
     const mcpServers: Record<string, any> = {
@@ -1270,18 +1434,30 @@ async function runQuery(input: WorkerInput) {
     };
     console.error(`[Worker] Navi context MCP server enabled (view_processes, view_terminal)`);
 
+    // Add agent's MCP servers if defined
+    if (resolvedAgent?.mcpServers) {
+      for (const [name, config] of Object.entries(resolvedAgent.mcpServers)) {
+        mcpServers[name] = config;
+        console.error(`[Worker] Added agent MCP server: ${name}`);
+      }
+    }
+
     // Enable multi-session tools if enabled (for all sessions that can spawn or are children)
     if (multiSession?.enabled) {
       mcpServers["multi-session"] = multiSessionServer;
       console.error(`[Worker] Multi-session MCP server enabled`);
     }
 
+    // Determine final model
+    const finalModel = agentModel || model;
+    console.error(`[Worker] Final model: ${finalModel || "default"}`);
+
     const q = query({
       prompt,
       options: {
         cwd,
         resume,
-        model,
+        model: finalModel,
         tools: allTools,
         allowedTools: permissionSettings?.autoAcceptAll ? allTools : autoAllowedTools,
         env: claudeEnv,
@@ -1292,8 +1468,9 @@ async function runQuery(input: WorkerInput) {
         systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
         includePartialMessages: true,
         mcpServers,
-        // Pass custom agents from .claude/agents/
-        ...(Object.keys(agents).length > 0 && { agents }),
+        // Pass SDK subagents (for Task tool spawning)
+        // This includes: all Navi Agents + their defined subagents
+        ...(Object.keys(sdkSubagents).length > 0 && { agents: sdkSubagents }),
       },
     });
 
@@ -1405,6 +1582,14 @@ rl.on("line", (line) => {
       if (resolve) {
         resolve({ success: msg.success, decisionId: msg.decisionId });
         pendingDecisionRequests.delete(msg.requestId);
+      }
+    }
+    // Wait/pause skip response
+    else if (msg.type === "session_wait_skip" && msg.requestId) {
+      const resolve = pendingWaitRequests.get(msg.requestId);
+      if (resolve) {
+        resolve({ skipped: true });
+        pendingWaitRequests.delete(msg.requestId);
       }
     }
     // Child deliverable injection (when a child completes)

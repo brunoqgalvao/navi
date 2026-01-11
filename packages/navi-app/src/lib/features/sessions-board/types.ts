@@ -19,6 +19,12 @@ export interface BoardColumn {
 
 export const BOARD_COLUMNS: BoardColumn[] = [
   {
+    type: "idle",
+    label: "Idle",
+    description: "Inactive or done",
+    color: "text-gray-500",
+  },
+  {
     type: "working",
     label: "Working",
     description: "Currently executing",
@@ -26,21 +32,15 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   },
   {
     type: "needs_approval",
-    label: "Needs Approval",
+    label: "Needs Input",
     description: "Waiting on tool permission",
     color: "text-yellow-500",
   },
   {
     type: "needs_review",
-    label: "Needs Review",
+    label: "Waiting Review",
     description: "Completed, needs review",
     color: "text-blue-500",
-  },
-  {
-    type: "idle",
-    label: "Idle",
-    description: "Inactive or done",
-    color: "text-gray-500",
   },
 ];
 

@@ -56,6 +56,13 @@ export interface SessionDecision {
   created_at: number;
 }
 
+// Latest message preview for child session cards
+export interface LatestPreview {
+  role: string;
+  preview: string;
+  timestamp: number;
+}
+
 // Extended session with hierarchy fields
 export interface HierarchySession {
   id: string;
@@ -74,6 +81,7 @@ export interface HierarchySession {
   role: string | null;
   task: string | null;
   agent_status: AgentStatus;
+  agent_type: string | null; // 'browser' | 'coding' | 'runner' | etc. for native UI
   deliverable: string | null; // JSON string
   escalation: string | null; // JSON string
   delivered_at: number | null;
@@ -81,6 +89,10 @@ export interface HierarchySession {
   // Timestamps
   created_at: number;
   updated_at: number;
+  // Enriched fields (added by API)
+  latestPreview?: LatestPreview | null;
+  isWaitingForInput?: boolean;
+  pendingQuestionType?: string | null;
 }
 
 // Tree node with children

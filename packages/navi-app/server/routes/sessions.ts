@@ -1,6 +1,6 @@
 import { json } from "../utils/response";
 import { projects, sessions, messages, searchIndex, pendingQuestions, type Message } from "../db";
-import { enableUntilDone, disableUntilDone, getUntilDoneSessions, cleanupSessionState } from "../websocket/handler";
+import { enableUntilDone, disableUntilDone, getUntilDoneSessions, cleanupSessionState, skipSessionWait, getActiveWaits } from "../websocket/handler";
 import { nativePreviewService } from "../services/native-preview";
 import { sessionManager } from "../services/session-manager";
 
@@ -64,6 +64,9 @@ export async function handleSessionRoutes(
       }
       if (body.model !== undefined) {
         sessions.updateModel(body.model, id);
+      }
+      if (body.backend !== undefined) {
+        sessions.updateBackend(body.backend, id);
       }
       return json(sessions.get(id));
     }
@@ -628,6 +631,29 @@ export async function handleSessionRoutes(
       console.error("Failed to prune tool results:", e);
       return json({ error: "Failed to prune tool results", details: String(e) }, 500);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // WAIT/PAUSE MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════
+
+  // Get active waits for a session
+  const activeWaitsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/waits$/);
+  if (activeWaitsMatch && method === "GET") {
+    const sessionId = activeWaitsMatch[1];
+    const waits = getActiveWaits(sessionId);
+    return json({ waits });
+  }
+
+  // Skip a specific wait
+  const skipWaitMatch = url.pathname.match(/^\/api\/sessions\/waits\/([^/]+)\/skip$/);
+  if (skipWaitMatch && method === "POST") {
+    const requestId = skipWaitMatch[1];
+    const success = skipSessionWait(requestId);
+    if (success) {
+      return json({ success: true });
+    }
+    return json({ error: "Wait not found or already completed" }, 404);
   }
 
   // ═══════════════════════════════════════════════════════════════

@@ -105,12 +105,16 @@ export async function updateCardStatus(
 export async function dispatchCard(
   projectId: string,
   cardId: string
-): Promise<{ sessionId: string; prompt: string; card: KanbanCard }> {
-  const res = await fetch(`${getKanbanApiBase(projectId)}/cards/${cardId}/dispatch`, {
+): Promise<{ sessionId: string; prompt: string; autoSend: boolean; card: KanbanCard }> {
+  const url = `${getKanbanApiBase(projectId)}/cards/${cardId}/dispatch`;
+  console.log("[KanbanAPI] dispatchCard:", { url, projectId, cardId });
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
+  console.log("[KanbanAPI] dispatchCard response:", { status: res.status, ok: res.ok });
   const data = await res.json();
+  console.log("[KanbanAPI] dispatchCard data:", data);
   if (data.error) throw new Error(data.error);
   return data;
 }

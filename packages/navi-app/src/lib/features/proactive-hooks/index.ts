@@ -1,4 +1,6 @@
 /**
+ * @experimental This feature is experimental and may change or be removed.
+ *
  * Proactive Hooks Feature
  *
  * Lightweight AI-powered suggestions that help users during conversation.

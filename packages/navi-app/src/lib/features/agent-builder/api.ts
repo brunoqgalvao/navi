@@ -81,4 +81,19 @@ export const agentBuilderApi = {
         body: JSON.stringify({ name, language }),
       }
     ),
+
+  // Prepare agent for execution (returns prompt + config)
+  prepareRun: (agentPath: string, input: Record<string, unknown>, model?: string) =>
+    request<{
+      prepared: boolean;
+      agentName: string;
+      model: string;
+      tools: string[];
+      prompt: string;
+      originalPrompt: string;
+      input: Record<string, unknown>;
+    }>("/agent-builder/run", {
+      method: "POST",
+      body: JSON.stringify({ agentPath, input, model }),
+    }),
 };

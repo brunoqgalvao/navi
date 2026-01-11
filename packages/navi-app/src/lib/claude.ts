@@ -438,7 +438,14 @@ export type ClaudeMessage =
   | { type: "ui_command"; command: string; payload: Record<string, unknown> }
   | { type: "until_done_continue"; uiSessionId?: string; iteration: number; maxIterations: number; totalCost: number; reason: string }
   | { type: "until_done_complete"; uiSessionId?: string; totalIterations: number; totalCost: number; reason: string }
-  | { type: "play_sound"; sound: string };
+  | { type: "play_sound"; sound: string }
+  // Wait/Pause events
+  | { type: "session:wait_start"; requestId: string; sessionId: string; seconds: number; endTime: number; reason: string }
+  | { type: "session:wait_end"; requestId: string; sessionId: string; skipped: boolean }
+  // Multi-backend events (Codex, Gemini)
+  | { type: "query_start"; sessionId?: string; uiSessionId?: string; backend?: string }
+  | { type: "query_complete"; sessionId?: string; uiSessionId?: string; backend?: string }
+  | { type: "complete"; sessionId?: string; uiSessionId?: string; lastAssistantContent?: ContentBlock[]; resultData?: Record<string, unknown> };
 
 export class ClaudeClient {
   private ws: WebSocket | null = null;
@@ -499,6 +506,10 @@ export class ClaudeClient {
     allowedTools?: string[];
     model?: string;
     historyContext?: string;
+    // Agent selection (e.g., "coder", "img3d")
+    agentId?: string;
+    // Backend selection (claude, codex, gemini)
+    backend?: "claude" | "codex" | "gemini";
     // Cloud execution options
     executionMode?: "local" | "cloud";
     cloudRepoUrl?: string;

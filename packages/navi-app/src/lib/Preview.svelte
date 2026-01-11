@@ -18,6 +18,20 @@
 
   type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "xlsx" | "json" | "stl" | "glb" | "logs" | "none";
 
+  // Element inspector data type
+  export interface InspectedElement {
+    tagName: string;
+    selector: string;
+    outerHTML: string;
+    innerHTML: string;
+    textContent: string;
+    attributes: Record<string, string>;
+    ancestors: Array<{ tag: string; id?: string; class?: string }>;
+    rect: { x: number; y: number; width: number; height: number };
+    computed: Record<string, string>;
+    page: { url: string; title: string };
+  }
+
   interface Props {
     source: string;
     type?: PreviewType;
@@ -31,6 +45,8 @@
     onBrowserGoToIndex?: (index: number) => void;
     // Resize state - when true, overlay blocks iframe mouse capture
     isParentResizing?: boolean;
+    // Element inspector callback
+    onElementInspected?: (element: InspectedElement) => void;
   }
 
   let {
@@ -44,6 +60,7 @@
     onBrowserForward,
     onBrowserGoToIndex,
     isParentResizing = false,
+    onElementInspected,
   }: Props = $props();
 
   // Use external history if provided, otherwise use internal state
@@ -68,6 +85,11 @@
   let showDebug = $state(false);
   let showBackHistory = $state(false);
   let showForwardHistory = $state(false);
+
+  // Element inspector state
+  let inspectMode = $state(false);
+  let inspectorReady = $state(false);
+  let inspectorTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Context menu state for text references
   interface SelectionInfo {
@@ -218,10 +240,20 @@
 
   function getProxiedUrl(url: string): string {
     const formatted = formatUrl(url);
-    // Only proxy external URLs, not localhost
+
+    // For localhost URLs, use preview proxy to inject inspector script
     if (isLocalUrl(formatted)) {
-      return formatted;
+      try {
+        const parsed = new URL(formatted);
+        const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+        const path = parsed.pathname + parsed.search + parsed.hash;
+        return `/api/preview/proxy/${port}${path}`;
+      } catch {
+        return formatted;
+      }
     }
+
+    // For external URLs, use the general proxy
     return `${getApiBase()}/proxy?url=${encodeURIComponent(formatted)}`;
   }
 
@@ -683,6 +715,79 @@
     iframeError = "Failed to load page";
   }
 
+  // Element inspector functions
+  function handleInspectorMessage(event: MessageEvent) {
+    // Only accept messages from localhost origins (dev servers)
+    if (!event.origin.includes('localhost') && !event.origin.includes('127.0.0.1')) {
+      return;
+    }
+
+    const { source: msgSource, type: msgType, data } = event.data || {};
+    if (msgSource !== 'navi-inspector') return;
+
+    switch (msgType) {
+      case 'ready':
+        inspectorReady = true;
+        if (inspectorTimeout) {
+          clearTimeout(inspectorTimeout);
+          inspectorTimeout = null;
+        }
+        break;
+      case 'element_selected':
+        if (data && onElementInspected) {
+          onElementInspected(data as InspectedElement);
+        }
+        inspectMode = false;
+        break;
+      case 'inspector_disabled':
+        inspectMode = false;
+        break;
+      case 'pong':
+        inspectorReady = true;
+        break;
+    }
+  }
+
+  function toggleInspectMode() {
+    if (!iframeRef?.contentWindow) return;
+
+    // Check if inspector is available
+    if (!inspectorReady) {
+      // Try pinging to see if inspector is loaded
+      iframeRef.contentWindow.postMessage({ type: 'ping' }, '*');
+
+      // Set a timeout to show unavailable message
+      inspectorTimeout = setTimeout(() => {
+        if (!inspectorReady) {
+          alert('Inspector not available.\n\nAdd the Navi inspector script to your dev server.\nSee: http://localhost:3001/navi-inspector.js');
+        }
+      }, 500);
+      return;
+    }
+
+    inspectMode = !inspectMode;
+    iframeRef.contentWindow.postMessage({
+      type: inspectMode ? 'enable_inspect' : 'disable_inspect'
+    }, '*');
+  }
+
+  // Set up inspector message listener
+  onMount(() => {
+    window.addEventListener('message', handleInspectorMessage);
+    return () => {
+      window.removeEventListener('message', handleInspectorMessage);
+      if (inspectorTimeout) clearTimeout(inspectorTimeout);
+    };
+  });
+
+  // Reset inspector state when iframe reloads
+  $effect(() => {
+    if (iframeKey) {
+      inspectorReady = false;
+      inspectMode = false;
+    }
+  });
+
   let lastSource = "";
   
   $effect(() => {
@@ -828,9 +933,21 @@
         />
       </div>
       
-      <button 
-        onclick={() => showDebug = !showDebug} 
-        class={`p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors ${showDebug ? 'bg-gray-200' : ''}`} 
+      <!-- Inspector toggle (only for localhost) -->
+      {#if isLocalUrl(currentUrl || source)}
+        <button
+          onclick={toggleInspectMode}
+          class={`p-1.5 rounded transition-colors ${inspectMode ? 'text-blue-600 bg-blue-100' : inspectorReady ? 'text-gray-400 hover:text-blue-600 hover:bg-blue-50' : 'text-gray-300 hover:text-gray-400 hover:bg-gray-100'}`}
+          title={inspectorReady ? (inspectMode ? 'Exit inspect mode (ESC)' : 'Inspect element') : 'Inspector not loaded - click to check'}
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
+          </svg>
+        </button>
+      {/if}
+      <button
+        onclick={() => showDebug = !showDebug}
+        class={`p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors ${showDebug ? 'bg-gray-200' : ''}`}
         title="Debug info"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>

@@ -208,6 +208,17 @@ function getOAuthInterceptScript(): string {
 `;
 }
 
+/**
+ * Generate the element inspector injection script
+ * This enables Navi's element inspector feature automatically in all previews
+ */
+function getInspectorScript(): string {
+  return `
+<!-- Navi Element Inspector -->
+<script src="/navi-inspector.js"></script>
+`;
+}
+
 function getBranchIndicatorScript(branch: string, projectName: string): string {
   // Navi compass SVG icon (black)
   const naviIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`;
@@ -497,11 +508,12 @@ export async function handlePreviewProxyRoutes(
           }
         );
 
-        // Inject OAuth interceptor and branch indicator before </body> or at the end
+        // Inject OAuth interceptor, element inspector, and branch indicator before </body> or at the end
         // Note: Fetch interceptor is already injected in <head> above
         const oauthScript = getOAuthInterceptScript();
+        const inspectorScript = getInspectorScript();
         const branchScript = getBranchIndicatorScript(branch, projectName);
-        const injectedScripts = oauthScript + branchScript;
+        const injectedScripts = oauthScript + inspectorScript + branchScript;
 
         if (html.includes("</body>")) {
           html = html.replace("</body>", `${injectedScripts}</body>`);

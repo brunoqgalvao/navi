@@ -11,15 +11,17 @@
    * Delegates workspace logic to WorkspacePanel
    */
   import FileBrowser from "../FileBrowser.svelte";
-  import Preview from "../Preview.svelte";
+  import Preview, { type InspectedElement } from "../Preview.svelte";
   import { GitPanel } from "../features/git";
   import { KanbanPanel } from "../features/kanban";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
   import PreviewPanel from "../components/PreviewPanel.svelte";
+  import EmailPanel from "../features/email/EmailPanel.svelte";
+  import AuthGate from "../components/AuthGate.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "email";
 
   interface Props {
     mode: PanelMode;
@@ -41,9 +43,11 @@
     onBrowserUrlChange: (url: string) => void;
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
-    onNavigateToSession?: (sessionId: string, prompt?: string) => void;
+    onNavigateToSession?: (sessionId: string, prompt?: string, autoSend?: boolean) => void;
     /** Callback when preview panel wants to ask Claude for help */
     onPreviewAskClaude?: (message: string) => void;
+    /** Callback when user inspects an element in browser preview */
+    onElementInspected?: (element: InspectedElement) => void;
   }
 
   let {
@@ -68,6 +72,7 @@
     onTerminalSendToClaude,
     onNavigateToSession,
     onPreviewAskClaude,
+    onElementInspected,
   }: Props = $props();
 
   // Use worktree path for git if available, otherwise use project path
@@ -229,6 +234,7 @@
           {browserUrl}
           onBrowserUrlChange={onBrowserUrlChange}
           {isResizing}
+          {onElementInspected}
         />
       </div>
     {:else if mode === "git" && effectiveGitPath}
@@ -276,7 +282,17 @@
           branch={worktreeBranch}
           previewUrl={containerPreviewUrl}
           onAskClaude={onPreviewAskClaude}
+          {onElementInspected}
         />
+      </div>
+    {:else if mode === "email"}
+      <!-- Email panel - requires auth -->
+      <div class="flex-1 flex flex-col w-full overflow-hidden">
+        <AuthGate feature="email" featureDescription="your personal Navi email inbox" featureIcon="email">
+          {#snippet children()}
+            <EmailPanel />
+          {/snippet}
+        </AuthGate>
       </div>
     {/if}
   </div>

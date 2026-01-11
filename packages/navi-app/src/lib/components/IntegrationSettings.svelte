@@ -40,16 +40,8 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
 
-  // OAuth credentials setup
-  let showCredentialsSetup = $state(false);
-  let setupProvider = $state<IntegrationProvider | null>(null);
-  let clientIdInput = $state("");
-  let clientSecretInput = $state("");
-  let savingCredentials = $state(false);
-
   // Connect flow
   let connectingProvider = $state<IntegrationProvider | null>(null);
-  let selectedServices = $state<IntegrationService[]>([]);
 
   const API_BASE = () => getServerUrl();
 
@@ -75,35 +67,6 @@
     }
   }
 
-  async function saveCredentials() {
-    if (!setupProvider || !clientIdInput || !clientSecretInput) return;
-
-    savingCredentials = true;
-    try {
-      const res = await fetch(`${API_BASE()}/api/integrations/credentials/${setupProvider}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: clientIdInput,
-          clientSecret: clientSecretInput,
-        }),
-      });
-
-      if (!res.ok) throw new Error("Failed to save credentials");
-
-      // Refresh providers to update hasCredentials
-      await loadData();
-      showCredentialsSetup = false;
-      setupProvider = null;
-      clientIdInput = "";
-      clientSecretInput = "";
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to save credentials";
-    } finally {
-      savingCredentials = false;
-    }
-  }
-
   async function startConnect(provider: IntegrationProvider, services?: IntegrationService[]) {
     connectingProvider = provider;
     const servicesToConnect = services || providers.find(p => p.id === provider)?.services.map(s => s.id) || [];
@@ -119,21 +82,17 @@
       }
 
       const { authUrl } = await res.json();
-
-      // Open OAuth popup
       const popup = window.open(authUrl, "oauth-popup", "width=600,height=700");
 
-      // Listen for OAuth callback
       const handleMessage = (event: MessageEvent) => {
         if (event.data?.type === "oauth-callback") {
           window.removeEventListener("message", handleMessage);
           connectingProvider = null;
-          loadData(); // Refresh integrations
+          loadData();
         }
       };
       window.addEventListener("message", handleMessage);
 
-      // Also poll for popup close (user cancelled)
       const checkClosed = setInterval(() => {
         if (popup?.closed) {
           clearInterval(checkClosed);
@@ -174,231 +133,195 @@
     return icons[provider];
   }
 
-  function getServiceIcon(service: IntegrationService): string {
-    const icons: Record<IntegrationService, string> = {
-      gmail: "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
-      sheets: "M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z",
-      drive: "M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z",
-      calendar: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
-      repos: "M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z",
-      issues: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
-      prs: "M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4",
-      pages: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
-      databases: "M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4",
-      channels: "M7 20l4-16m2 16l4-16M6 9h14M4 15h14",
-      messages: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
-    };
-    return icons[service] || "M12 6v6m0 0v6m0-6h6m-6 0H6";
-  }
-
   function formatDate(timestamp: number): string {
     return new Date(timestamp).toLocaleDateString();
   }
+
+  function getProviderColor(provider: IntegrationProvider): string {
+    const colors: Record<IntegrationProvider, string> = {
+      google: "text-blue-600 dark:text-blue-400",
+      github: "text-gray-900 dark:text-gray-100",
+      notion: "text-gray-900 dark:text-gray-100",
+      slack: "text-purple-600 dark:text-purple-400",
+    };
+    return colors[provider];
+  }
+
+  // Compute connected vs available providers
+  let connectedProviders = $derived(
+    providers.filter(p => integrations.some(i => i.provider === p.id))
+  );
+
+  let availableProviders = $derived(
+    providers.filter(p => !integrations.some(i => i.provider === p.id))
+  );
 
   onMount(loadData);
 </script>
 
 <div class="space-y-6">
   {#if loading}
-    <div class="flex items-center justify-center py-8">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-500"></div>
+    <div class="flex items-center justify-center py-12">
+      <svg class="w-8 h-8 animate-spin text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
     </div>
   {:else if error}
-    <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-4 text-red-400">
-      {error}
-      <button class="ml-2 underline" onclick={() => loadData()}>Retry</button>
+    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-red-700 dark:text-red-400 flex items-center justify-between">
+      <span>{error}</span>
+      <button class="text-red-600 dark:text-red-300 hover:text-red-800 dark:hover:text-red-200 underline text-sm" onclick={() => loadData()}>Retry</button>
     </div>
   {:else}
-    <!-- Connected Integrations -->
-    {#if integrations.length > 0}
-      <div>
-        <h3 class="text-lg font-medium text-zinc-100 mb-3">Connected Accounts</h3>
+    <!-- Connected Accounts Section -->
+    {#if connectedProviders.length > 0}
+      <section>
+        <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Connected</h3>
         <div class="space-y-3">
           {#each integrations as integration}
-            <div class="bg-zinc-800/50 rounded-lg p-4 flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <svg class="w-8 h-8 text-zinc-300" viewBox="0 0 24 24" fill="currentColor">
-                  <path d={getProviderIcon(integration.provider)} />
-                </svg>
-                <div>
-                  <div class="text-zinc-100 font-medium">{integration.account_label}</div>
-                  <div class="text-zinc-400 text-sm">
-                    {integration.account_id} · {integration.services.join(", ")}
+            {@const provider = providers.find(p => p.id === integration.provider)}
+            {#if provider}
+              <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                <div class="flex items-start gap-4">
+                  <!-- Provider Icon -->
+                  <div class="shrink-0 w-10 h-10 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center">
+                    <svg class="w-5 h-5 {getProviderColor(integration.provider)}" viewBox="0 0 24 24" fill="currentColor">
+                      <path d={getProviderIcon(integration.provider)} />
+                    </svg>
                   </div>
-                  {#if integration.last_used_at}
-                    <div class="text-zinc-500 text-xs">Last used: {formatDate(integration.last_used_at)}</div>
-                  {/if}
+
+                  <!-- Account Info -->
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium text-gray-900 dark:text-gray-100">{integration.account_label}</span>
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+                        <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                        Connected
+                      </span>
+                    </div>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">{integration.account_id}</p>
+
+                    <!-- Services as pills -->
+                    <div class="flex flex-wrap gap-1.5 mt-3">
+                      {#each integration.services as service}
+                        <span class="px-2 py-1 rounded-md text-xs bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 capitalize">
+                          {service}
+                        </span>
+                      {/each}
+                    </div>
+                  </div>
+
+                  <!-- Actions -->
+                  <div class="shrink-0 flex items-center gap-2">
+                    {#if integration.last_used_at}
+                      <span class="text-xs text-gray-400 dark:text-gray-500 hidden sm:block">
+                        Used {formatDate(integration.last_used_at)}
+                      </span>
+                    {/if}
+                    <button
+                      class="p-2 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                      title="Disconnect"
+                      onclick={() => disconnectIntegration(integration.id)}
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </div>
-              <button
-                class="px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded"
-                onclick={() => disconnectIntegration(integration.id)}
-              >
-                Disconnect
-              </button>
+            {/if}
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    <!-- Available Providers Section -->
+    {#if availableProviders.length > 0}
+      <section>
+        <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+          {connectedProviders.length > 0 ? "Available" : "Connect a Service"}
+        </h3>
+        <div class="space-y-3">
+          {#each availableProviders as provider}
+            <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <div class="flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <div class="shrink-0 w-10 h-10 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center">
+                    <svg class="w-5 h-5 {getProviderColor(provider.id)}" viewBox="0 0 24 24" fill="currentColor">
+                      <path d={getProviderIcon(provider.id)} />
+                    </svg>
+                  </div>
+                  <div>
+                    <span class="font-medium text-gray-900 dark:text-gray-100">{provider.name}</span>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {provider.services.map(s => s.name).join(" · ")}
+                    </p>
+                  </div>
+                </div>
+
+                {#if provider.hasCredentials}
+                  <button
+                    class="px-4 py-2 bg-gray-900 dark:bg-gray-700 hover:bg-black dark:hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    disabled={connectingProvider === provider.id}
+                    onclick={() => startConnect(provider.id)}
+                  >
+                    {#if connectingProvider === provider.id}
+                      <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Connecting...</span>
+                    {:else}
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                      </svg>
+                      <span>Connect</span>
+                    {/if}
+                  </button>
+                {:else}
+                  <span class="px-3 py-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 rounded-full">
+                    Coming Soon
+                  </span>
+                {/if}
+              </div>
             </div>
           {/each}
         </div>
+      </section>
+    {/if}
+
+    <!-- Empty State -->
+    {#if providers.length === 0}
+      <div class="text-center py-12">
+        <div class="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
+          <svg class="w-6 h-6 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+          </svg>
+        </div>
+        <p class="text-gray-500 dark:text-gray-400">No integrations available</p>
       </div>
     {/if}
 
-    <!-- Available Providers -->
-    <div>
-      <h3 class="text-lg font-medium text-zinc-100 mb-3">
-        {integrations.length > 0 ? "Add More Connections" : "Connect Services"}
-      </h3>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {#each providers as provider}
-          {@const existingIntegration = integrations.find(i => i.provider === provider.id)}
-          <div class="bg-zinc-800/50 rounded-lg p-4">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2">
-                <svg class="w-6 h-6 text-zinc-300" viewBox="0 0 24 24" fill="currentColor">
-                  <path d={getProviderIcon(provider.id)} />
-                </svg>
-                <span class="font-medium text-zinc-100">{provider.name}</span>
-              </div>
-              {#if !provider.hasCredentials}
-                <button
-                  class="text-xs text-accent-400 hover:text-accent-300"
-                  onclick={() => { setupProvider = provider.id; showCredentialsSetup = true; }}
-                >
-                  Configure
-                </button>
-              {/if}
-            </div>
-
-            <div class="space-y-2 mb-4">
-              {#each provider.services as service}
-                {@const isConnected = existingIntegration?.services.includes(service.id)}
-                <div class="flex items-center gap-2 text-sm">
-                  <svg class="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={getServiceIcon(service.id)} />
-                  </svg>
-                  <span class={isConnected ? "text-green-400" : "text-zinc-400"}>{service.name}</span>
-                  {#if isConnected}
-                    <span class="text-xs text-green-500">Connected</span>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-
-            {#if provider.hasCredentials}
-              <button
-                class="w-full py-2 px-3 bg-accent-600 hover:bg-accent-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={connectingProvider === provider.id}
-                onclick={() => startConnect(provider.id)}
-              >
-                {#if connectingProvider === provider.id}
-                  <span class="flex items-center justify-center gap-2">
-                    <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Connecting...
-                  </span>
-                {:else if existingIntegration}
-                  Add More Services
-                {:else}
-                  Connect {provider.name}
-                {/if}
-              </button>
-            {:else}
-              <div class="text-center text-zinc-500 text-sm py-2">
-                OAuth credentials required. <button class="text-accent-400 underline" onclick={() => { setupProvider = provider.id; showCredentialsSetup = true; }}>Set up</button>
-              </div>
-            {/if}
+    <!-- Usage Hint -->
+    {#if integrations.length > 0}
+      <section class="border-t border-gray-200 dark:border-gray-700 pt-5">
+        <div class="flex items-start gap-3 text-sm">
+          <div class="shrink-0 w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
+            <svg class="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
           </div>
-        {/each}
-      </div>
-    </div>
-
-    <!-- CLI Usage Info -->
-    <div class="bg-zinc-800/30 rounded-lg p-4 mt-6">
-      <h4 class="text-zinc-200 font-medium mb-2">CLI Access for Agents</h4>
-      <p class="text-zinc-400 text-sm mb-3">
-        Connected integrations can be accessed by Claude agents via the CLI:
-      </p>
-      <div class="bg-zinc-900 rounded p-3 font-mono text-sm text-zinc-300 overflow-x-auto">
-        <div class="text-zinc-500"># List connected integrations</div>
-        <div>navi-integrations list</div>
-        <br />
-        <div class="text-zinc-500"># Access Gmail</div>
-        <div>navi-integrations gmail list</div>
-        <div>navi-integrations gmail search "from:important"</div>
-        <br />
-        <div class="text-zinc-500"># Access Google Sheets</div>
-        <div>navi-integrations sheets list</div>
-        <div>navi-integrations sheets read &lt;spreadsheet-id&gt;</div>
-      </div>
-    </div>
+          <div>
+            <p class="text-gray-700 dark:text-gray-300 font-medium">How to use integrations</p>
+            <p class="text-gray-500 dark:text-gray-400 mt-1">
+              Agents can access your connected services using the <code class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs border border-gray-200 dark:border-gray-700">integrations</code> skill.
+              Try asking: "Read my latest emails" or "List my Google Drive files".
+            </p>
+          </div>
+        </div>
+      </section>
+    {/if}
   {/if}
 </div>
 
-<!-- Credentials Setup Modal -->
-{#if showCredentialsSetup && setupProvider}
-  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onclick={() => showCredentialsSetup = false}>
-    <div class="bg-zinc-900 rounded-xl p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()}>
-      <h3 class="text-lg font-medium text-zinc-100 mb-4">
-        Configure {providers.find(p => p.id === setupProvider)?.name} OAuth
-      </h3>
-
-      <p class="text-zinc-400 text-sm mb-4">
-        {#if setupProvider === "google"}
-          Create OAuth credentials in the <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-accent-400 underline">Google Cloud Console</a>.
-          Enable the Gmail, Sheets, Drive, and Calendar APIs.
-        {:else if setupProvider === "github"}
-          Create an OAuth App in <a href="https://github.com/settings/developers" target="_blank" class="text-accent-400 underline">GitHub Developer Settings</a>.
-        {:else}
-          Set up OAuth credentials for {setupProvider}.
-        {/if}
-      </p>
-
-      <div class="space-y-4">
-        <div>
-          <label class="block text-sm text-zinc-400 mb-1">Client ID</label>
-          <input
-            type="text"
-            bind:value={clientIdInput}
-            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 focus:outline-none focus:border-accent-500"
-            placeholder="Your OAuth client ID"
-          />
-        </div>
-
-        <div>
-          <label class="block text-sm text-zinc-400 mb-1">Client Secret</label>
-          <input
-            type="password"
-            bind:value={clientSecretInput}
-            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 focus:outline-none focus:border-accent-500"
-            placeholder="Your OAuth client secret"
-          />
-        </div>
-
-        <div class="bg-zinc-800/50 rounded-lg p-3">
-          <div class="text-sm text-zinc-400">
-            <strong class="text-zinc-300">Redirect URI:</strong>
-            <code class="ml-2 text-accent-400">{`${getServerUrl()}/api/integrations/oauth/callback`}</code>
-          </div>
-          <p class="text-xs text-zinc-500 mt-1">Add this to your OAuth app's allowed redirect URIs</p>
-        </div>
-      </div>
-
-      <div class="flex justify-end gap-3 mt-6">
-        <button
-          class="px-4 py-2 text-zinc-400 hover:text-zinc-200"
-          onclick={() => { showCredentialsSetup = false; setupProvider = null; }}
-        >
-          Cancel
-        </button>
-        <button
-          class="px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white rounded-lg disabled:opacity-50"
-          disabled={!clientIdInput || !clientSecretInput || savingCredentials}
-          onclick={saveCredentials}
-        >
-          {savingCredentials ? "Saving..." : "Save Credentials"}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}

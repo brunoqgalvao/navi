@@ -24,6 +24,14 @@ export interface TodoItem {
   activeForm?: string;
 }
 
+export interface ActiveWait {
+  requestId: string;
+  sessionId: string;
+  seconds: number;
+  endTime: number;
+  reason: string;
+}
+
 export interface TourStep {
   id: string;
   target: string;

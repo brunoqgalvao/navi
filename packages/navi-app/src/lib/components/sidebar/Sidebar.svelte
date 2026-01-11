@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { flip } from "svelte/animate";
-  import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, attentionItems } from "../../stores";
+  import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, attentionItems, backendModels, getBackendModelsFormatted, type BackendId, channelsEnabled } from "../../stores";
   import { api, type Project, type Session, type WorkspaceFolder, type SearchResult } from "../../api";
   import { getApiBase } from "../../config";
   import ModelSelector from "../ModelSelector.svelte";
@@ -12,9 +13,10 @@
   import WorkspaceCountBadge from "../WorkspaceCountBadge.svelte";
   import WorktreeBadge from "../WorktreeBadge.svelte";
   import type { ChatMessage } from "../../stores";
-  import SessionTree from "../../features/session-hierarchy/components/SessionTree.svelte";
-  import AgentStatusBadge from "../../features/session-hierarchy/components/AgentStatusBadge.svelte";
   import { blockedSessionsStore, blockedCount } from "../../features/session-hierarchy";
+  import { channels, currentChannelId, type Channel } from "../../features/channels";
+  import ChannelList from "../../features/channels/components/ChannelList.svelte";
+  import CreateChannelModal from "../../features/channels/components/CreateChannelModal.svelte";
 
   interface Props {
     projects: Project[];
@@ -54,6 +56,9 @@
     onProjectReorder: (order: string[]) => void;
     onSessionReorder: (order: string[]) => void;
     onModelSelect: (model: string) => void;
+    // Backend selection
+    backend?: BackendId;
+    onBackendChange?: (backend: BackendId) => void;
     onTitleApply: (title: string) => void;
     onStartResizing: (e: MouseEvent) => void;
     isResizing?: boolean;
@@ -73,9 +78,6 @@
     agents?: { id: string; name: string; type: "agent" | "skill"; description?: string }[];
     onSelectAgent?: (agent: { id: string; name: string; type: "agent" | "skill"; description?: string }) => void;
     titleSuggestionRef?: TitleSuggestion | null;
-    // Session hierarchy (multi-agent)
-    onSelectHierarchySession?: (session: any) => void;
-    onResolveEscalation?: (sessionId: string) => void;
   }
 
   let {
@@ -116,6 +118,8 @@
     onProjectReorder,
     onSessionReorder,
     onModelSelect,
+    backend = "claude",
+    onBackendChange,
     onTitleApply,
     onStartResizing,
     isResizing = false,
@@ -135,51 +139,26 @@
     agents = [],
     onSelectAgent,
     titleSuggestionRef = $bindable(null),
-    onSelectHierarchySession,
-    onResolveEscalation,
   }: Props = $props();
 
   // Agent section collapsed state
   let agentsSectionCollapsed = $state(true);
 
-// Session hierarchy state
-  let showSessionTree = $state(false);
-  let sessionTreeExpanded = $state(true);
+  // Channels state
+  let channelsSectionCollapsed = $state(false);
+  let showCreateChannelModal = $state(false);
 
-  // Check if current session has children or is part of a hierarchy
-  let currentSessionHasHierarchy = $derived(() => {
-    const currentSess = sessions.find(s => s.id === $session.sessionId);
-    if (!currentSess) return false;
-    const hasParent = !!(currentSess as any).parent_session_id;
-    const hasChildren = sessions.some(s => (s as any).parent_session_id === currentSess.id);
-    return hasParent || hasChildren;
-  });
+  function handleSelectChannel(channel: Channel) {
+    currentChannelId.set(channel.id);
+  }
 
-  // Get the root session ID for the tree (walk up to find the root)
-  let rootSessionIdForTree = $derived(() => {
-    const currentSess = sessions.find(s => s.id === $session.sessionId);
-    if (!currentSess) return $session.sessionId;
-    // If has root_session_id, use that
-    if ((currentSess as any).root_session_id) {
-      return (currentSess as any).root_session_id;
-    }
-    // If no parent, this is the root
-    if (!(currentSess as any).parent_session_id) {
-      return currentSess.id;
-    }
-    // Walk up to find root
-    let rootId = currentSess.id;
-    let current = currentSess;
-    while ((current as any).parent_session_id) {
-      const parent = sessions.find(s => s.id === (current as any).parent_session_id);
-      if (parent) {
-        rootId = parent.id;
-        current = parent;
-      } else {
-        break;
-      }
-    }
-    return rootId;
+  function handleChannelCreated(channelId: string) {
+    currentChannelId.set(channelId);
+  }
+
+  // Load channels on mount
+  onMount(() => {
+    channels.load();
   });
 
   let sidebarSearchQuery = $state("");
@@ -241,7 +220,7 @@
     let result: Session[];
 
     if (!query) {
-      // No search - show all sessions, but exclude child sessions (they appear in tree only)
+      // No search - show all sessions, but exclude child sessions (they appear inline under parent)
       result = sessions.filter(s => !(s as any).parent_session_id);
     } else {
       // Search active - filter to sessions that appear in search results
@@ -707,6 +686,62 @@
         {/if}
       </div>
     {:else if !currentProject}
+      <!-- Channels Section (Experimental) -->
+      {#if $channelsEnabled}
+      <div class="px-3 mb-4">
+        <div class="flex items-center justify-between mb-2 mt-2 px-2">
+          <button
+            onclick={() => channelsSectionCollapsed = !channelsSectionCollapsed}
+            class="flex items-center gap-1 text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
+          >
+            <svg class="w-3 h-3 transition-transform {channelsSectionCollapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+            Channels
+          </button>
+          <button
+            onclick={() => showCreateChannelModal = true}
+            class="p-1 text-gray-400 dark:text-gray-500 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-colors"
+            title="Create channel"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
+
+        {#if !channelsSectionCollapsed}
+          <div class="space-y-0.5 px-2">
+            {#each $channels as channel}
+              <button
+                onclick={() => handleSelectChannel(channel)}
+                class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors
+                  {$currentChannelId === channel.id
+                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+              >
+                <span class="text-purple-400 dark:text-purple-500 font-medium">#</span>
+                <span class="truncate text-[12px]">{channel.name}</span>
+              </button>
+            {/each}
+
+            {#if $channels.length === 0}
+              <div class="px-2 py-3 text-center">
+                <p class="text-[11px] text-gray-400 dark:text-gray-500">No channels yet</p>
+                <button
+                  onclick={() => showCreateChannelModal = true}
+                  class="mt-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline"
+                >
+                  Create your first channel
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+      {/if}
+
+      <!-- Workspaces Section -->
       <div class="px-3" data-tour="workspaces">
         <div class="flex items-center justify-between mb-2 mt-2 px-2">
           <h3 class="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Workspaces</h3>
@@ -1199,34 +1234,6 @@
           </div>
         </div>
 
-        <!-- Session Tree (when current session has children/parent) -->
-        {#if currentSessionHasHierarchy() && $session.sessionId}
-          <div class="mb-3 px-1">
-            <button
-              onclick={() => sessionTreeExpanded = !sessionTreeExpanded}
-              class="flex items-center justify-between w-full text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1 hover:text-gray-600 dark:hover:text-gray-400"
-            >
-              <span class="flex items-center gap-1">
-                <svg class="w-3 h-3 transition-transform {sessionTreeExpanded ? 'rotate-90' : ''}" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-                </svg>
-                Agent Tree
-              </span>
-            </button>
-            {#if sessionTreeExpanded}
-              <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-1 border border-gray-100 dark:border-gray-700">
-                <SessionTree
-                  rootSessionId={rootSessionIdForTree() || $session.sessionId}
-                  currentSessionId={$session.sessionId}
-                  onSelectSession={(sess) => onSelectHierarchySession?.(sess)}
-                  onResolveEscalation={(id) => onResolveEscalation?.(id)}
-                  compact={true}
-                />
-              </div>
-            {/if}
-          </div>
-        {/if}
-
         <div class="mb-2 px-1">
           <div class="relative">
             {#if isSearching}
@@ -1385,6 +1392,7 @@
                     {/if}
                   </div>
                 </div>
+
               </div>
             {/each}
           {/if}
@@ -1395,11 +1403,40 @@
 
   <div class={`${sidebarCollapsed ? 'px-2' : 'px-4'} py-3 border-t border-gray-200 bg-gray-50/50 space-y-2`}>
     {#if $session.sessionId && !sidebarCollapsed}
-      <ModelSelector 
-        models={$availableModels} 
-        bind:selectedModel={modelSelection}
-        onSelect={onModelSelect}
-      />
+      <!-- Backend + Model selector row -->
+      <div class="flex gap-2 items-center">
+        <!-- Backend toggle -->
+        {#if onBackendChange}
+          {@const backendMeta: Record<BackendId, { label: string; color: string; bg: string }> = {
+            claude: { label: 'Claude', color: 'text-orange-600', bg: 'bg-orange-100 hover:bg-orange-200 border-orange-200' },
+            codex: { label: 'Codex', color: 'text-green-600', bg: 'bg-green-100 hover:bg-green-200 border-green-200' },
+            gemini: { label: 'Gemini', color: 'text-blue-600', bg: 'bg-blue-100 hover:bg-blue-200 border-blue-200' }
+          }}
+          {@const current = backendMeta[backend] || backendMeta.claude}
+          <button
+            onclick={() => {
+              const backends: BackendId[] = ['claude', 'codex', 'gemini'];
+              const idx = backends.indexOf(backend);
+              onBackendChange?.(backends[(idx + 1) % backends.length]);
+            }}
+            class="shrink-0 px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-colors {current.bg} {current.color}"
+            title="Click to switch backend: {current.label}"
+          >
+            {current.label}
+          </button>
+        {/if}
+        <!-- Model selector - uses backend-specific models if available -->
+        {#if true}
+          {@const currentModels = getBackendModelsFormatted(backend, $backendModels)}
+          <div class="flex-1 min-w-0">
+            <ModelSelector
+              models={currentModels.length > 0 ? currentModels : $availableModels}
+              bind:selectedModel={modelSelection}
+              onSelect={onModelSelect}
+            />
+          </div>
+        {/if}
+      </div>
     {/if}
 
     {#if $session.inputTokens > 0 && !sidebarCollapsed}
@@ -1481,3 +1518,10 @@
     {/if}
   </div>
 </aside>
+
+<!-- Create Channel Modal -->
+<CreateChannelModal
+  bind:open={showCreateChannelModal}
+  onClose={() => showCreateChannelModal = false}
+  onCreated={handleChannelCreated}
+/>

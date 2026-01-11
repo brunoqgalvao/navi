@@ -1,4 +1,7 @@
 /**
+ * @deprecated This route handler is deprecated and scheduled for removal.
+ * These experimental features have been superseded or are being removed.
+ *
  * Experimental Features API Routes
  *
  * Endpoints for experimental AI-powered features:

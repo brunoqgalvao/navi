@@ -176,8 +176,12 @@ export function createMessageHandler(config: MessageHandlerConfig) {
       case "result": {
         const resultMsg = msg as ResultMessage;
         const resultCost = resultMsg.costUsd || 0;
-        if (uiSessionId && resultCost) {
-          callbacks.onComplete?.(uiSessionId, { costUsd: resultCost });
+        if (uiSessionId) {
+          if (resultCost) {
+            callbacks.onComplete?.(uiSessionId, { costUsd: resultCost });
+          }
+          // Result event signals query completion - end streaming
+          callbacks.onStreamingEnd?.(uiSessionId, "done");
         }
         break;
       }
@@ -257,6 +261,22 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           if (doneMsg.usage) {
             callbacks.onComplete?.(uiSessionId, { costUsd: 0, usage: doneMsg.usage });
           }
+          callbacks.onStreamingEnd?.(uiSessionId, "done");
+        }
+        break;
+      }
+
+      // Multi-backend completion event (Codex, Gemini)
+      case "query_complete": {
+        if (uiSessionId) {
+          callbacks.onStreamingEnd?.(uiSessionId, "done");
+        }
+        break;
+      }
+
+      // Multi-backend complete event (from adapter)
+      case "complete": {
+        if (uiSessionId) {
           callbacks.onStreamingEnd?.(uiSessionId, "done");
         }
         break;
@@ -352,6 +372,37 @@ export function createMessageHandler(config: MessageHandlerConfig) {
       case "session:artifact_created": {
         // Forward to session hierarchy handler
         callbacks.onSessionHierarchyEvent?.(msg as any);
+        break;
+      }
+
+      // Wait/Pause Events
+      case "session:wait_start": {
+        const waitMsg = msg as {
+          type: "session:wait_start";
+          requestId: string;
+          sessionId: string;
+          seconds: number;
+          endTime: number;
+          reason: string;
+        };
+        callbacks.onWaitStart?.({
+          requestId: waitMsg.requestId,
+          sessionId: waitMsg.sessionId,
+          seconds: waitMsg.seconds,
+          endTime: waitMsg.endTime,
+          reason: waitMsg.reason,
+        });
+        break;
+      }
+
+      case "session:wait_end": {
+        const waitMsg = msg as {
+          type: "session:wait_end";
+          requestId: string;
+          sessionId: string;
+          skipped: boolean;
+        };
+        callbacks.onWaitEnd?.(waitMsg.requestId, waitMsg.skipped);
         break;
       }
 

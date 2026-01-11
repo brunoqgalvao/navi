@@ -1,4 +1,6 @@
 /**
+ * @experimental This feature is experimental and may change or be removed.
+ *
  * Proactive Hooks - Server Routes
  *
  * Server-side endpoints for running proactive hook analysis.

@@ -33,11 +33,9 @@
 
   onMount(() => {
     loadChildren();
-    // Refresh every 3 seconds while there are active children
+    // Refresh every 3 seconds to catch new children
     refreshInterval = setInterval(() => {
-      if (activeChildren.length > 0) {
-        loadChildren();
-      }
+      loadChildren();
     }, 3000);
   });
 
@@ -55,8 +53,11 @@
 </script>
 
 {#if children.length > 0}
-  <div class="child-sessions-panel my-4">
-    <div class="flex items-center gap-2 mb-2">
+  <details class="child-sessions-panel my-4 group" open>
+    <summary class="flex items-center gap-2 mb-2 cursor-pointer select-none list-none">
+      <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-90" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+      </svg>
       <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
       </svg>
@@ -69,9 +70,9 @@
           Needs input
         </span>
       {/if}
-    </div>
+    </summary>
 
-    <div class="space-y-2">
+    <div class="space-y-2 mt-2">
       {#each activeChildren as child (child.id)}
         <ChildSessionCard
           session={child}
@@ -81,25 +82,18 @@
       {/each}
 
       {#if completedChildren.length > 0}
-        <details class="group">
-          <summary class="cursor-pointer text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
-            <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-            </svg>
-            {completedChildren.length} completed
-          </summary>
-          <div class="mt-2 space-y-2 pl-4">
-            {#each completedChildren as child (child.id)}
-              <ChildSessionCard
-                session={child}
-                onSelect={() => onSelectSession?.(child)}
-              />
-            {/each}
-          </div>
-        </details>
+        <div class="text-xs text-gray-400 mt-2 mb-1 pl-1">
+          {completedChildren.length} completed
+        </div>
+        {#each completedChildren as child (child.id)}
+          <ChildSessionCard
+            session={child}
+            onSelect={() => onSelectSession?.(child)}
+          />
+        {/each}
       {/if}
     </div>
-  </div>
+  </details>
 {:else if loading}
   <div class="my-4 flex items-center gap-2 text-xs text-gray-400">
     <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">

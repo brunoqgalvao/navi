@@ -1,5 +1,5 @@
-import { api, costsApi } from "../api";
-import { availableModels, costStore, sessionStatus, currentSession as session, showArchivedWorkspaces } from "../stores";
+import { api, costsApi, backendsApi, type BackendId } from "../api";
+import { availableModels, costStore, sessionStatus, currentSession as session, showArchivedWorkspaces, backendModels } from "../stores";
 import { get } from "svelte/store";
 import type { Session } from "../api";
 import { showError } from "../errorHandler";
@@ -46,9 +46,91 @@ export async function loadModels() {
       const opus = models.find(m => m.value === "opus" || m.value.includes("opus"));
       session.setSelectedModel(opus?.value || models[0].value);
     }
+
+    // Also load backend-specific models
+    await loadBackendModels();
   } catch (e) {
     showError({ title: "Models Error", message: "Failed to load available models", error: e });
   }
+}
+
+// Load models for all backends (Claude, Codex, Gemini)
+export async function loadBackendModels() {
+  try {
+    const allModels = await backendsApi.getAllModels();
+
+    // Convert to ModelInfo format
+    type ModelInfo = { value: string; displayName: string; description: string; provider?: string };
+    const formatted: Record<BackendId, ModelInfo[]> = {
+      claude: [],
+      codex: [],
+      gemini: [],
+    };
+
+    // Claude models (already loaded in availableModels)
+    const claudeModels = get(availableModels);
+    formatted.claude = claudeModels;
+
+    // Codex models
+    if (allModels.codex) {
+      formatted.codex = allModels.codex.map((m) => ({
+        value: m,
+        displayName: formatModelName(m, "codex"),
+        description: getModelDescription(m, "codex"),
+        provider: "openai",
+      }));
+    }
+
+    // Gemini models
+    if (allModels.gemini) {
+      formatted.gemini = allModels.gemini.map((m) => ({
+        value: m,
+        displayName: formatModelName(m, "gemini"),
+        description: getModelDescription(m, "gemini"),
+        provider: "google",
+      }));
+    }
+
+    backendModels.set(formatted);
+  } catch (e) {
+    console.error("Failed to load backend models:", e);
+  }
+}
+
+function formatModelName(model: string, backend: string): string {
+  if (backend === "codex") {
+    return model
+      .replace("gpt-", "GPT-")
+      .replace("-codex", " Codex")
+      .replace("-mini", " Mini")
+      .replace("-max", " Max");
+  }
+  if (backend === "gemini") {
+    return model
+      .replace("gemini-", "Gemini ")
+      .replace("-flash", " Flash")
+      .replace("-pro", " Pro")
+      .replace("-preview", " (Preview)");
+  }
+  return model;
+}
+
+function getModelDescription(model: string, backend: string): string {
+  const descriptions: Record<string, string> = {
+    // Codex
+    "gpt-5.2-codex": "Latest agentic coding model",
+    "gpt-5.1-codex-max": "Maximum capability",
+    "gpt-5.1-codex": "Standard agentic model",
+    "gpt-5.1-codex-mini": "Fast & efficient",
+    "gpt-5.1": "Base GPT-5.1",
+    "exp": "Experimental",
+    // Gemini
+    "gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
+    "gemini-3-pro-preview": "Gemini 3 Pro (Preview)",
+    "gemini-2.5-pro": "1M context, most capable",
+    "gemini-2.5-flash": "Fast & efficient",
+  };
+  return descriptions[model] || "";
 }
 
 export async function loadPermissions() {

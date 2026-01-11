@@ -1,4 +1,6 @@
 /**
+ * @experimental This feature is experimental and may change or be removed.
+ *
  * Sessions Board Routes
  *
  * Returns sessions grouped by state for the board view:

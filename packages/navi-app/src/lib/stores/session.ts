@@ -1,6 +1,6 @@
 import { writable, derived, get } from "svelte/store";
 import { setHash } from "../router";
-import type { ChatMessage, TodoItem, SessionDebugInfo, SessionStatus, SessionStatusType, ModelInfo, SDKEvent, QueuedMessage, SessionWorkspace, TerminalTab, BrowserState } from "./types";
+import type { ChatMessage, TodoItem, SessionDebugInfo, SessionStatus, SessionStatusType, ModelInfo, SDKEvent, QueuedMessage, SessionWorkspace, TerminalTab, BrowserState, ActiveWait } from "./types";
 import type { ContentBlock } from "../claude";
 
 // Pagination metadata per session
@@ -532,6 +532,47 @@ export const sessionStatus = createSessionStatusStore();
 export const executionModeStore = createExecutionModeStore();
 export const loadingSessions = writable<Set<string>>(new Set());
 export const availableModels = writable<ModelInfo[]>([]);
+
+// Backend selection store (claude, codex, gemini)
+export type BackendId = "claude" | "codex" | "gemini";
+function createBackendStore() {
+  const { subscribe, update } = writable<Map<string, BackendId>>(new Map());
+
+  return {
+    subscribe,
+    // Get backend for a session (defaults to claude)
+    get: (sessionId: string, map: Map<string, BackendId>): BackendId => {
+      return map.get(sessionId) || "claude";
+    },
+    // Set backend for a session
+    set: (sessionId: string, backend: BackendId) =>
+      update((map) => {
+        map.set(sessionId, backend);
+        return new Map(map);
+      }),
+    // Clear backend for a session (use default)
+    clear: (sessionId: string) =>
+      update((map) => {
+        map.delete(sessionId);
+        return new Map(map);
+      }),
+  };
+}
+export const sessionBackendStore = createBackendStore();
+// Default backend for new sessions
+export const defaultBackend = writable<BackendId>("claude");
+
+// Models for each backend (populated from API)
+export const backendModels = writable<Record<BackendId, ModelInfo[]>>({
+  claude: [],
+  codex: [],
+  gemini: [],
+});
+
+// Helper to get models formatted for a specific backend
+export function getBackendModelsFormatted(backend: BackendId, models: Record<BackendId, ModelInfo[]>): ModelInfo[] {
+  return models[backend] || [];
+}
 // Message queue store with helper methods
 function createMessageQueueStore() {
   const { subscribe, set, update } = writable<QueuedMessage[]>([]);
@@ -1130,3 +1171,71 @@ export function getClientMemoryStats() {
     eventsStored: eventsCount,
   };
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Active Waits Store - tracks native wait/pause for each session
+// ═══════════════════════════════════════════════════════════════
+
+function createActiveWaitsStore() {
+  const { subscribe, update } = writable<Map<string, ActiveWait>>(new Map());
+
+  return {
+    subscribe,
+
+    /**
+     * Start tracking a wait
+     */
+    start: (wait: ActiveWait) => {
+      update((map) => {
+        map.set(wait.requestId, wait);
+        return new Map(map);
+      });
+    },
+
+    /**
+     * Stop tracking a wait (completed or skipped)
+     */
+    end: (requestId: string) => {
+      update((map) => {
+        map.delete(requestId);
+        return new Map(map);
+      });
+    },
+
+    /**
+     * Get active waits for a specific session
+     */
+    getForSession: (sessionId: string): ActiveWait[] => {
+      let result: ActiveWait[] = [];
+      const unsubscribe = subscribe((map) => {
+        result = Array.from(map.values()).filter((w) => w.sessionId === sessionId);
+      });
+      unsubscribe();
+      return result;
+    },
+
+    /**
+     * Clear all waits (e.g., on disconnect)
+     */
+    clear: () => {
+      update(() => new Map());
+    },
+  };
+}
+
+export const activeWaits = createActiveWaitsStore();
+
+/**
+ * Get the current active wait for a session (if any)
+ * Returns the first active wait (usually there's only one at a time)
+ */
+export const currentSessionWait = derived(
+  [activeWaits, currentSession],
+  ([$waits, $session]) => {
+    if (!$session?.sessionId) return null;
+    const sessionWaits = Array.from($waits.values()).filter(
+      (w) => w.sessionId === $session.sessionId
+    );
+    return sessionWaits[0] || null;
+  }
+);

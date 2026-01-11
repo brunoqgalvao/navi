@@ -4,17 +4,25 @@ import { homedir } from "os";
 import { json } from "../utils/response";
 import { projects } from "../db";
 
-// Navi agent builder paths (extended format with folders)
-const NAVI_GLOBAL_AGENTS = join(homedir(), ".navi", "agents");
-const CLAUDE_GLOBAL_SKILLS = join(homedir(), ".claude", "skills");
+// Agent builder paths - UNIFIED with agent loader
+// Agents now go to .claude/agents/ for consistency with the agent resolution system
+const GLOBAL_AGENTS_DIR = join(homedir(), ".claude", "agents");
+const GLOBAL_SKILLS_DIR = join(homedir(), ".claude", "skills");
+
+// Legacy path for backwards compatibility (read-only)
+const LEGACY_NAVI_AGENTS = join(homedir(), ".navi", "agents");
 
 function getProjectAgentsDir(projectPath: string): string {
-  return join(projectPath, ".navi", "agents");
+  return join(projectPath, ".claude", "agents");
 }
 
 function getProjectSkillsDir(projectPath: string): string {
   return join(projectPath, ".claude", "skills");
 }
+
+// Alias for backwards compatibility
+const NAVI_GLOBAL_AGENTS = GLOBAL_AGENTS_DIR;
+const CLAUDE_GLOBAL_SKILLS = GLOBAL_SKILLS_DIR;
 
 // Types for Agent Builder
 export interface AgentFileNode {
@@ -113,19 +121,28 @@ function parseFrontmatter(content: string): { frontmatter: AgentFrontmatter; bod
   return { frontmatter, body };
 }
 
-function serializeFrontmatter(frontmatter: AgentFrontmatter, body: string): string {
+// Serialize frontmatter - supports both formats:
+// simple: true = aitmpl.com format (tools as comma string)
+// simple: false = YAML array format
+function serializeFrontmatter(frontmatter: AgentFrontmatter, body: string, simple: boolean = false): string {
   const lines: string[] = ["---"];
 
-  if (frontmatter.name) lines.push(`name: "${frontmatter.name}"`);
-  if (frontmatter.description) lines.push(`description: "${frontmatter.description}"`);
-  if (frontmatter.model) lines.push(`model: ${frontmatter.model}`);
+  if (frontmatter.name) lines.push(`name: ${frontmatter.name}`);
+  if (frontmatter.description) lines.push(`description: ${frontmatter.description}`);
 
+  // For simple format (aitmpl.com), tools as comma-separated string
   if (frontmatter.tools && frontmatter.tools.length > 0) {
-    lines.push("tools:");
-    for (const tool of frontmatter.tools) {
-      lines.push(`  - ${tool}`);
+    if (simple) {
+      lines.push(`tools: ${frontmatter.tools.join(", ")}`);
+    } else {
+      lines.push("tools:");
+      for (const tool of frontmatter.tools) {
+        lines.push(`  - ${tool}`);
+      }
     }
   }
+
+  if (frontmatter.model) lines.push(`model: ${frontmatter.model}`);
 
   if (frontmatter.skills && frontmatter.skills.length > 0) {
     lines.push("skills:");
@@ -202,7 +219,9 @@ function buildFileTree(dirPath: string, basePath?: string): AgentFileNode {
   return node;
 }
 
-// Scan for agents (folder-based format)
+// Scan for agents (supports both formats):
+// 1. Simple: frontend-developer.md (single file, aitmpl.com format)
+// 2. Complex: blog-automation/agent.md (folder with agent.md + skills/scripts)
 function scanAgentFolders(dir: string): AgentDefinition[] {
   const agents: AgentDefinition[] = [];
   if (!existsSync(dir)) return agents;
@@ -214,6 +233,33 @@ function scanAgentFolders(dir: string): AgentDefinition[] {
       const fullPath = join(dir, entry);
       const stat = statSync(fullPath);
 
+      // Format 1: Simple .md file (aitmpl.com format)
+      if (stat.isFile() && entry.endsWith(".md")) {
+        try {
+          const content = readFileSync(fullPath, "utf-8");
+          const { frontmatter, body } = parseFrontmatter(content);
+
+          const id = entry.replace(".md", "");
+          agents.push({
+            id,
+            name: frontmatter.name || id,
+            type: "agent",
+            path: fullPath,
+            description: frontmatter.description,
+            prompt: body,
+            tools: frontmatter.tools,
+            model: frontmatter.model,
+            hasSchema: false,
+            skillCount: 0,
+            scriptCount: 0,
+          });
+        } catch (e) {
+          console.error(`Failed to parse simple agent ${entry}:`, e);
+        }
+        continue;
+      }
+
+      // Format 2: Folder with agent.md
       if (!stat.isDirectory()) continue;
 
       // Look for agent.md in the folder
@@ -253,7 +299,7 @@ function scanAgentFolders(dir: string): AgentDefinition[] {
           scriptCount,
         });
       } catch (e) {
-        console.error(`Failed to parse agent ${entry}:`, e);
+        console.error(`Failed to parse folder agent ${entry}:`, e);
       }
     }
   } catch (e) {
@@ -394,10 +440,11 @@ export async function handleAgentBuilderRoutes(url: URL, method: string, req: Re
   }
 
   // POST /api/agent-builder/agents - Create new agent
+  // format: "simple" (single .md file, aitmpl.com style) or "complex" (folder with agent.md + subdirs)
   if (url.pathname === "/api/agent-builder/agents" && method === "POST") {
     try {
       const body = await req.json();
-      const { name, description, type = "agent" } = body;
+      const { name, description, type = "agent", format = "simple", model = "sonnet", tools = ["Read", "Write", "Bash"] } = body;
 
       if (!name) {
         return json({ error: "Name is required" }, 400);
@@ -412,49 +459,126 @@ export async function handleAgentBuilderRoutes(url: URL, method: string, req: Re
         basePath = NAVI_GLOBAL_AGENTS;
       }
 
-      const agentPath = join(basePath, slug);
+      // Ensure base directory exists
+      if (!existsSync(basePath)) {
+        mkdirSync(basePath, { recursive: true });
+      }
+
+      // For simple format: create single .md file
+      // For complex format: create folder structure
+      const isSimple = format === "simple" && type === "agent";
+      const agentPath = isSimple ? join(basePath, `${slug}.md`) : join(basePath, slug);
 
       if (existsSync(agentPath)) {
         return json({ error: `${type === "skill" ? "Skill" : "Agent"} "${slug}" already exists` }, 400);
       }
 
-      // Create directory structure
-      mkdirSync(agentPath, { recursive: true });
-
       if (type === "skill") {
-        // Create SKILL.md
+        // Skills always use folder format with SKILL.md
+        mkdirSync(agentPath, { recursive: true });
         const skillContent = serializeFrontmatter(
           { name, description: description || "" },
           `# ${name}\n\n## When to Use\n\nDescribe when this skill should be used.\n\n## Instructions\n\nYour instructions here.`
         );
         writeFileSync(join(agentPath, "SKILL.md"), skillContent);
-      } else {
-        // Create agent.md
+      } else if (isSimple) {
+        // Simple agent: single .md file (aitmpl.com format)
         const agentContent = serializeFrontmatter(
-          { name, description: description || "", tools: ["Read", "Write", "Bash"] },
-          `# ${name}\n\nYour agent instructions here.\n\n## Guidelines\n\n- Be helpful\n- Follow best practices`
+          { name, description: description || "", tools, model },
+          `You are a ${name.toLowerCase()}.\n\n## Focus Areas\n\n- Area 1\n- Area 2\n\n## Approach\n\n1. Step one\n2. Step two\n\n## Output\n\n- Expected output format\n\nFocus on working code over explanations.`,
+          true // simple format
         );
-        writeFileSync(join(agentPath, "agent.md"), agentContent);
+        writeFileSync(agentPath, agentContent);
+      } else {
+        // Complex agent: folder with agent.yaml + prompt.md + navi.yaml
+        mkdirSync(agentPath, { recursive: true });
 
-        // Create schema.ts
-        const schemaContent = `// Input and Output schemas for this agent
+        // agent.yaml - SDK-compatible core configuration
+        const agentYaml = `# ${name} - Agent Configuration
+# SDK-compatible fields (works with Claude Agent SDK)
 
-export interface Input {
-  // Define your input parameters
-  query: string;
-}
+name: ${slug}
+description: "${description || `A ${name.toLowerCase()} agent`}"
 
-export interface Output {
-  // Define your output structure
-  result: string;
-}
+# System prompt - loaded from prompt.md
+prompt: file:prompt.md
+
+# Model preference
+model: ${model}
+
+# Tool permissions
+tools:
+  allowed:
+${tools.map((t: string) => `    - ${t}`).join("\n")}
+
+# SDK Subagents - spawned via Task tool within this agent's session
+# subagents:
+#   researcher:
+#     description: "Research specialist"
+#     prompt: "You are a research specialist..."
+#     tools: [WebSearch, WebFetch, Read]
+#     model: haiku
 `;
-        writeFileSync(join(agentPath, "schema.ts"), schemaContent);
+        writeFileSync(join(agentPath, "agent.yaml"), agentYaml);
+
+        // prompt.md - System prompt
+        const promptContent = `# ${name}
+
+You are a ${name.toLowerCase()} agent.
+
+## Your Capabilities
+
+- Capability 1
+- Capability 2
+
+## Guidelines
+
+- Be helpful
+- Follow best practices
+- Be thorough but concise
+
+## Output Format
+
+Describe how you structure your responses.
+`;
+        writeFileSync(join(agentPath, "prompt.md"), promptContent);
+
+        // navi.yaml - Navi-specific extensions
+        const naviYaml = `# Navi Extensions for ${name}
+# These fields extend the agent with Navi-specific features
+
+# UI Configuration
+ui:
+  icon: "🤖"
+  color: gray
+  nativeUI: false
+
+# Skills to load
+# skills:
+#   - global:playwright
+#   - project:my-skill
+
+# Required integrations
+# integrations:
+#   required:
+#     - name: github
+#       reason: "Needs GitHub access"
+
+# Setup script (runs on first use)
+# setup:
+#   script: file:scripts/setup.sh
+
+# Metadata
+meta:
+  version: "1.0.0"
+  tags:
+    - ${slug}
+`;
+        writeFileSync(join(agentPath, "navi.yaml"), naviYaml);
 
         // Create subdirectories
         mkdirSync(join(agentPath, "skills"), { recursive: true });
         mkdirSync(join(agentPath, "scripts"), { recursive: true });
-        mkdirSync(join(agentPath, "sub-agents"), { recursive: true });
       }
 
       const result: AgentDefinition = {
@@ -463,7 +587,9 @@ export interface Output {
         type: type as "agent" | "skill",
         path: agentPath,
         description,
-        hasSchema: type === "agent",
+        tools,
+        model,
+        hasSchema: !isSimple && type === "agent",
         skillCount: 0,
         scriptCount: 0,
       };
@@ -607,6 +733,69 @@ export async function run(input: unknown): Promise<unknown> {
       return json({ path: scriptPath, name, language }, 201);
     } catch (e: any) {
       return json({ error: e.message || "Failed to add script" }, 500);
+    }
+  }
+
+  // POST /api/agent-builder/run - Execute an agent with input
+  if (url.pathname === "/api/agent-builder/run" && method === "POST") {
+    try {
+      const body = await req.json();
+      const { agentPath, input, model = "sonnet" } = body;
+
+      if (!agentPath) {
+        return json({ error: "agentPath is required" }, 400);
+      }
+
+      // Read the agent file
+      let agentContent: string;
+      let isSimpleAgent = false;
+
+      if (agentPath.endsWith(".md")) {
+        // Simple agent (single file)
+        if (!existsSync(agentPath)) {
+          return json({ error: "Agent file not found" }, 404);
+        }
+        agentContent = readFileSync(agentPath, "utf-8");
+        isSimpleAgent = true;
+      } else {
+        // Complex agent (folder with agent.md)
+        const agentMdPath = join(agentPath, "agent.md");
+        if (!existsSync(agentMdPath)) {
+          return json({ error: "agent.md not found in agent folder" }, 404);
+        }
+        agentContent = readFileSync(agentMdPath, "utf-8");
+      }
+
+      // Parse frontmatter to get tools and model
+      const { frontmatter, body: promptBody } = parseFrontmatter(agentContent);
+
+      // Build the full prompt with input context
+      const fullPrompt = `${promptBody}
+
+---
+
+## Input
+
+\`\`\`json
+${JSON.stringify(input, null, 2)}
+\`\`\`
+
+Process the above input according to your instructions and provide the output.`;
+
+      // Return the prepared execution context
+      // The actual execution happens via WebSocket in the main chat system
+      // This endpoint prepares the agent for execution
+      return json({
+        prepared: true,
+        agentName: frontmatter?.name || "Agent",
+        model: frontmatter?.model || model,
+        tools: frontmatter?.tools || ["Read", "Write", "Bash"],
+        prompt: fullPrompt,
+        originalPrompt: promptBody,
+        input,
+      });
+    } catch (e: any) {
+      return json({ error: e.message || "Failed to prepare agent" }, 500);
     }
   }
 

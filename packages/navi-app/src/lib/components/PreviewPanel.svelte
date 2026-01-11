@@ -9,7 +9,7 @@
   The engine selector is a very subtle dropdown that only appears on hover.
 -->
 <script lang="ts">
-  import NativePreviewPanel from "./NativePreviewPanel.svelte";
+  import NativePreviewPanel, { type InspectedElement } from "./NativePreviewPanel.svelte";
   import ContainerPreviewPanel from "./ContainerPreviewPanel.svelte";
   import PortManagerPreviewPanel from "./PortManagerPreviewPanel.svelte";
 
@@ -22,9 +22,11 @@
     previewUrl?: string | null;
     /** Callback to ask Claude to fix an error */
     onAskClaude?: (message: string) => void;
+    /** Callback when user inspects an element in the preview */
+    onElementInspected?: (element: InspectedElement) => void;
   }
 
-  let { projectId, sessionId, branch, previewUrl, onAskClaude }: Props = $props();
+  let { projectId, sessionId, branch, previewUrl, onAskClaude, onElementInspected }: Props = $props();
 
   // Persist engine choice in localStorage per project
   const STORAGE_KEY = "navi:preview-engine";
@@ -136,6 +138,7 @@
         {branch}
         {previewUrl}
         {onAskClaude}
+        {onElementInspected}
       />
     {:else if currentEngine === "container"}
       <ContainerPreviewPanel

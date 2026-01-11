@@ -4,6 +4,10 @@ A desktop application providing a rich GUI for Claude Code, built with Svelte 5,
 
 ## Be snarky fun
 
+
+VERY IMPORTANT CONTEXT:
+- we're using Navi to develop Navi -> so don't close the process/try to run it again to test - we're the process ourselves.
+
 ---
 
 ## Quick Reference
@@ -33,7 +37,7 @@ Navi has **8 distinct component categories** defined in `src/lib/core/`:
 | Category | Purpose | Location | Registry |
 |----------|---------|----------|----------|
 | **Extensions** | Sidebar panels (Files, Git, Terminal) | `features/extensions/` | `extensionRegistry` |
-| **Message Widgets** | Inline chat renderers (code, media, tools) | `components/*.svelte` | `messageWidgetRegistry` |
+| **Message Widgets** | Inline chat renderers (code, media, tools) | `components/widgets/` | `messageWidgetRegistry` |
 | **Dashboard Widgets** | Project landing page components | `features/dashboard/` | `dashboardWidgetRegistry` |
 | **References** | @ mentions in input (files, terminals, chats) | `core/references.ts` | `references` store |
 | **Skills** | Claude capability extensions | `.claude/skills/` | File-based |
@@ -69,6 +73,23 @@ packages/
 - **Desktop:** Tauri v2
 - **Database:** sql.js (SQLite in-memory, persisted to ~/.claude-code-ui/data.db)
 - **AI:** @anthropic-ai/claude-agent-sdk
+
+---
+
+## Feature Status
+
+See `docs/STATUS.md` for complete feature inventory. Quick summary:
+
+| Status | Features |
+|--------|----------|
+| **CORE** | Sessions, Projects, Terminal, Git, Skills, Preview, **Multi-Agent System** |
+| **STABLE** | Kanban, Commands, Extensions, OAuth Integrations, Backend Selector |
+| **EXPERIMENTAL** | Proactive Hooks, Sessions Board, Ensemble Consensus, Email (AgentMail) |
+| **DEPRECATED** | E2B Cloud Execution, Self-Healing Builds, Experimental Agents |
+| **CUT** | Channels, Browser (standalone), Plugins |
+
+**Experimental features** are marked with `@experimental` in code comments.
+**Deprecated features** are marked with `@deprecated` and will be removed.
 
 ---
 
@@ -153,6 +174,36 @@ const modes = extensionRegistry.getPanelModes(); // ["files", "browser", "git", 
 const gitExt = extensionRegistry.getByPanelMode("git");
 ```
 
+#### Built-in Extensions
+
+| ID | Panel Mode | Icon | Purpose |
+|----|------------|------|---------|
+| `files` | files | 📁 | File browser, project navigation |
+| `preview` | preview | 👁️ | URL/file preview panel |
+| `git` | git | 🔀 | Git status, branches, commits |
+| `terminal` | terminal | 💻 | Terminal output viewer |
+| `processes` | processes | ⚙️ | Background process manager |
+| `kanban` | kanban | 📋 | Task board |
+| `agents` | agents | 🤖 | Agent hierarchy viewer |
+
+#### Creating a New Extension
+
+1. Create component in `src/lib/features/extensions/components/`
+2. Register in `src/lib/core/registries.ts`
+3. Add to `DEFAULT_EXTENSIONS` array
+
+```typescript
+// In registries.ts
+extensionRegistry.register({
+  id: "my-extension",
+  panelMode: "my-panel",
+  label: "My Extension",
+  icon: "🔧",
+  component: MyExtensionPanel,
+  defaultEnabled: true,
+});
+```
+
 ### Message Widgets (Inline Chat)
 
 Register custom renderers for chat message content:
@@ -165,6 +216,45 @@ registerCodeBlockWidget("mermaid", MermaidRenderer);
 
 // Register a tool result widget
 registerToolWidget("Read", FilePreviewWidget);
+```
+
+#### Built-in Code Block Widgets
+
+| Language | Component | Purpose |
+|----------|-----------|---------|
+| `mermaid` | MermaidRenderer | Flowcharts, diagrams |
+| `stocks` | StockChart | Stock price comparison charts |
+| `media` | MediaDisplay | Images, audio, video |
+| `genui` | GenerativeUI | Interactive HTML components |
+| `copyable` | CopyableBlock | Text with copy button |
+
+#### Creating a New Widget
+
+1. Create component in `src/lib/components/widgets/`
+2. Register in `MermaidRenderer.svelte` (handles all special blocks)
+3. Parse content from code block body
+
+Example flow for `stocks` widget:
+```
+User asks → Claude outputs ```stocks {...} ``` → MermaidRenderer detects → StockChart renders
+```
+
+### Dashboard Widgets
+
+Dashboard widgets appear on the project landing page. Located in `src/lib/features/dashboard/`:
+
+| Widget | Purpose |
+|--------|---------|
+| `QuickActions` | Common actions (new chat, settings) |
+| `RecentSessions` | Recently used sessions |
+| `ProjectStats` | Token usage, cost stats |
+| `SkillsList` | Enabled skills for project |
+
+Dashboard can also render markdown widgets using code blocks:
+```markdown
+```widget:stats
+title: Usage This Week
+```
 ```
 
 ### References (@ Mentions)
@@ -214,6 +304,67 @@ model: sonnet
 # Documentation here
 ```
 
+### Built-in Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `stock-compare` | Fetch and compare stock prices |
+| `playwright` | Browser automation, screenshots |
+| `navi` | Control Navi GUI from Claude |
+| `integrations` | OAuth services (Gmail, Sheets) |
+| `ship-it` | Deploy apps to Navi Cloud |
+
+### Creating a New Skill
+
+1. Create folder `.claude/skills/{name}/`
+2. Add `SKILL.md` with frontmatter
+3. Optional: Add scripts/executables
+4. Claude auto-discovers based on description
+
+---
+
+## Commands System
+
+Commands are slash commands (e.g., `/review`, `/deploy`). Located in `.claude/commands/`:
+
+```yaml
+# .claude/commands/review.md
+---
+name: review
+description: Review code for quality and issues
+---
+
+Review the code in the current file for:
+- Bugs and edge cases
+- Performance issues
+- Security vulnerabilities
+- Code style consistency
+```
+
+---
+
+## Hooks System
+
+Hooks run shell commands on lifecycle events. Configured in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "pre-query": "echo 'Starting query...'",
+    "post-tool": "npm run lint --fix",
+    "on-error": "notify-send 'Error occurred'"
+  }
+}
+```
+
+| Event | When Triggered |
+|-------|----------------|
+| `pre-query` | Before sending to Claude |
+| `post-query` | After Claude responds |
+| `pre-tool` | Before tool execution |
+| `post-tool` | After tool execution |
+| `on-error` | On any error |
+
 ---
 
 ## Templates System
@@ -232,20 +383,64 @@ template-name/
 
 ---
 
-## Agents
+## Agents Framework
 
-Agents are specialized AI personas in `.claude/agents/{name}.md`:
+Agents are specialized AI personas that Navi can spawn for tasks. See `.claude/agents/AGENTS.md` for full spec.
+
+### Agent Types
+
+| Type | Icon | Native UI | Purpose |
+|------|------|-----------|---------|
+| `browser` | 🌐 | ✅ | Web research, URL analysis |
+| `coding` | 🔧 | ✅ | Code implementation, file editing |
+| `runner` | ▶️ | ✅ | Command execution, tests, builds |
+| `research` | 🔍 | ❌ | Deep analysis, findings synthesis |
+| `planning` | 📋 | ❌ | Task breakdown, architecture |
+| `reviewer` | 👀 | ❌ | Code/document review |
+| `general` | 🤖 | ❌ | Fallback for misc tasks |
+
+### Agent File Format
+
+Located in `.claude/agents/{name}.md`:
 
 ```yaml
 ---
-name: agent-name
-description: What this agent does (determines when invoked)
-tools: Read, Write, Edit, Bash
-model: sonnet
+name: Agent Display Name
+type: browser | coding | runner | research | planning | reviewer | general
+description: When to use this agent
+icon: 🌐
+color: blue | emerald | cyan | purple | amber | rose | gray
+nativeUI: true | false
+tools: WebFetch, WebSearch, Read, Write
+skills: playwright
+model: sonnet | opus | haiku
 ---
 
-# Agent instructions here
+# System Prompt (markdown body)
+
+You are a [Type] Agent specialized in...
 ```
+
+### Spawning Agents
+
+Agents are spawned via the `spawn_agent` MCP tool:
+
+```typescript
+spawn_agent({
+  title: "Research Chart.js docs",
+  role: "researcher",
+  task: "Find multi-dataset examples",
+  agent_type: "browser"  // Determines UI + capabilities
+})
+```
+
+### Agent Loading Order
+
+1. Built-in agents (`server/agent-types.ts`)
+2. Project agents (`.claude/agents/*.md`)
+3. Global agents (`~/.claude/agents/*.md`)
+
+Later definitions override earlier ones by `type`.
 
 ---
 
@@ -271,10 +466,23 @@ Client connects to `/ws` for real-time updates. Message types:
 
 ```sql
 projects (id, name, path, description, folder_id, archived, context_window)
-sessions (id, project_id, title, claude_session_id, model, total_cost_usd)
+sessions (id, project_id, title, claude_session_id, model, total_cost_usd,
+          parent_session_id, root_session_id, depth, role, task, agent_status, agent_type)
 messages (id, session_id, role, content, timestamp, parent_tool_use_id)
 skills (id, name, path, enabled, hash)
 ```
+
+### Session Hierarchy Fields
+
+| Field | Purpose |
+|-------|---------|
+| `parent_session_id` | Parent session (for child agents) |
+| `root_session_id` | Top-level session in hierarchy |
+| `depth` | Nesting level (max 3) |
+| `role` | Agent role (e.g., "frontend", "researcher") |
+| `task` | Task description |
+| `agent_status` | `working` \| `waiting` \| `delivered` \| `blocked` |
+| `agent_type` | `browser` \| `coding` \| `runner` \| etc. (for native UI) |
 
 **Helper access:**
 ```typescript
@@ -358,9 +566,16 @@ Accent colors are dynamically generated from configurable hue/saturation values.
 | API client | `packages/navi-app/src/lib/api.ts` |
 | Router | `packages/navi-app/src/lib/router.ts` |
 | Skills backend | `packages/navi-app/server/skills.ts` |
+| **Agent types (server)** | `packages/navi-app/server/agent-types.ts` |
+| **Agent types (frontend)** | `packages/navi-app/src/lib/core/agent-types.ts` |
+| **Multi-session tools** | `packages/navi-app/server/services/multi-session-tools.ts` |
+| **Session manager** | `packages/navi-app/server/services/session-manager.ts` |
 | Extensions | `packages/navi-app/src/lib/features/extensions/` |
+| Session hierarchy | `packages/navi-app/src/lib/features/session-hierarchy/` |
 | Git feature | `packages/navi-app/src/lib/features/git/` |
 | Dashboard | `packages/navi-app/src/lib/features/dashboard/` |
+| **Message widgets** | `packages/navi-app/src/lib/components/widgets/` |
+| **Stock chart widget** | `packages/navi-app/src/lib/components/widgets/StockChart.svelte` |
 
 ---
 
@@ -370,6 +585,9 @@ Accent colors are dynamically generated from configurable hue/saturation values.
 - **Logs:** `~/.claude-code-ui/logs/`
 - **Global skills:** `~/.claude/skills/`
 - **Project skills:** `.claude/skills/`
+- **Global agents:** `~/.claude/agents/`
+- **Project agents:** `.claude/agents/`
+- **Agent spec:** `.claude/agents/AGENTS.md`
 - **Settings:** `.claude/settings.json` (global), `.claude/settings.local.json` (project)
 
 ---

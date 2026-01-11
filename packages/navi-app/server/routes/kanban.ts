@@ -140,12 +140,21 @@ export async function handleKanbanRoutes(
       // Update card status to execute
       kanbanCards.updateStatus(cardId, "execute", "Chat started");
 
-      // Build the prompt from the card
-      const prompt = card.spec || card.title;
+      // Build structured prompt from the card
+      const promptLines = [
+        `Task: ${card.title}`,
+        "",
+        `Spec:`,
+        card.spec || "(no detailed spec provided)",
+        "",
+        "Ask questions if you need clarification before proceeding.",
+      ];
+      const prompt = promptLines.join("\n");
 
       return json({
         sessionId,
         prompt,
+        autoSend: true, // Signal to auto-send the message
         card: kanbanCards.get(cardId),
       });
     } catch (e: any) {

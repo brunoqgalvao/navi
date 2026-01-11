@@ -14,6 +14,8 @@ import { resolveNaviClaudeAuth, formatAuthForLog } from "../utils/navi-auth";
 import { resolveBunExecutable } from "../utils/bun";
 import { resolveClaudeCodeExecutable } from "../utils/claude-code";
 import { describePath, writeDebugLog } from "../utils/logging";
+// Multi-backend support
+import { getAdapter, type BackendId, type NormalizedEvent } from "../backends";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -67,6 +69,10 @@ export interface ClientMessage {
   permissionRequestId?: string;
   approved?: boolean;
   approveAll?: boolean;
+  // Agent selection (e.g., @coder, @img3d)
+  agentId?: string;
+  // Backend selection (claude, codex, gemini)
+  backend?: "claude" | "codex" | "gemini";
   // Question response fields
   questionRequestId?: string;
   answers?: Record<string, string | string[]>;
@@ -93,6 +99,7 @@ interface ActiveProcess {
 const activeProcesses = new Map<string, ActiveProcess>();
 const pendingPermissions = new Map<string, { sessionId: string; payload: any }>();
 const pendingQuestions = new Map<string, { sessionId: string; payload: any }>();
+const pendingWaits = new Map<string, { sessionId: string; proc: ChildProcess; endTime: number; reason: string }>();
 const sessionApprovedAll = new Set<string>();
 const connectedClients = new Set<any>();
 
@@ -472,6 +479,7 @@ function startChildSessionQuery(
     depth: childSession.depth || 0,
     role: childSession.role || undefined,
     task: childSession.task || undefined,
+    agentType: childSession.agent_type || undefined,  // Pass agent type for native UI prompts
     // Get parent and sibling info
     ...(childSession.parent_session_id && (() => {
       const parent = sessions.get(childSession.parent_session_id);
@@ -513,6 +521,20 @@ function startChildSessionQuery(
   const bunPath = resolvedBunPath ?? "bun";
 
   console.log(`[MultiSession] Starting child worker for session ${childSessionId}`);
+
+  // Save the initial user message to the database
+  const userMsgId = crypto.randomUUID();
+  const now = Date.now();
+  messages.upsert(
+    userMsgId,
+    childSessionId,
+    "user",
+    JSON.stringify([{ type: "text", text: config.prompt }]),
+    now,
+    null,
+    0
+  );
+  console.log(`[MultiSession] Created initial user message for child session ${childSessionId}`);
 
   const childProc = spawn(bunPath, ["run", "--env-file=/dev/null", workerPath, inputJson], {
     cwd: config.cwd,
@@ -612,6 +634,7 @@ function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefin
       task: msg.task,
       model: msg.model,
       context: msg.context,
+      agentType: msg.agent_type,
     });
 
     if (child) {
@@ -779,9 +802,9 @@ function handleMultiSessionDeliver(proc: ChildProcess, sessionId: string | undef
 
     // Inject the deliverable into the parent session's conversation
     if (childSession?.parent_session_id) {
+      // Try to inject into running parent process (if active)
       const parentProc = activeProcesses.get(childSession.parent_session_id)?.process;
       if (parentProc?.stdin) {
-        // Send a synthetic message to the parent that includes the child's deliverable
         const deliverableMessage = JSON.stringify({
           type: "child_deliverable",
           childSessionId: sessionId,
@@ -794,39 +817,40 @@ function handleMultiSessionDeliver(proc: ChildProcess, sessionId: string | undef
           },
         });
         parentProc.stdin.write(deliverableMessage + "\n");
-        console.log(`[MultiSession] Injected deliverable from ${sessionId} into parent ${childSession.parent_session_id}`);
-
-        // Also create a synthetic message in the parent's conversation
-        const parentMsgId = crypto.randomUUID();
-        const now = Date.now();
-        const syntheticContent = [
-          {
-            type: "text",
-            text: `**Child Agent (${childSession.role || "agent"}) completed:**\n\n${msg.summary}\n\n---\n\n${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}`,
-          },
-        ];
-
-        messages.upsert(
-          parentMsgId,
-          childSession.parent_session_id,
-          "assistant",
-          JSON.stringify(syntheticContent),
-          now,
-          null,
-          1 // synthetic
-        );
-
-        // Broadcast to UI
-        broadcastToClients({
-          type: "assistant",
-          uiSessionId: childSession.parent_session_id,
-          content: syntheticContent,
-          uuid: parentMsgId,
-          timestamp: now,
-          isSynthetic: true,
-          fromChildSession: sessionId,
-        });
+        console.log(`[MultiSession] Injected deliverable into running parent ${childSession.parent_session_id}`);
       }
+
+      // Always create a synthetic message in the parent's conversation and broadcast to UI
+      const parentMsgId = crypto.randomUUID();
+      const now = Date.now();
+      const syntheticContent = [
+        {
+          type: "text",
+          text: `**Child Agent (${childSession.role || "agent"}) completed:**\n\n${msg.summary}\n\n---\n\n${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}`,
+        },
+      ];
+
+      messages.upsert(
+        parentMsgId,
+        childSession.parent_session_id,
+        "assistant",
+        JSON.stringify(syntheticContent),
+        now,
+        null,
+        1 // synthetic
+      );
+
+      // Broadcast to UI (always, even if parent process isn't running)
+      broadcastToClients({
+        type: "assistant",
+        uiSessionId: childSession.parent_session_id,
+        content: syntheticContent,
+        uuid: parentMsgId,
+        timestamp: now,
+        isSynthetic: true,
+        fromChildSession: sessionId,
+      });
+      console.log(`[MultiSession] Broadcast deliverable to parent UI ${childSession.parent_session_id}`);
     }
   } catch (error) {
     sendWorkerResponse(proc, "multi_session_deliver_response", msg.requestId, {
@@ -881,6 +905,90 @@ function sendWorkerResponse(proc: ChildProcess, type: string, requestId: string,
   });
 
   proc.stdin.write(response + "\n");
+}
+
+// ============================================================================
+// Wait/Pause Handler Functions
+// ============================================================================
+
+/**
+ * Handle wait start from worker - broadcast to UI and store for skip
+ */
+function handleSessionWaitStart(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) return;
+
+  const endTime = Date.now() + (msg.seconds * 1000);
+
+  // Store for skip functionality
+  pendingWaits.set(msg.requestId, {
+    sessionId,
+    proc,
+    endTime,
+    reason: msg.reason || "Waiting...",
+  });
+
+  // Broadcast to UI
+  sendToSession(sessionId, {
+    type: "session:wait_start",
+    requestId: msg.requestId,
+    sessionId,
+    seconds: msg.seconds,
+    endTime,
+    reason: msg.reason || "Waiting...",
+  });
+
+  console.log(`[Wait] Session ${sessionId} started waiting ${msg.seconds}s: ${msg.reason || "no reason"}`);
+}
+
+/**
+ * Handle wait end from worker - cleanup and notify UI
+ */
+function handleSessionWaitEnd(sessionId: string | undefined, msg: any) {
+  pendingWaits.delete(msg.requestId);
+
+  if (sessionId) {
+    sendToSession(sessionId, {
+      type: "session:wait_end",
+      requestId: msg.requestId,
+      sessionId,
+      skipped: msg.skipped || false,
+    });
+  }
+
+  console.log(`[Wait] Session ${sessionId} finished waiting (skipped: ${msg.skipped || false})`);
+}
+
+/**
+ * Skip a pending wait - called from UI action
+ */
+export function skipSessionWait(requestId: string): boolean {
+  const pending = pendingWaits.get(requestId);
+  if (!pending) {
+    console.log(`[Wait] No pending wait found for ${requestId}`);
+    return false;
+  }
+
+  // Send skip response to worker
+  sendWorkerResponse(pending.proc, "session_wait_skip", requestId, {
+    skipped: true,
+  });
+
+  pendingWaits.delete(requestId);
+  console.log(`[Wait] Skipped wait ${requestId} for session ${pending.sessionId}`);
+  return true;
+}
+
+/**
+ * Get all active waits for a session
+ */
+export function getActiveWaits(sessionId: string): Array<{ requestId: string; endTime: number; reason: string }> {
+  const waits: Array<{ requestId: string; endTime: number; reason: string }> = [];
+  for (const [requestId, wait] of pendingWaits) {
+    if (wait.sessionId === sessionId) {
+      waits.push({ requestId, endTime: wait.endTime, reason: wait.reason });
+    }
+  }
+  return waits;
 }
 
 function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
@@ -959,8 +1067,204 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
   }
 }
 
+/**
+ * Handle queries using the multi-backend adapter system (Codex, Gemini)
+ * This runs the query through the appropriate backend adapter and
+ * normalizes events to match the Claude SDK format for the UI.
+ */
+async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: BackendId) {
+  const { prompt, projectId, sessionId, model, historyContext } = data;
+
+  const session = sessionId ? sessions.get(sessionId) : null;
+  const project = projectId ? projects.get(projectId) : null;
+  const workingDirectory = project?.path || process.cwd();
+
+  console.log(`[${sessionId}] Using ${backendId.toUpperCase()} backend for query`);
+
+  // Save user message
+  if (sessionId && prompt) {
+    const msgId = crypto.randomUUID();
+    const now = Date.now();
+    messages.create(msgId, sessionId, "user", JSON.stringify(prompt), now);
+    searchIndex.indexMessage(msgId, sessionId, JSON.stringify(prompt), now);
+  }
+
+  // Get permission settings
+  const permissionSettings = globalSettings.getPermissions();
+  const isAutoApprove = permissionSettings.autoAcceptAll ||
+    (sessionId ? sessionApprovedAll.has(sessionId) : false) ||
+    session?.auto_accept_all === 1 ||
+    project?.auto_accept_all === 1;
+
+  // Get the adapter
+  const adapter = getAdapter(backendId);
+
+  // Emit query_start
+  safeSend(ws, {
+    type: "query_start",
+    uiSessionId: sessionId,
+    backend: backendId,
+  });
+
+  try {
+    // Run query through adapter
+    for await (const event of adapter.query({
+      prompt: historyContext ? `${historyContext}\n\nUser's new message:\n${prompt}` : prompt || "",
+      cwd: workingDirectory,
+      sessionId: sessionId || crypto.randomUUID(),
+      model,
+      permissionMode: isAutoApprove ? "auto" : "confirm",
+    })) {
+      // Convert normalized events to UI format
+      const uiEvent = convertNormalizedEventToUI(event, sessionId);
+      if (uiEvent) {
+        safeSend(ws, uiEvent);
+
+        // Persist assistant messages
+        if (event.type === "assistant" && sessionId) {
+          const msgId = crypto.randomUUID();
+          const now = Date.now();
+          messages.create(msgId, sessionId, "assistant", JSON.stringify(event.content), now);
+          sessions.updateClaudeSession(null, model || null, 0, 1, 0, 0, now, sessionId);
+        }
+      }
+    }
+
+    // Emit completion - use uiSessionId for the messageHandler
+    safeSend(ws, {
+      type: "query_complete",
+      uiSessionId: sessionId,
+      backend: backendId,
+    });
+
+  } catch (error: any) {
+    console.error(`[${sessionId}] ${backendId} adapter error:`, error.message);
+    safeSend(ws, {
+      type: "error",
+      uiSessionId: sessionId,
+      error: error.message,
+      backend: backendId,
+    });
+  }
+}
+
+/**
+ * Convert normalized backend events to UI-compatible format
+ */
+function convertNormalizedEventToUI(event: NormalizedEvent, sessionId?: string): any {
+  const timestamp = Date.now();
+  const uuid = crypto.randomUUID();
+
+  switch (event.type) {
+    case "system":
+      return {
+        type: "system",
+        subtype: event.subtype,
+        uiSessionId: sessionId,
+        ...(event.subtype === "init" && {
+          backend: event.backendId,
+          model: event.model,
+          cwd: event.cwd,
+          tools: event.tools,
+        }),
+        ...(event.subtype === "status" && {
+          status: event.status,
+        }),
+        uuid,
+        timestamp,
+      };
+
+    case "assistant":
+      return {
+        type: "assistant",
+        uiSessionId: sessionId,
+        content: event.content,
+        parentToolUseId: event.parentToolUseId || null,
+        usage: event.usage,
+        uuid,
+        timestamp,
+      };
+
+    case "user":
+      return {
+        type: "user",
+        uiSessionId: sessionId,
+        content: event.content,
+        parentToolUseId: event.parentToolUseId || null,
+        uuid,
+        timestamp,
+      };
+
+    case "tool_progress":
+      return {
+        type: "tool_progress",
+        uiSessionId: sessionId,
+        toolUseId: event.toolUseId,
+        toolName: event.toolName,
+        elapsedTimeSeconds: event.elapsedTimeSeconds,
+        uuid,
+        timestamp,
+      };
+
+    case "result":
+      return {
+        type: "result",
+        uiSessionId: sessionId,
+        subtype: event.subtype,
+        costUsd: event.costUsd,
+        durationMs: event.durationMs,
+        numTurns: event.numTurns,
+        isError: event.isError,
+        result: event.result,
+        errors: event.errors,
+        uuid,
+        timestamp,
+      };
+
+    case "error":
+      return {
+        type: "error",
+        uiSessionId: sessionId,
+        error: event.error,
+        code: event.code,
+        uuid,
+        timestamp,
+      };
+
+    case "complete":
+      return {
+        type: "complete",
+        uiSessionId: sessionId,
+        lastAssistantContent: event.lastAssistantContent,
+        resultData: event.resultData,
+        uuid,
+        timestamp,
+      };
+
+    default:
+      return null;
+  }
+}
+
 export function handleQueryWithProcess(ws: any, data: ClientMessage) {
-  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext } = data;
+  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext, agentId, backend } = data;
+
+  // Determine which backend to use (default: claude)
+  const effectiveBackend: BackendId = backend ||
+    (sessionId ? (sessions.get(sessionId)?.backend as BackendId) : undefined) ||
+    (projectId ? (projects.get(projectId)?.default_backend as BackendId) : undefined) ||
+    "claude";
+
+  // Update session backend if specified
+  if (sessionId && backend) {
+    sessions.updateBackend(backend, sessionId);
+  }
+
+  // Route to appropriate backend adapter for non-Claude backends
+  if (effectiveBackend !== "claude") {
+    handleQueryWithAdapter(ws, data, effectiveBackend);
+    return;
+  }
 
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
@@ -1027,6 +1331,7 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
       depth: session.depth || 0,
       role: session.role || undefined,
       task: session.task || undefined,
+      agentType: session.agent_type || undefined,  // Pass agent type for native UI prompts
       // For child sessions, get parent context
       ...(isChildSession && session.parent_session_id && (() => {
         const parent = sessions.get(session.parent_session_id);
@@ -1051,6 +1356,7 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
     model,
     allowedTools: allowedTools || permissionSettings.allowedTools,
     sessionId,
+    agentId, // Selected agent (e.g., "coder", "img3d")
     permissionSettings: {
       autoAcceptAll: permissionSettings.autoAcceptAll || isSessionApprovedAll || isProjectApprovedAll,
       requireConfirmation: permissionSettings.requireConfirmation,
@@ -1227,6 +1533,14 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
           handleMultiSessionDeliver(child, sessionId, msg);
         } else if (msg.type === "multi_session_log_decision") {
           handleMultiSessionLogDecision(child, sessionId, msg);
+        }
+        // ═══════════════════════════════════════════════════════════════
+        // WAIT/PAUSE: Agent is waiting for a duration
+        // ═══════════════════════════════════════════════════════════════
+        else if (msg.type === "session_wait_start") {
+          handleSessionWaitStart(child, sessionId, msg);
+        } else if (msg.type === "session_wait_end") {
+          handleSessionWaitEnd(sessionId, msg);
         } else if (msg.type === "complete") {
           if (lastMainAssistantMsgId) {
             messages.markFinal(lastMainAssistantMsgId);
@@ -1717,6 +2031,10 @@ export function createWebSocketHandlers() {
                 approveAll: data.approveAll,
               });
               active.process.stdin.write(response + "\n");
+              // Resume kanban card execution when user responds
+              if (data.approved && pending.sessionId) {
+                resumeKanbanCardExecution(pending.sessionId, "Permission granted");
+              }
             }
             pendingPermissions.delete(data.permissionRequestId);
           }
@@ -1731,6 +2049,8 @@ export function createWebSocketHandlers() {
                 answers: data.answers,
               });
               active.process.stdin.write(response + "\n");
+              // Resume kanban card execution when user responds
+              resumeKanbanCardExecution(pending.sessionId, "User responded");
             }
             // Remove from memory and database
             pendingQuestions.delete(data.questionRequestId);

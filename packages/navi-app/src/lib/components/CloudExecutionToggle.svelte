@@ -1,4 +1,8 @@
 <script lang="ts">
+  /**
+   * @deprecated This component is deprecated and scheduled for removal.
+   * E2B cloud execution has been superseded by Navi Cloud.
+   */
   import type { ExecutionMode } from "../stores";
 
   interface Props {

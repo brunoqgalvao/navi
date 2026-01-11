@@ -1,6 +1,10 @@
 import "./app.css";
 import App from "./App.svelte";
 import { mount } from "svelte";
+import { initTelemetry } from "./lib/telemetry";
+
+// Initialize telemetry (respects user opt-out)
+initTelemetry();
 
 // Inject Navi branch indicator when running in preview mode
 if (import.meta.env.VITE_NAVI_PREVIEW === "true" && import.meta.env.VITE_NAVI_BRANCH) {

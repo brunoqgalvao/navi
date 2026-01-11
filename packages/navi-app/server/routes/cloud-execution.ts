@@ -1,4 +1,7 @@
 /**
+ * @deprecated This route handler is deprecated and scheduled for removal.
+ * E2B cloud execution has been superseded by Navi Cloud.
+ *
  * Cloud Execution API Routes
  *
  * Endpoints for managing E2B cloud executions.

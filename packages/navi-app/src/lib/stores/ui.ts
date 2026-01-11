@@ -12,6 +12,8 @@ const TOUR_COMPLETE_KEY = "claude-code-ui-tours-complete";
 const CHAT_VIEW_MODE_KEY = "claude-code-ui-chat-view-mode";
 const UI_SCALE_KEY = "claude-code-ui-scale";
 const THEME_KEY = "claude-code-ui-theme";
+const DASHBOARD_ENABLED_KEY = "claude-code-ui-dashboard-enabled";
+const CHANNELS_ENABLED_KEY = "claude-code-ui-channels-enabled";
 
 // Onboarding store
 function createOnboardingStore() {
@@ -79,6 +81,56 @@ function createDebugModeStore() {
     set: (value: boolean) => {
       if (typeof window !== "undefined") {
         localStorage.setItem(DEBUG_MODE_KEY, String(value));
+      }
+      set(value);
+    },
+  };
+}
+
+// Dashboard feature store (experimental - default off)
+function createDashboardEnabledStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(DASHBOARD_ENABLED_KEY) : null;
+  const { subscribe, set } = writable(stored === "true");
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current = false;
+      subscribe(v => current = v)();
+      const newValue = !current;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(DASHBOARD_ENABLED_KEY, String(newValue));
+      }
+      set(newValue);
+    },
+    set: (value: boolean) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(DASHBOARD_ENABLED_KEY, String(value));
+      }
+      set(value);
+    },
+  };
+}
+
+// Channels feature store (experimental - default off)
+function createChannelsEnabledStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(CHANNELS_ENABLED_KEY) : null;
+  const { subscribe, set } = writable(stored === "true");
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current = false;
+      subscribe(v => current = v)();
+      const newValue = !current;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(CHANNELS_ENABLED_KEY, String(newValue));
+      }
+      set(newValue);
+    },
+    set: (value: boolean) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(CHANNELS_ENABLED_KEY, String(value));
       }
       set(value);
     },
@@ -518,6 +570,8 @@ function createThemeStore() {
 export const onboardingComplete = createOnboardingStore();
 export const advancedMode = createAdvancedModeStore();
 export const debugMode = createDebugModeStore();
+export const dashboardEnabled = createDashboardEnabledStore();
+export const channelsEnabled = createChannelsEnabledStore();
 export const newChatView = createNewChatViewStore();
 export const showArchivedWorkspaces = createShowArchivedStore();
 export const tour = createTourStore();

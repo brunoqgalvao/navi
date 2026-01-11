@@ -6,9 +6,25 @@
   - Auto-switches when changing worktrees/sessions
   - Fast startup, no container overhead
   - Compliance checking (validates project can be previewed)
+  - Element inspector support (via injected script)
 -->
 <script lang="ts">
+  import { onMount } from "svelte";
   import { nativePreviewApi, getServerUrl, type PreviewComplianceResult, type PortConflictInfo } from "../api";
+
+  // Element inspector data type
+  export interface InspectedElement {
+    tagName: string;
+    selector: string;
+    outerHTML: string;
+    innerHTML: string;
+    textContent: string;
+    attributes: Record<string, string>;
+    ancestors: Array<{ tag: string; id?: string; class?: string }>;
+    rect: { x: number; y: number; width: number; height: number };
+    computed: Record<string, string>;
+    page: { url: string; title: string };
+  }
 
   interface Props {
     projectId: string | null;
@@ -18,9 +34,11 @@
     onClose?: () => void;
     /** Callback to ask Claude to fix an error. Receives the error message and logs. */
     onAskClaude?: (message: string) => void;
+    /** Callback when user inspects an element in the preview */
+    onElementInspected?: (element: InspectedElement) => void;
   }
 
-  let { projectId, sessionId, branch, previewUrl, onClose, onAskClaude }: Props = $props();
+  let { projectId, sessionId, branch, previewUrl, onClose, onAskClaude, onElementInspected }: Props = $props();
 
   let iframeRef = $state<HTMLIFrameElement | null>(null);
   let status = $state<"stopped" | "starting" | "running" | "error" | "switching" | "unavailable" | "conflict">("stopped");
@@ -45,18 +63,22 @@
   let statusPollInterval: ReturnType<typeof setInterval> | null = null;
   let logsPollInterval: ReturnType<typeof setInterval> | null = null;
 
+  // Element inspector state
+  let inspectMode = $state(false);
+  let inspectorReady = $state(false);
+  let inspectorTimeout: ReturnType<typeof setTimeout> | null = null;
+
   const effectiveBranch = $derived(branch || "main");
   const normalizeBranch = (value: string | null | undefined) => (value ?? "main").trim();
 
-  // Load the preview directly from localhost - no proxy needed
-  // This allows Next.js client-side navigation to work correctly
-  // Branch indicator can be injected at the project level (like Google Analytics)
+  // Load preview through the proxy for script injection (inspector, branch indicator, OAuth intercept)
+  // The proxy rewrites URLs and injects Navi's helper scripts into HTML responses
   const iframeSrc = $derived(() => {
-    const directUrl = currentPort
-      ? `http://localhost:${currentPort}/`
+    const proxyUrl = currentPort
+      ? `/api/preview/proxy/${currentPort}/`
       : currentUrl;
-    console.log("[NativePreviewPanel] iframeSrc:", { currentPort, currentUrl, directUrl });
-    return directUrl;
+    console.log("[NativePreviewPanel] iframeSrc:", { currentPort, currentUrl, proxyUrl });
+    return proxyUrl;
   });
 
   // Sync previewUrl prop to currentUrl
@@ -457,6 +479,80 @@
     }
   }
 
+  // Element inspector functions
+  function handleInspectorMessage(event: MessageEvent) {
+    // Only accept messages from our proxy origin (same origin)
+    if (event.origin !== window.location.origin) {
+      return;
+    }
+
+    const { source: msgSource, type: msgType, data } = event.data || {};
+    if (msgSource !== 'navi-inspector') return;
+
+    switch (msgType) {
+      case 'ready':
+        inspectorReady = true;
+        if (inspectorTimeout) {
+          clearTimeout(inspectorTimeout);
+          inspectorTimeout = null;
+        }
+        break;
+      case 'element_selected':
+        if (data && onElementInspected) {
+          onElementInspected(data as InspectedElement);
+        }
+        inspectMode = false;
+        break;
+      case 'inspector_disabled':
+        inspectMode = false;
+        break;
+      case 'pong':
+        inspectorReady = true;
+        break;
+    }
+  }
+
+  function toggleInspectMode() {
+    if (!iframeRef?.contentWindow) return;
+
+    // Check if inspector is available
+    if (!inspectorReady) {
+      // Try pinging to see if inspector is loaded
+      iframeRef.contentWindow.postMessage({ type: 'ping' }, '*');
+
+      // Set a timeout to show unavailable message
+      inspectorTimeout = setTimeout(() => {
+        if (!inspectorReady) {
+          // Inspector should auto-inject via proxy, so this shouldn't happen often
+          console.warn('[NativePreviewPanel] Inspector not responding');
+        }
+      }, 500);
+      return;
+    }
+
+    inspectMode = !inspectMode;
+    iframeRef.contentWindow.postMessage({
+      type: inspectMode ? 'enable_inspect' : 'disable_inspect'
+    }, '*');
+  }
+
+  // Set up inspector message listener
+  onMount(() => {
+    window.addEventListener('message', handleInspectorMessage);
+    return () => {
+      window.removeEventListener('message', handleInspectorMessage);
+      if (inspectorTimeout) clearTimeout(inspectorTimeout);
+    };
+  });
+
+  // Reset inspector state when iframe reloads
+  $effect(() => {
+    if (iframeKey) {
+      inspectorReady = false;
+      inspectMode = false;
+    }
+  });
+
   function askClaudeToFix() {
     if (!onAskClaude) return;
 
@@ -502,6 +598,16 @@ Can you help fix this issue so the preview can start successfully?`;
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
+        <!-- Element inspector toggle -->
+        <button
+          onclick={toggleInspectMode}
+          class={`p-1.5 rounded transition-colors ${inspectMode ? 'text-blue-600 bg-blue-100' : inspectorReady ? 'text-gray-500 hover:text-blue-600 hover:bg-blue-50' : 'text-gray-300 hover:text-gray-400 hover:bg-gray-100'}`}
+          title={inspectorReady ? (inspectMode ? 'Exit inspect mode (ESC)' : 'Inspect element') : 'Inspector loading...'}
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
           </svg>
         </button>
         <button

@@ -12,7 +12,7 @@
   import { currentSession, projectWorkspaces } from "../stores/session";
   import type { TerminalTab } from "../stores/types";
   import SafeTerminal from "./SafeTerminal.svelte";
-  import Preview from "../Preview.svelte";
+  import Preview, { type InspectedElement } from "../Preview.svelte";
   import { ptyApi } from "../api";
 
   interface Props {
@@ -24,6 +24,7 @@
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
     isResizing?: boolean;
+    onElementInspected?: (element: InspectedElement) => void;
   }
 
   let {
@@ -35,6 +36,7 @@
     onTerminalRef,
     onTerminalSendToClaude,
     isResizing = false,
+    onElementInspected,
   }: Props = $props();
 
   // Get workspace for current project reactively
@@ -215,5 +217,6 @@
     onBrowserForward={handleBrowserForward}
     onBrowserGoToIndex={handleBrowserGoToIndex}
     isParentResizing={isResizing}
+    {onElementInspected}
   />
 {/if}

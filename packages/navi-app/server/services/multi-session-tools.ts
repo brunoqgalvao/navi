@@ -11,6 +11,7 @@
 
 import { sessionManager, type SpawnConfig, type ContextQuery } from "./session-manager";
 import { sessions, type EscalationType } from "../db";
+import { getAgentDefinition, inferAgentTypeFromRole, type AgentType } from "../agent-types";
 
 // Tool definitions that will be added to agent sessions
 export interface ToolDefinition {
@@ -249,7 +250,7 @@ export async function executeMultiSessionTool(
   try {
     switch (toolName) {
       case "spawn_agent": {
-        const { title, role, task, model, context: additionalContext } = params;
+        const { title, role, task, agent_type, model, context: additionalContext } = params;
 
         // Check if can spawn
         const canSpawn = sessionManager.canSpawn(sessionId);
@@ -263,6 +264,7 @@ export async function executeMultiSessionTool(
           task,
           model,
           context: additionalContext,
+          agentType: agent_type,  // Pass agent type for native UI
         };
 
         const child = sessionManager.spawn(sessionId, config);
@@ -278,9 +280,10 @@ export async function executeMultiSessionTool(
         return {
           success: true,
           result: {
-            message: `Spawned child agent '${role}' to work on: ${task}`,
+            message: `Spawned ${agent_type || 'general'} agent '${role}' to work on: ${task}`,
             childSessionId: child.id,
             childRole: role,
+            agentType: agent_type || 'general',
             note: "You will receive their deliverable when they complete. Continue with your own work.",
           },
         };
@@ -407,8 +410,13 @@ export function generateChildSystemPrompt(
   role: string,
   parentTask: string,
   siblingRoles: string[],
-  decisions: string[]
+  decisions: string[],
+  agentType?: string
 ): string {
+  // Get agent-specific system prompt
+  const effectiveType = agentType || inferAgentTypeFromRole(role);
+  const agentDef = getAgentDefinition(effectiveType);
+
   const siblingsText =
     siblingRoles.length > 0
       ? `You have sibling agents working on: ${siblingRoles.join(", ")}`
@@ -420,31 +428,34 @@ export function generateChildSystemPrompt(
       : "";
 
   return `
-## Your Role: ${role}
-You are a specialized agent working on a specific task within a larger project.
+# ${agentDef.displayName}
 
-## Your Task
+${agentDef.systemPrompt}
+
+---
+
+## Your Assigned Task
 ${task}
 
 ## Context
-- Parent's task: ${parentTask}
+- **Parent's task**: ${parentTask}
 - ${siblingsText}
 ${decisionsText}
 
-## Available Tools
-In addition to standard tools, you have access to multi-session tools:
-- spawn_agent: Create child agents for subtasks (if needed)
-- get_context: Query parent, siblings, or project-wide decisions/artifacts
-- log_decision: Record important decisions for other agents
-- escalate: Request help when blocked (last resort)
-- deliver: Complete your task and return results to parent
+## Multi-Session Coordination Tools
+You have access to these tools for coordinating with other agents:
+- **spawn_agent**: Create child agents for subtasks (if needed)
+- **get_context**: Query parent, siblings, or project-wide decisions/artifacts
+- **log_decision**: Record important decisions for other agents to see
+- **escalate**: Request help when blocked (last resort)
+- **deliver**: Complete your task and return results to parent
 
-## Guidelines
+## Agent Guidelines
 1. Focus on YOUR specific task. Don't duplicate work siblings are doing.
 2. Use get_context to coordinate with siblings if needed.
 3. Log important decisions so others can see them.
 4. Only escalate if you truly cannot proceed.
-5. Deliver when your task is COMPLETE, not before.
+5. **Call deliver when your task is COMPLETE** - this is required to signal completion.
 6. Be efficient - don't spawn agents for trivial work.
   `.trim();
 }

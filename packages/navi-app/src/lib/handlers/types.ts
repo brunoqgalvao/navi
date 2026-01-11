@@ -1,4 +1,4 @@
-import type { TodoItem } from "../stores/types";
+import type { TodoItem, ActiveWait } from "../stores/types";
 import type { SessionHierarchyEvent } from "../features/session-hierarchy/types";
 
 export interface UICommand {
@@ -67,6 +67,9 @@ export interface HandlerCallbacks {
   onUntilDoneComplete?: (sessionId: string, data: UntilDoneCompleteData) => void;
   // Session Hierarchy (Multi-Agent)
   onSessionHierarchyEvent?: (event: SessionHierarchyEvent) => void;
+  // Wait/Pause
+  onWaitStart?: (wait: ActiveWait) => void;
+  onWaitEnd?: (requestId: string, skipped: boolean) => void;
   onPlaySound?: (sound: string) => void;
   scrollToBottom?: () => void;
   onNewContent?: () => void;

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode } from "../stores";
+  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId } from "../stores";
+  import { agents, type Agent } from "../stores/agents";
   import FileAttachment from "./FileAttachment.svelte";
   import ReferenceChip from "./ReferenceChip.svelte";
   import TerminalReferenceChip from "./TerminalReferenceChip.svelte";
@@ -72,11 +73,16 @@
     onArchiveSession?: () => void;
     onExecutionModeChange?: (mode: ExecutionMode) => void;
     onCloudBranchChange?: (branch: string) => void;
+    // Backend selection (claude, codex, gemini)
+    backend?: BackendId;
+    onBackendChange?: (backend: BackendId) => void;
     // Slash commands from SDK
     slashCommands?: SlashCommand[];
+    // UI-only command handlers
+    onUICommand?: (command: string, args?: string) => boolean; // Return true if handled
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, slashCommands = [] }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], backend = "claude", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, onBackendChange, slashCommands = [], onUICommand }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
@@ -94,8 +100,35 @@
     return text.trim().startsWith("!");
   }
 
+  // Check if the input is a UI-only slash command
+  function isUIOnlyCommand(text: string): { isUI: boolean; command?: string; args?: string } {
+    const trimmed = text.trim();
+    if (!trimmed.startsWith("/")) return { isUI: false };
+
+    const match = trimmed.match(/^\/(\w+)(?:\s+(.*))?$/);
+    if (!match) return { isUI: false };
+
+    const [, command, args] = match;
+    if (UI_ONLY_COMMANDS.has(command)) {
+      return { isUI: true, command, args };
+    }
+    return { isUI: false };
+  }
+
+  // UI-only commands that should NOT be sent to the SDK (defined here for use in handleSubmit)
+  const UI_ONLY_COMMANDS = new Set(["help", "config", "bug", "status"]);
+
   function handleSubmit() {
     const trimmedValue = value.trim();
+
+    // Check for UI-only slash commands first
+    const uiCommand = isUIOnlyCommand(trimmedValue);
+    if (uiCommand.isUI && uiCommand.command && onUICommand) {
+      value = "";
+      onUICommand(uiCommand.command, uiCommand.args);
+      return;
+    }
+
     if (isShellCommand(trimmedValue) && onExecCommand) {
       const command = trimmedValue.slice(1).trim(); // Remove the ! prefix
       if (command) {
@@ -162,6 +195,21 @@
       : availableChats.slice(0, 10)
   );
 
+  // Agent picker state
+  let showAgentPicker = $state(false);
+  let agentPickerQuery = $state("");
+  let agentPickerIndex = $state(0);
+
+  // Filter agents based on query
+  let filteredAgents = $derived(
+    agentPickerQuery
+      ? $agents.filter(a =>
+          a.slug.toLowerCase().includes(agentPickerQuery.toLowerCase()) ||
+          a.description.toLowerCase().includes(agentPickerQuery.toLowerCase())
+        ).slice(0, 10)
+      : $agents.slice(0, 10)
+  );
+
   // Slash command picker state
   let showCommandPicker = $state(false);
   let commandPickerQuery = $state("");
@@ -192,9 +240,9 @@
       : allCommands.slice(0, 10)
   );
 
-  // Picker mode: "file" | "terminal" | "chat" | "command" | null
-  let pickerMode = $derived<"file" | "terminal" | "chat" | "command" | null>(
-    showCommandPicker ? "command" : showChatPicker ? "chat" : showTerminalPicker ? "terminal" : showFilePicker ? "file" : null
+  // Picker mode: "file" | "terminal" | "chat" | "command" | "agent" | null
+  let pickerMode = $derived<"file" | "terminal" | "chat" | "command" | "agent" | null>(
+    showCommandPicker ? "command" : showAgentPicker ? "agent" : showChatPicker ? "chat" : showTerminalPicker ? "terminal" : showFilePicker ? "file" : null
   );
 
   // Parse blockquote references from input for preview
@@ -382,6 +430,26 @@
       return;
     }
 
+    if (showAgentPicker) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        agentPickerIndex = Math.min(agentPickerIndex + 1, filteredAgents.length - 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        agentPickerIndex = Math.max(agentPickerIndex - 1, 0);
+      } else if (e.key === "Enter" && filteredAgents.length > 0) {
+        e.preventDefault();
+        selectAgent(filteredAgents[agentPickerIndex]);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeAgentPicker();
+      } else if (e.key === "Tab" && filteredAgents.length > 0) {
+        e.preventDefault();
+        selectAgent(filteredAgents[agentPickerIndex]);
+      }
+      return;
+    }
+
     if (showCommandPicker) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -453,6 +521,7 @@
       showTerminalPicker = true;
       showFilePicker = false;
       showChatPicker = false;
+      showAgentPicker = false;
       // Load terminals when picker opens
       if (availableTerminals.length === 0) {
         loadActiveTerminals();
@@ -461,23 +530,40 @@
       return;
     }
 
+    // Check for @agent mention (for agent selection)
+    const agentMatch = textBeforeCursor.match(/(?:^|[\s])@agent([^\s@]*)$/i);
+    if (agentMatch) {
+      agentPickerQuery = agentMatch[1];
+      agentPickerIndex = 0;
+      showAgentPicker = true;
+      showFilePicker = false;
+      showTerminalPicker = false;
+      showChatPicker = false;
+      agents.load();
+      adjustTextareaHeight(target);
+      return;
+    }
+
     // Check for regular @ mention (files + special options) - must be at start or preceded by whitespace
     const atMatch = textBeforeCursor.match(/(?:^|[\s])@([^\s@]*)$/);
     if (atMatch) {
       const query = atMatch[1].toLowerCase();
-      // Show file picker with special options for terminal/chat
+      // Show file picker with special options for terminal/chat/agent
       filePickerQuery = atMatch[1];
       filePickerIndex = 0;
       showFilePicker = true;
       showTerminalPicker = false;
       showChatPicker = false;
+      showAgentPicker = false;
     } else {
       showFilePicker = false;
       showTerminalPicker = false;
       showChatPicker = false;
+      showAgentPicker = false;
       filePickerQuery = "";
       terminalPickerQuery = "";
       chatPickerQuery = "";
+      agentPickerQuery = "";
     }
 
     adjustTextareaHeight(target);
@@ -493,6 +579,7 @@
   }
 
   const specialOptions: SpecialOption[] = [
+    { id: "agent", label: "agent", description: "Call a specialized agent", icon: "agent", color: "purple" },
     { id: "chat", label: "chat", description: "Reference another chat", icon: "chat", color: "blue" },
     { id: "terminal", label: "terminal", description: "Reference terminal output", icon: "terminal", color: "green" },
   ];
@@ -519,7 +606,10 @@
 
       // Trigger the appropriate picker
       setTimeout(() => {
-        if (option.id === "chat") {
+        if (option.id === "agent") {
+          showAgentPicker = true;
+          agents.load(); // Load agents if not already loaded
+        } else if (option.id === "chat") {
           showChatPicker = true;
           if (availableChats.length === 0) loadRecentChats();
         } else if (option.id === "terminal") {
@@ -529,6 +619,37 @@
         inputRef?.focus();
       }, 0);
     }
+  }
+
+  function selectAgent(agent: Agent) {
+    const cursorPos = inputRef?.selectionStart || 0;
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const textAfterCursor = value.slice(cursorPos);
+
+    // Find @agent pattern and replace with @agentSlug
+    const atIndex = textBeforeCursor.lastIndexOf("@agent");
+    if (atIndex !== -1) {
+      // If this is at the start of the message, keep it there for agent routing
+      // Replace @agent with @slug followed by space
+      value = textBeforeCursor.slice(0, atIndex) + `@${agent.slug} ` + textAfterCursor;
+    } else {
+      // Fallback: just insert at cursor
+      value = textBeforeCursor + `@${agent.slug} ` + textAfterCursor;
+    }
+
+    closeAgentPicker();
+
+    setTimeout(() => {
+      inputRef?.focus();
+      const newPos = value.indexOf(`@${agent.slug} `) + agent.slug.length + 2;
+      inputRef?.setSelectionRange(newPos, newPos);
+    }, 0);
+  }
+
+  function closeAgentPicker() {
+    showAgentPicker = false;
+    agentPickerQuery = "";
+    agentPickerIndex = 0;
   }
 
   function adjustTextareaHeight(textarea: HTMLTextAreaElement) {
@@ -681,9 +802,20 @@
   }
 
   function selectCommand(command: SlashCommand) {
-    // Set the command text
-    value = `/${command.name}`;
     closeCommandPicker();
+
+    // Check if this is a UI-only command
+    if (UI_ONLY_COMMANDS.has(command.name)) {
+      // Handle locally - don't send to SDK
+      value = ""; // Clear input
+      if (onUICommand) {
+        onUICommand(command.name);
+      }
+      return;
+    }
+
+    // Set the command text for SDK commands
+    value = `/${command.name}`;
 
     // If command has no args, execute immediately
     if (!command.argsHint) {
@@ -1023,9 +1155,13 @@
           {#each filteredSpecialOptions as option, i}
             <button
               onclick={() => selectSpecialOption(option)}
-              class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 {i === filePickerIndex ? (option.color === 'blue' ? 'bg-blue-50 dark:bg-blue-900/30' : 'bg-green-50 dark:bg-green-900/30') : ''}"
+              class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 {i === filePickerIndex ? (option.color === 'purple' ? 'bg-purple-50 dark:bg-purple-900/30' : option.color === 'blue' ? 'bg-blue-50 dark:bg-blue-900/30' : 'bg-green-50 dark:bg-green-900/30') : ''}"
             >
-              {#if option.id === "chat"}
+              {#if option.id === "agent"}
+                <svg class="w-4 h-4 text-purple-500 dark:text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                </svg>
+              {:else if option.id === "chat"}
                 <svg class="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
                 </svg>
@@ -1133,6 +1269,43 @@
         {#if filteredChats.length === 0}
           <div class="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
             {availableChats.length === 0 ? "Loading chats..." : "No matching chats"}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    {#if showAgentPicker}
+      <div class="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto z-50">
+        <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 font-medium flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 text-purple-500 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+          </svg>
+          Agents
+        </div>
+        {#each filteredAgents as agent, i}
+          <button
+            onclick={() => selectAgent(agent)}
+            class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 {i === agentPickerIndex ? 'bg-purple-50 dark:bg-purple-900/30' : ''}"
+          >
+            <svg class="w-4 h-4 text-purple-500 dark:text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+            </svg>
+            <div class="min-w-0 flex-1">
+              <div class="text-sm text-gray-900 dark:text-gray-100">@{agent.slug}</div>
+              <div class="text-xs text-gray-400 dark:text-gray-500 truncate">
+                {agent.description}
+              </div>
+            </div>
+            {#if agent.scope === 'global'}
+              <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300 rounded">global</span>
+            {:else}
+              <span class="text-[10px] px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-300 rounded">project</span>
+            {/if}
+          </button>
+        {/each}
+        {#if filteredAgents.length === 0}
+          <div class="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
+            {$agents.length === 0 ? "Loading agents..." : "No matching agents"}
           </div>
         {/if}
       </div>

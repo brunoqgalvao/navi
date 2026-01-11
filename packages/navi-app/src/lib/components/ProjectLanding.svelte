@@ -2,13 +2,14 @@
   /**
    * ProjectLanding - Default view when no session is active
    *
-   * Shows dashboard if .claude/dashboard.md exists,
+   * Shows dashboard if .claude/dashboard.md exists AND dashboard feature is enabled,
    * otherwise falls back to ProjectEmptyState.
    */
   import { onMount } from "svelte";
   import ProjectEmptyState from "./ProjectEmptyState.svelte";
   import DashboardView from "$lib/features/dashboard/components/DashboardView.svelte";
   import { getDashboard } from "$lib/features/dashboard";
+  import { dashboardEnabled } from "$lib/stores";
 
   interface Props {
     projectPath: string;
@@ -34,6 +35,13 @@
   let hasDashboard = $state(false);
 
   async function checkDashboard() {
+    // Skip dashboard check if feature is disabled
+    if (!$dashboardEnabled) {
+      hasDashboard = false;
+      checkingDashboard = false;
+      return;
+    }
+
     if (!projectPath) {
       hasDashboard = false;
       checkingDashboard = false;
@@ -54,12 +62,18 @@
     checkDashboard();
   });
 
-  // Re-check when project changes
+  // Re-check when project changes or dashboard feature toggles
   $effect(() => {
     if (projectPath) {
       checkingDashboard = true;
       checkDashboard();
     }
+  });
+
+  // Also re-check when dashboard feature is toggled
+  $effect(() => {
+    $dashboardEnabled;
+    checkDashboard();
   });
 </script>
 

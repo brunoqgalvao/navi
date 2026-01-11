@@ -2,6 +2,7 @@ import type { ClaudeMessage, SystemMessage, AssistantMessage, UserMessage } from
 import { createMessageHandler, type MessageHandlerConfig } from "./messageHandler";
 import type { UICommand, CompactMetadata, AskUserQuestionData, UntilDoneContinueData, UntilDoneCompleteData } from "./types";
 import type { SessionHierarchyEvent } from "../features/session-hierarchy/types";
+import type { ActiveWait } from "../stores/types";
 import {
   sessionMessages,
   loadingSessions,
@@ -9,6 +10,7 @@ import {
   sessionTodos,
   sessionDebugInfo,
   sessionEvents,
+  activeWaits,
   type SDKEvent,
   type SDKEventType,
 } from "../stores";
@@ -34,6 +36,9 @@ export interface UseMessageHandlerOptions {
   onUntilDoneComplete?: (sessionId: string, data: UntilDoneCompleteData) => void;
   // Session Hierarchy (Multi-Agent) callbacks
   onSessionHierarchyEvent?: (event: SessionHierarchyEvent) => void;
+  // Wait/Pause callbacks
+  onWaitStart?: (wait: ActiveWait) => void;
+  onWaitEnd?: (requestId: string, skipped: boolean) => void;
   onPlaySound?: (sound: string) => void;
 }
 
@@ -123,6 +128,8 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     onUntilDoneContinue,
     onUntilDoneComplete,
     onSessionHierarchyEvent,
+    onWaitStart,
+    onWaitEnd,
     onPlaySound,
   } = options;
 
@@ -249,6 +256,20 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
 
       onSessionHierarchyEvent: (event) => {
         onSessionHierarchyEvent?.(event);
+      },
+
+      onWaitStart: (wait) => {
+        // Update the store
+        activeWaits.start(wait);
+        // Call the external callback
+        onWaitStart?.(wait);
+      },
+
+      onWaitEnd: (requestId, skipped) => {
+        // Update the store
+        activeWaits.end(requestId);
+        // Call the external callback
+        onWaitEnd?.(requestId, skipped);
       },
 
       onPlaySound: (sound) => {

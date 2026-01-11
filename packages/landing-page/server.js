@@ -43,6 +43,42 @@ async function initDatabase() {
     )
   `;
 
+  // Telemetry tables
+  await sql`
+    CREATE TABLE IF NOT EXISTS crash_reports (
+      id SERIAL PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      app_version TEXT NOT NULL,
+      os TEXT,
+      os_version TEXT,
+      arch TEXT,
+      error_type TEXT NOT NULL,
+      message TEXT NOT NULL,
+      stack TEXT,
+      context JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS usage_events (
+      id SERIAL PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      app_version TEXT NOT NULL,
+      event_name TEXT NOT NULL,
+      properties JSONB,
+      session_id TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
+  // Index for querying
+  await sql`CREATE INDEX IF NOT EXISTS idx_crash_reports_created ON crash_reports(created_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_crash_reports_device ON crash_reports(device_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_usage_events_created ON usage_events(created_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_usage_events_name ON usage_events(event_name)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_usage_events_device ON usage_events(device_id)`;
+
   console.log('Database tables initialized');
 }
 
@@ -416,6 +452,252 @@ app.get('/api/app-info', async (req, res) => {
 app.get('/downloads/*', (req, res) => {
   const filePath = path.join(__dirname, 'dist', req.path);
   res.download(filePath);
+});
+
+// ============================================
+// Telemetry Endpoints
+// ============================================
+
+// Crash reports - public endpoint (no auth required for clients)
+app.post('/api/telemetry/crash', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  const { deviceId, appVersion, os, osVersion, arch, errorType, message, stack, context } = req.body;
+
+  if (!deviceId || !appVersion || !message) {
+    return res.status(400).json({ error: 'deviceId, appVersion, and message are required' });
+  }
+
+  if (!sql) {
+    console.log(`[NO DB] Crash report: ${errorType} - ${message}`);
+    return res.json({ success: true });
+  }
+
+  try {
+    const result = await sql`
+      INSERT INTO crash_reports (device_id, app_version, os, os_version, arch, error_type, message, stack, context)
+      VALUES (${deviceId}, ${appVersion}, ${os || null}, ${osVersion || null}, ${arch || null},
+              ${errorType || 'unknown'}, ${message}, ${stack || null}, ${context ? JSON.stringify(context) : null})
+      RETURNING id
+    `;
+
+    console.log(`Crash report received: ${errorType} - ${message.substring(0, 50)}...`);
+    res.json({ success: true, id: result[0].id });
+  } catch (err) {
+    console.error('Failed to save crash report:', err);
+    res.status(500).json({ error: 'Failed to save crash report' });
+  }
+});
+
+// Usage events - batch endpoint
+app.post('/api/telemetry/events', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  const { deviceId, appVersion, events } = req.body;
+
+  if (!deviceId || !appVersion || !events || !Array.isArray(events)) {
+    return res.status(400).json({ error: 'deviceId, appVersion, and events array are required' });
+  }
+
+  if (!sql) {
+    console.log(`[NO DB] ${events.length} usage events from ${deviceId}`);
+    return res.json({ success: true, count: events.length });
+  }
+
+  try {
+    let inserted = 0;
+    for (const event of events) {
+      if (!event.name) continue;
+
+      await sql`
+        INSERT INTO usage_events (device_id, app_version, event_name, properties, session_id)
+        VALUES (${deviceId}, ${appVersion}, ${event.name},
+                ${event.properties ? JSON.stringify(event.properties) : null},
+                ${event.sessionId || null})
+      `;
+      inserted++;
+    }
+
+    console.log(`Received ${inserted} usage events from ${deviceId.substring(0, 8)}...`);
+    res.json({ success: true, count: inserted });
+  } catch (err) {
+    console.error('Failed to save usage events:', err);
+    res.status(500).json({ error: 'Failed to save usage events' });
+  }
+});
+
+// CORS preflight for telemetry endpoints
+app.options('/api/telemetry/*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.sendStatus(204);
+});
+
+// Admin endpoint - view crash reports
+app.get('/api/telemetry/crashes', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!sql) {
+    return res.json({ count: 0, crashes: [], message: 'Database not configured' });
+  }
+
+  const limit = parseInt(req.query.limit) || 100;
+  const offset = parseInt(req.query.offset) || 0;
+
+  try {
+    const crashes = await sql`
+      SELECT id, device_id, app_version, os, os_version, arch, error_type, message, stack, context, created_at
+      FROM crash_reports
+      ORDER BY created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const [{ count }] = await sql`SELECT COUNT(*) as count FROM crash_reports`;
+
+    res.json({ count: parseInt(count), crashes });
+  } catch (err) {
+    console.error('Failed to read crash reports:', err);
+    res.status(500).json({ error: 'Failed to read crash reports' });
+  }
+});
+
+// Admin endpoint - view usage events
+app.get('/api/telemetry/usage', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!sql) {
+    return res.json({ count: 0, events: [], message: 'Database not configured' });
+  }
+
+  const limit = parseInt(req.query.limit) || 100;
+  const offset = parseInt(req.query.offset) || 0;
+  const eventName = req.query.event;
+
+  try {
+    let events;
+    let countResult;
+
+    if (eventName) {
+      events = await sql`
+        SELECT id, device_id, app_version, event_name, properties, session_id, created_at
+        FROM usage_events
+        WHERE event_name = ${eventName}
+        ORDER BY created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      countResult = await sql`SELECT COUNT(*) as count FROM usage_events WHERE event_name = ${eventName}`;
+    } else {
+      events = await sql`
+        SELECT id, device_id, app_version, event_name, properties, session_id, created_at
+        FROM usage_events
+        ORDER BY created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      countResult = await sql`SELECT COUNT(*) as count FROM usage_events`;
+    }
+
+    res.json({ count: parseInt(countResult[0].count), events });
+  } catch (err) {
+    console.error('Failed to read usage events:', err);
+    res.status(500).json({ error: 'Failed to read usage events' });
+  }
+});
+
+// Admin endpoint - telemetry stats/dashboard data
+app.get('/api/telemetry/stats', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.ADMIN_KEY}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!sql) {
+    return res.json({ message: 'Database not configured' });
+  }
+
+  try {
+    // Crash stats
+    const [crashTotal] = await sql`SELECT COUNT(*) as count FROM crash_reports`;
+    const [crashToday] = await sql`SELECT COUNT(*) as count FROM crash_reports WHERE created_at >= CURRENT_DATE`;
+    const [crashWeek] = await sql`SELECT COUNT(*) as count FROM crash_reports WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'`;
+
+    // Top errors
+    const topErrors = await sql`
+      SELECT error_type, message, COUNT(*) as count
+      FROM crash_reports
+      WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
+      GROUP BY error_type, message
+      ORDER BY count DESC
+      LIMIT 10
+    `;
+
+    // Usage stats
+    const [eventTotal] = await sql`SELECT COUNT(*) as count FROM usage_events`;
+    const [eventToday] = await sql`SELECT COUNT(*) as count FROM usage_events WHERE created_at >= CURRENT_DATE`;
+
+    // Unique users (devices)
+    const [uniqueDevices] = await sql`SELECT COUNT(DISTINCT device_id) as count FROM usage_events`;
+    const [activeToday] = await sql`SELECT COUNT(DISTINCT device_id) as count FROM usage_events WHERE created_at >= CURRENT_DATE`;
+    const [activeWeek] = await sql`SELECT COUNT(DISTINCT device_id) as count FROM usage_events WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'`;
+
+    // Top events
+    const topEvents = await sql`
+      SELECT event_name, COUNT(*) as count
+      FROM usage_events
+      WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
+      GROUP BY event_name
+      ORDER BY count DESC
+      LIMIT 15
+    `;
+
+    // Events by day (last 14 days)
+    const eventsByDay = await sql`
+      SELECT DATE(created_at) as date, COUNT(*) as count
+      FROM usage_events
+      WHERE created_at >= CURRENT_DATE - INTERVAL '14 days'
+      GROUP BY DATE(created_at)
+      ORDER BY date
+    `;
+
+    // Version distribution
+    const versionDist = await sql`
+      SELECT app_version, COUNT(DISTINCT device_id) as users
+      FROM usage_events
+      WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
+      GROUP BY app_version
+      ORDER BY users DESC
+    `;
+
+    res.json({
+      crashes: {
+        total: parseInt(crashTotal.count),
+        today: parseInt(crashToday.count),
+        thisWeek: parseInt(crashWeek.count),
+        topErrors,
+      },
+      usage: {
+        totalEvents: parseInt(eventTotal.count),
+        eventsToday: parseInt(eventToday.count),
+        topEvents,
+        eventsByDay,
+      },
+      users: {
+        total: parseInt(uniqueDevices.count),
+        activeToday: parseInt(activeToday.count),
+        activeThisWeek: parseInt(activeWeek.count),
+        versionDistribution: versionDist,
+      },
+    });
+  } catch (err) {
+    console.error('Failed to get telemetry stats:', err);
+    res.status(500).json({ error: 'Failed to get telemetry stats' });
+  }
 });
 
 app.get('*', (req, res) => {

@@ -48,12 +48,22 @@ import { handleDashboardRoutes } from "./routes/dashboard";
 import { handleIntegrationsRoutes } from "./routes/integrations";
 // Experimental Features (Ensemble Consensus, Self-Healing, Experimental Agents)
 import { handleExperimentalRoutes, initExperimentalWebSocket } from "./routes/experimental";
+// Backend adapters (Claude, Codex, Gemini)
+import { handleBackendRoutes } from "./routes/backends";
 // Project Memory (for proactive hooks)
 import { handleMemoryRoutes } from "./routes/memory";
 // Proactive Hooks (cheap Haiku analysis)
 import { handleProactiveHooksRoutes } from "./routes/proactive-hooks";
 // Cloud Execution (E2B sandboxes)
 import { handleCloudExecutionRoutes } from "./routes/cloud-execution";
+// Email (AgentMail)
+import { handleEmailRoutes } from "./routes/email";
+// Browser-use automation
+import { handleBrowserRoutes } from "./routes/browser";
+// Channels (cross-workspace agent collaboration)
+import { handleChannelRoutes } from "./routes/channels";
+// Plugin Management
+import { handlePluginRoutes } from "./routes/plugins";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -321,6 +331,10 @@ const server = Bun.serve({
     response = await handleGitRoutes(url, method, req);
     if (response) return response;
 
+    // Plugin routes
+    response = await handlePluginRoutes(url, method, req);
+    if (response) return response;
+
     // Dashboard routes (isolated feature)
     response = await handleDashboardRoutes(url, method, req);
     if (response) return response;
@@ -359,6 +373,10 @@ const server = Bun.serve({
 
     // Config routes
     response = await handleConfigRoutes(url, method, req);
+    if (response) return response;
+
+    // Backend routes (Claude, Codex, Gemini)
+    response = await handleBackendRoutes(url, method, req);
     if (response) return response;
 
     // Project routes
@@ -415,6 +433,18 @@ const server = Bun.serve({
 
     // Cloud Execution routes (E2B)
     response = await handleCloudExecutionRoutes(url, method, req);
+    if (response) return response;
+
+    // Email routes (AgentMail)
+    response = await handleEmailRoutes(url, method, req);
+    if (response) return response;
+
+    // Browser routes (browser-use)
+    response = await handleBrowserRoutes(url, method, req);
+    if (response) return response;
+
+    // Channels routes (cross-workspace agent collaboration)
+    response = await handleChannelRoutes(url, method, req);
     if (response) return response;
 
     // Background process routes

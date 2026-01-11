@@ -18,6 +18,5 @@ export const HOTKEYS: Hotkey[] = [
   // Experimental agents
   { key: "Cmd/Ctrl + Shift + A", action: "Open agents panel", category: "experimental" },
   { key: "Cmd/Ctrl + Shift + H", action: "Toggle self-healing", category: "experimental" },
-  { key: "Cmd/Ctrl + Shift + R", action: "Spawn Red Team agent", category: "experimental" },
   { key: "Cmd/Ctrl + Shift + F", action: "Spawn Fix Errors agent", category: "experimental" },
 ];

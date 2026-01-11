@@ -1,5 +1,8 @@
 <script lang="ts">
   /**
+   * @deprecated This component is deprecated and scheduled for removal.
+   * E2B cloud execution has been superseded by Navi Cloud.
+   *
    * CloudExecutionStatus - Shows the current status of a cloud execution
    * Displays stage, progress, output stream, and cost estimate
    */

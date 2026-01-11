@@ -4,17 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "dev:api": "wrangler dev --config wrangler.api.toml",
-    "deploy:dispatch": "wrangler deploy",
-    "deploy:api": "wrangler deploy --config wrangler.api.toml",
-    "deploy:all": "npm run deploy:dispatch && npm run deploy:api",
+    "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "tail:api": "wrangler tail --config wrangler.api.toml",
-    "db:create": "wrangler d1 create navi-cloud-registry",
-    "db:migrate": "wrangler d1 execute navi-cloud-registry --file=./migrations/001_init.sql",
-    "db:migrate:local": "wrangler d1 execute navi-cloud-registry --local --file=./migrations/001_init.sql",
-    "namespace:create": "wrangler dispatch-namespace create navi-user-apps",
-    "setup": "npm run db:create && npm run namespace:create && npm run db:migrate"
+    "db:migrate": "wrangler d1 execute navi-cloud-registry --remote --file=./migrations/001_init.sql",
+    "db:migrate:local": "wrangler d1 execute navi-cloud-registry --local --file=./migrations/001_init.sql"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",

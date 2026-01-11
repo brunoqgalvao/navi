@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import path from "path";
+import { readFileSync } from "fs";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -8,12 +9,17 @@ const host = process.env.TAURI_DEV_HOST;
 const isPreviewMode = process.env.NAVI_PREVIEW === "true";
 const naviBranch = process.env.NAVI_BRANCH || process.env.VITE_NAVI_BRANCH || "";
 
+// Read version from package.json for telemetry
+const pkg = JSON.parse(readFileSync("./package.json", "utf-8"));
+const appVersion = pkg.version || "0.0.0";
+
 export default defineConfig({
   plugins: [svelte()],
-  // Expose NAVI_PREVIEW and NAVI_BRANCH to frontend
+  // Expose NAVI_PREVIEW, NAVI_BRANCH, and APP_VERSION to frontend
   define: {
     "import.meta.env.VITE_NAVI_PREVIEW": JSON.stringify(isPreviewMode ? "true" : "false"),
     "import.meta.env.VITE_NAVI_BRANCH": JSON.stringify(naviBranch),
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(appVersion),
   },
   resolve: {
     alias: {

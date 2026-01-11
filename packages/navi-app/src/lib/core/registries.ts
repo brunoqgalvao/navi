@@ -248,6 +248,26 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     defaultEnabled: true,
     defaultOrder: 6,
   },
+  email: {
+    id: "email",
+    name: "Email",
+    icon: "mail",
+    description: "Navi's email inboxes (registered dynamically)",
+    panelMode: "email",
+    requiresProject: false,
+    defaultEnabled: false, // Registered by initBrowserEmail()
+    defaultOrder: 100,
+  },
+  "browser-preview": {
+    id: "browser-preview",
+    name: "Browser",
+    icon: "globe",
+    description: "Browser-use preview (not yet implemented)",
+    panelMode: "browser-preview",
+    requiresProject: false,
+    defaultEnabled: false,
+    defaultOrder: 101,
+  },
 };
 
 // =============================================================================

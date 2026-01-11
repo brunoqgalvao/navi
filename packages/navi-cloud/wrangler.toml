@@ -1,6 +1,6 @@
-# Navi Cloud - Dispatch Worker (Routes requests to user apps)
-name = "navi-cloud-dispatch"
-main = "src/dispatch.ts"
+# Navi Cloud - Router Worker (Routes *.usenavi.app to Pages projects)
+name = "navi-cloud-router"
+main = "src/router.ts"
 compatibility_date = "2024-12-01"
 
 # Routes all *.usenavi.app traffic
@@ -15,12 +15,9 @@ ENVIRONMENT = "production"
 [[d1_databases]]
 binding = "REGISTRY_DB"
 database_name = "navi-cloud-registry"
-database_id = "" # Fill after: wrangler d1 create navi-cloud-registry
-
-# Dispatch namespace for user Workers
-[[dispatch_namespaces]]
-binding = "USER_WORKERS"
-namespace = "navi-user-apps"
+database_id = "1b559a51-e6fe-430d-a58e-db5deaa87791"
 
 # Secrets (set via `wrangler secret put`):
-# - DEPLOY_SECRET (auth for deploy API)
+# - DEPLOY_SECRET (auth for API routes)
+# - CLOUDFLARE_API_TOKEN (for Pages API)
+# - CLOUDFLARE_ACCOUNT_ID

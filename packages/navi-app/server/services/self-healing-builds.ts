@@ -1,4 +1,7 @@
 /**
+ * @deprecated This service is deprecated and scheduled for removal.
+ * Premature optimization - complex and not essential.
+ *
  * Self-Healing Builds Service
  *
  * Continuously monitors builds and type checks, automatically attempting

@@ -39,7 +39,9 @@ export type ExtensionId =
   | "terminal"
   | "processes"
   | "kanban"
-  | "preview";
+  | "preview"
+  | "email"           // Navi's email inbox
+  | "browser-preview"; // Browser-use live preview
 
 /**
  * Panel modes - what the right sidebar can display
@@ -52,7 +54,9 @@ export type PanelMode =
   | "terminal"
   | "processes"
   | "kanban"
-  | "preview-unified";
+  | "preview-unified"
+  | "email"           // Email inbox view
+  | "browser-preview"; // Browser-use preview
 
 // =============================================================================
 // 2. MESSAGE WIDGETS (Inline in Chat Messages)
@@ -83,7 +87,10 @@ export type MessageWidgetType =
   | "subagent"
   | "generative-ui"
   | "copyable"
-  | "todo-list";
+  | "todo-list"
+  | "browser-action"    // Browser-use action/result
+  | "email-notification" // Incoming email
+  | "email-sent";        // Sent email confirmation
 
 // =============================================================================
 // 3. DASHBOARD WIDGETS (Project Landing Page)

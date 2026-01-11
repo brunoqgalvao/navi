@@ -1,13 +1,16 @@
 <script lang="ts">
   import { api, costsApi, containerPreviewApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project, type ContainerPreview } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
+  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
   import IntegrationSettings from "./IntegrationSettings.svelte";
+  import { PluginSettings } from "../features/plugins";
+  import { isTelemetryEnabled, setTelemetryOptOut, trackEvent, TelemetryEvents } from "../telemetry";
+  import { hooksEnabled } from "../features/proactive-hooks";
 
-  type Tab = "api" | "permissions" | "claude-md" | "skills" | "commands" | "features" | "previews" | "analytics" | "integrations";
+  type Tab = "api" | "permissions" | "claude-md" | "skills" | "commands" | "features" | "experimental" | "previews" | "analytics" | "integrations" | "plugins";
 
   interface Props {
     open: boolean;
@@ -43,6 +46,7 @@
   let switchingAuth = $state(false);
   let loading = $state(true);
   let autoTitleEnabled = $state(true);
+  let telemetryEnabled = $state(isTelemetryEnabled());
 
   let showOpenAIInput = $state(false);
   let openAIKeyInput = $state("");
@@ -92,8 +96,10 @@
     { id: "permissions", label: "Permissions", icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" },
     { id: "claude-md", label: "CLAUDE.md", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
     { id: "skills", label: "Skills", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
+    { id: "plugins", label: "Plugins", icon: "M17 14v6m-3-3h6M6 10h2a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2zm10 0h2a2 2 0 002-2V6a2 2 0 00-2-2h-2a2 2 0 00-2 2v2a2 2 0 002 2zM6 20h2a2 2 0 002-2v-2a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2z" },
     { id: "commands", label: "Commands", icon: "M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
     { id: "features", label: "Features", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" },
+    { id: "experimental", label: "Experimental", icon: "M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" },
     { id: "previews", label: "Previews", icon: "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
     { id: "analytics", label: "Analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   ];
@@ -376,6 +382,13 @@
       console.error("Failed to save auto-title setting:", e);
       autoTitleEnabled = !newValue;
     }
+  }
+
+  function toggleTelemetry() {
+    const newValue = !telemetryEnabled;
+    telemetryEnabled = newValue;
+    setTelemetryOptOut(!newValue);
+    trackEvent(TelemetryEvents.TELEMETRY_TOGGLED, { enabled: newValue });
   }
 
   function startEditingClaudeMd() {
@@ -812,7 +825,13 @@
             </div>
 
           {:else if activeTab === "integrations"}
-            <IntegrationSettings />
+            <div class="max-w-3xl">
+              <div class="mb-6">
+                <h4 class="text-lg font-semibold text-zinc-100 mb-1">OAuth Integrations</h4>
+                <p class="text-sm text-zinc-400">Connect external services to give agents access to Gmail, Google Sheets, Drive, and more.</p>
+              </div>
+              <IntegrationSettings />
+            </div>
 
           {:else if activeTab === "permissions"}
             <div class="space-y-6 max-w-2xl">
@@ -959,6 +978,9 @@
 
               <SkillLibrary />
             </div>
+
+          {:else if activeTab === "plugins"}
+            <PluginSettings />
 
           {:else if activeTab === "commands"}
             <CommandSettings />
@@ -1238,6 +1260,29 @@
                 <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Share Usage Analytics</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Help improve Navi by sharing anonymous usage data and crash reports</p>
+                    </div>
+                    <button
+                      onclick={toggleTelemetry}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {telemetryEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {telemetryEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+
+                  <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                    {#if telemetryEnabled}
+                      Crash reports and anonymous usage events are shared. No personal data or code is collected.
+                    {:else}
+                      Analytics disabled. No data will be collected or shared.
+                    {/if}
+                  </p>
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
                       <h5 class="font-medium text-gray-900 dark:text-gray-100">Show Onboarding</h5>
                       <p class="text-sm text-gray-500 dark:text-gray-400">View the welcome screen and setup wizard again</p>
                     </div>
@@ -1284,6 +1329,90 @@
                       <code class="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono text-xs">~/.claude-code-ui/default-claude.md</code>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+          {:else if activeTab === "experimental"}
+            <div class="space-y-6 max-w-2xl">
+              <div>
+                <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Experimental Features</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Try out new features that are still in development. These may change or be removed.</p>
+              </div>
+
+              <div class="space-y-4">
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Project Dashboard</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Show customizable dashboard when clicking a project</p>
+                    </div>
+                    <button
+                      onclick={() => dashboardEnabled.toggle()}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$dashboardEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$dashboardEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+
+                  {#if $dashboardEnabled}
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                      Dashboard shows project info, quick actions, and widgets. Customize via <code>.claude/dashboard.md</code>
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Channels</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Slack-style channels for agent collaboration across workspaces</p>
+                    </div>
+                    <button
+                      onclick={() => channelsEnabled.toggle()}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$channelsEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$channelsEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+
+                  {#if $channelsEnabled}
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                      Channels appear in the sidebar when no workspace is selected. Create threads and @mention agents for cross-project collaboration.
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Proactive Hooks</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">AI-powered suggestions that learn from your conversations</p>
+                    </div>
+                    <button
+                      onclick={() => hooksEnabled.toggle()}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$hooksEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$hooksEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+
+                  <div class="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                    <div class="flex items-start gap-2">
+                      <span class="text-gray-400 mt-0.5">•</span>
+                      <span><strong>Skill Scout:</strong> Detects reusable workflows and suggests creating skills</span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                      <span class="text-gray-400 mt-0.5">•</span>
+                      <span><strong>Memory Builder:</strong> Learns your preferences and saves to <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded text-xs">.claude/MEMORY.md</code></span>
+                    </div>
+                  </div>
+
+                  {#if $hooksEnabled}
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                      Proactive hooks are enabled. You'll see suggestions after conversations based on detected patterns.
+                    </p>
+                  {/if}
                 </div>
               </div>
             </div>

@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, auth, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId } from "./lib/stores";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill } from "./lib/api";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree } from "./lib/actions";
+  import { initBrowserEmail } from "./lib/features/browser-email-init";
   import { parseHash, onHashChange } from "./lib/router";
   import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
   import { setupGlobalErrorHandlers, pendingErrorReport, showError, showSuccess, type ErrorReport } from "./lib/errorHandler";
@@ -86,6 +87,18 @@
   import Modal from "./lib/components/Modal.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Settings from "./lib/components/Settings.svelte";
+
+  // Proactive Hooks - AI-powered suggestions (skill scout, error detector, memory builder)
+  import {
+    setupProactiveHooks,
+    onUserMessage as hookOnUserMessage,
+    onAssistantMessage as hookOnAssistantMessage,
+    startSessionTracking,
+    stopSessionTracking,
+    buildHookContext,
+    SuggestionPanel,
+  } from "./lib/features/proactive-hooks";
+
   import ProjectSettings from "./lib/components/ProjectSettings.svelte";
   import SearchModal from "./lib/components/SearchModal.svelte";
   import QuickSessionsPanel from "./lib/components/QuickSessionsPanel.svelte";
@@ -98,10 +111,12 @@
   import CloudExecutionStatus from "./lib/components/CloudExecutionStatus.svelte";
   import ContextWarning from "./lib/components/ContextWarning.svelte";
   import MergeModal from "./lib/components/MergeModal.svelte";
+  import CommandHelpModal from "./lib/components/CommandHelpModal.svelte";
   import { QueuedMessagesPanel } from "./lib/components/queue";
   import ProcessManager from "./lib/components/ProcessManager.svelte";
   import { useMessageHandler } from "./lib/handlers";
   import SessionDebug from "./lib/components/SessionDebug.svelte";
+  import WaitCountdown from "./lib/components/widgets/WaitCountdown.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
   import UpdateChecker from "./lib/components/UpdateChecker.svelte";
@@ -109,6 +124,10 @@
   import ProjectEmptyState from "./lib/components/ProjectEmptyState.svelte";
   import ProjectLanding from "./lib/components/ProjectLanding.svelte";
   import NewProjectModal from "./lib/components/NewProjectModal.svelte";
+  // Channels
+  import { currentChannelId } from "./lib/features/channels";
+  import { channelsEnabled } from "./lib/stores";
+  import ChannelView from "./lib/features/channels/components/ChannelView.svelte";
   import ProjectPermissionsModal from "./lib/components/ProjectPermissionsModal.svelte";
   import FeedbackModal from "./lib/components/FeedbackModal.svelte";
   import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
@@ -116,7 +135,7 @@
   import { ExperimentalAgentsPanel, SelfHealingWidget } from "./lib/components/agents";
   import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
-  import { handleSessionHierarchyWSEvent } from "./lib/features/session-hierarchy";
+  import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
   import { SessionsBoard, type BoardSession } from "./lib/features/sessions-board";
   import { fetchCommands, type CustomCommand } from "./lib/features/commands";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
@@ -245,6 +264,21 @@
   // Get current session data from sidebar sessions for worktree info
   let currentSessionData = $derived($session.sessionId ? sidebarSessions.find(s => s.id === $session.sessionId) : null);
 
+  // Session hierarchy info for multi-agent
+  let currentSessionHierarchy = $derived(() => {
+    if (!currentSessionData) return null;
+    const sess = currentSessionData as any;
+    const hasParent = !!sess.parent_session_id;
+    const isBlocked = sess.agent_status === "blocked";
+    const escalation = isBlocked ? parseEscalation(sess.escalation) : null;
+    return {
+      hasParent,
+      isBlocked,
+      escalation,
+      role: sess.role || null,
+    };
+  });
+
   // Track if current project is a git repo (for worktree feature)
   let currentProjectIsGitRepo = $state(false);
   let workspaceFolders = $state<WorkspaceFolder[]>([]);
@@ -298,6 +332,7 @@
   let projectSettingsInitialTab = $state<"instructions" | "model" | "permissions" | "skills" | undefined>(undefined);
   let showDebugInfo = $state(false);
   let showMergeModal = $state(false);
+  let showCommandHelp = $state(false);
   let isResolvingMergeConflicts = $state(false);
   let mergeConflictInfo = $state<{ branch: string; baseBranch: string; fileCount: number; snapshotId: string } | null>(null);
   let sidebarCollapsed = $state(false);
@@ -548,6 +583,16 @@
           setTimeout(() => tour.start("chat"), 800);
         }
       }
+
+      // Trigger proactive hooks after assistant responds
+      if (reason === "done") {
+        const msgs = $sessionMessages.get(sessionId) || [];
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg && lastMsg.role === "assistant") {
+          const proj = currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null;
+          hookOnAssistantMessage(lastMsg, msgs, sessionId, proj);
+        }
+      }
     },
     onCompactStart: (sessionId) => {
       compactingSessionsStore.update(set => {
@@ -689,9 +734,10 @@
   let showGitPanel = $state(false);
   let showTerminal = $state(false);
   let showKanban = $state(false);
+  let showEmail = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "email">("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
@@ -815,9 +861,6 @@
       } else if (e.key === 'H' || e.key === 'h') {
         e.preventDefault();
         toggleSelfHealing();
-      } else if (e.key === 'R' || e.key === 'r') {
-        e.preventDefault();
-        spawnQuickAgent('red-team');
       } else if (e.key === 'F' || e.key === 'f') {
         e.preventDefault();
         spawnQuickAgent('healer-agent');
@@ -1018,8 +1061,14 @@
     // Initialize extension registry with default extensions
     initializeRegistry();
 
+    // Initialize browser-use and email features
+    initBrowserEmail();
+
     startSidecar().then(() => {
       serverReady = true;
+
+      // Initialize auth state (check if user is already logged in)
+      auth.init();
 
       loadProjects();
       loadRecentChatsAction();
@@ -1029,6 +1078,13 @@
       loadPermissionsAction();
       loadCostsAction();
       loadLibrary(); // Load agents for sidebar
+
+      // Initialize proactive hooks (skill scout, error detector, memory builder)
+      setupProactiveHooks().then((enabled) => {
+        if (enabled) {
+          console.log("[App] Proactive hooks enabled");
+        }
+      });
 
       client = new ClaudeClient();
       client.connect().then(() => {
@@ -1193,6 +1249,22 @@
     attachSession($session.sessionId, $isConnected);
   });
 
+  // Process message queue when session is ready and connected
+  $effect(() => {
+    const sessionId = $session.sessionId;
+    const connected = $isConnected;
+    const queue = $messageQueue;
+
+    if (sessionId && connected && queue.length > 0) {
+      // Check if there are queued messages for this session
+      const sessionQueue = queue.filter(m => m.sessionId === sessionId);
+      if (sessionQueue.length > 0) {
+        // Small delay to ensure session is fully attached
+        setTimeout(() => processMessageQueue(sessionId), 150);
+      }
+    }
+  });
+
   $effect(() => {
     const projectId = $session.projectId;
     if (projectId) {
@@ -1306,6 +1378,9 @@
     // Clear session-specific UI state when switching projects
     pendingPermissionRequest = null;
     pendingQuestion = null;
+
+    // Close any open channel when selecting a workspace
+    currentChannelId.set(null);
 
     session.setProject(project.id);
     session.setSession(null);
@@ -1669,15 +1744,27 @@
       session.setSelectedModel(defaultModel);
     }
 
+    // Restore backend for this session from cache or DB
+    const cachedBackend = sessionBackendStore.get(s.id, $sessionBackendStore);
+    if (cachedBackend && cachedBackend !== "claude") {
+      // Already cached, keep it
+    } else if (s.backend) {
+      // Load from DB
+      sessionBackendStore.set(s.id, s.backend as BackendId);
+    }
+    // If neither, defaults to "claude" via the store
+
     sessionStatus.markSeen(s.id);
 
     // Track in navigation history
     if (!skipHistory) {
-      const project = sidebarProjects.find(p => p.id === $session.projectId);
+      // Use session's project_id (for child sessions), fallback to current project
+      const sessionProjectId = s.project_id || $session.projectId || "";
+      const project = sidebarProjects.find(p => p.id === sessionProjectId);
       navHistory.push({
         chatId: s.id,
         chatTitle: s.title || "Untitled Chat",
-        projectId: $session.projectId || "",
+        projectId: sessionProjectId,
         projectName: project?.name || "Unknown Project",
       });
     }
@@ -1691,6 +1778,10 @@
         if (freshSession.model && !cachedModel) {
           session.setSelectedModel(freshSession.model);
           sessionModels.setModel(s.id, freshSession.model);
+        }
+        // Update backend from DB if we don't have a cached value
+        if (freshSession.backend && !cachedBackend) {
+          sessionBackendStore.set(s.id, freshSession.backend as BackendId);
         }
       }
     } catch {}
@@ -1720,6 +1811,8 @@
     }
 
     userIsNearBottom = true; // Reset on session switch
+    // Wait for DOM to update with new messages before scrolling
+    await tick();
     scrollToBottom(true);
   }
 
@@ -2028,6 +2121,47 @@
     setTimeout(() => { isProgrammaticScroll = false; }, 300);
   }
 
+  /**
+   * Build a conversation history context string from session messages.
+   * Used when switching to non-Claude backends that don't maintain their own session state.
+   */
+  function buildHistoryContextFromMessages(sessionId: string): string | undefined {
+    const msgs = get(sessionMessages).get(sessionId);
+    if (!msgs || msgs.length === 0) return undefined;
+
+    // Filter to main conversation messages (not tool results, not system info)
+    const mainMsgs = msgs
+      .filter(m => !m.parentToolUseId && !m.isSystemInfo && m.role !== "system")
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+    if (mainMsgs.length === 0) return undefined;
+
+    // Build context string
+    const contextParts: string[] = [];
+    for (const msg of mainMsgs) {
+      const role = msg.role === "user" ? "User" : "Assistant";
+      let text = "";
+
+      if (typeof msg.content === "string") {
+        text = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        // Extract text from content blocks
+        text = msg.content
+          .filter((b: any) => b.type === "text")
+          .map((b: any) => b.text || "")
+          .join("\n");
+      }
+
+      if (text.trim()) {
+        contextParts.push(`${role}: ${text.trim()}`);
+      }
+    }
+
+    if (contextParts.length === 0) return undefined;
+
+    return `Previous conversation:\n\n${contextParts.join("\n\n")}`;
+  }
+
   function notifyNewContent() {
     // Only increment if user is scrolled away - called for actual new messages, not stream chunks
     if (!userIsNearBottom) {
@@ -2074,12 +2208,16 @@
       sessionStatus.setRunning(sessionId, $session.projectId);
     }
 
+    // Get the backend for this session
+    const backend = sessionBackendStore.get(sessionId, get(sessionBackendStore)) || get(defaultBackend);
+
     client.query({
       prompt,
       projectId: $session.projectId || undefined,
       sessionId,
       claudeSessionId: $session.claudeSessionId || undefined,
       model: $session.selectedModel || undefined,
+      backend,
     });
 
     if (sessionId === $session.sessionId) {
@@ -2161,12 +2299,15 @@
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
 
+    const backend = sessionBackendStore.get(currentSessionId, get(sessionBackendStore)) || get(defaultBackend);
+
     client.query({
       prompt: command,
       projectId: $session.projectId,
       sessionId: currentSessionId,
       claudeSessionId: $session.claudeSessionId || undefined,
       model: $session.selectedModel || undefined,
+      backend,
     });
   }
 
@@ -2228,35 +2369,59 @@
       messageContent = `${fileRefs}\n\n${messageContent}`;
     }
 
-    sessionMessages.addMessage(currentSessionId, {
+    const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
       content: messageContent,
       timestamp: new Date(),
-    });
+    };
+    sessionMessages.addMessage(currentSessionId, userMessage);
+
+    // Trigger proactive hooks on user message
+    const projectForHooks = currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null;
+    hookOnUserMessage(userMessage, get(sessionMessages).get(currentSessionId) || [], currentSessionId, projectForHooks);
 
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
 
-    const historyCtx = $sessionHistoryContext.get(currentSessionId);
-
     // Get execution mode settings for this session
     const execSettings = executionModeStore.get(currentSessionId, get(executionModeStore));
 
+    // Extract @agent mention from the beginning of the message (e.g., "@coder add feature")
+    // Agent must be at the start of the message, followed by space
+    const agentMatch = messageContent.match(/^@(\w+)\s+/);
+    let agentId: string | undefined;
+    let promptWithoutAgent = messageContent;
+    if (agentMatch) {
+      agentId = agentMatch[1];
+      promptWithoutAgent = messageContent.slice(agentMatch[0].length);
+    }
+
+    const backend = sessionBackendStore.get(currentSessionId, get(sessionBackendStore)) || get(defaultBackend);
+
+    // For non-Claude backends, build history context from messages if not already provided
+    // Claude maintains its own session state via claudeSessionId, but Gemini/Codex need the full context
+    let historyCtx = $sessionHistoryContext.get(currentSessionId);
+    if (!historyCtx && backend !== "claude") {
+      historyCtx = buildHistoryContextFromMessages(currentSessionId);
+    }
+
     client.query({
-      prompt: messageContent,
+      prompt: promptWithoutAgent,
       projectId: $session.projectId || undefined,
       sessionId: currentSessionId,
-      claudeSessionId: $session.claudeSessionId || undefined,
+      claudeSessionId: backend === "claude" ? ($session.claudeSessionId || undefined) : undefined,
       model: $session.selectedModel || undefined,
       historyContext: historyCtx,
+      agentId,
+      backend,
       // Cloud execution options
       executionMode: execSettings.mode,
       cloudRepoUrl: execSettings.repoUrl,
       cloudBranch: execSettings.branch,
     });
 
-    if (historyCtx) {
+    if ($sessionHistoryContext.get(currentSessionId)) {
       sessionHistoryContext.update(map => {
         map.delete(currentSessionId);
         return new Map(map);
@@ -2315,28 +2480,40 @@
       messageContent = `${fileRefs}\n\n${messageContent}`;
     }
 
-    sessionMessages.addMessage(targetSessionId, {
+    const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
       content: messageContent,
       timestamp: new Date(),
-    });
+    };
+    sessionMessages.addMessage(targetSessionId, userMsg);
+
+    // Trigger proactive hooks
+    const projForHooks = currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null;
+    hookOnUserMessage(userMsg, get(sessionMessages).get(targetSessionId) || [], targetSessionId, projForHooks);
 
     loadingSessions.update(s => { s.add(targetSessionId); return new Set(s); });
     sessionStatus.setRunning(targetSessionId, $session.projectId!);
 
-    const historyCtx = $sessionHistoryContext.get(targetSessionId);
+    const backend = sessionBackendStore.get(targetSessionId, get(sessionBackendStore)) || get(defaultBackend);
+
+    // For non-Claude backends, build history context from messages
+    let historyCtx = $sessionHistoryContext.get(targetSessionId);
+    if (!historyCtx && backend !== "claude") {
+      historyCtx = buildHistoryContextFromMessages(targetSessionId);
+    }
 
     client.query({
       prompt: messageContent,
       projectId: $session.projectId || undefined,
       sessionId: targetSessionId,
-      claudeSessionId: $session.claudeSessionId || undefined,
+      claudeSessionId: backend === "claude" ? ($session.claudeSessionId || undefined) : undefined,
       model: $session.selectedModel || undefined,
       historyContext: historyCtx,
+      backend,
     });
 
-    if (historyCtx) {
+    if ($sessionHistoryContext.get(targetSessionId)) {
       sessionHistoryContext.update(map => {
         map.delete(targetSessionId);
         return new Map(map);
@@ -2361,12 +2538,22 @@
     loadingSessions.update(s => { s.add(targetSessionId); return new Set(s); });
     sessionStatus.setRunning(targetSessionId, $session.projectId!);
 
+    const backend = sessionBackendStore.get(targetSessionId, get(sessionBackendStore)) || get(defaultBackend);
+
+    // For non-Claude backends, build history context from messages
+    let historyCtx: string | undefined;
+    if (backend !== "claude") {
+      historyCtx = buildHistoryContextFromMessages(targetSessionId);
+    }
+
     client.query({
       prompt: messageContent,
       projectId: $session.projectId || undefined,
       sessionId: targetSessionId,
-      claudeSessionId: $session.claudeSessionId || undefined,
+      claudeSessionId: backend === "claude" ? ($session.claudeSessionId || undefined) : undefined,
       model: $session.selectedModel || undefined,
+      historyContext: historyCtx,
+      backend,
     });
 
     scrollToBottom();
@@ -2412,6 +2599,37 @@
     }
   }
 
+  // Handle UI-only slash commands (e.g., /help, /config, /status)
+  function handleUICommand(command: string, args?: string): boolean {
+    switch (command) {
+      case "help":
+        showCommandHelp = true;
+        return true;
+
+      case "config":
+        // Open settings modal
+        showSettings = true;
+        return true;
+
+      case "status":
+        // Show status notification
+        notifications.add({
+          type: "info",
+          title: "Status",
+          message: `Connected: ${$isConnected ? 'Yes' : 'No'} | Model: ${$session.selectedModel || $session.model || 'Unknown'} | Session: ${$session.sessionId || 'None'}`,
+        });
+        return true;
+
+      case "bug":
+        // Open GitHub issues
+        window.open("https://github.com/anthropics/claude-code/issues", "_blank");
+        return true;
+
+      default:
+        return false;
+    }
+  }
+
   // Handle "Send to Claude" from Terminal Panel in Dock (auto-sends)
   function handleTerminalSendToClaude(context: string) {
     inputText = context;
@@ -2422,6 +2640,29 @@
   function handlePreviewAskClaude(message: string) {
     inputText = message;
     sendMessage();
+  }
+
+  // Handle element inspection from browser preview
+  function handleElementInspected(element: import("./lib/Preview.svelte").InspectedElement) {
+    // Format element data for chat context
+    const elementInfo = [
+      `**Inspected Element from ${element.page.url}**`,
+      "",
+      "```html",
+      element.outerHTML,
+      "```",
+      "",
+      `**Selector:** \`${element.selector}\``,
+      "",
+      `**Tag:** ${element.tagName}`,
+      element.attributes.class ? `**Classes:** ${element.attributes.class}` : "",
+      element.attributes.id ? `**ID:** ${element.attributes.id}` : "",
+      element.textContent ? `**Text:** "${element.textContent.slice(0, 100)}${element.textContent.length > 100 ? '...' : ''}"` : "",
+    ].filter(Boolean).join("\n");
+
+    // Pre-fill input with element context
+    inputText = elementInfo + "\n\nHelp me with this element: ";
+    inputRef?.focus();
   }
 
   // Handle "Send to Claude" from Bash tool results (pre-fills input for review)
@@ -2499,6 +2740,7 @@
     showGitPanel = false;
     showTerminal = false;
     showKanban = false;
+    showEmail = false;
     previewSource = "";
     terminalInitialCommand = "";
   }
@@ -2596,11 +2838,11 @@
    * Handle extension toolbar clicks - toggles the corresponding panel
    */
   function handleExtensionClick(mode: string) {
-    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified";
+    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "email";
     const panelMode = mode as PanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban;
+    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showEmail;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -2626,6 +2868,9 @@
         break;
       case "preview-unified":
         showPreview = true;
+        break;
+      case "email":
+        showEmail = true;
         break;
     }
     rightPanelMode = panelMode;
@@ -2992,6 +3237,18 @@
 
 <Confetti trigger={showConfetti} onComplete={() => showConfetti = false} />
 
+<!-- Proactive Hooks Suggestions (skill scout, error detector, memory builder) -->
+{#if $session.sessionId}
+  <SuggestionPanel
+    sessionId={$session.sessionId}
+    getContext={() => buildHookContext(
+      $session.sessionId!,
+      $sessionMessages.get($session.sessionId!) || [],
+      currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null
+    )}
+  />
+{/if}
+
 {#if showOnboarding}
   <Onboarding onComplete={handleOnboardingComplete} />
 {/if}
@@ -3068,6 +3325,25 @@
       }
     }}
     onModelSelect={handleModelSelect}
+    backend={$session.sessionId ? (sessionBackendStore.get($session.sessionId, $sessionBackendStore) || $defaultBackend) : $defaultBackend}
+    onBackendChange={async (newBackend) => {
+      if ($session.sessionId) {
+        sessionBackendStore.set($session.sessionId, newBackend);
+        // Persist to database
+        try {
+          await api.sessions.update($session.sessionId, { backend: newBackend });
+        } catch (e) {
+          console.error("Failed to persist backend:", e);
+        }
+      }
+      defaultBackend.set(newBackend);
+      // Auto-select the default model for the new backend
+      const models = getBackendModelsFormatted(newBackend, get(backendModels));
+      if (models.length > 0) {
+        modelSelection = models[0].value;
+        handleModelSelect(models[0].value);
+      }
+    }}
     onTitleApply={handleTitleSuggestionApply}
     onStartResizing={startResizingLeft}
     isResizing={isResizingLeft}
@@ -3136,7 +3412,12 @@
       />
     {/if}
 
-    {#if !currentProject}
+    {#if $channelsEnabled && $currentChannelId}
+      <!-- Channel View -->
+      <ChannelView
+        onClose={() => currentChannelId.set(null)}
+      />
+    {:else if !currentProject}
       <WorkspaceHome
         projects={sidebarProjects}
         onSelectProject={selectProject}
@@ -3209,15 +3490,28 @@
 
         <div class="flex-1 overflow-y-auto p-4 md:p-0 scroll-smooth" bind:this={messagesContainer} onscroll={handleMessagesScroll}>
           {#if currentMessages.length === 0 && !$session.sessionId}
-            <ProjectLanding
-              projectPath={currentProject?.path || ''}
-              projectName={currentProject.name}
-              projectDescription={currentProject?.description}
-              {claudeMdContent}
-              {projectContext}
-              onSuggestionClick={(suggestion) => { inputText = suggestion; }}
-              onShowClaudeMd={() => showClaudeMdModal = true}
-            />
+            {#if $session.isPending}
+              <!-- New chat - show simple empty state -->
+              <ProjectEmptyState
+                projectName={currentProject.name}
+                projectDescription={currentProject?.description}
+                {claudeMdContent}
+                {projectContext}
+                onSuggestionClick={(suggestion) => { inputText = suggestion; }}
+                onShowClaudeMd={() => showClaudeMdModal = true}
+              />
+            {:else}
+              <!-- Project selected, no session - show dashboard -->
+              <ProjectLanding
+                projectPath={currentProject?.path || ''}
+                projectName={currentProject.name}
+                projectDescription={currentProject?.description}
+                {claudeMdContent}
+                {projectContext}
+                onSuggestionClick={(suggestion) => { inputText = suggestion; }}
+                onShowClaudeMd={() => showClaudeMdModal = true}
+              />
+            {/if}
           {:else}
             <!-- Cloud Execution Status -->
             {#if currentCloudExecution}
@@ -3271,6 +3565,20 @@
               worktreeBranch={currentSessionData?.worktree_branch}
               worktreeBaseBranch={currentSessionData?.worktree_base_branch}
               sessionTitle={currentSessionData?.title || ''}
+              sessionHierarchy={currentSessionHierarchy()}
+              onSelectHierarchySession={(sess) => {
+                // Switch to the selected session (use selectSession to properly load messages)
+                if (sess.id && sess.id !== $session.sessionId) {
+                  selectSession(sess as Session);
+                }
+              }}
+              onEscalationResolved={async () => {
+                // Refresh session data
+                if ($session.projectId) {
+                  const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+                  sidebarSessions = sessionsList;
+                }
+              }}
               onMergeComplete={async () => {
                 // Refresh sessions list after merge
                 if ($session.projectId) {
@@ -3372,6 +3680,7 @@
                       }
                     }}
                     onMergeWorktree={() => showMergeModal = true}
+                    onUICommand={handleUICommand}
                     slashCommands={customCommands.map(c => ({
                       name: c.name,
                       description: c.description,
@@ -3391,8 +3700,8 @@
 
   </main>
 
-  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban}
+  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Email) -->
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showEmail}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -3423,15 +3732,21 @@
       onTerminalRef={(ref) => terminalRef = ref}
       onTerminalSendToClaude={handleTerminalSendToClaude}
       onPreviewAskClaude={handlePreviewAskClaude}
-      onNavigateToSession={(sessionId, prompt) => {
+      onElementInspected={handleElementInspected}
+      onNavigateToSession={(sessionId, prompt, autoSend) => {
         // Navigate to the session
         session.setSession($session.projectId!, sessionId);
-        // If there's a prompt, set it as the input text
-        if (prompt) {
-          inputText = prompt;
-        }
         // Close the right panel to focus on the chat
         closeRightPanel();
+        // If there's a prompt, set it and optionally auto-send
+        if (prompt) {
+          if (autoSend) {
+            // Use message queue to ensure message is sent even if WS isn't ready yet
+            messageQueue.add({ sessionId, text: prompt, attachments: [] });
+          } else {
+            inputText = prompt;
+          }
+        }
       }}
     />
   {/if}
@@ -3608,6 +3923,27 @@
       }}
     />
   {/if}
+
+  <!-- Command Help Modal -->
+  <CommandHelpModal
+    open={showCommandHelp}
+    onClose={() => showCommandHelp = false}
+    commands={customCommands.map(c => ({
+      name: c.name,
+      description: c.description,
+      argsHint: c.argsHint,
+      isBuiltIn: false,
+    }))}
+    onExecuteCommand={(cmd) => {
+      showCommandHelp = false;
+      // Send the command to the input or execute directly
+      if (["compact", "clear"].includes(cmd)) {
+        sendCommand(`/${cmd}`);
+      } else {
+        handleUICommand(cmd);
+      }
+    }}
+  />
 
   <SearchModal 
     bind:isOpen={showSearchModal} 
@@ -3794,6 +4130,7 @@
 <NotificationToast />
 <UpdateChecker />
 <ConnectivityBanner />
+<WaitCountdown />
 
 <style>
 

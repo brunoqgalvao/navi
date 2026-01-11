@@ -8,9 +8,9 @@
   let { size = "md", label, class: className = "" }: Props = $props();
 
   const sizeMap = {
-    sm: { width: 24, height: 16, stroke: 1.5 },
-    md: { width: 32, height: 20, stroke: 2 },
-    lg: { width: 48, height: 28, stroke: 2.5 },
+    sm: { width: 24, height: 12, stroke: 1.5 },
+    md: { width: 32, height: 14, stroke: 2 },
+    lg: { width: 44, height: 18, stroke: 2.5 },
   };
 
   const dims = $derived(sizeMap[size]);
@@ -20,38 +20,18 @@
   <svg
     width={dims.width}
     height={dims.height}
-    viewBox="0 0 48 28"
+    viewBox="0 0 44 14"
     fill="none"
     class="doodle-svg"
   >
-    <!-- Main scribble path - animated stroke -->
+    <!-- Simple wavy scribble -->
     <path
-      class="doodle-line"
-      d="M4 14 Q8 6, 12 14 T20 14 T28 14 T36 14 T44 14"
+      class="doodle-wave"
+      d="M2 7 Q7 2, 12 7 T22 7 T32 7 T42 7"
       stroke="currentColor"
       stroke-width={dims.stroke}
       stroke-linecap="round"
       fill="none"
-    />
-    <!-- Secondary wavy line -->
-    <path
-      class="doodle-line-2"
-      d="M6 18 Q10 22, 14 18 T22 18 T30 18 T38 18"
-      stroke="currentColor"
-      stroke-width={dims.stroke * 0.7}
-      stroke-linecap="round"
-      fill="none"
-      opacity="0.5"
-    />
-    <!-- Little spiral doodle -->
-    <path
-      class="doodle-spiral"
-      d="M40 8 Q42 6, 44 8 Q46 10, 44 12 Q42 14, 40 12 Q38 10, 40 8"
-      stroke="currentColor"
-      stroke-width={dims.stroke * 0.6}
-      stroke-linecap="round"
-      fill="none"
-      opacity="0.6"
     />
   </svg>
   {#if label}
@@ -68,29 +48,15 @@
     color: var(--doodle-color, #6b7280);
   }
 
-  .doodle-line {
-    stroke-dasharray: 60;
-    stroke-dashoffset: 60;
-    animation: doodle-draw 1.2s ease-in-out infinite;
-  }
-
-  .doodle-line-2 {
+  .doodle-wave {
     stroke-dasharray: 50;
     stroke-dashoffset: 50;
-    animation: doodle-draw-2 1.4s ease-in-out infinite;
-    animation-delay: 0.2s;
+    animation: wave-draw 1s ease-in-out infinite;
   }
 
-  .doodle-spiral {
-    stroke-dasharray: 30;
-    stroke-dashoffset: 30;
-    animation: doodle-spiral 1s ease-in-out infinite;
-    animation-delay: 0.4s;
-  }
-
-  @keyframes doodle-draw {
+  @keyframes wave-draw {
     0% {
-      stroke-dashoffset: 60;
+      stroke-dashoffset: 50;
       opacity: 0.3;
     }
     50% {
@@ -98,36 +64,8 @@
       opacity: 1;
     }
     100% {
-      stroke-dashoffset: -60;
-      opacity: 0.3;
-    }
-  }
-
-  @keyframes doodle-draw-2 {
-    0% {
-      stroke-dashoffset: 50;
-      opacity: 0.2;
-    }
-    50% {
-      stroke-dashoffset: 0;
-      opacity: 0.6;
-    }
-    100% {
       stroke-dashoffset: -50;
-      opacity: 0.2;
-    }
-  }
-
-  @keyframes doodle-spiral {
-    0%, 100% {
-      stroke-dashoffset: 30;
-      transform: rotate(0deg);
-      transform-origin: 42px 10px;
-    }
-    50% {
-      stroke-dashoffset: 0;
-      transform: rotate(180deg);
-      transform-origin: 42px 10px;
+      opacity: 0.3;
     }
   }
 </style>

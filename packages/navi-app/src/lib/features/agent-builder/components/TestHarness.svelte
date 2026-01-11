@@ -7,12 +7,14 @@
     updateTestRun,
     addTestLog,
   } from "../stores";
+  import { agentBuilderApi } from "../api";
   import type { TestRun } from "../types";
   import JsonTreeViewer from "../../../components/JsonTreeViewer.svelte";
 
   let inputJson = $state("{\n  \n}");
   let inputError = $state<string | null>(null);
   let isRunning = $state(false);
+  let responseText = $state("");
 
   // Validate JSON input
   function validateInput(): Record<string, unknown> | null {
@@ -32,36 +34,39 @@
     if (!input || !$currentAgent) return;
 
     isRunning = true;
+    responseText = "";
 
     const run = startTestRun($currentAgent.id, input);
     updateTestRun(run.id, { status: "running" });
-    addTestLog(run.id, "info", "Starting agent execution...");
+    addTestLog(run.id, "info", "Preparing agent for execution...");
 
     try {
-      // TODO: Actually run the agent via API
-      // For now, simulate a run
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Prepare the agent (get prompt + config)
+      const prepared = await agentBuilderApi.prepareRun($currentAgent.path, input);
 
-      addTestLog(run.id, "info", "Agent completed successfully");
+      addTestLog(run.id, "info", `Agent: ${prepared.agentName}`);
+      addTestLog(run.id, "info", `Model: ${prepared.model}`);
+      addTestLog(run.id, "info", `Tools: ${prepared.tools.join(", ")}`);
+      addTestLog(run.id, "info", "Executing agent prompt...");
+
+      // For now, show the prepared prompt as the "output"
+      // Full execution would require spawning a Claude session
+      // which is complex - this shows the user what WOULD be executed
+      responseText = prepared.prompt;
+
+      addTestLog(run.id, "info", "Agent prepared successfully");
+      addTestLog(run.id, "info", "Note: Full execution requires a Claude session");
 
       updateTestRun(run.id, {
         status: "completed",
         completedAt: new Date(),
         output: {
-          result: "Simulated output",
-          metadata: {
-            duration: 2000,
-            tokensUsed: 150,
-          },
+          preparedPrompt: prepared.prompt,
+          agentName: prepared.agentName,
+          model: prepared.model,
+          tools: prepared.tools,
+          input: prepared.input,
         },
-        files: [
-          {
-            name: "report.md",
-            path: "/tmp/agent-output/report.md",
-            mimeType: "text/markdown",
-            size: 1234,
-          },
-        ],
       });
     } catch (e: any) {
       addTestLog(run.id, "error", `Execution failed: ${e.message}`);
@@ -72,6 +77,13 @@
       });
     } finally {
       isRunning = false;
+    }
+  }
+
+  // Copy prompt to clipboard
+  async function copyPrompt() {
+    if (responseText) {
+      await navigator.clipboard.writeText(responseText);
     }
   }
 
@@ -108,12 +120,19 @@
 
   <!-- Input section -->
   <div class="px-3 py-3 border-b border-gray-100">
-    <label class="block text-xs font-medium text-gray-600 mb-2">Input (JSON)</label>
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-xs font-medium text-gray-600">Input (JSON)</span>
+      {#if $currentAgent}
+        <span class="text-[10px] text-gray-400 font-mono truncate max-w-32" title={$currentAgent.path}>
+          {$currentAgent.name}
+        </span>
+      {/if}
+    </div>
     <div class="relative">
       <textarea
         bind:value={inputJson}
         oninput={() => validateInput()}
-        class="w-full h-32 p-2 text-xs font-mono bg-gray-50 border rounded-lg resize-none focus:outline-none focus:border-indigo-400 {inputError ? 'border-red-300' : 'border-gray-200'}"
+        class="w-full h-28 p-2 text-xs font-mono bg-gray-50 border rounded-lg resize-none focus:outline-none focus:border-indigo-400 {inputError ? 'border-red-300' : 'border-gray-200'}"
         placeholder="Enter JSON input..."
         spellcheck="false"
       ></textarea>
@@ -124,7 +143,7 @@
 
     <button
       onclick={handleRun}
-      disabled={isRunning || !!inputError}
+      disabled={isRunning || !!inputError || !$currentAgent}
       class="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {#if isRunning}
@@ -138,18 +157,36 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        Run Agent
+        Test Agent
       {/if}
     </button>
   </div>
 
   <!-- Output section -->
   <div class="flex-1 overflow-y-auto">
+    {#if responseText}
+      <!-- Prepared Prompt -->
+      <div class="px-3 py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium text-gray-600">Prepared Prompt</span>
+          <button
+            onclick={copyPrompt}
+            class="text-xs text-indigo-600 hover:text-indigo-700"
+          >
+            Copy
+          </button>
+        </div>
+        <div class="bg-gray-900 rounded-lg p-3 text-xs font-mono text-gray-100 max-h-48 overflow-auto whitespace-pre-wrap">
+          {responseText}
+        </div>
+      </div>
+    {/if}
+
     {#if $currentTestRun}
       <!-- Output -->
-      {#if $currentTestRun.output}
+      {#if $currentTestRun.output && !responseText}
         <div class="px-3 py-2 border-b border-gray-100">
-          <label class="block text-xs font-medium text-gray-600 mb-2">Output</label>
+          <span class="block text-xs font-medium text-gray-600 mb-2">Output</span>
           <div class="bg-gray-50 rounded-lg p-2 text-xs max-h-48 overflow-auto">
             <JsonTreeViewer value={$currentTestRun.output} />
           </div>
@@ -159,7 +196,7 @@
       <!-- Files -->
       {#if $currentTestRun.files && $currentTestRun.files.length > 0}
         <div class="px-3 py-2 border-b border-gray-100">
-          <label class="block text-xs font-medium text-gray-600 mb-2">Output Files</label>
+          <span class="block text-xs font-medium text-gray-600 mb-2">Output Files</span>
           <div class="space-y-1">
             {#each $currentTestRun.files as file}
               <div class="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
@@ -185,7 +222,7 @@
 
       <!-- Logs -->
       <div class="px-3 py-2">
-        <label class="block text-xs font-medium text-gray-600 mb-2">Logs</label>
+        <span class="block text-xs font-medium text-gray-600 mb-2">Logs</span>
         <div class="space-y-1 text-xs font-mono">
           {#each $currentTestRun.logs as log}
             <div class="flex gap-2 {log.level === 'error' ? 'text-red-600' : log.level === 'warn' ? 'text-amber-600' : 'text-gray-600'}">
@@ -204,7 +241,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p class="text-xs text-gray-400">No test runs yet</p>
-          <p class="text-xs text-gray-400">Enter input and click Run</p>
+          <p class="text-xs text-gray-400">Enter input and click Test</p>
         </div>
       </div>
     {/if}
@@ -213,7 +250,7 @@
   <!-- Previous runs -->
   {#if $testRuns.length > 1}
     <div class="px-3 py-2 border-t border-gray-100">
-      <label class="block text-xs font-medium text-gray-600 mb-2">Previous Runs</label>
+      <span class="block text-xs font-medium text-gray-600 mb-2">Previous Runs</span>
       <div class="space-y-1 max-h-24 overflow-y-auto">
         {#each $testRuns.slice(1, 6) as run}
           <button

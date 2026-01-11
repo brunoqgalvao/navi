@@ -74,19 +74,12 @@ export async function getFileContent(projectPath: string, filePath: string): Pro
 export async function createDefaultDashboard(projectPath: string, projectName: string): Promise<{ success: boolean; error?: string }> {
   const defaultContent = `# ${projectName}
 
-Welcome to your project dashboard. Customize this file at \`.claude/dashboard.md\`.
+Welcome to your project. Start chatting or customize this dashboard by editing \`.claude/dashboard.md\`.
 
 ## Quick Actions
 \`\`\`actions
 - name: "📂 Open in Finder"
   command: "open ."
-- name: "🔧 Install Dependencies"
-  command: "bun install"
-\`\`\`
-
-## Recent Commits
-\`\`\`widget:git-log
-limit: 5
 \`\`\`
 `;
 

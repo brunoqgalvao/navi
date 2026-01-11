@@ -10,6 +10,8 @@ import {
   sessionHierarchy,
   sessionDecisions,
   sessionArtifacts,
+  messages,
+  pendingQuestions,
   type AgentStatus,
 } from "../db";
 import { sessionManager } from "../services/session-manager";
@@ -34,12 +36,30 @@ export async function handleSessionHierarchyRoutes(
     return json(tree);
   }
 
-  // GET /api/sessions/:id/children - Get direct children
+  // GET /api/sessions/:id/children - Get direct children with preview data
   const childrenMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/children$/);
   if (childrenMatch && method === "GET") {
     const sessionId = childrenMatch[1];
     const children = sessionHierarchy.getChildren(sessionId);
-    return json(children);
+
+    // Enrich children with preview data and waiting status
+    const enrichedChildren = children.map((child) => {
+      const preview = messages.getLatestPreview(child.id);
+      const pendingQuestion = pendingQuestions.getBySession(child.id);
+
+      return {
+        ...child,
+        // Latest activity preview
+        latestPreview: preview,
+        // Whether this child is waiting for user input
+        isWaitingForInput: !!pendingQuestion,
+        pendingQuestionType: pendingQuestion
+          ? JSON.parse(pendingQuestion.questions)?.[0]?.header || "Question"
+          : null,
+      };
+    });
+
+    return json(enrichedChildren);
   }
 
   // GET /api/sessions/:id/siblings - Get sibling sessions

@@ -52,12 +52,20 @@ export {
   executionModeStore,
   defaultExecutionMode,
   cloudExecutionStore,
+  // Backend selection (claude, codex, gemini)
+  sessionBackendStore,
+  defaultBackend,
+  backendModels,
+  getBackendModelsFormatted,
   // Memory management utilities
   cleanupAuxiliaryStores,
   getClientMemoryStats,
+  // Active waits (native pause/wait tool)
+  activeWaits,
+  currentSessionWait,
 } from "./session";
 
-export type { ProjectWorkspace, SessionPaginationState, ExecutionMode, CloudExecutionSettings, CloudExecutionState, CloudExecutionStage } from "./session";
+export type { ProjectWorkspace, SessionPaginationState, ExecutionMode, CloudExecutionSettings, CloudExecutionState, CloudExecutionStage, BackendId } from "./session";
 
 // Project stores
 export {
@@ -71,6 +79,8 @@ export {
   onboardingComplete,
   advancedMode,
   debugMode,
+  dashboardEnabled,
+  channelsEnabled,
   newChatView,
   showArchivedWorkspaces,
   tour,
@@ -164,3 +174,14 @@ export {
   type ConnectionStatus,
   type ConnectivityState,
 } from "./connectivity";
+
+// Auth store
+export {
+  auth,
+  isAuthenticated,
+  currentUser,
+  authLoading,
+  naviEmail,
+  type NaviUser,
+  type AuthState,
+} from "./auth";
