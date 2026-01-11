@@ -134,7 +134,7 @@
       console.log("[NativePreviewPanel] Session status:", result);
 
       if (result.running) {
-        // Check if this is the same project/port/branch - if so, don't reload iframe
+        // Check if this is the same preview - if so, don't reload iframe
         const normalizedEffectiveBranch = normalizeBranch(effectiveBranch);
         const normalizedResultBranch = normalizeBranch(result.branch ?? effectiveBranch);
         const isSamePreview = currentPort === result.port
@@ -151,10 +151,11 @@
         });
 
         // This session's project has a preview running
+        // IMPORTANT: Don't use fallback values from stale state - only use what the server returns
         currentUrl = result.url || null;
         currentPort = result.port || null;
-        currentProjectId = result.projectId ?? currentProjectId ?? null;
-        currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
+        currentProjectId = result.projectId || null;
+        currentBranch = result.branch || effectiveBranch;
         framework = result.framework || null;
         error = result.error || null;
 
@@ -194,10 +195,11 @@
       const result = await nativePreviewApi.getStatus(sessionId);
       console.log("[NativePreviewPanel] status result:", result);
       if (result.running) {
+        // IMPORTANT: Don't use fallback values from stale state
         currentUrl = result.url || null;
         currentPort = result.port || null;
-        currentProjectId = result.projectId ?? currentProjectId ?? null;
-        currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
+        currentProjectId = result.projectId || null;
+        currentBranch = result.branch || effectiveBranch;
         framework = result.framework || null;
         error = result.error || null;
 
@@ -211,7 +213,10 @@
           status = "running";
         }
       } else {
+        // No preview running - clear all state to avoid showing stale data
         status = "stopped";
+        currentUrl = null;
+        currentPort = null;
       }
     } catch (e) {
       console.error("[NativePreviewPanel] checkStatus error:", e);
@@ -386,10 +391,11 @@
         console.log("[NativePreviewPanel] Poll result:", result.status);
         if (result.status === "running") {
           status = "running";
+          // IMPORTANT: Don't use fallback values from stale state
           currentUrl = result.url || null;
           currentPort = result.port || null;
-          currentProjectId = result.projectId ?? currentProjectId ?? projectId ?? null;
-          currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
+          currentProjectId = result.projectId || projectId || null;
+          currentBranch = result.branch || effectiveBranch;
           framework = result.framework || null;
           iframeKey = Date.now();
           if (statusPollInterval) clearInterval(statusPollInterval);
@@ -408,11 +414,9 @@
             status = "running";
             currentUrl = result.url;
             // CRITICAL: Also update currentPort so iframeSrc uses the proxy
-            if (result.port) {
-              currentPort = result.port;
-            }
-            currentProjectId = result.projectId ?? currentProjectId ?? projectId ?? null;
-            currentBranch = result.branch ?? currentBranch ?? effectiveBranch;
+            currentPort = result.port || null;
+            currentProjectId = result.projectId || projectId || null;
+            currentBranch = result.branch || effectiveBranch;
             console.log("[NativePreviewPanel] Set currentPort:", currentPort, "currentUrl:", currentUrl);
             iframeKey = Date.now();
             if (statusPollInterval) clearInterval(statusPollInterval);
