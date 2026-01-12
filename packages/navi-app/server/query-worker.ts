@@ -64,18 +64,36 @@ function loadSkillsFromDir(skillsDir: string): SkillInfo[] {
   return skills;
 }
 
-function loadAllSkills(cwd: string): SkillInfo[] {
+/**
+ * Load skills from project and global directories.
+ * If enabledSkillSlugs is provided, only skills with matching slugs (folder names) are loaded.
+ * If enabledSkillSlugs is undefined, all skills are loaded (backwards compatibility).
+ */
+function loadAllSkills(cwd: string, enabledSkillSlugs?: string[]): SkillInfo[] {
   const projectSkillsDir = path.join(cwd, '.claude', 'skills');
   const globalSkillsDir = path.join(os.homedir(), '.claude', 'skills');
 
   const projectSkills = loadSkillsFromDir(projectSkillsDir);
   const globalSkills = loadSkillsFromDir(globalSkillsDir);
 
+  // Merge: project skills take precedence over global skills with same name
   const allSkills = [...projectSkills];
   for (const gs of globalSkills) {
     if (!allSkills.find(s => s.name === gs.name)) {
       allSkills.push(gs);
     }
+  }
+
+  // Filter by enabled slugs if provided
+  if (enabledSkillSlugs !== undefined) {
+    const enabledSet = new Set(enabledSkillSlugs);
+    const filtered = allSkills.filter(skill => {
+      // Extract slug from basePath (last directory component)
+      const slug = path.basename(skill.basePath);
+      return enabledSet.has(slug);
+    });
+    console.error(`[Worker] Filtered skills: ${filtered.length} of ${allSkills.length} (enabled: ${enabledSkillSlugs.join(', ') || 'none'})`);
+    return filtered;
   }
 
   return allSkills;
@@ -501,6 +519,11 @@ interface WorkerInput {
     siblingRoles?: string[];
     recentDecisions?: string[];
   };
+  // MCP server enabled/disabled settings (server name -> enabled boolean)
+  // If a server is not in the map, it defaults to enabled
+  mcpSettings?: Record<string, boolean>;
+  // Enabled skill slugs for this project (undefined = load all skills)
+  enabledSkillSlugs?: string[];
 }
 
 const pendingPermissions = new Map<string, (result: { approved: boolean; approveAll?: boolean }) => void>();
@@ -1215,10 +1238,23 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
 let sessionApprovedAll = false;
 
 async function runQuery(input: WorkerInput) {
-  const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession } = input;
+  const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, enabledSkillSlugs } = input;
 
   // Debug: Log multiSession state
   console.error(`[Worker] multiSession received:`, JSON.stringify(multiSession, null, 2));
+
+  // Initialize database for integration MCPs (credentials, sessions)
+  // This is required because the worker runs in a separate Bun process
+  try {
+    const { initDb } = await import("./db");
+    await initDb();
+    // Also init integrations/credentials tables
+    const { initIntegrationsTable } = await import("./integrations/db");
+    initIntegrationsTable();
+    console.error(`[Worker] Database initialized`);
+  } catch (e) {
+    console.error(`[Worker] Failed to initialize database:`, e);
+  }
 
   // Clear any stray API keys from environment - Navi controls auth exclusively
   delete process.env.ANTHROPIC_API_KEY;
@@ -1305,8 +1341,8 @@ async function runQuery(input: WorkerInput) {
     console.error(`[Worker] Starting query with cwd: ${cwd}`);
     console.error(`[Worker] permissionSettings:`, permissionSettings);
 
-    // Load skills from project and global directories
-    const skills = loadAllSkills(cwd);
+    // Load skills from project and global directories, filtered by enabled slugs
+    const skills = loadAllSkills(cwd, enabledSkillSlugs);
     console.error(`[Worker] Loaded ${skills.length} skills:`, skills.map(s => s.name));
 
     // Load all Navi Agents using the new unified loader
@@ -1427,25 +1463,70 @@ You are currently acting as the @${agentId} agent. Follow the instructions above
     console.error(`[Worker]   - requireConfirmation:`, requireConfirmation);
     console.error(`[Worker]   - autoAllowedTools (${autoAllowedTools.length}):`, autoAllowedTools);
 
-    // Build MCP servers - always include user-interaction and navi-context
-    const mcpServers: Record<string, any> = {
-      "user-interaction": userInteractionServer,
-      "navi-context": naviContextServer,
-    };
-    console.error(`[Worker] Navi context MCP server enabled (view_processes, view_terminal)`);
+    // Helper to check if an MCP server is enabled (defaults to true if not in settings)
+    const isMcpEnabled = (name: string) => mcpSettings?.[name] !== false;
 
-    // Add agent's MCP servers if defined
+    // Build MCP servers - include built-in servers if enabled
+    const mcpServers: Record<string, any> = {};
+
+    if (isMcpEnabled("user-interaction")) {
+      mcpServers["user-interaction"] = userInteractionServer;
+      console.error(`[Worker] MCP server enabled: user-interaction`);
+    } else {
+      console.error(`[Worker] MCP server disabled: user-interaction`);
+    }
+
+    if (isMcpEnabled("navi-context")) {
+      mcpServers["navi-context"] = naviContextServer;
+      console.error(`[Worker] MCP server enabled: navi-context (view_processes, view_terminal)`);
+    } else {
+      console.error(`[Worker] MCP server disabled: navi-context`);
+    }
+
+    // Add agent's MCP servers if defined and enabled
     if (resolvedAgent?.mcpServers) {
       for (const [name, config] of Object.entries(resolvedAgent.mcpServers)) {
-        mcpServers[name] = config;
-        console.error(`[Worker] Added agent MCP server: ${name}`);
+        if (isMcpEnabled(name)) {
+          mcpServers[name] = config;
+          console.error(`[Worker] Added agent MCP server: ${name}`);
+        } else {
+          console.error(`[Worker] Agent MCP server disabled: ${name}`);
+        }
       }
     }
 
+    // Add integration MCPs (from configured integrations with credentials)
+    // Uses project-scoped credentials if available, falls back to user-level
+    try {
+      const { getAvailableIntegrationMCPs } = await import("./services/integration-mcp");
+      const { sessions } = await import("./db");
+
+      // Get project ID from session for project-scoped credentials
+      let projectId: string | undefined;
+      if (sessionId) {
+        const session = sessions.get(sessionId);
+        projectId = session?.project_id;
+      }
+
+      const credentialScope = projectId ? { projectId } : undefined;
+      const integrationMCPs = getAvailableIntegrationMCPs(credentialScope);
+
+      for (const [name, config] of Object.entries(integrationMCPs)) {
+        if (isMcpEnabled(name) && !mcpServers[name]) {
+          mcpServers[name] = config;
+          console.error(`[Worker] Added integration MCP server: ${name}${projectId ? ` (project: ${projectId})` : ""}`);
+        }
+      }
+    } catch (e) {
+      console.error(`[Worker] Failed to load integration MCPs:`, e);
+    }
+
     // Enable multi-session tools if enabled (for all sessions that can spawn or are children)
-    if (multiSession?.enabled) {
+    if (multiSession?.enabled && isMcpEnabled("multi-session")) {
       mcpServers["multi-session"] = multiSessionServer;
-      console.error(`[Worker] Multi-session MCP server enabled`);
+      console.error(`[Worker] MCP server enabled: multi-session`);
+    } else if (multiSession?.enabled) {
+      console.error(`[Worker] MCP server disabled: multi-session (multi-session context is enabled but server is disabled)`);
     }
 
     // Determine final model

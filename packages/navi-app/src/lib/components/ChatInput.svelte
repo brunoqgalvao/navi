@@ -35,6 +35,12 @@
     path: string;
   }
 
+  interface McpServer {
+    name: string;
+    enabled: boolean;
+    toolCount?: number;
+  }
+
   interface SlashCommand {
     name: string;
     description: string;
@@ -49,6 +55,7 @@
     queuedCount?: number;
     projectPath?: string;
     activeSkills?: Skill[];
+    mcpServers?: McpServer[];
     sessionId?: string;
     untilDoneEnabled?: boolean;
     // Worktree mode - for new chats
@@ -66,6 +73,7 @@
     onPreview?: (path: string) => void;
     onExecCommand?: (command: string) => void;
     onManageSkills?: () => void;
+    onManageMcp?: () => void;
     onNavigateToChat?: (sessionId: string) => void;
     onToggleUntilDone?: () => void;
     onCreateWithWorktree?: (description: string, message: string) => void;
@@ -82,7 +90,7 @@
     onUICommand?: (command: string, args?: string) => boolean; // Return true if handled
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], backend = "claude", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, onBackendChange, slashCommands = [], onUICommand }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], backend = "claude", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, onBackendChange, slashCommands = [], onUICommand }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
@@ -94,6 +102,10 @@
   }
 
   let showSkillsMenu = $state(false);
+  let showMcpMenu = $state(false);
+
+  // Compute enabled MCP servers count
+  let enabledMcpCount = $derived(mcpServers.filter(s => s.enabled).length);
 
   // Check if the input is a ! command
   function isShellCommand(text: string): boolean {
@@ -1505,6 +1517,65 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
                 </svg>
                 Manage Skills
+              </button>
+            </div>
+          </div>
+        {/if}
+      </div>
+
+      <!-- MCP Servers dropdown -->
+      <div class="relative">
+        <button
+          onclick={() => showMcpMenu = !showMcpMenu}
+          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {enabledMcpCount > 0 ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-200 dark:hover:bg-cyan-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+          title={enabledMcpCount > 0 ? `MCP Servers: ${enabledMcpCount} active` : 'MCP Servers: none active'}
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+          </svg>
+          {#if enabledMcpCount > 0}
+            <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-cyan-500 dark:bg-cyan-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+              {enabledMcpCount}
+            </span>
+          {/if}
+        </button>
+
+        {#if showMcpMenu}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="fixed inset-0 z-40"
+            onclick={() => showMcpMenu = false}
+          ></div>
+          <div class="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-2 z-50">
+            <div class="px-3 py-2 text-[11px] text-gray-500 dark:text-gray-400 font-semibold uppercase tracking-wider border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+              <svg class="w-3.5 h-3.5 text-cyan-500 dark:text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+              </svg>
+              {enabledMcpCount > 0 ? `MCP Servers (${enabledMcpCount}/${mcpServers.length})` : 'No MCP Servers Active'}
+            </div>
+            {#if mcpServers.length > 0}
+              <div class="py-1 max-h-48 overflow-y-auto">
+                {#each mcpServers as server}
+                  <div class="px-3 py-2 text-sm flex items-center gap-2.5 {server.enabled ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'}">
+                    <span class="w-2 h-2 rounded-full flex-shrink-0 {server.enabled ? 'bg-gradient-to-br from-cyan-400 to-teal-500' : 'bg-gray-300 dark:bg-gray-600'}"></span>
+                    <span class="truncate flex-1">{server.name}</span>
+                    {#if server.toolCount !== undefined}
+                      <span class="text-xs text-gray-400 dark:text-gray-500">{server.toolCount} tools</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+            <div class="border-t border-gray-100 dark:border-gray-700 pt-2 px-2">
+              <button
+                onclick={() => { showMcpMenu = false; onManageMcp?.(); }}
+                class="w-full px-3 py-2 text-left text-sm text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 rounded-lg flex items-center gap-2.5 transition-colors font-medium"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                Manage MCP Servers
               </button>
             </div>
           </div>

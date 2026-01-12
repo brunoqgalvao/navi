@@ -13,6 +13,44 @@ const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { execFileSync } = require('child_process');
+
+// Resolve the user's actual PATH by running their login shell
+// GUI apps on macOS don't inherit shell PATH, so we need to fetch it
+let cachedUserPath = null;
+function getUserPath() {
+  if (cachedUserPath) return cachedUserPath;
+
+  const shell = process.env.SHELL || '/bin/zsh';
+  const baseEnv = { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' };
+
+  try {
+    // -ilc loads both login files and ~/.zshrc where users typically set PATH
+    cachedUserPath = execFileSync(shell, ['-ilc', 'printf %s "$PATH"'], {
+      env: baseEnv,
+      encoding: 'utf8',
+      timeout: 5000,
+    }).trim();
+    console.log('[PTY] Resolved user PATH:', cachedUserPath.substring(0, 200) + '...');
+    return cachedUserPath;
+  } catch (e) {
+    console.error('[PTY] Failed to get user PATH from shell:', e.message);
+    // Fallback: try path_helper (macOS system utility)
+    try {
+      const out = execFileSync('/usr/libexec/path_helper', ['-s'], { encoding: 'utf8' });
+      const match = out.match(/PATH="([^"]+)"/);
+      if (match) {
+        cachedUserPath = match[1];
+        console.log('[PTY] Using path_helper PATH:', cachedUserPath);
+        return cachedUserPath;
+      }
+    } catch {}
+    // Final fallback: common paths
+    cachedUserPath = '/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+    console.log('[PTY] Using fallback PATH');
+    return cachedUserPath;
+  }
+}
 
 // When running in Tauri bundled mode, modules are in pty-node_modules directory
 // alongside this script in the resources folder
@@ -194,13 +232,18 @@ function handleMessage(ws, message, attachedTerminals) {
 
       const terminalId = crypto.randomUUID();
 
+      // Get the user's actual PATH by running their shell
+      // This ensures npm, bun, node etc. are available in the terminal
+      const shellEnv = { ...process.env, PATH: getUserPath() };
+
       try {
+        // Don't use -l flag as the PATH is already resolved from user's shell
         const ptyProcess = pty.spawn(shell, [], {
           name: 'xterm-256color',
           cols: safeCols,
           rows: safeRows,
           cwd,
-          env: process.env,
+          env: shellEnv,
         });
 
         const terminal = {

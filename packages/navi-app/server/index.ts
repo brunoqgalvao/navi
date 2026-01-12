@@ -46,6 +46,8 @@ import { handleSessionsBoardRoutes } from "./routes/sessions-board";
 import { handleDashboardRoutes } from "./routes/dashboard";
 // OAuth Integrations (Google, GitHub, etc.)
 import { handleIntegrationsRoutes } from "./routes/integrations";
+// Credentials Management (API keys, tokens)
+import { handleCredentialsRoutes } from "./routes/credentials";
 // Experimental Features (Ensemble Consensus, Self-Healing, Experimental Agents)
 import { handleExperimentalRoutes, initExperimentalWebSocket } from "./routes/experimental";
 // Backend adapters (Claude, Codex, Gemini)
@@ -64,6 +66,8 @@ import { handleBrowserRoutes } from "./routes/browser";
 import { handleChannelRoutes } from "./routes/channels";
 // Plugin Management
 import { handlePluginRoutes } from "./routes/plugins";
+// MCP Server Settings
+import { handleMcpRoutes } from "./routes/mcp";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -335,6 +339,10 @@ const server = Bun.serve({
     response = await handlePluginRoutes(url, method, req);
     if (response) return response;
 
+    // MCP server settings routes
+    response = await handleMcpRoutes(url, method, req);
+    if (response) return response;
+
     // Dashboard routes (isolated feature)
     response = await handleDashboardRoutes(url, method, req);
     if (response) return response;
@@ -369,6 +377,10 @@ const server = Bun.serve({
 
     // Integrations routes (OAuth)
     response = await handleIntegrationsRoutes(url, method, req);
+    if (response) return response;
+
+    // Credentials routes (API keys, tokens)
+    response = await handleCredentialsRoutes(url, method, req);
     if (response) return response;
 
     // Config routes

@@ -67,6 +67,59 @@
   let inspectMode = $state(false);
   let inspectorReady = $state(false);
   let inspectorTimeout: ReturnType<typeof setTimeout> | null = null;
+  let sessionEpoch = 0;
+  let lastSessionId: string | null = null;
+
+  function getPortFromUrl(value: string | null): number | null {
+    if (!value) return null;
+    try {
+      const normalized = value.startsWith("http://") || value.startsWith("https://")
+        ? value
+        : value.startsWith("//")
+          ? `http:${value}`
+          : value.startsWith(":")
+            ? `http://localhost${value}`
+            : `http://${value}`;
+      const url = new URL(normalized);
+      if (!url.port) return null;
+      const port = Number(url.port);
+      return Number.isFinite(port) ? port : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function clearPolling() {
+    if (statusPollInterval) {
+      clearInterval(statusPollInterval);
+      statusPollInterval = null;
+    }
+    if (logsPollInterval) {
+      clearInterval(logsPollInterval);
+      logsPollInterval = null;
+    }
+  }
+
+  function clearPreviewRuntimeState() {
+    currentUrl = null;
+    currentPort = null;
+    currentProjectId = null;
+    currentBranch = null;
+    framework = null;
+    portConflict = null;
+    serverLogs = [];
+    showLogsDrawer = false;
+  }
+
+  function resetPreviewState() {
+    status = "stopped";
+    error = null;
+    loading = false;
+    resolvingConflict = false;
+    clearPreviewRuntimeState();
+    inspectorReady = false;
+    inspectMode = false;
+  }
 
   const effectiveBranch = $derived(branch || "main");
   const normalizeBranch = (value: string | null | undefined) => (value ?? "main").trim();
@@ -74,63 +127,105 @@
   // Load preview through the proxy for script injection (inspector, branch indicator, OAuth intercept)
   // The proxy rewrites URLs and injects Navi's helper scripts into HTML responses
   const iframeSrc = $derived(() => {
-    const proxyUrl = currentPort
-      ? `/api/preview/proxy/${currentPort}/`
+    const portFromUrl = currentUrl ? getPortFromUrl(currentUrl) : null;
+    const effectivePort = currentUrl ? portFromUrl : currentPort;
+    const proxyUrl = effectivePort
+      ? `/api/preview/proxy/${effectivePort}/`
       : currentUrl;
-    console.log("[NativePreviewPanel] iframeSrc:", { currentPort, currentUrl, proxyUrl });
+    console.log("[NativePreviewPanel] iframeSrc:", {
+      currentPort,
+      currentUrl,
+      portFromUrl,
+      effectivePort,
+      proxyUrl,
+    });
     return proxyUrl;
   });
 
   // Sync previewUrl prop to currentUrl
   $effect(() => {
     if (previewUrl) {
-      currentUrl = previewUrl;
+      const nextPort = getPortFromUrl(previewUrl);
+      const shouldSync = !currentUrl || status !== "running" || nextPort === currentPort;
+      if (shouldSync) {
+        currentUrl = previewUrl;
+        if (nextPort !== currentPort) {
+          currentPort = nextPort;
+          if (status === "running") {
+            iframeKey = Date.now();
+          }
+        }
+      }
+    } else if (!sessionId) {
+      currentUrl = null;
+      currentPort = null;
+    }
+  });
+
+  $effect(() => {
+    if (!currentUrl) return;
+    const urlPort = getPortFromUrl(currentUrl);
+    if (urlPort !== currentPort) {
+      currentPort = urlPort;
     }
   });
 
   // Check compliance and status on mount and when session changes
   $effect(() => {
+    if (sessionId === lastSessionId) return;
+    lastSessionId = sessionId;
+    sessionEpoch += 1;
+    clearPolling();
+    resetPreviewState();
+    compliance = null;
+    checkingCompliance = false;
     if (sessionId) {
-      checkComplianceAndStatus();
+      checkComplianceAndStatus(sessionId, sessionEpoch);
     }
   });
 
-  async function checkComplianceAndStatus() {
-    if (!sessionId) return;
-    console.log("[NativePreviewPanel] checkComplianceAndStatus", { sessionId, branch: effectiveBranch });
+  async function checkComplianceAndStatus(targetSessionId: string, epoch = sessionEpoch) {
+    console.log("[NativePreviewPanel] checkComplianceAndStatus", { sessionId: targetSessionId, branch: effectiveBranch });
     checkingCompliance = true;
 
     try {
       // First check if preview is even possible
-      const complianceResult = await nativePreviewApi.checkCompliance(sessionId);
+      const complianceResult = await nativePreviewApi.checkCompliance(targetSessionId);
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       compliance = complianceResult;
       console.log("[NativePreviewPanel] Compliance:", complianceResult);
 
       if (!complianceResult.canPreview) {
         status = "unavailable";
         error = complianceResult.reason || null;
+        clearPreviewRuntimeState();
         checkingCompliance = false;
         return;
       }
 
       // Now check if there's an active preview
-      await checkStatusAndMaybeSwitch();
+      await checkStatusAndMaybeSwitch(targetSessionId, epoch);
     } catch (e) {
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       console.error("[NativePreviewPanel] checkComplianceAndStatus error:", e);
       status = "stopped";
+      error = null;
+      clearPreviewRuntimeState();
     } finally {
-      checkingCompliance = false;
+      if (epoch === sessionEpoch && sessionId === targetSessionId) {
+        checkingCompliance = false;
+      }
     }
   }
 
-  async function checkStatusAndMaybeSwitch() {
-    if (!sessionId) return;
-    console.log("[NativePreviewPanel] checkStatusAndMaybeSwitch", { sessionId, branch: effectiveBranch });
+  async function checkStatusAndMaybeSwitch(targetSessionId: string, epoch = sessionEpoch) {
+    console.log("[NativePreviewPanel] checkStatusAndMaybeSwitch", { sessionId: targetSessionId, branch: effectiveBranch });
 
     try {
       // Check status for THIS session only (not global!)
       // Each project can have its own preview running on a different port
-      const result = await nativePreviewApi.getStatus(sessionId);
+      const result = await nativePreviewApi.getStatus(targetSessionId);
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       console.log("[NativePreviewPanel] Session status:", result);
 
       if (result.running) {
@@ -179,20 +274,23 @@
       } else {
         // No preview running for this session's project
         status = "stopped";
-        currentProjectId = null;
-        currentBranch = null;
+        error = null;
+        clearPreviewRuntimeState();
       }
     } catch (e) {
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       console.error("[NativePreviewPanel] checkStatusAndMaybeSwitch error:", e);
       status = "stopped";
+      error = null;
+      clearPreviewRuntimeState();
     }
   }
 
-  async function checkStatus() {
-    if (!sessionId) return;
-    console.log("[NativePreviewPanel] checkStatus", { sessionId, branch: effectiveBranch });
+  async function checkStatus(targetSessionId: string, epoch = sessionEpoch) {
+    console.log("[NativePreviewPanel] checkStatus", { sessionId: targetSessionId, branch: effectiveBranch });
     try {
-      const result = await nativePreviewApi.getStatus(sessionId);
+      const result = await nativePreviewApi.getStatus(targetSessionId);
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       console.log("[NativePreviewPanel] status result:", result);
       if (result.running) {
         // IMPORTANT: Don't use fallback values from stale state
@@ -215,12 +313,15 @@
       } else {
         // No preview running - clear all state to avoid showing stale data
         status = "stopped";
-        currentUrl = null;
-        currentPort = null;
+        error = null;
+        clearPreviewRuntimeState();
       }
     } catch (e) {
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       console.error("[NativePreviewPanel] checkStatus error:", e);
       status = "stopped";
+      error = null;
+      clearPreviewRuntimeState();
     }
   }
 
@@ -235,7 +336,10 @@
     portConflict = null;
     try {
       console.log("[NativePreviewPanel] Calling nativePreviewApi.start");
-      const result = await nativePreviewApi.start(sessionId);
+      const targetSessionId = sessionId;
+      const epoch = sessionEpoch;
+      const result = await nativePreviewApi.start(targetSessionId);
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       console.log("[NativePreviewPanel] Start result:", result);
       if (result.success) {
         status = "starting";
@@ -267,7 +371,10 @@
     resolvingConflict = true;
     try {
       console.log("[NativePreviewPanel] Resolving conflict with action:", action);
-      const result = await nativePreviewApi.resolveConflict(sessionId, action);
+      const targetSessionId = sessionId;
+      const epoch = sessionEpoch;
+      const result = await nativePreviewApi.resolveConflict(targetSessionId, action);
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       console.log("[NativePreviewPanel] Resolve result:", result);
 
       if (result.success) {
@@ -335,12 +442,11 @@
     if (!sessionId) return;
     loading = true;
     try {
-      await nativePreviewApi.stop(sessionId);
-      status = "stopped";
-      currentUrl = null;
-      currentPort = null;
-      currentProjectId = null;
-      currentBranch = null;
+      const targetSessionId = sessionId;
+      const epoch = sessionEpoch;
+      await nativePreviewApi.stop(targetSessionId);
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
+      resetPreviewState();
     } catch (e: any) {
       error = e.message;
     } finally {
@@ -353,10 +459,14 @@
     loading = true;
     error = null;
     try {
+      const targetSessionId = sessionId;
+      const epoch = sessionEpoch;
       // Stop first, then start
-      await nativePreviewApi.stop(sessionId);
+      await nativePreviewApi.stop(targetSessionId);
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       status = "starting";
-      const result = await nativePreviewApi.start(sessionId);
+      const result = await nativePreviewApi.start(targetSessionId);
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       if (result.success) {
         currentUrl = result.url || null;
         currentPort = result.port || null;
@@ -379,6 +489,8 @@
 
   function pollStatus() {
     if (!sessionId) return;
+    const targetSessionId = sessionId;
+    const epoch = sessionEpoch;
     console.log("[NativePreviewPanel] Starting status polling...");
     // Clear any existing interval first
     if (statusPollInterval) {
@@ -386,8 +498,13 @@
       statusPollInterval = null;
     }
     statusPollInterval = setInterval(async () => {
+      if (epoch !== sessionEpoch || sessionId !== targetSessionId) {
+        if (statusPollInterval) clearInterval(statusPollInterval);
+        statusPollInterval = null;
+        return;
+      }
       try {
-        const result = await nativePreviewApi.getStatus(sessionId!);
+        const result = await nativePreviewApi.getStatus(targetSessionId);
         console.log("[NativePreviewPanel] Poll result:", result.status);
         if (result.status === "running") {
           status = "running";
@@ -403,6 +520,7 @@
         } else if (result.status === "error" || !result.running) {
           status = "error";
           error = result.error || "Preview failed";
+          clearPreviewRuntimeState();
           await fetchServerLogs(); showLogsDrawer = true;
           if (statusPollInterval) clearInterval(statusPollInterval);
           statusPollInterval = null;
@@ -847,7 +965,7 @@ Can you help fix this issue so the preview can start successfully?`;
           </div>
         {/if}
         <button
-          onclick={checkComplianceAndStatus}
+          onclick={() => sessionId && checkComplianceAndStatus(sessionId, sessionEpoch)}
           class="mt-4 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors flex items-center gap-2"
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

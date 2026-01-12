@@ -5,6 +5,7 @@
   import { api, type Project, type Session, type WorkspaceFolder, type SearchResult } from "../../api";
   import { getApiBase } from "../../config";
   import ModelSelector from "../ModelSelector.svelte";
+  import BackendSelector from "../BackendSelector.svelte";
   import StarButton from "../StarButton.svelte";
   import TitleSuggestion from "../TitleSuggestion.svelte";
   import RelativeTime from "../RelativeTime.svelte";
@@ -1405,37 +1406,14 @@
     {#if $session.sessionId && !sidebarCollapsed}
       <!-- Backend + Model selector row -->
       <div class="flex gap-2 items-center">
-        <!-- Backend toggle -->
-        {#if onBackendChange}
-          {@const backendMeta: Record<BackendId, { label: string; color: string; bg: string }> = {
-            claude: { label: 'Claude', color: 'text-orange-600', bg: 'bg-orange-100 hover:bg-orange-200 border-orange-200' },
-            codex: { label: 'Codex', color: 'text-green-600', bg: 'bg-green-100 hover:bg-green-200 border-green-200' },
-            gemini: { label: 'Gemini', color: 'text-blue-600', bg: 'bg-blue-100 hover:bg-blue-200 border-blue-200' }
+        <BackendSelector
+          value={`${backend}:${modelSelection}`}
+          onchange={(newBackend, newModel) => {
+            onBackendChange?.(newBackend);
+            onModelSelect?.(newModel);
           }}
-          {@const current = backendMeta[backend] || backendMeta.claude}
-          <button
-            onclick={() => {
-              const backends: BackendId[] = ['claude', 'codex', 'gemini'];
-              const idx = backends.indexOf(backend);
-              onBackendChange?.(backends[(idx + 1) % backends.length]);
-            }}
-            class="shrink-0 px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-colors {current.bg} {current.color}"
-            title="Click to switch backend: {current.label}"
-          >
-            {current.label}
-          </button>
-        {/if}
-        <!-- Model selector - uses backend-specific models if available -->
-        {#if true}
-          {@const currentModels = getBackendModelsFormatted(backend, $backendModels)}
-          <div class="flex-1 min-w-0">
-            <ModelSelector
-              models={currentModels.length > 0 ? currentModels : $availableModels}
-              bind:selectedModel={modelSelection}
-              onSelect={onModelSelect}
-            />
-          </div>
-        {/if}
+          class="flex-1"
+        />
       </div>
     {/if}
 

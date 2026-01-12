@@ -4,9 +4,11 @@
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
   import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, auth, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId } from "./lib/stores";
+  import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill } from "./lib/api";
+  import { mcpApi, type McpServer } from "./lib/features/mcp";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
-  import { createNewChatWithWorktree } from "./lib/actions";
+  import { createNewChatWithWorktree, startNewChat } from "./lib/actions";
   import { initBrowserEmail } from "./lib/features/browser-email-init";
   import { parseHash, onHashChange } from "./lib/router";
   import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
@@ -327,7 +329,7 @@
 
   // Derived agents list for sidebar (combine agents + skills from stores)
   let sidebarAgents = $derived([...$agentLibrary, ...$skillLibraryForBuilder].slice(0, 10));
-  let settingsInitialTab = $state<"api" | "permissions" | "claude-md" | "skills" | "features" | "analytics" | undefined>(undefined);
+  let settingsInitialTab = $state<"api" | "permissions" | "claude-md" | "skills" | "features" | "analytics" | "mcp" | undefined>(undefined);
   let showProjectSettings = $state(false);
   let projectSettingsInitialTab = $state<"instructions" | "model" | "permissions" | "skills" | undefined>(undefined);
   let showDebugInfo = $state(false);
@@ -529,7 +531,9 @@
     onNewContent: notifyNewContent,
     onClaudeSessionInit: (claudeSessionId, model) => {
       session.setClaudeSession(claudeSessionId);
-      session.setModel(model);
+      if (model) {
+        session.setModel(model);
+      }
     },
     onStreamingEnd: (sessionId, reason) => {
       // Reset activeSubagents for current session
@@ -964,6 +968,7 @@
   const contextWindow = $derived(currentProject?.context_window || 200000);
   const usagePercent = $derived(contextWindow > 0 ? Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100)) : 0);
   let activeSkills = $state<Skill[]>([]);
+  let mcpServers = $state<McpServer[]>([]);
   let customCommands = $state<CustomCommand[]>([]);
 
   // Check git status when project changes
@@ -1078,6 +1083,7 @@
       loadPermissionsAction();
       loadCostsAction();
       loadLibrary(); // Load agents for sidebar
+      loadMcpServers(); // Load MCP server states
 
       // Initialize proactive hooks (skill scout, error detector, memory builder)
       setupProactiveHooks().then((enabled) => {
@@ -1124,6 +1130,9 @@
         } else if (msg.type === "cloud_error") {
           cloudExecutionStore.complete(msg.uiSessionId || "", false, 0, 0, msg.error);
           loadingSessions.update(s => { s.delete(msg.uiSessionId || ""); return new Set(s); });
+        } else if (msg.type === "background_process_event") {
+          // Forward background process events to the store for real-time updates
+          backgroundProcessEvents.emit(msg as any);
         }
       });
     }).catch(() => {
@@ -1210,8 +1219,44 @@
     };
     document.addEventListener("click", handleGlobalClick);
 
+    // Handle integration setup chat requests from Settings
+    const handleSetupChat = async (event: CustomEvent) => {
+      const { providerId, providerName, setupGuide } = event.detail;
+
+      // Close settings modal if open
+      showSettings = false;
+      await tick();
+
+      // Start a new chat
+      startNewChat();
+      await tick();
+
+      // Build the initial prompt with context
+      const capabilities = setupGuide?.capabilities?.join("\n- ") || "";
+      const examplePrompts = setupGuide?.examplePrompts?.join("\n- ") || "";
+
+      const initialMessage = `Help me connect ${providerName} to Navi.
+
+I want to set up the ${providerName} integration. Please guide me through getting the API key and help me test it.
+
+${capabilities ? `\n**What I'll be able to do:**\n- ${capabilities}` : ""}
+
+${examplePrompts ? `\n**Example things to try after setup:**\n- ${examplePrompts}` : ""}
+
+Please walk me through the setup step by step. When I have the credentials, save them for me using the credentials API.`;
+
+      // Set the input text and auto-send
+      inputText = initialMessage;
+      await tick();
+
+      // Trigger send
+      handleSend();
+    };
+    document.addEventListener("open-setup-chat", handleSetupChat as EventListener);
+
     return () => {
       document.removeEventListener("click", handleGlobalClick);
+      document.removeEventListener("open-setup-chat", handleSetupChat as EventListener);
       unsubscribeHash();
       cleanupErrorHandlers();
     };
@@ -1278,6 +1323,16 @@
       activeSkills = [];
     }
   });
+
+  // Load MCP servers
+  async function loadMcpServers() {
+    try {
+      mcpServers = await mcpApi.list();
+    } catch (e) {
+      console.error("Failed to load MCP servers:", e);
+      mcpServers = [];
+    }
+  }
 
   // Load custom commands when project changes
   $effect(() => {
@@ -1744,15 +1799,13 @@
       session.setSelectedModel(defaultModel);
     }
 
-    // Restore backend for this session from cache or DB
-    const cachedBackend = sessionBackendStore.get(s.id, $sessionBackendStore);
-    if (cachedBackend && cachedBackend !== "claude") {
-      // Already cached, keep it
-    } else if (s.backend) {
-      // Load from DB
+    // Restore backend for this session from DB if specified
+    // Always trust the session's stored backend over cache (cache may have stale defaults)
+    if (s.backend) {
       sessionBackendStore.set(s.id, s.backend as BackendId);
     }
-    // If neither, defaults to "claude" via the store
+    // If session doesn't have a backend, check the map directly to see if we have a cached value
+    // (The get() method returns "claude" as default, which could be wrong for a codex session)
 
     sessionStatus.markSeen(s.id);
 
@@ -1779,8 +1832,8 @@
           session.setSelectedModel(freshSession.model);
           sessionModels.setModel(s.id, freshSession.model);
         }
-        // Update backend from DB if we don't have a cached value
-        if (freshSession.backend && !cachedBackend) {
+        // Always update backend from fresh session data (trust DB over cache)
+        if (freshSession.backend) {
           sessionBackendStore.set(s.id, freshSession.backend as BackendId);
         }
       }
@@ -2094,20 +2147,29 @@
     return `${quotedText}\n> *${annotation}*`;
   }
 
-  function scrollToBottom(instant = false) {
+  async function scrollToBottom(instant = false) {
     // Only auto-scroll if user is near the bottom, or if it's an instant scroll
     if (!instant && !userIsNearBottom) return;
 
     isProgrammaticScroll = true;
     newMessagesWhileAway = 0;
-    setTimeout(() => {
-      messagesContainer?.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: instant ? "instant" : "smooth",
+
+    // Wait for Svelte to render DOM updates before scrolling
+    // Double tick: first for store propagation, second for DOM render
+    await tick();
+    await tick();
+
+    // Use requestAnimationFrame to ensure layout is complete before scrolling
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        messagesContainer?.scrollTo({
+          top: messagesContainer.scrollHeight,
+          behavior: instant ? "instant" : "smooth",
+        });
+        // Reset flag after scroll animation completes
+        setTimeout(() => { isProgrammaticScroll = false; }, instant ? 50 : 300);
       });
-      // Reset flag after scroll animation completes
-      setTimeout(() => { isProgrammaticScroll = false; }, instant ? 50 : 300);
-    }, instant ? 0 : 50);
+    });
   }
 
   function jumpToBottom() {
@@ -3652,6 +3714,7 @@
                     {queuedCount}
                     projectPath={currentProject?.path}
                     activeSkills={activeSkills.map(s => ({ name: s.name, path: s.slug }))}
+                    {mcpServers}
                     sessionId={$session.sessionId || undefined}
                     {untilDoneEnabled}
                     isGitRepo={currentProjectIsGitRepo}
@@ -3666,6 +3729,7 @@
                     onPreview={openPreview}
                     onExecCommand={handleExecCommand}
                     onManageSkills={() => { projectSettingsInitialTab = "skills"; showProjectSettings = true; }}
+                    onManageMcp={() => { settingsInitialTab = "mcp"; showSettings = true; }}
                     onToggleUntilDone={toggleUntilDone}
                     onExecutionModeChange={handleExecutionModeChange}
                     onCloudBranchChange={handleCloudBranchChange}
@@ -3843,7 +3907,7 @@
     {/snippet}
   </Modal>
 
-  <Settings open={showSettings} onClose={() => { showSettings = false; settingsInitialTab = undefined; }} initialTab={settingsInitialTab} />
+  <Settings open={showSettings} onClose={() => { showSettings = false; settingsInitialTab = undefined; loadMcpServers(); }} initialTab={settingsInitialTab} />
 
   {#if showAgentBuilder}
     <div class="fixed inset-0 z-50 bg-white">

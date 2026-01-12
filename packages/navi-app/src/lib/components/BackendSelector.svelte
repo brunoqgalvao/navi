@@ -117,37 +117,39 @@
     <div class="text-red-500 text-sm">{error}</div>
   {:else}
     <!-- Dropdown trigger -->
-    <button
-      type="button"
-      onclick={() => (isOpen = !isOpen)}
-      class="flex items-center gap-2 px-3 py-2 rounded-lg border border-zinc-700
-             hover:border-zinc-500 bg-zinc-800/50 w-full text-left transition-all"
-    >
+    {#if true}
       {@const meta = backendMeta[parsed().backendId]}
-      <div
-        class="w-5 h-5 rounded flex items-center justify-center text-white text-xs font-bold {meta.color}"
+      <button
+        type="button"
+        onclick={() => (isOpen = !isOpen)}
+        class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-zinc-700
+               hover:border-gray-300 dark:hover:border-zinc-500 bg-white dark:bg-zinc-800/50 w-full text-left transition-all"
       >
-        {meta.icon}
-      </div>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium truncate">
-          {meta.label} › {formatModelName(selectedModel)}
+        <div
+          class="w-4 h-4 rounded flex items-center justify-center text-white text-[10px] font-bold {meta.color}"
+        >
+          {meta.icon}
         </div>
-      </div>
-      <svg
-        class="w-4 h-4 text-zinc-400 transition-transform {isOpen ? 'rotate-180' : ''}"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-      </svg>
-    </button>
+        <div class="flex-1 min-w-0">
+          <div class="text-[11px] font-medium truncate text-gray-900 dark:text-zinc-100">
+            {meta.label} › {formatModelName(selectedModel)}
+          </div>
+        </div>
+        <svg
+          class="w-3 h-3 text-gray-400 dark:text-zinc-400 transition-transform {isOpen ? 'rotate-180' : ''}"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+    {/if}
 
     <!-- Dropdown menu -->
     {#if isOpen}
       <div
-        class="absolute top-full left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700
+        class="absolute bottom-full left-0 right-0 mb-1 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700
                rounded-lg shadow-xl z-50 max-h-80 overflow-y-auto"
       >
         {#each backends as backend}
@@ -155,16 +157,16 @@
           {@const models = backend.models || []}
 
           <!-- Backend header -->
-          <div class="px-3 py-2 text-xs font-semibold text-zinc-400 uppercase tracking-wide
-                      bg-zinc-900/50 sticky top-0 flex items-center gap-2 border-b border-zinc-700/50">
+          <div class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-zinc-400 uppercase tracking-wide
+                      bg-gray-50 dark:bg-zinc-900/50 sticky top-0 flex items-center gap-2 border-b border-gray-100 dark:border-zinc-700/50">
             <div
-              class="w-4 h-4 rounded flex items-center justify-center text-white text-[10px] font-bold {meta.color}"
+              class="w-3.5 h-3.5 rounded flex items-center justify-center text-white text-[9px] font-bold {meta.color}"
             >
               {meta.icon}
             </div>
             {meta.label}
             {#if !backend.installed}
-              <span class="text-zinc-500 font-normal normal-case">(not installed)</span>
+              <span class="text-gray-400 dark:text-zinc-500 font-normal normal-case">(not installed)</span>
             {/if}
           </div>
 
@@ -175,17 +177,17 @@
               type="button"
               onclick={() => handleSelect({ backendId: backend.id, model, label: "", installed: backend.installed })}
               disabled={!backend.installed}
-              class="w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors
-                     {isSelected ? 'bg-accent-500/20 text-accent-300' : 'hover:bg-zinc-700/50'}
-                     {!backend.installed ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}"
+              class="w-full px-3 py-1.5 text-left text-[11px] flex items-center gap-2 transition-colors
+                     {isSelected ? 'bg-accent-500/10 text-accent-600 dark:text-accent-300' : 'hover:bg-gray-50 dark:hover:bg-zinc-700/50'}
+                     {!backend.installed ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer text-gray-700 dark:text-zinc-200'}"
             >
-              <span class="w-4"></span>
+              <span class="w-3"></span>
               <span class="flex-1 truncate">{formatModelName(model)}</span>
               {#if i === 0}
-                <span class="text-xs text-zinc-500">default</span>
+                <span class="text-[9px] text-gray-400 dark:text-zinc-500">default</span>
               {/if}
               {#if isSelected}
-                <svg class="w-4 h-4 text-accent-500" fill="currentColor" viewBox="0 0 20 20">
+                <svg class="w-3 h-3 text-accent-500" fill="currentColor" viewBox="0 0 20 20">
                   <path
                     fill-rule="evenodd"
                     d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
@@ -217,6 +219,6 @@
 
 <style>
   .backend-selector {
-    @apply text-zinc-200;
+    /* Base styles */
   }
 </style>

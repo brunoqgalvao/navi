@@ -3,6 +3,7 @@ import { join, basename } from "path";
 import { homedir } from "os";
 import { json } from "../utils/response";
 import { projects } from "../db";
+import { agentLoader, type AgentBundle } from "../services/agent-loader";
 
 // Anthropic standard paths for agents
 const CLAUDE_GLOBAL_AGENTS = join(homedir(), ".claude", "agents");
@@ -167,10 +168,41 @@ function scanAgentDirectory(dir: string, scope: "global" | "project", projectId?
 }
 
 export async function handleAgentRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
-  // GET /api/agents - List all agents (global)
+  // GET /api/agents - List all agents (builtin + global + project if projectPath provided)
   if (url.pathname === "/api/agents" && method === "GET") {
-    const globalAgents = scanAgentDirectory(CLAUDE_GLOBAL_AGENTS, "global");
-    return json(globalAgents);
+    const projectPath = url.searchParams.get("projectPath") || process.cwd();
+
+    try {
+      // Use the unified agent loader to get all agents
+      const agentBundles = await agentLoader.loadAllAgents(projectPath);
+
+      // Convert AgentBundle to the frontend Agent format
+      const agents: Agent[] = [];
+      for (const [id, bundle] of agentBundles) {
+        agents.push({
+          id: `${bundle.source}:${id}`,
+          slug: id,
+          name: bundle.name,
+          description: bundle.description,
+          model: bundle.model,
+          tools: bundle.tools?.allowed,
+          body: bundle.prompt,
+          scope: bundle.source === "project" ? "project" : "global",
+          path: bundle.source === "builtin"
+            ? `builtin:${id}`
+            : bundle.source === "global"
+              ? join(CLAUDE_GLOBAL_AGENTS, `${id}.md`)
+              : join(projectPath, ".claude", "agents", `${id}.md`),
+        });
+      }
+
+      return json(agents);
+    } catch (e) {
+      console.error("Failed to load agents:", e);
+      // Fallback to old behavior
+      const globalAgents = scanAgentDirectory(CLAUDE_GLOBAL_AGENTS, "global");
+      return json(globalAgents);
+    }
   }
 
   // POST /api/agents - Create global agent

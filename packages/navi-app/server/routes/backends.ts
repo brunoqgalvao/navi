@@ -46,7 +46,18 @@ export async function handleBackendRoutes(
     try {
       const backends = await detectBackends();
       const installed = backends.filter((b) => b.installed);
-      return json(installed);
+      // Enrich with models and other adapter info
+      const enriched = installed.map((b) => {
+        const adapter = backendRegistry.get(b.id);
+        return {
+          ...b,
+          models: adapter?.models || [],
+          defaultModel: adapter?.defaultModel,
+          supportsCallbackPermissions: adapter?.supportsCallbackPermissions,
+          supportsResume: adapter?.supportsResume,
+        };
+      });
+      return json(enriched);
     } catch (e: any) {
       return error(e.message, 500);
     }

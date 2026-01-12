@@ -527,6 +527,10 @@ export async function handlePreviewProxyRoutes(
         responseHeaders["Content-Type"] = "text/html; charset=utf-8";
         responseHeaders["Content-Length"] = new TextEncoder().encode(html).length.toString();
         delete responseHeaders["content-encoding"]; // Remove since we decoded it
+        delete responseHeaders["etag"];
+        delete responseHeaders["last-modified"];
+        responseHeaders["cache-control"] = "no-store";
+        responseHeaders["pragma"] = "no-cache";
 
         return new Response(html, {
           status: response.status,
@@ -558,6 +562,8 @@ export async function handlePreviewProxyRoutes(
         responseHeaders["Content-Type"] = "text/css; charset=utf-8";
         responseHeaders["Content-Length"] = new TextEncoder().encode(css).length.toString();
         delete responseHeaders["content-encoding"];
+        delete responseHeaders["etag"];
+        delete responseHeaders["last-modified"];
 
         return new Response(css, {
           status: response.status,
@@ -610,6 +616,8 @@ export async function handlePreviewProxyRoutes(
 
         responseHeaders["Content-Length"] = new TextEncoder().encode(js).length.toString();
         delete responseHeaders["content-encoding"];
+        delete responseHeaders["etag"];
+        delete responseHeaders["last-modified"];
 
         return new Response(js, {
           status: response.status,

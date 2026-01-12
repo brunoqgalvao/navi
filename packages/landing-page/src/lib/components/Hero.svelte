@@ -8,8 +8,8 @@
   let submitted = $state(false);
 
   // Dynamic app info
-  let appVersion = $state('1.1.0');
-  let downloadUrl = $state('https://storage.googleapis.com/navi-releases/Navi_1.1.0_aarch64.dmg');
+  let appVersion = $state('1.8.1');
+  let downloadUrl = $state('https://storage.googleapis.com/navi-releases/Navi_1.8.1_aarch64.dmg');
 
   onMount(async () => {
     setTimeout(() => visible = true, 100);

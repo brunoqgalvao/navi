@@ -34,6 +34,9 @@
     error: { label: "Error", color: "bg-red-100 text-red-800", icon: "!" },
     permission_request: { label: "Permission", color: "bg-yellow-100 text-yellow-800", icon: "?" },
     auth_status: { label: "Auth", color: "bg-violet-100 text-violet-800", icon: "🔑" },
+    query_start: { label: "Query Start", color: "bg-blue-100 text-blue-800", icon: "▶" },
+    query_complete: { label: "Query Complete", color: "bg-emerald-100 text-emerald-800", icon: "✓" },
+    complete: { label: "Complete", color: "bg-emerald-100 text-emerald-800", icon: "✓" },
     unknown: { label: "Unknown", color: "bg-gray-100 text-gray-500", icon: "?" },
   };
 

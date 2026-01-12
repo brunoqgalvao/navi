@@ -805,13 +805,15 @@ export interface SessionSidebar {
   agent_type: string | null;
   escalation: string | null;
   deliverable: string | null;
+  // Backend selection (claude, codex, gemini)
+  backend: string | null;
 }
 
 // Columns used for sidebar display (avoids SELECT * overhead with large JSON columns)
 const SIDEBAR_COLUMNS = `id, project_id, title, claude_session_id, model, total_cost_usd,
   input_tokens, output_tokens, pinned, favorite, archived, sort_order,
   created_at, updated_at, worktree_path, worktree_branch, auto_accept_all, marked_for_review,
-  parent_session_id, root_session_id, depth, role, task, agent_status, agent_type, escalation, deliverable`;
+  parent_session_id, root_session_id, depth, role, task, agent_status, agent_type, escalation, deliverable, backend`;
 
 export const sessions = {
   // Optimized query for sidebar - excludes heavy columns like deliverable, escalation, context_excerpt

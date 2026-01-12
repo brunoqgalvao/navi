@@ -47,6 +47,10 @@
       case "MultiEdit":
         return (input.file_path || "").split("/").pop() || "";
       case "Bash":
+        // Prefer description if available (from Codex harness)
+        if (input.description) {
+          return input.description;
+        }
         const cmd = input.command || "";
         return cmd.length > 50 ? cmd.slice(0, 50) + "..." : cmd;
       case "Glob":

@@ -26,9 +26,17 @@
     const groups: { provider: string; label: string; models: Model[] }[] = [];
     const anthropicModels = models.filter(m => !m.provider || m.provider === "anthropic");
     const zaiModels = models.filter(m => m.provider === "zai");
+    const openaiModels = models.filter(m => m.provider === "openai" || m.provider === "codex");
+    const googleModels = models.filter(m => m.provider === "google" || m.provider === "gemini");
 
     if (anthropicModels.length > 0) {
       groups.push({ provider: "anthropic", label: "Claude", models: anthropicModels });
+    }
+    if (openaiModels.length > 0) {
+      groups.push({ provider: "openai", label: "OpenAI", models: openaiModels });
+    }
+    if (googleModels.length > 0) {
+      groups.push({ provider: "google", label: "Google", models: googleModels });
     }
     if (zaiModels.length > 0) {
       groups.push({ provider: "zai", label: "Z.AI", models: zaiModels });

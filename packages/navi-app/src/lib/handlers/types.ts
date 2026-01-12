@@ -49,7 +49,8 @@ export interface UntilDoneCompleteData {
   reason: string;
 }
 export interface HandlerCallbacks {
-  onSessionInit?: (sessionId: string, data: { model?: string; cwd?: string; tools?: string[]; skills?: string[] }) => void;
+  onSessionInit?: (sessionId: string, data: { claudeSessionId?: string; model?: string; cwd?: string; tools?: string[]; skills?: string[] }) => void;
+  onClaudeSessionId?: (sessionId: string, claudeSessionId: string) => void;
   onMessageUpdate?: (sessionId: string) => void;
   onStreamingStart?: (sessionId: string) => void;
   onStreamingEnd?: (sessionId: string, reason: "done" | "aborted" | "error") => void;

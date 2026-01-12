@@ -70,6 +70,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         const systemMsg = msg as SystemMessage;
         if (systemMsg.subtype === "init" && uiSessionId && uiSessionId === currentSessionId) {
           callbacks.onSessionInit?.(uiSessionId, {
+            claudeSessionId: systemMsg.claudeSessionId,
             model: systemMsg.model,
             cwd: systemMsg.cwd,
             tools: systemMsg.tools,
@@ -261,7 +262,19 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           if (doneMsg.usage) {
             callbacks.onComplete?.(uiSessionId, { costUsd: 0, usage: doneMsg.usage });
           }
+          // Notify about claudeSessionId so frontend can update session state
+          if (doneMsg.claudeSessionId) {
+            callbacks.onClaudeSessionId?.(uiSessionId, doneMsg.claudeSessionId);
+          }
           callbacks.onStreamingEnd?.(uiSessionId, "done");
+        }
+        break;
+      }
+
+      // Multi-backend start event (Codex, Gemini) - shows running status
+      case "query_start": {
+        if (uiSessionId) {
+          callbacks.onStreamingStart?.(uiSessionId);
         }
         break;
       }

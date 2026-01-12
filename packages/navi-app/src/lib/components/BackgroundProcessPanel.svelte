@@ -15,6 +15,7 @@
     type BackgroundProcessStatus,
     type BackgroundProcessEvent,
   } from "../api";
+  import { backgroundProcessEvents } from "../stores/backgroundProcessEvents";
   import { getApiBase } from "../config";
 
   interface Props {
@@ -320,11 +321,8 @@
   }
 
   // Handle WebSocket events for real-time updates
-  function handleWsMessage(event: MessageEvent) {
+  function handleBgProcessEvent(bgEvent: BackgroundProcessEvent) {
     try {
-      const data = JSON.parse(event.data);
-      if (data.type === "background_process_event") {
-        const bgEvent = data as BackgroundProcessEvent;
 
         switch (bgEvent.type) {
           case "process_started":
@@ -386,7 +384,6 @@
             }
             break;
         }
-      }
     } catch {}
   }
 

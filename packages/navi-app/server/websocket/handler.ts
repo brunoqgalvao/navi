@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions, cloudExecutions } from "../db";
+import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb } from "../db";
 import { executeInCloud, type CloudExecutionStage } from "../services/e2b-executor";
 import { sessionManager, type SessionEvent } from "../services/session-manager";
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
@@ -16,6 +16,7 @@ import { resolveClaudeCodeExecutable } from "../utils/claude-code";
 import { describePath, writeDebugLog } from "../utils/logging";
 // Multi-backend support
 import { getAdapter, type BackendId, type NormalizedEvent } from "../backends";
+import { mcpSettings } from "../services/mcp-settings";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -348,6 +349,30 @@ function setKanbanCardReview(sessionId: string, statusMessage?: string) {
 }
 
 /**
+ * Get enabled skill slugs for a project
+ * Returns slugs of skills enabled globally + skills enabled specifically for this project
+ */
+function getEnabledSkillSlugs(projectId: string): string[] {
+  const globalEnabled = enabledSkills.listGlobal();
+  const projectEnabled = enabledSkills.listByProject(projectId);
+
+  const seenIds = new Set<string>();
+  const slugs: string[] = [];
+
+  for (const e of [...globalEnabled, ...projectEnabled]) {
+    if (seenIds.has(e.skill_id)) continue;
+    seenIds.add(e.skill_id);
+
+    const skill = skillsDb.get(e.skill_id);
+    if (skill) {
+      slugs.push(skill.slug);
+    }
+  }
+
+  return slugs;
+}
+
+/**
  * Broadcast kanban card update to all clients
  */
 function broadcastKanbanUpdate(cardId: string) {
@@ -494,6 +519,9 @@ function startChildSessionQuery(
     })()),
   };
 
+  // Get enabled skills for child session (inherit from project)
+  const childEnabledSkillSlugs = config.projectId ? getEnabledSkillSlugs(config.projectId) : undefined;
+
   const inputJson = JSON.stringify({
     prompt: config.prompt,
     cwd: config.cwd,
@@ -504,6 +532,7 @@ function startChildSessionQuery(
       requireConfirmation: [],
     },
     multiSession: multiSessionContext,
+    enabledSkillSlugs: childEnabledSkillSlugs, // Inherit enabled skills from project
   });
 
   // Find worker path
@@ -1349,6 +1378,9 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
   // Don't resume if the worktree was just cleared - the old Claude session was tied to the worktree cwd
   const effectiveResumeId = worktreeWasCleared ? undefined : (claudeSessionId || session?.claude_session_id);
 
+  // Get enabled skills for this project (global + project-specific)
+  const enabledSkillSlugs = projectId ? getEnabledSkillSlugs(projectId) : undefined;
+
   const inputJson = JSON.stringify({
     prompt: effectivePrompt,
     cwd: workingDirectory,
@@ -1362,6 +1394,8 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
       requireConfirmation: permissionSettings.requireConfirmation,
     },
     multiSession: multiSessionContext,
+    mcpSettings: mcpSettings.getAll(), // Pass MCP server enabled/disabled states
+    enabledSkillSlugs, // Skills enabled for this project (undefined = load all)
   });
 
   const workerEnv = { ...process.env };
@@ -1654,7 +1688,7 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
             untilDoneSessions.delete(sessionId);
           }
 
-          sendToSession(sessionId, { type: "done", uiSessionId: sessionId, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
+          sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
           if (sessionId) {
             // Update kanban card to waiting_review (agent completed, needs user review)
             setKanbanCardReview(sessionId, "Ready for review");

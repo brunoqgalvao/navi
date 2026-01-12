@@ -154,6 +154,7 @@ export interface ErrorMessage {
 export interface DoneMessage {
   type: "done";
   uiSessionId?: string;
+  claudeSessionId?: string;
   finalMessageId?: string;
   usage?: {
     input_tokens: number;

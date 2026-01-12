@@ -208,6 +208,9 @@ export type SDKEventType =
   | "error"
   | "permission_request"
   | "auth_status"
+  | "query_start"
+  | "query_complete"
+  | "complete"
   | "unknown";
 
 export interface SDKEvent {

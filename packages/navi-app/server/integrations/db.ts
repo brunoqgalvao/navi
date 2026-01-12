@@ -6,6 +6,7 @@
 
 import { getDb, saveDb } from "../db";
 import type { Integration, IntegrationProvider, IntegrationService } from "./types";
+import { initCredentialsTable } from "./credentials";
 
 // Initialize integrations table
 export function initIntegrationsTable() {
@@ -31,6 +32,9 @@ export function initIntegrationsTable() {
   `);
 
   saveDb();
+
+  // Also initialize credentials table for API keys
+  initCredentialsTable();
 }
 
 // Helper functions

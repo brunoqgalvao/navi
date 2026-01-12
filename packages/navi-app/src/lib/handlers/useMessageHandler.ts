@@ -76,6 +76,9 @@ function getEventType(msg: ClaudeMessage): SDKEventType {
     case "permission_request": return "permission_request";
     case "stream_event": return "assistant_streaming";
     case "auth_status": return "auth_status";
+    case "query_start": return "query_start";
+    case "query_complete": return "query_complete";
+    case "complete": return "complete";
     default: return "unknown";
   }
 }
@@ -140,8 +143,6 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     getProjectId,
     callbacks: {
       onSessionInit: (sessionId, data) => {
-        // Note: claudeSessionId is set separately via SystemMessage's claudeSessionId field
-        // The onSessionInit callback only receives model/cwd/tools/skills
         sessionDebugInfo.setForSession(sessionId, {
           cwd: data.cwd || "",
           model: data.model || "",
@@ -149,8 +150,19 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
           skills: data.skills || [],
           timestamp: new Date(),
         });
+        // If claudeSessionId is present, notify the UI to update session state
+        if (data.claudeSessionId && data.model) {
+          onClaudeSessionInit?.(data.claudeSessionId, data.model);
+        }
       },
-      
+
+      onClaudeSessionId: (sessionId, claudeSessionId) => {
+        // Update session state when claudeSessionId becomes available (after query completes)
+        if (sessionId === getCurrentSessionId()) {
+          onClaudeSessionInit?.(claudeSessionId, "");
+        }
+      },
+
       onMessageUpdate: (sessionId) => {
         if (sessionId === getCurrentSessionId()) {
           scrollToBottom?.();

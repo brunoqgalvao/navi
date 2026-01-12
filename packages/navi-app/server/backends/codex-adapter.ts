@@ -405,27 +405,36 @@ export class CodexAdapter implements BackendAdapter {
           ],
         };
 
-      case "command_execution":
+      case "command_execution": {
+        // Use consistent ID for both tool_use and tool_result
+        const toolUseId = item.id || crypto.randomUUID();
         return {
           type: "assistant",
           sessionId,
           content: [
             {
               type: "tool_use",
-              id: item.id || crypto.randomUUID(),
+              id: toolUseId,
               name: "Bash",
-              input: { command: item.command },
+              input: {
+                command: item.command,
+                // Add description for cleaner display
+                description: this.extractBashDescription(item.command),
+              },
             },
             {
               type: "tool_result",
-              tool_use_id: item.id || crypto.randomUUID(),
+              tool_use_id: toolUseId,
               content: item.output || item.result || "",
               is_error: item.exit_code !== 0,
             },
           ],
         };
+      }
 
-      case "file_change":
+      case "file_change": {
+        // Use consistent ID for both tool_use and tool_result
+        const fileToolUseId = item.id || crypto.randomUUID();
         const toolName = item.action === "create" ? "Write" : "Edit";
         return {
           type: "assistant",
@@ -433,7 +442,7 @@ export class CodexAdapter implements BackendAdapter {
           content: [
             {
               type: "tool_use",
-              id: item.id || crypto.randomUUID(),
+              id: fileToolUseId,
               name: toolName,
               input: {
                 file_path: item.path,
@@ -442,32 +451,36 @@ export class CodexAdapter implements BackendAdapter {
             },
             {
               type: "tool_result",
-              tool_use_id: item.id || crypto.randomUUID(),
+              tool_use_id: fileToolUseId,
               content: `${item.action}: ${item.path}`,
             },
           ],
         };
+      }
 
-      case "web_search":
+      case "web_search": {
+        // Use consistent ID for both tool_use and tool_result
+        const searchToolUseId = item.id || crypto.randomUUID();
         return {
           type: "assistant",
           sessionId,
           content: [
             {
               type: "tool_use",
-              id: item.id || crypto.randomUUID(),
+              id: searchToolUseId,
               name: "WebSearch",
               input: { query: item.query },
             },
             {
               type: "tool_result",
-              tool_use_id: item.id || crypto.randomUUID(),
+              tool_use_id: searchToolUseId,
               content: item.results
                 ? JSON.stringify(item.results, null, 2)
                 : "Search completed",
             },
           ],
         };
+      }
 
       case "plan_update":
         // Plan updates shown as assistant messages
@@ -513,6 +526,80 @@ export class CodexAdapter implements BackendAdapter {
         .filter((c): c is NormalizedContentBlock => c !== null);
     }
     return [{ type: "text", text: JSON.stringify(content) }];
+  }
+
+  /**
+   * Extract a clean description from a bash command for display purposes.
+   * Converts raw commands like "rg -n 'foo' packages/" into "Search for 'foo'"
+   */
+  private extractBashDescription(command: string): string {
+    if (!command) return "";
+
+    // Clean up shell wrapper if present
+    const cleanCmd = command
+      .replace(/^\/bin\/\w+\s+-lc\s+['"]?/, "")
+      .replace(/['"]$/, "")
+      .trim();
+
+    // Extract first command and arguments
+    const parts = cleanCmd.split(/\s+/);
+    const baseCmd = parts[0]?.split("/").pop() || "";
+
+    // Map common commands to friendly descriptions
+    const cmdDescriptions: Record<string, (args: string[]) => string> = {
+      rg: (args) => {
+        const pattern = args.find((a) => !a.startsWith("-") && a !== "rg");
+        return pattern ? `Search for "${pattern}"` : "Search files";
+      },
+      grep: (args) => {
+        const pattern = args.find((a) => !a.startsWith("-") && a !== "grep");
+        return pattern ? `Search for "${pattern}"` : "Search files";
+      },
+      cat: (args) => {
+        const file = args.find((a) => !a.startsWith("-"))?.split("/").pop();
+        return file ? `Read ${file}` : "Read file";
+      },
+      ls: (args) => {
+        const dir = args.find((a) => !a.startsWith("-"))?.split("/").pop();
+        return dir ? `List ${dir}` : "List directory";
+      },
+      cd: (args) => {
+        const dir = args[1]?.split("/").pop();
+        return dir ? `Change to ${dir}` : "Change directory";
+      },
+      mkdir: () => "Create directory",
+      rm: () => "Remove files",
+      mv: () => "Move files",
+      cp: () => "Copy files",
+      git: (args) => {
+        const subCmd = args[1];
+        return subCmd ? `git ${subCmd}` : "Git operation";
+      },
+      npm: (args) => {
+        const subCmd = args[1];
+        return subCmd ? `npm ${subCmd}` : "npm operation";
+      },
+      bun: (args) => {
+        const subCmd = args[1];
+        return subCmd ? `bun ${subCmd}` : "bun operation";
+      },
+      node: (args) => {
+        const file = args.find((a) => !a.startsWith("-"))?.split("/").pop();
+        return file ? `Run ${file}` : "Run Node.js";
+      },
+      python: (args) => {
+        const file = args.find((a) => !a.startsWith("-"))?.split("/").pop();
+        return file ? `Run ${file}` : "Run Python";
+      },
+    };
+
+    const descFn = cmdDescriptions[baseCmd];
+    if (descFn) {
+      return descFn(parts);
+    }
+
+    // Default: show truncated command
+    return cleanCmd.length > 50 ? cleanCmd.slice(0, 47) + "..." : cleanCmd;
   }
 }
 

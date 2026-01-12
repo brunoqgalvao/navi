@@ -317,8 +317,8 @@
     </div>
   {/if}
 
-  <!-- Scrollable content area -->
-  <div class="flex-1 overflow-y-auto">
+  <!-- Content area - scrolling handled by parent container in App.svelte -->
+  <div class="flex-1">
     <div class="max-w-3xl mx-auto w-full md:pt-6 space-y-3 pb-64 px-4" style="overflow-anchor: none;">
     <!-- Background process badge -->
     <div class="flex justify-center">

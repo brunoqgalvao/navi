@@ -102,6 +102,8 @@
       case "MultiEdit":
         return getFileName(input.file_path || "");
       case "Bash":
+        // Prefer description if available (from Codex harness)
+        if (input.description) return input.description;
         return formatCommand(input.command || "", 50);
       case "Glob":
         return input.pattern || "";
