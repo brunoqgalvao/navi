@@ -32,9 +32,6 @@ class BaseRegistry<T extends { id?: string; type?: string; name?: string }>
 
   register(item: T): void {
     const id = String(item[this.idField]);
-    if (this.items.has(id)) {
-      console.warn(`[Registry] ${id} already registered, overwriting`);
-    }
     this.items.set(id, item);
   }
 
@@ -252,10 +249,10 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     id: "email",
     name: "Email",
     icon: "mail",
-    description: "Navi's email inboxes (registered dynamically)",
+    description: "Navi's email inboxes (experimental)",
     panelMode: "email",
     requiresProject: false,
-    defaultEnabled: false, // Registered by initBrowserEmail()
+    defaultEnabled: false, // @experimental - AgentMail integration
     defaultOrder: 100,
   },
   "browser-preview": {
@@ -282,7 +279,6 @@ let initialized = false;
  */
 export function initializeRegistries(): void {
   if (initialized) {
-    console.warn("[Registries] Already initialized");
     return;
   }
 
@@ -295,7 +291,6 @@ export function initializeRegistries(): void {
   // Dashboard widgets are registered by the dashboard feature
 
   initialized = true;
-  console.log("[Registries] Initialized with", extensionRegistry.getAll().length, "extensions");
 }
 
 /**

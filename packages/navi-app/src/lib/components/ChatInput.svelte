@@ -7,6 +7,7 @@
   import ChatReferenceChip from "./ChatReferenceChip.svelte";
   import AudioRecorder from "./AudioRecorder.svelte";
   import CloudExecutionToggle from "./CloudExecutionToggle.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import { getApiBase } from "../config";
 
   interface FileEntry {
@@ -1452,15 +1453,16 @@
         </div>
       {:else if isGitRepo && isNewChat}
         <!-- Parallel Branch toggle (only for new chats in git repos) -->
-        <button
-          onclick={handleToggle}
-          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {worktreeEnabled ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
-          title={worktreeEnabled ? 'Parallel branch: ON - working in isolated copy' : 'Parallel branch: work on an isolated copy'}
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 4.97-4.03 9-9 9"/>
-          </svg>
-        </button>
+        <Tooltip text={worktreeEnabled ? 'Parallel Branch: ON' : 'Parallel Branch'} position="top">
+          <button
+            onclick={handleToggle}
+            class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {worktreeEnabled ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 4.97-4.03 9-9 9"/>
+            </svg>
+          </button>
+        </Tooltip>
       {/if}
 
       <!-- Backend Selector (only for new chats) -->
@@ -1549,43 +1551,46 @@
       {/if}
 
       <!-- Plan Mode toggle -->
-      <button
-        onclick={() => planMode.toggle()}
-        class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {$planMode ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
-        title={$planMode ? 'Plan Mode: ON - Claude plans before acting' : 'Plan Mode: Claude plans before executing'}
-      >
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
-        </svg>
-      </button>
+      <Tooltip text={$planMode ? 'Plan Mode: ON' : 'Plan Mode'} position="top">
+        <button
+          onclick={() => planMode.toggle()}
+          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {$planMode ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+          </svg>
+        </button>
+      </Tooltip>
 
       <!-- Loop/Until Done toggle -->
-      <button
-        onclick={() => onToggleUntilDone?.()}
-        class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {untilDoneEnabled ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
-        title={untilDoneEnabled ? 'Loop mode: ON - Claude keeps working until done' : 'Loop mode: auto-continue until task complete'}
-      >
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-        </svg>
-      </button>
+      <Tooltip text={untilDoneEnabled ? 'Loop Mode: ON' : 'Loop Mode'} position="top">
+        <button
+          onclick={() => onToggleUntilDone?.()}
+          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {untilDoneEnabled ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
+      </Tooltip>
 
       <!-- Skills dropdown -->
       <div class="relative">
-        <button
-          onclick={() => showSkillsMenu = !showSkillsMenu}
-          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {activeSkills.length > 0 ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
-          title={activeSkills.length > 0 ? `Skills: ${activeSkills.length} active` : 'Skills: none active'}
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
-          </svg>
-          {#if activeSkills.length > 0}
-            <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-purple-500 dark:bg-purple-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-              {activeSkills.length}
-            </span>
-          {/if}
-        </button>
+        <Tooltip text={activeSkills.length > 0 ? `Skills (${activeSkills.length})` : 'Skills'} position="top">
+          <button
+            onclick={() => showSkillsMenu = !showSkillsMenu}
+            class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {activeSkills.length > 0 ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            {#if activeSkills.length > 0}
+              <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-purple-500 dark:bg-purple-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                {activeSkills.length}
+              </span>
+            {/if}
+          </button>
+        </Tooltip>
 
         {#if showSkillsMenu}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1628,20 +1633,21 @@
 
       <!-- MCP Servers dropdown -->
       <div class="relative">
-        <button
-          onclick={() => showMcpMenu = !showMcpMenu}
-          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {enabledMcpCount > 0 ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-200 dark:hover:bg-cyan-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
-          title={enabledMcpCount > 0 ? `MCP Servers: ${enabledMcpCount} active` : 'MCP Servers: none active'}
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
-          </svg>
-          {#if enabledMcpCount > 0}
-            <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-cyan-500 dark:bg-cyan-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-              {enabledMcpCount}
-            </span>
-          {/if}
-        </button>
+        <Tooltip text={enabledMcpCount > 0 ? `MCP (${enabledMcpCount})` : 'MCP Servers'} position="top">
+          <button
+            onclick={() => showMcpMenu = !showMcpMenu}
+            class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {enabledMcpCount > 0 ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-200 dark:hover:bg-cyan-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+            </svg>
+            {#if enabledMcpCount > 0}
+              <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-cyan-500 dark:bg-cyan-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                {enabledMcpCount}
+              </span>
+            {/if}
+          </button>
+        </Tooltip>
 
         {#if showMcpMenu}
           <!-- svelte-ignore a11y_no_static_element_interactions -->

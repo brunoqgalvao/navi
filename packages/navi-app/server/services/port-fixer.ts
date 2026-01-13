@@ -548,7 +548,6 @@ Respond with EXACTLY one JSON object (no markdown, no explanation):
       try {
         await this.killProcess(portInfo.pid);
         cleaned++;
-        console.log(`[PortFixer] Cleaned up port ${portInfo.port} (PID: ${portInfo.pid})`);
       } catch {
         // Ignore errors
       }

@@ -31,7 +31,6 @@
         sessionId &&
         !triggeredSessions.has(sessionId) &&
         !showSuggestion) {
-      console.log("[TitleSuggestion] Triggering for session:", sessionId);
       triggeredSessions.add(sessionId);
       generateSuggestion();
     }
@@ -99,7 +98,6 @@
 
   async function generateSuggestion() {
     const titleToCheck = currentTitle || "New Chat";
-    console.log("[TitleSuggestion] generateSuggestion called, currentTitle:", titleToCheck);
     const recentMessages = messages
       .filter(m => !m.parentToolUseId)
       .slice(-6);
@@ -127,8 +125,7 @@ Bad responses: "Debug React", Current title: ..., The new title should be...`,
       });
       
       const result = response.result.trim();
-      console.log("[TitleSuggestion] LLM response:", result);
-      
+
       // Extract just the title - take first line and clean it up
       let title = result.split('\n')[0].trim();
       
@@ -149,9 +146,6 @@ Bad responses: "Debug React", Current title: ..., The new title should be...`,
         }
         suggestedTitle = title;
         showSuggestion = true;
-        console.log("[TitleSuggestion] Showing suggestion:", suggestedTitle);
-      } else {
-        console.log("[TitleSuggestion] No change needed or invalid response");
       }
     } catch (e) {
       console.error("[TitleSuggestion] Failed to generate suggestion:", e);
@@ -160,7 +154,6 @@ Bad responses: "Debug React", Current title: ..., The new title should be...`,
 
   function apply() {
     if (suggestedTitle) {
-      console.log("[TitleSuggestion] Applying title:", suggestedTitle);
       onApply(suggestedTitle);
       showSuggestion = false;
       suggestedTitle = null;
@@ -168,17 +161,14 @@ Bad responses: "Debug React", Current title: ..., The new title should be...`,
   }
 
   function dismiss() {
-    console.log("[TitleSuggestion] Dismissed");
     showSuggestion = false;
     suggestedTitle = null;
   }
 
   export function triggerSuggestion(forSessionId?: string) {
     const targetSessionId = forSessionId || sessionId;
-    console.log("[TitleSuggestion] Manual trigger requested for session:", targetSessionId);
     if (!targetSessionId) return;
     if (targetSessionId !== sessionId) {
-      console.log("[TitleSuggestion] Ignoring - not the current session");
       return;
     }
     // Manual trigger always works, but mark as triggered so auto-trigger won't fire again

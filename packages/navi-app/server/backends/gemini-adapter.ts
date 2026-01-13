@@ -184,20 +184,15 @@ export class GeminiAdapter implements BackendAdapter {
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
-          console.log("[GeminiAdapter] Raw event:", JSON.stringify(event).slice(0, 200));
           const normalized = this.normalizeGeminiEvent(event, options.sessionId);
           if (normalized) {
-            console.log("[GeminiAdapter] Normalized:", normalized.type);
             eventQueue.push(normalized);
             resolveNext?.();
-          } else {
-            console.log("[GeminiAdapter] Skipped event (null normalized)");
           }
         } catch (e) {
           // Non-JSON output - might be progress indicator or plain text
           // Treat as assistant text message
           if (line.trim()) {
-            console.log("[GeminiAdapter] Non-JSON output:", line.slice(0, 100));
             eventQueue.push({
               type: "assistant",
               sessionId: options.sessionId,
@@ -233,11 +228,8 @@ export class GeminiAdapter implements BackendAdapter {
     });
 
     child.on("close", (code) => {
-      console.log("[GeminiAdapter] Process closed with code:", code);
-
       // Process remaining buffer
       if (buffer.trim()) {
-        console.log("[GeminiAdapter] Processing remaining buffer:", buffer.slice(0, 100));
         try {
           const event = JSON.parse(buffer);
           const normalized = this.normalizeGeminiEvent(event, options.sessionId);

@@ -72,7 +72,6 @@ function getOAuthInterceptScript(): string {
   }
 
   function openOAuthPopup(url) {
-    console.log('[Navi] Opening OAuth in popup:', url);
     const width = 500;
     const height = 700;
     const left = (screen.width - width) / 2;
@@ -173,7 +172,7 @@ function getOAuthInterceptScript(): string {
       // Can't replace location, use navigation API fallback
     }
   } catch(e) {
-    console.log('[Navi] Could not proxy location:', e);
+    // Could not proxy location
   }
 
   // Fallback: Use Navigation API if available (modern browsers)
@@ -201,8 +200,6 @@ function getOAuthInterceptScript(): string {
   if (window.parent !== window) {
     window.parent.postMessage({ type: 'navi:oauthInterceptActive' }, '*');
   }
-
-  console.log('[Navi] OAuth intercept active - OAuth logins will open in popup');
 })();
 </script>
 `;

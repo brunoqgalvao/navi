@@ -56,7 +56,6 @@ export async function getSDK(): Promise<typeof import("@anthropic-ai/claude-agen
 
     if (sdkPath) {
       // Load from Tauri resources
-      console.log(`[SDK Loader] Loading SDK from: ${sdkPath}`);
       sdkModule = await import(sdkPath);
     } else {
       // Normal import from node_modules (development mode)

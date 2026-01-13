@@ -31,7 +31,6 @@
       fullPath = `${basePath}/${src}`;
     }
     const resolvedUrl = `${getApiBase()}/fs/read?path=${encodeURIComponent(fullPath)}&raw=true`;
-    console.log("[MediaDisplay] Resolved media URL:", resolvedUrl, "from src:", src, "basePath:", basePath);
     return resolvedUrl;
   }
 

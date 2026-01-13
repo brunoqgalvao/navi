@@ -390,8 +390,6 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
         expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
       });
 
-      console.log(`[Auth] User created: ${body.email} with Navi email: ${naviEmail}`);
-
       const response = json({
         id: user.id,
         email: user.email,
@@ -448,8 +446,6 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
         createdAt: Date.now(),
         expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
       });
-
-      console.log(`[Auth] User signed in: ${body.email}`);
 
       const response = json({
         id: foundUser.id,

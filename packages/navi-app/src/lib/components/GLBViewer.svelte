@@ -92,8 +92,6 @@
     dracoLoader.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.6/");
     loader.setDRACOLoader(dracoLoader);
 
-    console.log("[GLBViewer] Loading from:", src);
-
     loader.load(
       src,
       (gltf) => {
@@ -140,7 +138,6 @@
         const percent = progress.lengthComputable
           ? Math.round((progress.loaded / progress.total) * 100)
           : 0;
-        console.log(`Loading GLB: ${percent}%`);
       },
       (err) => {
         console.error("[GLBViewer] Error loading GLB:", err);

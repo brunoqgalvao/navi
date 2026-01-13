@@ -139,8 +139,6 @@ ${docUrl ? `\n[${analysis.library} Docs](${docUrl})` : ""}` : ""}`,
     };
 
     if (docUrl) {
-      console.log(`[ErrorDetector] User wants ${library} docs: ${docUrl}`);
-
       // Emit event for UI to handle
       if (typeof window !== "undefined") {
         window.dispatchEvent(

@@ -776,6 +776,7 @@
 
   let showConfetti = $state(false);
   let showWelcome = $state(false);
+  let startTourAfterWelcome = $state(false);
   let titleSuggestionRef: TitleSuggestion | null = $state(null);
 
   // TOUR_STEPS and HOTKEYS are now imported from ./lib/constants
@@ -1007,8 +1008,9 @@
   function handleOnboardingComplete() {
     showWelcome = true;
     onboardingComplete.complete();
+    // Mark that we should start the tour after the welcome animation finishes
     if (!$tour.completedTours.includes("main")) {
-      setTimeout(() => tour.start("main"), 300);
+      startTourAfterWelcome = true;
     }
   }
 
@@ -3275,7 +3277,14 @@ Please walk me through the setup step by step. When I have the credentials, save
 <svelte:window onmousemove={handleMouseMove} onmouseup={() => { stopResizingRight(); stopResizingLeft(); }} onkeydown={handleGlobalKeydown} />
 
 {#if showWelcome}
-  <WelcomeScreen onComplete={() => showWelcome = false} />
+  <WelcomeScreen onComplete={() => {
+    showWelcome = false;
+    // Start the tour after welcome animation completes, not during
+    if (startTourAfterWelcome) {
+      startTourAfterWelcome = false;
+      setTimeout(() => tour.start("main"), 300);
+    }
+  }} />
 {/if}
 
 <Confetti trigger={showConfetti} onComplete={() => showConfetti = false} />

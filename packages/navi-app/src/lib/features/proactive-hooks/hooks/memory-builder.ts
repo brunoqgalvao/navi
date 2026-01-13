@@ -169,8 +169,6 @@ These will be saved to \`.claude/MEMORY.md\` and automatically loaded in future 
       if (!response.ok) {
         throw new Error(`Failed to save memory: ${await response.text()}`);
       }
-
-      console.log(`[MemoryBuilder] Saved ${entries.length} memory entries`);
     } catch (error) {
       console.error("[MemoryBuilder] Failed to save memory:", error);
       throw error;

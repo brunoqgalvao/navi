@@ -68,7 +68,6 @@ export async function handleAudioRoutes(url: URL, method: string, req: Request):
       const audioBuffer = await audioFile.arrayBuffer();
       await fs.writeFile(filepath, new Uint8Array(audioBuffer));
 
-      console.log(`Audio backup saved: ${filepath}`);
       return json({ path: filepath });
     } catch (e) {
       console.error("Audio save error:", e);

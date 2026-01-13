@@ -120,8 +120,6 @@ This skill would be saved to \`.claude/skills/${analysis.skillName}/\` and can b
       if (!response.ok) {
         throw new Error(`Failed to generate skill: ${await response.text()}`);
       }
-
-      console.log(`[SkillScout] Skill "${skillName}" created successfully`);
     } catch (error) {
       console.error("[SkillScout] Failed to create skill:", error);
       throw error;

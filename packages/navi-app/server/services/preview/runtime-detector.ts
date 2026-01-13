@@ -86,23 +86,19 @@ export async function detectRuntime(): Promise<RuntimeInfo> {
   // Check in order of preference
   const orbstack = await checkOrbStack();
   if (orbstack) {
-    console.log(`[Preview] Detected OrbStack ${orbstack.version} (${orbstack.running ? "running" : "stopped"})`);
     return orbstack;
   }
 
   const colima = await checkColima();
   if (colima) {
-    console.log(`[Preview] Detected Colima ${colima.version} (${colima.running ? "running" : "stopped"})`);
     return colima;
   }
 
   const docker = await checkDocker();
   if (docker) {
-    console.log(`[Preview] Detected Docker ${docker.version} (${docker.running ? "running" : "stopped"})`);
     return docker;
   }
 
-  console.log("[Preview] No container runtime detected");
   return { runtime: "none", running: false };
 }
 
@@ -110,12 +106,10 @@ export async function detectRuntime(): Promise<RuntimeInfo> {
  * Start Colima with recommended settings for preview
  */
 export async function startColima(): Promise<boolean> {
-  console.log("[Preview] Starting Colima...");
   try {
     await execAsync("colima start --cpu 4 --memory 4 --disk 60", {
       timeout: 120000, // 2 minutes timeout for startup
     });
-    console.log("[Preview] Colima started successfully");
     return true;
   } catch (error: any) {
     console.error("[Preview] Failed to start Colima:", error.message);

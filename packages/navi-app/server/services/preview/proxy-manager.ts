@@ -48,7 +48,6 @@ export class ProxyManager {
   async start(): Promise<void> {
     // Check if already running
     if (await this.isRunning()) {
-      console.log("[Preview] Traefik proxy already running");
       return;
     }
 
@@ -58,8 +57,6 @@ export class ProxyManager {
     } catch {
       // Ignore - container might not exist
     }
-
-    console.log(`[Preview] Starting Traefik proxy on port ${this.config.proxyPort}...`);
 
     const args = [
       "run", "-d",
@@ -105,8 +102,6 @@ export class ProxyManager {
 
     // Wait for Traefik to be ready
     await this.waitForReady();
-
-    console.log("[Preview] Traefik proxy started successfully");
   }
 
   /**
@@ -116,7 +111,6 @@ export class ProxyManager {
     try {
       await docker(`stop ${TRAEFIK_CONTAINER_NAME}`, 10000);
       await docker(`rm ${TRAEFIK_CONTAINER_NAME}`, 5000);
-      console.log("[Preview] Traefik proxy stopped");
     } catch {
       // Ignore errors
     }
@@ -153,8 +147,6 @@ export class ProxyManager {
 
       await new Promise((r) => setTimeout(r, 500));
     }
-
-    console.warn("[Preview] Traefik may not be fully ready (timeout)");
   }
 
   /**

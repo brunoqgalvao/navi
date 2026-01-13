@@ -92,17 +92,16 @@ export function initBrowserEmail() {
   );
 
   // Register email extension to the features/extensions registry
+  // @experimental - Email is disabled by default (AgentMail integration)
   const emailExtension: Extension = {
     id: "email",
     name: "Email",
     icon: "mail",
-    description: "Navi's email inboxes",
+    description: "Navi's email inboxes (experimental)",
     panelMode: "email" as any,
     requiresProject: false,
-    defaultEnabled: true,
+    defaultEnabled: false,
     defaultOrder: 7,
   };
   extensionRegistry.register(emailExtension);
-
-  console.log("[Browser+Email] Features initialized");
 }

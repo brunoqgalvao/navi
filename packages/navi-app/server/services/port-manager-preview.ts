@@ -123,7 +123,6 @@ class PortManagerPreviewService {
               // Verify it has a dev script
               const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
               if (pkg.scripts?.dev || pkg.scripts?.start) {
-                console.log(`[PortManagerPreview] Found package.json in: ${entry}`);
                 return subPath;
               }
             }

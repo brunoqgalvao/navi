@@ -126,7 +126,6 @@ class PreviewService {
       // If running or starting, return as-is (don't create duplicate!)
       if (existing.status === "running" || existing.status === "starting") {
         existing.lastAccessedAt = Date.now();
-        console.log(`[Preview] Reusing existing preview for branch ${branch}: ${existing.url}`);
         return { preview: existing };
       }
       // Otherwise, clean it up and create new
@@ -141,7 +140,6 @@ class PreviewService {
     // Detect framework
     // Force npm for container since Alpine only has npm installed
     const framework = await detectFramework(projectPath, true);
-    console.log(`[Preview] Detected: ${describeFramework(framework)}`);
 
     // Create container (will auto-detect config if not cached)
     const { container, detectedConfig } = await this.containerManager.createContainer(
@@ -328,7 +326,6 @@ class PreviewService {
     }
 
     if (oldest) {
-      console.log(`[Preview] Evicting oldest container: ${oldest.slug}`);
       await this.stopPreview(oldest.id);
     }
   }
@@ -370,7 +367,6 @@ class PreviewService {
 
       if (healthy) {
         current.status = "running";
-        console.log(`[Preview] Container ${current.slug} is healthy at ${current.url}`);
         return;
       }
 
@@ -419,7 +415,6 @@ class PreviewService {
           container.status === "running" &&
           idleTime > this.state.config.idleTimeoutMs
         ) {
-          console.log(`[Preview] Pausing idle container: ${container.slug}`);
           await this.pausePreview(id);
         }
 
@@ -428,7 +423,6 @@ class PreviewService {
           container.status === "paused" &&
           idleTime > this.state.config.cleanupTimeoutMs
         ) {
-          console.log(`[Preview] Removing stale container: ${container.slug}`);
           await this.stopPreview(id);
         }
       }
@@ -445,9 +439,6 @@ class PreviewService {
         );
 
         if (status !== "running") {
-          console.log(
-            `[Preview] Container ${container.slug} status changed to ${status}`
-          );
           container.status = status || "error";
         }
       }
@@ -457,9 +448,6 @@ class PreviewService {
   private async restoreContainers(): Promise<void> {
     try {
       const containerIds = await this.containerManager.listContainers();
-      console.log(
-        `[Preview] Found ${containerIds.length} existing preview containers`
-      );
 
       // For now, just clean them up on startup
       // TODO: Could restore state from container labels

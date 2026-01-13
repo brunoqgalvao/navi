@@ -16,18 +16,17 @@
 
   function handleInteraction(event: CustomEvent) {
     const { type, target, data } = event.detail;
-    
+
     // Log interactions for debugging - in a real app, you'd handle these appropriately
-    console.log('Generative UI Interaction:', { type, target, data });
-    
+
     // Example: Handle form submissions
     if (type === 'form_submit') {
-      console.log('Form submitted with data:', data);
+      // Form submitted with data
     }
-    
+
     // Example: Handle button clicks
     if (type === 'click' && target?.tagName === 'BUTTON') {
-      console.log('Button clicked:', target.textContent);
+      // Button clicked
     }
   }
 

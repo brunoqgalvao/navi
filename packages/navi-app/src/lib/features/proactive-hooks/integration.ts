@@ -44,21 +44,18 @@ function registerBuiltInHooks(): void {
  */
 export async function setupProactiveHooks(): Promise<boolean> {
   if (initialized) {
-    console.warn("[ProactiveHooks] Already initialized");
     return true;
   }
 
   // Check if server has API key configured
   const status = await checkHooksStatus();
   if (!status.enabled) {
-    console.log("[ProactiveHooks] Disabled - no API key configured");
     return false;
   }
 
   registerBuiltInHooks();
   initialized = true;
 
-  console.log("[ProactiveHooks] System initialized with 3 hooks");
   return true;
 }
 

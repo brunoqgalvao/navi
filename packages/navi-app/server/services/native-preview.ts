@@ -1108,7 +1108,6 @@ class NativePreviewService {
 
     // If same workspace (e.g., different branch of same project), auto-kill seamlessly
     if (isSameWorkspace && processInfo.isDevServer) {
-      console.log(`[NativePreview] Same workspace detected, auto-killing process on port ${targetPort}...`);
       await this.forceKillPort(targetPort);
 
       // Verify port is now free
@@ -1198,10 +1197,8 @@ class NativePreviewService {
 
     if (action === "use_alternative") {
       portToUse = alternativePort;
-      console.log(`[NativePreview] User chose alternative port ${portToUse}`);
     } else {
       // Kill the conflicting process and use the original port
-      console.log(`[NativePreview] User chose to kill process on port ${requestedPort}`);
       await this.forceKillPort(requestedPort);
 
       // Verify the port is now free
@@ -1233,11 +1230,9 @@ class NativePreviewService {
   ): Promise<PreviewStartResult> {
     // Reserve the port
     this.portReservations.set(port, sessionId);
-    console.log(`[NativePreview] Reserved port ${port} for session ${sessionId}`);
 
     // Build dev command with port override
     const devCommand = this.buildDevCommand(framework, port);
-    console.log(`[NativePreview] Command: ${devCommand}`);
 
     // Spawn process (detached so we can kill the process group)
     const childProcess = spawn(devCommand, {
@@ -1289,7 +1284,6 @@ class NativePreviewService {
 
     // Handle process exit
     childProcess.on("exit", (code) => {
-      console.log(`[NativePreview] Process exited with code ${code} for session ${sessionId}`);
       const existingPreview = this.previews.get(sessionId);
       if (existingPreview) {
         existingPreview.status = "error";
@@ -1298,7 +1292,6 @@ class NativePreviewService {
         setTimeout(() => {
           const preview = this.previews.get(sessionId);
           if (preview?.status === "error") {
-            console.log(`[NativePreview] Auto-removing crashed preview for session ${sessionId}`);
             this.previews.delete(sessionId);
             // Also clean up any port reservations
             for (const [port, reservedSession] of this.portReservations.entries()) {
@@ -1316,7 +1309,6 @@ class NativePreviewService {
 
     // Clear the port reservation
     this.portReservations.delete(port);
-    console.log(`[NativePreview] Active previews: ${this.previews.size}`);
 
     // Start health check polling
     this.pollHealth(sessionId, projectId);
@@ -1346,7 +1338,6 @@ class NativePreviewService {
   ): Promise<{ port: number; action?: string; reason?: string }> {
     // CRITICAL: Never use or kill reserved Navi ports
     if (RESERVED_PORTS.has(targetPort)) {
-      console.log(`[NativePreview] Port ${targetPort} is reserved for Navi services, finding new port...`);
       const newPort = await this.findSafePort(targetPort + 1);
       return {
         port: newPort,
@@ -1358,7 +1349,6 @@ class NativePreviewService {
     // Check if port is reserved by another session (active preview or pending reservation)
     const reservedBy = this.isPortReservedByOther(targetPort, currentSessionId);
     if (reservedBy) {
-      console.log(`[NativePreview] Port ${targetPort} is reserved by session ${reservedBy}, finding new port...`);
       const newPort = await this.findSafePort(targetPort + 1);
       return {
         port: newPort,
@@ -1375,8 +1365,6 @@ class NativePreviewService {
       return { port: targetPort };
     }
 
-    console.log(`[NativePreview] Port ${targetPort} is in use by ${conflict.conflictingProcess.process} (PID: ${conflict.conflictingProcess.pid})`);
-
     // Double-check: don't kill if port is reserved (belt and suspenders)
     if (RESERVED_PORTS.has(targetPort)) {
       const newPort = await this.findSafePort(targetPort + 1);
@@ -1389,7 +1377,6 @@ class NativePreviewService {
 
     // Kill external dev servers - they're safe to kill
     if (conflict.conflictingProcess.isDevServer || !conflict.conflictingProcess.isSystemProcess) {
-      console.log(`[NativePreview] Killing external process on port ${targetPort}...`);
       await this.forceKillPort(targetPort);
 
       // Verify port is now free
@@ -1401,7 +1388,6 @@ class NativePreviewService {
           reason: `Killed ${conflict.conflictingProcess.process} (PID: ${conflict.conflictingProcess.pid})`,
         };
       }
-      console.warn(`[NativePreview] Port ${targetPort} still in use after kill attempt`);
     }
 
     // If we couldn't free the port, find another one (skipping reserved ports)
@@ -1429,8 +1415,6 @@ class NativePreviewService {
 
     const { execSync } = await import("child_process");
 
-    console.log(`[NativePreview] Killing process on port ${port}...`);
-
     try {
       // Get PIDs using this specific port (LISTEN state only to be surgical)
       const pidsOutput = execSync(
@@ -1440,17 +1424,13 @@ class NativePreviewService {
       const pids = pidsOutput.trim().split("\n").filter(p => p && /^\d+$/.test(p));
 
       if (pids.length === 0) {
-        console.log(`[NativePreview] No process found listening on port ${port}`);
         return;
       }
-
-      console.log(`[NativePreview] Found PIDs on port ${port}: ${pids.join(", ")}`);
 
       // Step 1: Try graceful SIGTERM first
       for (const pid of pids) {
         try {
           execSync(`kill -TERM ${pid} 2>/dev/null || true`, { stdio: "pipe" });
-          console.log(`[NativePreview] Sent SIGTERM to PID ${pid}`);
         } catch {
           // Process might already be dead
         }
@@ -1472,7 +1452,6 @@ class NativePreviewService {
         for (const pid of remainingPids) {
           try {
             execSync(`kill -9 ${pid} 2>/dev/null || true`, { stdio: "pipe" });
-            console.log(`[NativePreview] Sent SIGKILL to PID ${pid}`);
           } catch {
             // Ignore
           }
@@ -1484,13 +1463,10 @@ class NativePreviewService {
       const start = Date.now();
       while (Date.now() - start < maxWait) {
         if (await this.isPortAvailable(port, net)) {
-          console.log(`[NativePreview] Port ${port} is now free`);
           return;
         }
         await new Promise(resolve => setTimeout(resolve, 200));
       }
-
-      console.warn(`[NativePreview] Port ${port} may still be in use after kill`);
     } catch (e) {
       console.error(`[NativePreview] Error killing port ${port}:`, e);
     }
@@ -1512,13 +1488,10 @@ class NativePreviewService {
 
       if (result) {
         // Port is in use by process(es)
-        const pids = result.split("\n").filter(p => p);
-        console.log(`[NativePreview] Port ${port} in use by PIDs: ${pids.join(", ")} (lsof check)`);
         return false;
       }
     } catch (e) {
       // lsof failed, fall through to socket check
-      console.log(`[NativePreview] lsof check failed for port ${port}, using socket check`);
     }
 
     // Method 2: Try to bind to the port on multiple interfaces
@@ -1551,7 +1524,6 @@ class NativePreviewService {
       });
 
       if (inUse) {
-        console.log(`[NativePreview] Port ${port} in use on ${host} (socket check)`);
         return false;
       }
     }
@@ -1619,7 +1591,6 @@ class NativePreviewService {
       // Check if this preview is still active for this session
       const currentPreview = this.previews.get(targetSessionId);
       if (!currentPreview) {
-        console.log(`[NativePreview] Health poll cancelled - preview removed for session ${targetSessionId}`);
         return;
       }
 
@@ -1640,7 +1611,6 @@ class NativePreviewService {
 
         if (response.ok || response.status < 500) {
           currentPreview.status = "running";
-          console.log(`[NativePreview] Server is healthy on port ${currentPreview.port} for session ${targetSessionId}`);
           return;
         }
       } catch {

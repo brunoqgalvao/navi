@@ -200,7 +200,6 @@
             class="w-full p-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
             onclick={() => {
               // TODO: Open email detail view or inject into chat
-              console.log("View email:", email.message_id);
             }}
           >
             <div class="flex items-start gap-3">

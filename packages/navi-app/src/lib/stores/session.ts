@@ -43,7 +43,6 @@ function evictOldSessions(map: Map<string, ChatMessage[]>, paginationMap: Map<st
     if (idx !== -1) {
       recentlyAccessedSessions.splice(idx, 1);
     }
-    console.log(`[Memory] Evicted session ${sessionId} from message cache (LRU)`);
   }
 }
 
@@ -1140,7 +1139,6 @@ export function cleanupAuxiliaryStores(currentSessionId: string) {
     if (evictIdx !== -1) {
       auxiliarySessionsAccessed.splice(evictIdx, 1);
     }
-    console.log(`[Memory] Evicted auxiliary data for session ${sessionId}`);
   }
 }
 

@@ -126,7 +126,6 @@ function createUpdateStore() {
           switch (event.event) {
             case "Started":
               contentLength = event.data.contentLength || 0;
-              console.log(`Download started, size: ${contentLength} bytes`);
               break;
             case "Progress":
               downloaded += event.data.chunkLength;
@@ -136,7 +135,6 @@ function createUpdateStore() {
               }
               break;
             case "Finished":
-              console.log("Download finished");
               update(s => ({ ...s, downloadProgress: 100 }));
               break;
           }

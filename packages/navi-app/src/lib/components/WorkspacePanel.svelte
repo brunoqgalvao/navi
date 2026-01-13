@@ -64,7 +64,6 @@
       const terminals = await ptyApi.list(pid);
       if (terminals.length > 0) {
         projectWorkspaces.setTerminals(pid, terminals);
-        console.log(`[WorkspacePanel] Loaded ${terminals.length} terminals for project ${pid}`);
       } else {
         // No terminals exist yet - create workspace with no tabs
         projectWorkspaces.getOrCreate(pid);

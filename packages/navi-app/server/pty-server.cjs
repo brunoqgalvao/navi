@@ -31,7 +31,6 @@ function getUserPath() {
       encoding: 'utf8',
       timeout: 5000,
     }).trim();
-    console.log('[PTY] Resolved user PATH:', cachedUserPath.substring(0, 200) + '...');
     return cachedUserPath;
   } catch (e) {
     console.error('[PTY] Failed to get user PATH from shell:', e.message);
@@ -41,13 +40,11 @@ function getUserPath() {
       const match = out.match(/PATH="([^"]+)"/);
       if (match) {
         cachedUserPath = match[1];
-        console.log('[PTY] Using path_helper PATH:', cachedUserPath);
         return cachedUserPath;
       }
     } catch {}
     // Final fallback: common paths
     cachedUserPath = '/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
-    console.log('[PTY] Using fallback PATH');
     return cachedUserPath;
   }
 }
@@ -188,8 +185,6 @@ const httpServer = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server: httpServer });
 
 wss.on('connection', (ws) => {
-  console.log('[PTY] Client connected');
-
   // Track which terminals this client is attached to
   const attachedTerminals = new Set();
 
@@ -204,7 +199,6 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    console.log('[PTY] Client disconnected');
     // Detach from all terminals
     for (const terminalId of attachedTerminals) {
       const terminal = terminals.get(terminalId);
@@ -335,8 +329,6 @@ function handleMessage(ws, message, attachedTerminals) {
           projectId,
           name,
         }));
-
-        console.log(`[PTY] Created terminal ${terminalId} for project ${projectId} (pid: ${ptyProcess.pid})`);
       } catch (e) {
         ws.send(JSON.stringify({
           type: 'error',
@@ -438,7 +430,6 @@ function handleMessage(ws, message, attachedTerminals) {
           type: 'killed',
           terminalId,
         }));
-        console.log(`[PTY] Killed terminal ${terminalId}`);
       }
       break;
     }
@@ -506,7 +497,6 @@ function handleMessage(ws, message, attachedTerminals) {
 
 // Cleanup on exit
 process.on('SIGINT', () => {
-  console.log('[PTY] Shutting down...');
   for (const [id, terminal] of terminals) {
     try {
       terminal.pty.kill();
@@ -516,7 +506,6 @@ process.on('SIGINT', () => {
 });
 
 process.on('SIGTERM', () => {
-  console.log('[PTY] Shutting down...');
   for (const [id, terminal] of terminals) {
     try {
       terminal.pty.kill();
@@ -527,13 +516,7 @@ process.on('SIGTERM', () => {
 
 async function start() {
   PORT = await findAvailablePort(PREFERRED_PORT);
-  if (PORT !== PREFERRED_PORT) {
-    console.log(`[PTY] Port ${PREFERRED_PORT} in use, using ${PORT} instead`);
-  }
-  httpServer.listen(PORT, () => {
-    console.log(`[PTY] Server running on http://localhost:${PORT}`);
-    console.log(`[PTY] WebSocket endpoint: ws://localhost:${PORT}`);
-  });
+  httpServer.listen(PORT);
 }
 
 start().catch(err => {

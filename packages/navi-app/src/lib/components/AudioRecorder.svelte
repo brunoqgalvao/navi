@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "../api";
+  import Tooltip from "./Tooltip.svelte";
 
   interface Props {
     onTranscript: (text: string) => void;
@@ -243,20 +244,20 @@
     </span>
   {/if}
   
-  <button
-    onclick={handleClick}
-    disabled={disabled || recordingState === "processing" || hasApiKey === null}
-    class={`relative p-2 rounded-lg transition-all ${
-      recordingState === "idle"
-        ? hasApiKey === false
-          ? "text-amber-500 hover:text-amber-600 hover:bg-amber-50"
-          : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-        : recordingState === "recording"
-        ? "text-white bg-red-500 hover:bg-red-600 animate-pulse"
-        : "text-gray-400 bg-gray-100 cursor-wait"
-    } disabled:opacity-30 disabled:cursor-not-allowed`}
-    title={hasApiKey === false ? "Click to configure OpenAI API key" : recordingState === "idle" ? "Start recording" : recordingState === "recording" ? "Stop recording" : "Processing..."}
-  >
+  <Tooltip text={hasApiKey === false ? "Setup Voice Input" : recordingState === "idle" ? "Voice Input" : recordingState === "recording" ? "Stop Recording" : "Processing..."} position="top">
+    <button
+      onclick={handleClick}
+      disabled={disabled || recordingState === "processing" || hasApiKey === null}
+      class={`relative p-2 rounded-lg transition-all ${
+        recordingState === "idle"
+          ? hasApiKey === false
+            ? "text-amber-500 hover:text-amber-600 hover:bg-amber-50"
+            : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+          : recordingState === "recording"
+          ? "text-white bg-red-500 hover:bg-red-600 animate-pulse"
+          : "text-gray-400 bg-gray-100 cursor-wait"
+      } disabled:opacity-30 disabled:cursor-not-allowed`}
+    >
     {#if recordingState === "processing"}
       <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -276,7 +277,8 @@
       <span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border-2 border-white"></span>
     {/if}
   </button>
-  
+  </Tooltip>
+
   {#if error}
     <div class="absolute bottom-full right-0 mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 break-words whitespace-nowrap max-w-xs">
       {error}

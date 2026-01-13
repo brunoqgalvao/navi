@@ -106,10 +106,6 @@ export async function discoverPorts(): Promise<{ server: number; pty: number }> 
   setPtyServerPort(ptyPort);
   portsDiscovered = true;
 
-  if (serverPort !== baseServerPort || ptyPort !== basePtyPort) {
-    console.log(`[Config] Discovered ports: server=${serverPort}, pty=${ptyPort}`);
-  }
-
   return { server: serverPort, pty: ptyPort };
 }
 

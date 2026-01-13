@@ -100,7 +100,6 @@ export async function createNewChatWithWorktree(description: string, backend?: B
     try {
       const branchResult = await branchNameApi.generate(description);
       branchName = branchResult.branchName;
-      console.log(`[Worktree] Generated branch name via ${branchResult.generatedBy}: ${branchResult.shortName}`);
     } catch (branchError) {
       console.warn("[Worktree] Failed to generate smart branch name, using fallback:", branchError);
       // Will fall back to server-side generation from description
@@ -200,10 +199,6 @@ export async function selectSession(s: Session) {
     try {
       const result = await api.messages.listPaginated(s.id, MESSAGE_PAGE_SIZE, 0);
       const loadedMsgs = parseMessages(result.messages);
-      const subagentMsgs = loadedMsgs.filter(m => m.parentToolUseId);
-      if (subagentMsgs.length > 0) {
-        console.log("[session-actions] Loaded", subagentMsgs.length, "subagent messages from DB");
-      }
       sessionMessages.setMessagesPaginated(s.id, loadedMsgs, result.total, result.hasMore);
     } catch (e) {
       showError({ title: "Messages Error", message: "Failed to load chat messages", error: e });

@@ -92,7 +92,6 @@ export function loadPreviewSpec(projectPath: string): PreviewSpec | null {
     try {
       const content = readFileSync(naviDirPath, "utf-8");
       const spec = JSON.parse(content) as PreviewSpec;
-      console.log(`[Preview] Loaded spec from ${naviDirPath}`);
       return validateSpec(spec);
     } catch (e: any) {
       console.error(`[Preview] Failed to parse ${naviDirPath}: ${e.message}`);
@@ -105,7 +104,6 @@ export function loadPreviewSpec(projectPath: string): PreviewSpec | null {
     try {
       const content = readFileSync(rootPath, "utf-8");
       const spec = JSON.parse(content) as PreviewSpec;
-      console.log(`[Preview] Loaded spec from ${rootPath}`);
       return validateSpec(spec);
     } catch (e: any) {
       console.error(`[Preview] Failed to parse ${rootPath}: ${e.message}`);

@@ -1427,7 +1427,6 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
     } else {
       // Worktree was deleted (e.g., after merge), clear it from the session and use project path
       // Also clears claude_session_id since that session was tied to the worktree cwd
-      console.log(`[${sessionId}] Worktree path no longer exists: ${session.worktree_path}, clearing worktree and claude session, using project path`);
       sessions.clearWorktree(sessionId!);
       worktreeWasCleared = true;
     }
@@ -1760,9 +1759,6 @@ The user will explicitly approve the plan before any execution begins.
 
             const { complete, reason } = isTaskLikelyComplete(msg.lastAssistantContent || []);
 
-            console.log(`[UntilDone] Session ${sessionId} iteration ${untilDoneState.iteration}/${untilDoneState.maxIterations}`);
-            console.log(`[UntilDone] Complete: ${complete}, Reason: ${reason}`);
-
             if (!complete && untilDoneState.iteration < untilDoneState.maxIterations) {
               // NOT DONE - Continue working
               untilDoneState.iteration++;
@@ -1783,7 +1779,6 @@ The user will explicitly approve the plan before any execution begins.
 
               // Re-invoke with continuation prompt after a short delay
               setTimeout(() => {
-                console.log(`[UntilDone] Auto-continuing session ${sessionId}, iteration ${untilDoneState.iteration}`);
                 handleQueryWithProcess(ws, {
                   prompt: "Continue working on the task. Check your progress and keep going until everything is complete.",
                   projectId: untilDoneState.projectId,
@@ -1798,7 +1793,6 @@ The user will explicitly approve the plan before any execution begins.
 
             // Task is complete OR max iterations reached
             const finalReason = complete ? "Task completed" : `Max iterations (${untilDoneState.maxIterations}) reached`;
-            console.log(`[UntilDone] Finishing: ${finalReason}`);
 
             // Send completion notification
             sendToSession(sessionId, {
@@ -1843,7 +1837,7 @@ The user will explicitly approve the plan before any execution begins.
           }
         }
       } catch (e) {
-        console.log(`[${sessionId}] Non-JSON stdout:`, line);
+        // Ignore non-JSON stdout
       }
     }
   });
@@ -1867,7 +1861,6 @@ The user will explicitly approve the plan before any execution begins.
   });
 
   child.on("exit", (code) => {
-    console.log(`[${sessionId}] Process exited with code ${code}`);
     if (buffer.trim()) {
       try {
         const msg = JSON.parse(buffer);
@@ -1934,7 +1927,6 @@ export async function handleCloudQuery(ws: any, data: ClientMessage) {
       const detectedUrl = await detectGitRemoteUrl(project.path);
       if (detectedUrl) {
         cloudRepoUrl = detectedUrl;
-        console.log(`[${sessionId}] Auto-detected git remote: ${cloudRepoUrl}`);
       }
     } catch (e) {
       console.warn(`[${sessionId}] Failed to auto-detect git remote:`, e);
@@ -1963,9 +1955,6 @@ export async function handleCloudQuery(ws: any, data: ClientMessage) {
     });
     return;
   }
-
-  console.log(`[${sessionId}] Starting cloud execution via E2B`);
-  console.log(`[${sessionId}] Repo: ${cloudRepoUrl || "none"}, Branch: ${cloudBranch || "default"}`);
 
   // Create execution record
   const executionId = crypto.randomUUID();
@@ -2025,8 +2014,6 @@ export async function handleCloudQuery(ws: any, data: ClientMessage) {
       (stage, message) => {
         const exec = activeCloudExecutions.get(sessionId);
         if (exec?.aborted) return;
-
-        console.log(`[${sessionId}] Cloud stage: ${stage} - ${message || ""}`);
 
         cloudExecutions.updateStatus(executionId, stage as any, message);
 
@@ -2113,7 +2100,6 @@ export async function handleCloudQuery(ws: any, data: ClientMessage) {
 export function createWebSocketHandlers() {
   return {
     open(ws: any) {
-      console.log("Client connected");
       connectedClients.add(ws);
       safeSend(ws, { type: "connected" });
     },
@@ -2123,7 +2109,6 @@ export function createWebSocketHandlers() {
         const data: ClientMessage = JSON.parse(message.toString());
 
         if (data.type === "query" && data.prompt) {
-          console.log(`[${data.sessionId}] Starting query: "${data.prompt.slice(0, 50)}..." (mode: ${data.executionMode || "local"})`);
           // Update kanban card to in_progress when query starts
           if (data.sessionId) {
             setKanbanCardExecuting(data.sessionId, data.executionMode === "cloud" ? "Running in cloud..." : "Agent working...");
@@ -2138,7 +2123,6 @@ export function createWebSocketHandlers() {
           // Handle local process abort
           const active = activeProcesses.get(data.sessionId);
           if (active) {
-            console.log(`Aborting local query for session ${data.sessionId}`);
             active.process.kill("SIGTERM");
             activeProcesses.delete(data.sessionId);
             safeSend(ws, { type: "aborted", uiSessionId: data.sessionId });
@@ -2146,7 +2130,6 @@ export function createWebSocketHandlers() {
           // Handle cloud execution abort
           const cloudExec = activeCloudExecutions.get(data.sessionId);
           if (cloudExec) {
-            console.log(`Aborting cloud execution for session ${data.sessionId}`);
             cloudExec.aborted = true;
             cloudExecutions.cancel(cloudExec.executionId);
             activeCloudExecutions.delete(data.sessionId);
@@ -2199,7 +2182,7 @@ export function createWebSocketHandlers() {
               active.process.stdin.write(response + "\n");
               // Resume kanban card execution when user responds
               if (data.approved && pending.sessionId) {
-                resumeKanbanCardExecution(pending.sessionId, "Permission granted");
+                setKanbanCardExecuting(pending.sessionId, "Permission granted");
               }
             }
             pendingPermissions.delete(data.permissionRequestId);
@@ -2216,7 +2199,7 @@ export function createWebSocketHandlers() {
               });
               active.process.stdin.write(response + "\n");
               // Resume kanban card execution when user responds
-              resumeKanbanCardExecution(pending.sessionId, "User responded");
+              setKanbanCardExecuting(pending.sessionId, "User responded");
             }
             // Remove from memory and database
             pendingQuestions.delete(data.questionRequestId);
@@ -2244,7 +2227,6 @@ export function createWebSocketHandlers() {
     },
 
     close(ws: any) {
-      console.log("[WebSocket] Client disconnected, starting cleanup...");
       connectedClients.delete(ws);
       // Detach from all terminals and cleanup exec processes
       detachFromAllTerminals(ws);
@@ -2257,10 +2239,6 @@ export function createWebSocketHandlers() {
           detachedSessions++;
         }
       }
-      if (detachedSessions > 0) {
-        console.log(`[WebSocket] Detached ${detachedSessions} active session(s) from disconnected client`);
-      }
-      console.log(`[WebSocket] Cleanup complete. Connected clients: ${connectedClients.size}`);
     },
   };
 }

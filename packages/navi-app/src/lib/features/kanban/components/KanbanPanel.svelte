@@ -61,9 +61,7 @@
       return;
     }
     try {
-      console.log("[Kanban] Dispatching card:", { projectId, cardId: card.id, cardTitle: card.title });
       const { sessionId, prompt, autoSend } = await kanbanStore.dispatchCard(projectId, card.id);
-      console.log("[Kanban] Dispatch success:", { sessionId, autoSend });
       showSuccess("Task started", `Chat created for "${card.title}"`);
       onNavigateToSession?.(sessionId, prompt, autoSend);
     } catch (error) {

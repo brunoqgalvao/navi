@@ -79,8 +79,6 @@
 
     const loader = new STLLoader();
 
-    console.log("[STLViewer] Loading from:", src);
-
     loader.load(
       src,
       (geometry) => {
@@ -118,7 +116,6 @@
         const percent = progress.lengthComputable
           ? Math.round((progress.loaded / progress.total) * 100)
           : 0;
-        console.log(`Loading STL: ${percent}%`);
       },
       (err) => {
         console.error("[STLViewer] Error loading STL:", err);

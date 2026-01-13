@@ -79,8 +79,6 @@ export function initExperimentalWebSocket(broadcast: (payload: unknown) => void)
       data: { attemptId, success, error: healError },
     } as HealingWebSocketEvent);
   });
-
-  console.log("[Experimental] WebSocket events initialized");
 }
 
 /**

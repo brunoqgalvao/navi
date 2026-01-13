@@ -77,7 +77,6 @@
 
     // Save to backend
     const orderedIds = newExtensions.map((ext) => ext.id);
-    console.log("[ExtensionSettingsModal] Reordering:", orderedIds);
     projectExtensions.reorder(projectId, orderedIds).catch(err => {
       console.error("[ExtensionSettingsModal] Reorder failed:", err);
     });

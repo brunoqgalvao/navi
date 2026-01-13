@@ -462,7 +462,6 @@ export class ClaudeClient {
       this.ws = new WebSocket(this.url);
 
       this.ws.onopen = () => {
-        console.log("Connected to Claude server");
         resolve();
       };
 
@@ -481,7 +480,6 @@ export class ClaudeClient {
       };
 
       this.ws.onclose = () => {
-        console.log("Disconnected from Claude server");
       };
     });
   }

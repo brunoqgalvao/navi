@@ -141,7 +141,6 @@ export class ContainerManager {
     try {
       await docker(`network inspect ${this.config.networkName}`);
     } catch {
-      console.log(`[Preview] Creating network: ${this.config.networkName}`);
       await docker(`network create ${this.config.networkName}`);
     }
   }
@@ -299,13 +298,6 @@ export class ContainerManager {
       "sh", "-c",
       `echo "[Navi Preview] Installing dependencies..." && ${installCmd} && echo "[Navi Preview] Running setup..." && ${setupCmds} && echo "[Navi Preview] Starting dev server..." && ${devCmd}`,
     ];
-
-    console.log(`[Preview] Creating container: ${containerName}`);
-    console.log(`[Preview] Using spec: ${hasSpec}`);
-    console.log(`[Preview] Image: ${image}`);
-    console.log(`[Preview] Ports: ${portMappings.map(p => `${p.name}=${p.host}:${p.container}`).join(", ")}`);
-    console.log(`[Preview] Install: ${installCmd}`);
-    console.log(`[Preview] Dev: ${devCmd}`);
 
     // Use spawn with array args to avoid shell escaping issues
     const containerId = await dockerSpawn(args, 120000);

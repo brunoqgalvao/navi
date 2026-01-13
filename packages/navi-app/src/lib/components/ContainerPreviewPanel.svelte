@@ -65,10 +65,8 @@
 
   async function checkStatus() {
     if (!projectId) return;
-    console.log("[ContainerPreviewPanel] checkStatus", { projectId, branch: effectiveBranch });
     try {
       const result = await containerPreviewApi.getStatusByBranch(projectId, effectiveBranch);
-      console.log("[ContainerPreviewPanel] status result:", result);
       if (result.exists) {
         currentUrl = result.url || null;
         error = result.error || null;
@@ -79,7 +77,6 @@
             await fetch(result.url, { method: 'HEAD', mode: 'no-cors' });
             // If fetch succeeds, it's actually running
             status = "running";
-            console.log("[ContainerPreviewPanel] URL responding, marking as running");
           } catch {
             // Not responding yet, keep as starting
             status = "starting";
@@ -103,17 +100,13 @@
   }
 
   async function startPreview() {
-    console.log("[ContainerPreviewPanel] startPreview", { sessionId, projectId, branch: effectiveBranch });
     if (!sessionId) {
-      console.log("[ContainerPreviewPanel] No sessionId, cannot start");
       return;
     }
     loading = true;
     error = null;
     try {
-      console.log("[ContainerPreviewPanel] Calling containerPreviewApi.start");
       const result = await containerPreviewApi.start(sessionId);
-      console.log("[ContainerPreviewPanel] Start result:", result);
       if (result.success && result.preview) {
         status = (result.preview.status as any) || "starting";
         currentUrl = result.preview.url;
@@ -158,7 +151,6 @@
 
   function pollStatus() {
     if (!projectId) return;
-    console.log("[ContainerPreviewPanel] Starting status polling...");
     // Clear any existing interval first
     if (statusPollInterval) {
       clearInterval(statusPollInterval);
@@ -167,7 +159,6 @@
     statusPollInterval = setInterval(async () => {
       try {
         const result = await containerPreviewApi.getStatusByBranch(projectId!, effectiveBranch);
-        console.log("[ContainerPreviewPanel] Poll result:", result.status);
         if (result.status === "running") {
           status = "running";
           currentUrl = result.url || null;
@@ -186,7 +177,6 @@
           try {
             const response = await fetch(result.url, { method: 'HEAD', mode: 'no-cors' });
             // no-cors mode means we can't check response.ok, but if it doesn't throw, it's likely up
-            console.log("[ContainerPreviewPanel] URL check passed, marking as running");
             status = "running";
             currentUrl = result.url;
             iframeKey = Date.now();
