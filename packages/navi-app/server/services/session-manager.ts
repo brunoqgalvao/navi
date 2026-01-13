@@ -40,6 +40,7 @@ export interface SpawnConfig {
   role: string;
   task: string;
   model?: string;
+  backend?: string; // 'claude' | 'codex' | 'gemini' for multi-backend dispatch
   context?: string; // Additional context to pass to the child
   agentType?: string; // 'browser' | 'coding' | 'runner' | etc. for native UI
 }
@@ -132,6 +133,7 @@ class SessionManager {
       role: config.role,
       task: config.task,
       model: config.model,
+      backend: config.backend,      // Pass backend for multi-model dispatch
       agentType: config.agentType,  // Pass agent type for native UI
     });
 
@@ -617,7 +619,6 @@ To read an artifact's content, use the Read tool with the file path.
    */
   cleanup(sessionId: string) {
     this.runtimeSessions.delete(sessionId);
-    console.log(`[SessionManager] Cleaned up runtime state for session ${sessionId}`);
   }
 
   /**

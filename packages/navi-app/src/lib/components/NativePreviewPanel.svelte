@@ -132,13 +132,6 @@
     const proxyUrl = effectivePort
       ? `/api/preview/proxy/${effectivePort}/`
       : currentUrl;
-    console.log("[NativePreviewPanel] iframeSrc:", {
-      currentPort,
-      currentUrl,
-      portFromUrl,
-      effectivePort,
-      proxyUrl,
-    });
     return proxyUrl;
   });
 
@@ -185,7 +178,6 @@
   });
 
   async function checkComplianceAndStatus(targetSessionId: string, epoch = sessionEpoch) {
-    console.log("[NativePreviewPanel] checkComplianceAndStatus", { sessionId: targetSessionId, branch: effectiveBranch });
     checkingCompliance = true;
 
     try {
@@ -193,7 +185,6 @@
       const complianceResult = await nativePreviewApi.checkCompliance(targetSessionId);
       if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
       compliance = complianceResult;
-      console.log("[NativePreviewPanel] Compliance:", complianceResult);
 
       if (!complianceResult.canPreview) {
         status = "unavailable";
@@ -219,14 +210,11 @@
   }
 
   async function checkStatusAndMaybeSwitch(targetSessionId: string, epoch = sessionEpoch) {
-    console.log("[NativePreviewPanel] checkStatusAndMaybeSwitch", { sessionId: targetSessionId, branch: effectiveBranch });
-
     try {
       // Check status for THIS session only (not global!)
       // Each project can have its own preview running on a different port
       const result = await nativePreviewApi.getStatus(targetSessionId);
       if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
-      console.log("[NativePreviewPanel] Session status:", result);
 
       if (result.running) {
         // Check if this is the same preview - if so, don't reload iframe
@@ -235,15 +223,6 @@
         const isSamePreview = currentPort === result.port
           && currentProjectId === result.projectId
           && normalizedResultBranch === normalizedEffectiveBranch;
-        console.log("[NativePreviewPanel] Preview comparison:", {
-          currentPort,
-          currentProjectId,
-          effectiveBranch: normalizedEffectiveBranch,
-          resultPort: result.port,
-          resultProjectId: result.projectId,
-          resultBranch: normalizedResultBranch,
-          isSamePreview,
-        });
 
         // This session's project has a preview running
         // IMPORTANT: Don't use fallback values from stale state - only use what the server returns
@@ -265,10 +244,7 @@
           // Only update iframeKey if this is a different preview
           // (switching sessions within same project should NOT reload)
           if (!isSamePreview && currentPort) {
-            console.log("[NativePreviewPanel] Different preview detected, refreshing iframe");
             iframeKey = Date.now();
-          } else {
-            console.log("[NativePreviewPanel] Same preview, keeping iframe");
           }
         }
       } else {
@@ -287,11 +263,9 @@
   }
 
   async function checkStatus(targetSessionId: string, epoch = sessionEpoch) {
-    console.log("[NativePreviewPanel] checkStatus", { sessionId: targetSessionId, branch: effectiveBranch });
     try {
       const result = await nativePreviewApi.getStatus(targetSessionId);
       if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
-      console.log("[NativePreviewPanel] status result:", result);
       if (result.running) {
         // IMPORTANT: Don't use fallback values from stale state
         currentUrl = result.url || null;
@@ -326,21 +300,17 @@
   }
 
   async function startPreview() {
-    console.log("[NativePreviewPanel] startPreview", { sessionId, projectId, branch: effectiveBranch });
     if (!sessionId) {
-      console.log("[NativePreviewPanel] No sessionId, cannot start");
       return;
     }
     loading = true;
     error = null;
     portConflict = null;
     try {
-      console.log("[NativePreviewPanel] Calling nativePreviewApi.start");
       const targetSessionId = sessionId;
       const epoch = sessionEpoch;
       const result = await nativePreviewApi.start(targetSessionId);
       if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
-      console.log("[NativePreviewPanel] Start result:", result);
       if (result.success) {
         status = "starting";
         currentUrl = result.url || null;
@@ -370,12 +340,10 @@
 
     resolvingConflict = true;
     try {
-      console.log("[NativePreviewPanel] Resolving conflict with action:", action);
       const targetSessionId = sessionId;
       const epoch = sessionEpoch;
       const result = await nativePreviewApi.resolveConflict(targetSessionId, action);
       if (epoch !== sessionEpoch || sessionId !== targetSessionId) return;
-      console.log("[NativePreviewPanel] Resolve result:", result);
 
       if (result.success) {
         portConflict = null;
@@ -491,7 +459,6 @@
     if (!sessionId) return;
     const targetSessionId = sessionId;
     const epoch = sessionEpoch;
-    console.log("[NativePreviewPanel] Starting status polling...");
     // Clear any existing interval first
     if (statusPollInterval) {
       clearInterval(statusPollInterval);
@@ -505,7 +472,6 @@
       }
       try {
         const result = await nativePreviewApi.getStatus(targetSessionId);
-        console.log("[NativePreviewPanel] Poll result:", result.status);
         if (result.status === "running") {
           status = "running";
           // IMPORTANT: Don't use fallback values from stale state
@@ -528,14 +494,12 @@
           // Check if URL is responding
           try {
             await fetch(result.url, { method: 'HEAD', mode: 'no-cors' });
-            console.log("[NativePreviewPanel] URL responding, marking as running");
             status = "running";
             currentUrl = result.url;
             // CRITICAL: Also update currentPort so iframeSrc uses the proxy
             currentPort = result.port || null;
             currentProjectId = result.projectId || projectId || null;
             currentBranch = result.branch || effectiveBranch;
-            console.log("[NativePreviewPanel] Set currentPort:", currentPort, "currentUrl:", currentUrl);
             iframeKey = Date.now();
             if (statusPollInterval) clearInterval(statusPollInterval);
             statusPollInterval = null;

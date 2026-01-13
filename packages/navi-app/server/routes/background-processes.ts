@@ -170,7 +170,6 @@ export function startBackgroundProcess(options: {
   };
 
   backgroundProcesses.set(id, bgProcess);
-  console.log(`[BackgroundProcesses] Started process ${id} (pid: ${childProcess.pid}): ${command.slice(0, 50)}...`);
 
   emitEvent({
     type: "process_started",
@@ -245,7 +244,6 @@ export function startBackgroundProcess(options: {
 
   // Handle exit
   childProcess.on("close", (code, signal) => {
-    console.log(`[BackgroundProcesses] Process ${id} exited with code ${code}, signal ${signal}`);
     bgProcess.status = code === 0 ? "completed" : "failed";
     bgProcess.exitCode = code ?? undefined;
     delete bgProcess.process;
@@ -539,14 +537,12 @@ export async function handleBackgroundProcessRoutes(
       // Get the most recent active session (there's usually only one)
       for (const [sid] of activeProcesses) {
         sessionId = sid;
-        console.log(`[BackgroundProcesses] Auto-detected sessionId: ${sessionId}`);
         break;
       }
 
       // Default to "global" if no active session found
       if (!sessionId) {
         sessionId = "global";
-        console.log(`[BackgroundProcesses] No active session found, using default: ${sessionId}`);
       }
     }
 

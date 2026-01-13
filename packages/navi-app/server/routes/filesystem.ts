@@ -224,9 +224,6 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
         path.resolve(process.cwd(), "..", "..", ".claude", "templates");
 
       const templatePath = path.join(TEMPLATES_BASE, templateId);
-      console.log("[fs/apply-template] TEMPLATES_BASE:", TEMPLATES_BASE);
-      console.log("[fs/apply-template] templatePath:", templatePath);
-      console.log("[fs/apply-template] targetPath:", targetPath);
 
       // Verify template exists
       try {

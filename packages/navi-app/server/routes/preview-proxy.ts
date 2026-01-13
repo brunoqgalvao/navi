@@ -631,7 +631,6 @@ export async function handlePreviewProxyRoutes(
         headers: responseHeaders,
       });
     } catch (e: any) {
-      console.error(`[PreviewProxy] Failed to proxy to port ${port}:`, e.message);
       return error(`Failed to proxy to preview: ${e.message}`, 502);
     }
   }

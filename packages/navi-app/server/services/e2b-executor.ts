@@ -88,8 +88,6 @@ export async function executeInCloud(
     const sandboxId = sandbox.sandboxId;
     const workDir = request.workingDir || "/workspace";
 
-    console.log(`[E2B] Sandbox created: ${sandboxId}`);
-
     // Clone repo if provided
     if (request.repoUrl) {
       onStage("cloning", `Cloning ${request.repoUrl}...`);
@@ -214,7 +212,6 @@ export async function executeInCloud(
     if (sandbox) {
       try {
         await sandbox.kill();
-        console.log(`[E2B] Sandbox killed: ${sandbox.sandboxId}`);
       } catch (e) {
         console.error("[E2B] Failed to kill sandbox:", e);
       }

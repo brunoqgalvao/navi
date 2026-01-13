@@ -194,11 +194,6 @@ export async function handleWorktreePreviewRoutes(
       }
     }
 
-    console.log(`[WorktreePreview] Starting preview for session ${sessionId}`);
-    console.log(`[WorktreePreview] Path: ${session.worktree_path}`);
-    console.log(`[WorktreePreview] Command: ${command}`);
-    console.log(`[WorktreePreview] Frontend port: ${frontendPort}, Backend port: ${backendPort}`);
-
     const proc = startBackgroundProcess({
       command,
       cwd: session.worktree_path,

@@ -111,9 +111,6 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         const content = assistantMsg.content;
         const msgUuid = assistantMsg.uuid || crypto.randomUUID();
 
-        if (parentId) {
-          console.log("[MessageHandler] Assistant message with parentToolUseId:", parentId, "content types:", content?.map((b: any) => b.type));
-        }
 
         if (content && content.length > 0) {
           sessionMessages.addMessage(uiSessionId, {

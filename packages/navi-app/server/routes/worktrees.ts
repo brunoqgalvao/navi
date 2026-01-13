@@ -318,15 +318,9 @@ export async function handleWorktreeRoutes(
     const { commitMessage, autoCommit = true, cleanupAfter = true } = body;
 
     try {
-      console.log(`[Merge] Starting merge for session ${sessionId}`);
-      console.log(`[Merge] Worktree path: ${session.worktree_path}`);
-      console.log(`[Merge] Branch: ${session.worktree_branch} -> ${session.worktree_base_branch || "main"}`);
-      console.log(`[Merge] Project path: ${project.path}`);
-
       // Check if main repo has uncommitted changes - block merge if so
       const mainRepoStatus = getWorktreeStatus(project.path);
       if (!mainRepoStatus.isClean) {
-        console.log(`[Merge] Blocked: Main repo has uncommitted changes`);
         return json({
           success: false,
           error: "Cannot merge: the main repository has uncommitted changes. Please commit or stash them first.",
@@ -342,20 +336,16 @@ export async function handleWorktreeRoutes(
       // Auto-commit uncommitted changes if requested
       if (autoCommit && !isWorktreeClean(session.worktree_path)) {
         const message = commitMessage || `Changes from: ${session.title}`;
-        console.log(`[Merge] Auto-committing with message: ${message}`);
-        const committed = commitWorktreeChanges(session.worktree_path, message);
-        console.log(`[Merge] Commit result: ${committed}`);
+        commitWorktreeChanges(session.worktree_path, message);
       }
 
       // Perform the merge
-      console.log(`[Merge] Performing merge...`);
       const result = mergeWorktreeToBase(
         project.path,
         session.worktree_branch!,
         session.worktree_base_branch || "main",
         session.worktree_path  // Pass worktree path for updating with latest
       );
-      console.log(`[Merge] Result:`, result);
 
       if (!result.success && result.conflicts) {
         // Return conflict info for resolution - now includes rich context for Claude
@@ -478,8 +468,6 @@ export async function handleWorktreeRoutes(
       }
 
       // Rebase completed! Now do the fast-forward merge in main repo
-      console.log("[Continue Rebase] Rebase complete, proceeding with fast-forward merge");
-
       const body = await req.json().catch(() => ({}));
       const { cleanupAfter = true } = body;
 
@@ -610,7 +598,6 @@ export async function handleWorktreeRoutes(
     const snapshotId = restoreMatch[1];
 
     try {
-      console.log(`[Merge] Restoring from snapshot: ${snapshotId}`);
       const success = restoreRepoSnapshot(snapshotId);
 
       if (!success) {

@@ -2173,6 +2173,7 @@ export const sessionHierarchy = {
       role: string;
       task: string;
       model?: string;
+      backend?: string;   // 'claude' | 'codex' | 'gemini' for multi-backend dispatch
       agentType?: string;  // 'browser' | 'coding' | 'research' | etc. for native UI
     }
   ): Session | null => {
@@ -2205,15 +2206,16 @@ export const sessionHierarchy = {
 
     run(
       `INSERT INTO sessions (
-        id, project_id, title, model,
+        id, project_id, title, model, backend,
         parent_session_id, root_session_id, depth, role, task, agent_status, agent_type,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?, ?)`,
       [
         config.id,
         parent.project_id,
         config.title,
         config.model || parent.model,
+        config.backend || parent.backend || 'claude',  // Inherit backend from parent
         parentSessionId,
         rootSessionId,
         newDepth,

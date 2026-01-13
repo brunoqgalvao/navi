@@ -174,7 +174,6 @@ class SelfHealingBuildsService extends EventEmitter {
     await this.runCheck(projectId);
 
     this.emit("session:started", { projectId, session });
-    console.log(`[SelfHealing] Started watching project ${projectId} at ${projectPath}`);
 
     return session;
   }
@@ -200,7 +199,6 @@ class SelfHealingBuildsService extends EventEmitter {
     this.configs.delete(projectId);
 
     this.emit("session:stopped", { projectId });
-    console.log(`[SelfHealing] Stopped watching project ${projectId}`);
   }
 
   /**
@@ -246,8 +244,6 @@ class SelfHealingBuildsService extends EventEmitter {
     const session = this.sessions.get(projectId);
     const config = this.configs.get(projectId);
     if (!session || !config) return [];
-
-    console.log(`[SelfHealing] Running check for project ${projectId}`);
 
     const errors: BuildError[] = [];
 
@@ -301,7 +297,6 @@ class SelfHealingBuildsService extends EventEmitter {
     // Check if we've already tried too many times
     const attempts = session.attempts.filter((a) => a.errorId === error.id);
     if (attempts.length >= session.maxAttempts) {
-      console.log(`[SelfHealing] Max attempts reached for error ${error.id}, skipping`);
       return;
     }
 
@@ -309,7 +304,6 @@ class SelfHealingBuildsService extends EventEmitter {
     const lastAttempt = attempts[attempts.length - 1];
     const config = this.configs.get(projectId);
     if (lastAttempt && config && Date.now() - lastAttempt.startedAt < config.cooldownMs) {
-      console.log(`[SelfHealing] Cooldown active for error ${error.id}, skipping`);
       return;
     }
 
@@ -609,14 +603,11 @@ ${snippet}
           if (debounceTimer) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             if (session.status === "watching") {
-              console.log(`[SelfHealing] File changed: ${filename}`);
               this.runCheck(session.projectId);
             }
           }, debounceMs);
         }
       );
-
-      console.log(`[SelfHealing] File watcher started for ${session.projectPath}`);
     } catch (err) {
       console.error(`[SelfHealing] Failed to start file watcher:`, err);
     }

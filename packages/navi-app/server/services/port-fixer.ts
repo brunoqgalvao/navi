@@ -111,8 +111,6 @@ class PortFixerService {
       return null;
     }
 
-    console.log(`[PortFixer] Port ${port} conflict detected:`, portInfo);
-
     // Determine resolution
     const resolution = await this.determineResolution(portInfo, projectPath, useLlm);
 
@@ -132,7 +130,6 @@ class PortFixerService {
     switch (resolution.action) {
       case "kill":
         try {
-          console.log(`[PortFixer] Killing process ${conflictingProcess.pid} (${resolution.reason})`);
           await this.killProcess(conflictingProcess.pid);
 
           // Wait for port to be released
@@ -148,7 +145,6 @@ class PortFixerService {
 
       case "reassign":
         const newPort = resolution.newPort || (await this.findAvailablePort(conflict.requestedPort));
-        console.log(`[PortFixer] Reassigning to port ${newPort} (${resolution.reason})`);
         return { success: true, port: newPort };
 
       case "prompt_user":
@@ -284,7 +280,6 @@ class PortFixerService {
     // This is aggressive but necessary because many package.json scripts have hardcoded ports
     // like "next dev -p 3000" which ignore PORT env var
     if (portInfo.isDevServer) {
-      console.log(`[PortFixer] Dev server detected on port ${portInfo.port}, killing it`);
       return {
         action: "kill",
         reason: `Killing existing dev server (${portInfo.process}) to free port`,

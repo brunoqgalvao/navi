@@ -103,7 +103,6 @@ class PortManagerPreviewService {
     for (const subfolder of COMMON_APP_SUBFOLDERS) {
       const subPath = join(projectPath, subfolder);
       if (existsSync(join(subPath, "package.json"))) {
-        console.log(`[PortManagerPreview] Found package.json in subfolder: ${subfolder}`);
         return subPath;
       }
     }
@@ -169,13 +168,11 @@ class PortManagerPreviewService {
 
     // Use the resolved path for all operations
     const effectivePath = resolvedPath;
-    console.log(`[PortManagerPreview] Using project root: ${effectivePath}`);
 
     // Check if node_modules exists - if not, we need to install dependencies
     // This is critical for worktrees which don't share node_modules
     const nodeModulesPath = join(effectivePath, "node_modules");
     if (!existsSync(nodeModulesPath)) {
-      console.log(`[PortManagerPreview] node_modules not found, installing dependencies...`);
       try {
         await this.installDependencies(effectivePath);
       } catch (e: any) {
@@ -188,18 +185,15 @@ class PortManagerPreviewService {
     let framework: DetectedFramework;
     try {
       framework = await detectFramework(effectivePath, false);
-      console.log(`[PortManagerPreview] Detected: ${describeFramework(framework)}`);
     } catch (e: any) {
       throw new Error(`Framework detection failed: ${e.message}`);
     }
 
     // Allocate ports intelligently
     const ports = await this.allocatePorts(framework, effectivePath, useLlm);
-    console.log(`[PortManagerPreview] Allocated ports:`, ports);
 
     // Build dev command with port configuration
     const devCommand = this.buildDevCommand(framework, ports);
-    console.log(`[PortManagerPreview] Command: ${devCommand}`);
 
     // Spawn process with port env vars
     const childProcess = spawn(devCommand, {
@@ -228,7 +222,6 @@ class PortManagerPreviewService {
           const preview = this.previews.get(id);
           if (preview && preview.status === "starting") {
             preview.status = "running";
-            console.log(`[PortManagerPreview] ${id} is now running`);
           }
         }
       }
@@ -250,7 +243,6 @@ class PortManagerPreviewService {
 
     // Handle process exit
     childProcess.on("exit", (code) => {
-      console.log(`[PortManagerPreview] ${id} exited with code ${code}`);
       const preview = this.previews.get(id);
       if (preview) {
         preview.status = "error";
@@ -259,7 +251,6 @@ class PortManagerPreviewService {
         // Auto-remove crashed previews after 30 seconds to allow UI to show error
         setTimeout(() => {
           if (this.previews.get(id)?.status === "error") {
-            console.log(`[PortManagerPreview] Auto-removing crashed preview ${id}`);
             this.previews.delete(id);
           }
         }, 30000);
@@ -594,8 +585,6 @@ class PortManagerPreviewService {
       installCmd = "yarn install";
     }
 
-    console.log(`[PortManagerPreview] Running: ${installCmd} in ${projectPath}`);
-
     try {
       execSync(installCmd, {
         cwd: projectPath,
@@ -606,7 +595,6 @@ class PortManagerPreviewService {
           CI: "true", // Disable interactive prompts
         },
       });
-      console.log(`[PortManagerPreview] Dependencies installed successfully`);
     } catch (e: any) {
       console.error(`[PortManagerPreview] Failed to install dependencies:`, e.message);
       throw new Error(`Failed to install dependencies: ${e.message}`);
@@ -736,7 +724,6 @@ class PortManagerPreviewService {
 
         if (response.ok || response.status < 500) {
           preview.status = "running";
-          console.log(`[PortManagerPreview] ${previewId} is healthy on port ${preview.ports.primary}`);
           return;
         }
       } catch {

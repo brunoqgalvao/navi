@@ -79,11 +79,9 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 function connectToPtyServer() {
   if (ptyServerWs?.readyState === WebSocket.OPEN) return;
 
-  console.log("[Terminal] Connecting to PTY server:", PTY_SERVER_URL);
   ptyServerWs = new WebSocket(PTY_SERVER_URL);
 
   ptyServerWs.on("open", () => {
-    console.log("[Terminal] Connected to PTY server");
     ptyServerConnected = true;
   });
 
@@ -97,7 +95,6 @@ function connectToPtyServer() {
   });
 
   ptyServerWs.on("close", () => {
-    console.log("[Terminal] PTY server connection closed");
     ptyServerConnected = false;
     ptyServerWs = null;
     scheduleReconnect();
@@ -329,7 +326,6 @@ export async function handleTerminalRoutes(
           });
           execProcessActivity.set(execId, { lastActivityAt: now });
 
-          console.log(`[Terminal] Started HTTP exec process ${execId} (pid: ${proc.pid})`);
           safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: "started", execId })}\n\n`));
 
           proc.stdout?.on("data", (data: Buffer) => {
@@ -355,7 +351,6 @@ export async function handleTerminalRoutes(
           });
 
           proc.on("close", (code) => {
-            console.log(`[Terminal] HTTP exec process ${execId} exited with code ${code}`);
             safeEnqueue(
               encoder.encode(`data: ${JSON.stringify({ type: "exit", code })}\n\n`)
             );
@@ -365,7 +360,6 @@ export async function handleTerminalRoutes(
           });
 
           proc.on("error", (err) => {
-            console.log(`[Terminal] HTTP exec process ${execId} error: ${err.message}`);
             safeEnqueue(
               encoder.encode(`data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`)
             );
@@ -400,7 +394,6 @@ export async function handleTerminalRoutes(
       return json({ error: "Process not found" }, 404);
     }
 
-    console.log(`[Terminal] Killing HTTP exec process ${execId} (pid: ${termProcess.process.pid}) via DELETE request`);
     termProcess.process.kill("SIGTERM");
     execProcesses.delete(execId);
     execProcessActivity.delete(execId);
@@ -664,7 +657,6 @@ export function startWsExec(ws: any, command: string, cwd: string = homedir()): 
     ws,
   });
 
-  console.log(`[Terminal] Started WS exec process ${execId} (pid: ${proc.pid})`);
   ws.send(JSON.stringify({ type: "exec_started", execId }));
 
   proc.stdout?.on("data", (data: Buffer) => {
@@ -690,7 +682,6 @@ export function startWsExec(ws: any, command: string, cwd: string = homedir()): 
   });
 
   proc.on("close", (code) => {
-    console.log(`[Terminal] WS exec process ${execId} exited with code ${code}`);
     try {
       ws.send(JSON.stringify({ type: "exec_exit", execId, code }));
     } catch {}
@@ -698,7 +689,6 @@ export function startWsExec(ws: any, command: string, cwd: string = homedir()): 
   });
 
   proc.on("error", (err) => {
-    console.log(`[Terminal] WS exec process ${execId} error: ${err.message}`);
     try {
       ws.send(JSON.stringify({ type: "exec_error", execId, message: err.message }));
     } catch {}
@@ -711,11 +701,9 @@ export function startWsExec(ws: any, command: string, cwd: string = homedir()): 
 export function killWsExec(execId: string): boolean {
   const proc = wsExecProcesses.get(execId);
   if (proc) {
-    console.log(`[Terminal] Killing WS exec process ${execId} (pid: ${proc.process.pid}) via kill request`);
     proc.process.kill("SIGTERM");
     setTimeout(() => {
       if (wsExecProcesses.has(execId)) {
-        console.log(`[Terminal] Force killing WS exec process ${execId} (SIGKILL) after timeout`);
         proc.process.kill("SIGKILL");
         wsExecProcesses.delete(execId);
       }
@@ -726,17 +714,11 @@ export function killWsExec(execId: string): boolean {
 }
 
 export function cleanupWsExec(ws: any) {
-  let cleanedCount = 0;
   for (const [execId, proc] of wsExecProcesses.entries()) {
     if (proc.ws === ws) {
-      console.log(`[Terminal] Cleaning up exec process ${execId} (pid: ${proc.process.pid}) on WS disconnect`);
       proc.process.kill("SIGTERM");
       wsExecProcesses.delete(execId);
-      cleanedCount++;
     }
-  }
-  if (cleanedCount > 0) {
-    console.log(`[Terminal] Cleaned up ${cleanedCount} exec process(es) for disconnected WebSocket`);
   }
 }
 
@@ -855,7 +837,6 @@ export function cleanupStaleProcesses(): { wsExecCleaned: number; httpExecCleane
   for (const [execId, proc] of wsExecProcesses.entries()) {
     const idleTime = now - proc.lastActivityAt;
     if (idleTime > STALE_PROCESS_TIMEOUT_MS) {
-      console.log(`[Terminal] Cleaning up stale WS exec process ${execId} (pid: ${proc.process.pid}, idle: ${Math.round(idleTime / 1000 / 60)}min)`);
       proc.process.kill("SIGTERM");
       wsExecProcesses.delete(execId);
       wsExecCleaned++;
@@ -869,16 +850,11 @@ export function cleanupStaleProcesses(): { wsExecCleaned: number; httpExecCleane
     const idleTime = now - lastActivity;
 
     if (idleTime > STALE_PROCESS_TIMEOUT_MS) {
-      console.log(`[Terminal] Cleaning up stale HTTP exec process ${execId} (pid: ${proc.process.pid}, idle: ${Math.round(idleTime / 1000 / 60)}min)`);
       proc.process.kill("SIGTERM");
       execProcesses.delete(execId);
       execProcessActivity.delete(execId);
       httpExecCleaned++;
     }
-  }
-
-  if (wsExecCleaned > 0 || httpExecCleaned > 0) {
-    console.log(`[Terminal] Stale process cleanup complete: ${wsExecCleaned} WS exec, ${httpExecCleaned} HTTP exec`);
   }
 
   return { wsExecCleaned, httpExecCleaned };
@@ -906,7 +882,6 @@ export function startPeriodicCleanup() {
   if (cleanupTimer) {
     return; // Already running
   }
-  console.log(`[Terminal] Starting periodic stale process cleanup (interval: ${CLEANUP_INTERVAL_MS / 1000 / 60}min, timeout: ${STALE_PROCESS_TIMEOUT_MS / 1000 / 60}min)`);
   cleanupTimer = setInterval(() => {
     cleanupStaleProcesses();
   }, CLEANUP_INTERVAL_MS);
@@ -916,7 +891,6 @@ export function stopPeriodicCleanup() {
   if (cleanupTimer) {
     clearInterval(cleanupTimer);
     cleanupTimer = null;
-    console.log("[Terminal] Stopped periodic stale process cleanup");
   }
 }
 

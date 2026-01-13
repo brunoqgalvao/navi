@@ -137,7 +137,6 @@ function loadExternalMcpServers(projectPath?: string): McpServerInfo[] {
             }
           }
         }
-        console.log(`[MCP Settings] Loaded ${Object.keys(config.mcpServers || {}).length} servers from project .mcp.json`);
       }
     } catch (e) {
       console.error(`[MCP Settings] Failed to load project .mcp.json:`, e);
@@ -165,7 +164,6 @@ function loadExternalMcpServers(projectPath?: string): McpServerInfo[] {
           }
         }
       }
-      console.log(`[MCP Settings] Loaded ${Object.keys(config.mcpServers || {}).length} servers from global .mcp.json`);
     }
   } catch (e) {
     console.error(`[MCP Settings] Failed to load global .mcp.json:`, e);
@@ -290,7 +288,6 @@ export const mcpSettings = {
     }
 
     saveClaudeJson(claudeJson);
-    console.log(`[MCP Settings] ${name} ${enabled ? "enabled" : "disabled"} for ${projectPath} (saved to ~/.claude.json)`);
   },
 
   /**
@@ -304,7 +301,6 @@ export const mcpSettings = {
       claudeJson.projects[projectPath].disabledMcpjsonServers = [];
       saveClaudeJson(claudeJson);
     }
-    console.log("[MCP Settings] Reset disabled servers for", projectPath);
   },
 
   /**
@@ -371,7 +367,6 @@ export const mcpSettings = {
     }
 
     saveClaudeJson(claudeJson);
-    console.log(`[MCP Settings] Builtin ${name} ${enabled ? "enabled" : "disabled"} for ${projectPath}`);
   },
 
   /**
@@ -493,7 +488,6 @@ export const mcpSettings = {
 
       mcpConfig.mcpServers[name] = config;
       writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2));
-      console.log(`[MCP Settings] Added server "${name}" to project .mcp.json`);
     } else {
       // Global scope
       let mcpConfig: McpJsonConfig = { mcpServers: {} };
@@ -513,7 +507,6 @@ export const mcpSettings = {
 
       mcpConfig.mcpServers[name] = config;
       writeFileSync(GLOBAL_MCP_JSON_PATH, JSON.stringify(mcpConfig, null, 2));
-      console.log(`[MCP Settings] Added server "${name}" to global ~/.mcp.json`);
     }
   },
 
@@ -545,7 +538,6 @@ export const mcpSettings = {
 
         delete mcpConfig.mcpServers[name];
         writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2));
-        console.log(`[MCP Settings] Removed server "${name}" from project .mcp.json`);
         return true;
       } catch (e) {
         console.error(`[MCP Settings] Failed to remove server from project .mcp.json:`, e);
@@ -566,7 +558,6 @@ export const mcpSettings = {
 
         delete mcpConfig.mcpServers[name];
         writeFileSync(GLOBAL_MCP_JSON_PATH, JSON.stringify(mcpConfig, null, 2));
-        console.log(`[MCP Settings] Removed server "${name}" from global ~/.mcp.json`);
         return true;
       } catch (e) {
         console.error(`[MCP Settings] Failed to remove server from global .mcp.json:`, e);
@@ -595,7 +586,6 @@ export const mcpSettings = {
         const credKey = envVar.toLowerCase().replace(/_/g, "-");
         setCredential(credProvider, credKey, value, { projectId: scope === "project" ? projectPath : null });
         credentialRefs[envVar] = `${credProvider}:${credKey}`;
-        console.log(`[MCP Settings] Stored credential ${credProvider}:${credKey}`);
       }
     }
 

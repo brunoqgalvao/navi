@@ -40,7 +40,6 @@
       checkPreviewStatus();
     } else if (!portsDiscovered) {
       // Wait for port discovery
-      console.log("[PreviewButton] Waiting for port discovery...");
     } else {
       previewStatus = "stopped";
       previewUrl = null;
@@ -75,18 +74,14 @@
   }
 
   async function startPreview() {
-    console.log("[PreviewButton] startPreview called", { sessionId, projectId, branch: effectiveBranch });
     if (!sessionId) {
-      console.log("[PreviewButton] No sessionId, opening panel anyway");
       onOpenPreviewPanel();
       return;
     }
 
     previewLoading = true;
     try {
-      console.log("[PreviewButton] Starting preview for session", sessionId);
       const result = await containerPreviewApi.start(sessionId);
-      console.log("[PreviewButton] Start result:", result);
       if (result.success && result.preview) {
         previewStatus = (result.preview.status as any) || "starting";
         previewUrl = result.preview.url;

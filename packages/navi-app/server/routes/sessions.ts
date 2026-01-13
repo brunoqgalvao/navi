@@ -258,7 +258,6 @@ export async function handleSessionRoutes(
 
               await fs.writeFile(newSessionFile, updatedLines.join("\n") + "\n");
               sessions.updateClaudeSession(newClaudeSessionId, sourceSession.model, 0, 0, 0, 0, now, newSessionId);
-              console.log(`Forked Claude session: ${sourceSession.claude_session_id} -> ${newClaudeSessionId} (${linesToKeep.length} lines)`);
             }
           } catch (e) {
             console.error("Failed to copy Claude session file:", e);
@@ -618,8 +617,6 @@ export async function handleSessionRoutes(
       await fs.writeFile(sessionFile, prunedLines.join("\n") + "\n");
 
       const tokensSaved = Math.round(charsSaved / 4);
-
-      console.log(`Pruned ${prunedCount} tool results in session ${sessionId}, saved ~${tokensSaved} tokens`);
 
       return json({
         success: true,

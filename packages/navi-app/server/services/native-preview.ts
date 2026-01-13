@@ -175,7 +175,6 @@ class NativePreviewService {
       if (foundSubfolder) {
         resolvedPath = foundSubfolder;
         pkgPath = join(foundSubfolder, "package.json");
-        console.log(`[NativePreview] Found package.json in subfolder: ${foundSubfolder}`);
       } else {
         // List what folders exist to give better suggestions
         const subfolders = this.listDirectories(projectPath);
@@ -321,7 +320,6 @@ class NativePreviewService {
         if (match) {
           const port = parseInt(match[1], 10);
           if (port >= 1024 && port <= 65535) {
-            console.log(`[NativePreview] Found hardcoded port ${port} in package.json scripts`);
             return port;
           }
         }
@@ -407,8 +405,6 @@ class NativePreviewService {
       packageManager = "yarn";
     }
 
-    console.log(`[NativePreview] Detected ${packageManager}, running: ${installCmd}`);
-
     try {
       execSync(installCmd, {
         cwd: projectPath,
@@ -419,7 +415,6 @@ class NativePreviewService {
           CI: "true", // Disable interactive prompts
         },
       });
-      console.log(`[NativePreview] Dependencies installed successfully`);
     } catch (e: any) {
       console.error(`[NativePreview] Failed to install dependencies:`, e.message);
       throw new Error(`Failed to install dependencies: ${e.message}`);
@@ -437,9 +432,8 @@ class NativePreviewService {
     if (existsSync(nextLockPath)) {
       try {
         rmSync(nextLockPath, { force: true });
-        console.log(`[NativePreview] Removed Next.js lock file: ${nextLockPath}`);
       } catch (e) {
-        console.warn(`[NativePreview] Failed to remove Next.js lock: ${e}`);
+        // Ignore
       }
     }
 
@@ -448,9 +442,8 @@ class NativePreviewService {
     if (existsSync(viteLockPath)) {
       try {
         rmSync(viteLockPath, { force: true });
-        console.log(`[NativePreview] Removed Vite lock file: ${viteLockPath}`);
       } catch (e) {
-        console.warn(`[NativePreview] Failed to remove Vite lock: ${e}`);
+        // Ignore
       }
     }
 
@@ -459,9 +452,8 @@ class NativePreviewService {
     if (existsSync(nuxtLockPath)) {
       try {
         rmSync(nuxtLockPath, { force: true });
-        console.log(`[NativePreview] Removed Nuxt lock file: ${nuxtLockPath}`);
       } catch (e) {
-        console.warn(`[NativePreview] Failed to remove Nuxt lock: ${e}`);
+        // Ignore
       }
     }
   }
@@ -481,9 +473,6 @@ class NativePreviewService {
     projectPath: string,
     branch: string
   ): Promise<PreviewStartResult> {
-    console.log(`[NativePreview] Starting preview for session ${sessionId}, project ${projectId}`);
-    console.log(`[NativePreview] Path: ${projectPath}, Branch: ${branch}`);
-
     // Check compliance first
     const compliance = await this.checkCompliance(projectPath);
     if (!compliance.canPreview) {
@@ -503,7 +492,6 @@ class NativePreviewService {
         existingPreview.branch === branch &&
         existingPreview.status === "running"
       ) {
-        console.log(`[NativePreview] Already running for this session`);
         return {
           success: true,
           port: existingPreview.port,
@@ -513,10 +501,6 @@ class NativePreviewService {
       }
 
       // Same session but different config (e.g., switched branch) → stop and start fresh
-      console.log(`[NativePreview] Stopping existing preview for session (config changed)`);
-      console.log(`[NativePreview] Old: branch=${existingPreview.branch}, path=${existingPreview.projectPath}`);
-      console.log(`[NativePreview] New: branch=${branch}, path=${projectPath}`);
-
       await this.stopForSession(sessionId);
     }
 
@@ -524,7 +508,6 @@ class NativePreviewService {
     // This is critical for worktrees which don't share node_modules
     const nodeModulesPath = join(projectPath, "node_modules");
     if (!existsSync(nodeModulesPath)) {
-      console.log(`[NativePreview] node_modules not found, installing dependencies...`);
       await this.installDependencies(projectPath);
     }
 
@@ -534,12 +517,10 @@ class NativePreviewService {
 
     // Detect framework and package manager
     const framework = await detectFramework(projectPath, false);
-    console.log(`[NativePreview] Detected: ${describeFramework(framework)}`);
 
     // Check for hardcoded port in package.json scripts
     const scriptPort = this.detectHardcodedPort(projectPath);
     const targetPort = scriptPort || framework.defaultPort;
-    console.log(`[NativePreview] Target port: ${targetPort} (${scriptPort ? 'from package.json' : 'framework default'})`);
 
     // CRITICAL: Use mutex lock for port operations to prevent race conditions
     // when multiple projects start simultaneously
@@ -584,14 +565,9 @@ class NativePreviewService {
 
       // No conflict or auto-resolved - use the determined port
       finalPort = conflictResult.port;
-      console.log(`[NativePreview] Using port ${finalPort}`);
-      if (conflictResult.action) {
-        console.log(`[NativePreview] Port action: ${conflictResult.action} - ${conflictResult.reason}`);
-      }
 
       // Reserve the port BEFORE spawning to prevent race conditions
       this.portReservations.set(finalPort, sessionId);
-      console.log(`[NativePreview] Reserved port ${finalPort} for session ${sessionId}`);
     } finally {
       // Release lock after port is reserved but before spawn (spawn can take time)
       releasePortLock();
@@ -599,7 +575,6 @@ class NativePreviewService {
 
     // Build dev command with port override
     const devCommand = this.buildDevCommand(framework, finalPort);
-    console.log(`[NativePreview] Command: ${devCommand}`);
 
     // Spawn process (detached so we can kill the process group)
     const childProcess = spawn(devCommand, {
@@ -652,7 +627,6 @@ class NativePreviewService {
 
     // Handle process exit
     childProcess.on("exit", (code) => {
-      console.log(`[NativePreview] Process exited with code ${code} for session ${sessionId}`);
       const existingPreview = this.previews.get(sessionId);
       if (existingPreview) {
         existingPreview.status = "error";
@@ -661,7 +635,6 @@ class NativePreviewService {
         setTimeout(() => {
           const preview = this.previews.get(sessionId);
           if (preview?.status === "error") {
-            console.log(`[NativePreview] Auto-removing crashed preview for session ${sessionId}`);
             this.previews.delete(sessionId);
             // Also clean up any port reservations
             for (const [port, reservedSession] of this.portReservations.entries()) {
@@ -679,7 +652,6 @@ class NativePreviewService {
 
     // Clear the port reservation since it's now registered as an active preview
     this.portReservations.delete(finalPort);
-    console.log(`[NativePreview] Active previews: ${this.previews.size}`);
 
     // Start health check polling
     this.pollHealth(sessionId, projectId);
@@ -698,10 +670,6 @@ class NativePreviewService {
   async stopForSession(sessionId: string): Promise<void> {
     const preview = this.previews.get(sessionId);
     if (!preview) return;
-
-    const port = preview.port;
-
-    console.log(`[NativePreview] Stopping preview for session ${sessionId} on port ${port}`);
 
     // Remove from map first
     this.previews.delete(sessionId);
@@ -751,19 +719,15 @@ class NativePreviewService {
     const sessionId = preview.sessionId;
     const pid = preview.process.pid;
 
-    console.log(`[NativePreview] Stopping preview for session ${sessionId} (PID: ${pid}, port: ${port})`);
-
     // CRITICAL: Only kill by PID, never by port!
     // The port might now be used by something else (like Navi server after restart)
     if (!pid) {
-      console.warn(`[NativePreview] No PID for preview, cannot kill safely`);
       return;
     }
 
     // Check if our spawned process is still alive
     const isOurProcessAlive = this.isProcessAlive(pid);
     if (!isOurProcessAlive) {
-      console.log(`[NativePreview] Process ${pid} already dead, nothing to kill`);
       return;
     }
 
@@ -771,9 +735,8 @@ class NativePreviewService {
       // Kill ONLY the specific process we spawned - never use lsof!
       try {
         preview.process.kill("SIGTERM");
-        console.log(`[NativePreview] Sent SIGTERM to PID ${pid}`);
       } catch (e) {
-        console.log(`[NativePreview] SIGTERM failed (process may be dead): ${e}`);
+        // Process may be dead
       }
 
       // Wait a moment for graceful shutdown
@@ -783,11 +746,8 @@ class NativePreviewService {
       if (!preview.process.killed && this.isProcessAlive(pid)) {
         try {
           preview.process.kill("SIGKILL");
-          console.log(`[NativePreview] Sent SIGKILL to PID ${pid}`);
         } catch {}
       }
-
-      console.log(`[NativePreview] Preview process ${pid} stopped`);
     } catch (e) {
       console.error("[NativePreview] Error stopping preview:", e);
     }
@@ -1034,13 +994,11 @@ class NativePreviewService {
     for (let i = 0; i < maxAttempts; i++) {
       // 1. Skip Navi reserved ports
       while (RESERVED_PORTS.has(port)) {
-        console.log(`[NativePreview] Port ${port} is reserved for Navi, skipping...`);
         port++;
       }
 
       // 2. Skip ports with pending reservations
       if (this.portReservations.has(port)) {
-        console.log(`[NativePreview] Port ${port} has pending reservation, skipping...`);
         port++;
         continue;
       }
@@ -1048,7 +1006,6 @@ class NativePreviewService {
       // 3. Skip ports already used by other Navi previews
       const usedByPreview = this.findPreviewByPort(port);
       if (usedByPreview) {
-        console.log(`[NativePreview] Port ${port} used by session ${usedByPreview.sessionId}, skipping...`);
         port++;
         continue;
       }
@@ -1056,16 +1013,13 @@ class NativePreviewService {
       // 4. Check if port is actually free (not used by any process)
       const isAvailable = await this.isPortAvailable(port, net);
       if (isAvailable) {
-        console.log(`[NativePreview] Found available port: ${port}`);
         return port;
       }
 
-      console.log(`[NativePreview] Port ${port} is in use by external process, skipping...`);
       port++;
     }
 
     // Fallback - shouldn't normally reach here
-    console.warn(`[NativePreview] Could not find free port after ${maxAttempts} attempts, trying portFixer fallback`);
     return portFixer.findAvailablePort(startPort + maxAttempts);
   }
 
@@ -1119,7 +1073,6 @@ class NativePreviewService {
   }> {
     // CRITICAL: Never use reserved Navi ports
     if (RESERVED_PORTS.has(targetPort)) {
-      console.log(`[NativePreview] Port ${targetPort} is reserved for Navi services, finding new port...`);
       const newPort = await this.findSafePort(targetPort + 1);
       return {
         port: newPort,
@@ -1131,7 +1084,6 @@ class NativePreviewService {
     // Check if port is reserved by another Navi session
     const reservedBy = this.isPortReservedByOther(targetPort, sessionId);
     if (reservedBy) {
-      console.log(`[NativePreview] Port ${targetPort} is reserved by session ${reservedBy}, finding new port...`);
       const newPort = await this.findSafePort(targetPort + 1);
       return {
         port: newPort,
@@ -1149,7 +1101,6 @@ class NativePreviewService {
     }
 
     const processInfo = conflict.conflictingProcess;
-    console.log(`[NativePreview] Port ${targetPort} is in use by ${processInfo.process} (PID: ${processInfo.pid})`);
 
     // Determine if this is from the same workspace
     // Same workspace = same project base path (parent directory of worktrees)

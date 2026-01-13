@@ -211,7 +211,7 @@
         }
       }
     } catch (e) {
-      console.warn("Failed to read ports from Tauri backend, using defaults", e);
+      // Failed to read ports from Tauri backend, using defaults
     }
 
     setServerPort(serverPort);
@@ -221,7 +221,6 @@
       try {
         const res = await fetch(`http://localhost:${serverPort}/health`);
         if (res.ok) {
-          console.log("Server is ready on port", serverPort);
           return serverPort;
         }
       } catch {
@@ -387,7 +386,6 @@
       const branchData = await getBranches(currentProject.path);
       cloudBranches = [branchData.current, ...branchData.local.filter(b => b !== branchData.current)];
     } catch (e) {
-      console.warn("Failed to load branches for cloud execution:", e);
       cloudBranches = ["main"];
     }
   }
@@ -453,7 +451,6 @@
     onAskUserQuestion: (data) => {
       // Only show question if it's for the current session
       if (data.sessionId && data.sessionId !== $session.sessionId) {
-        console.warn(`[AskUserQuestion] Ignoring question for different session: ${data.sessionId} (current: ${$session.sessionId})`);
         return;
       }
       pendingQuestion = {
@@ -550,9 +547,9 @@
 
         if (snapshotId) {
           // Clean up the snapshot since resolution is complete
-          worktreeApi.deleteSnapshot(snapshotId).catch(e =>
-            console.warn("[MergeConflict] Failed to cleanup snapshot:", e)
-          );
+          worktreeApi.deleteSnapshot(snapshotId).catch(() => {
+            // Snapshot cleanup failed
+          });
         }
 
         if (reason === "done") {
@@ -676,7 +673,6 @@
         maxIterations: data.maxIterations,
         totalCost: data.totalCost,
       }));
-      console.log(`[UntilDone] Continuing: session ${sessionId}, iteration ${data.iteration}/${data.maxIterations}, reason: ${data.reason}`);
     },
     onUntilDoneComplete: (sessionId, data) => {
       // Remove from tracking
@@ -691,7 +687,6 @@
           message: `Finished in ${data.totalIterations} iteration${data.totalIterations > 1 ? 's' : ''} ($${data.totalCost.toFixed(2)})`,
         });
       }
-      console.log(`[UntilDone] Complete: session ${sessionId}, ${data.reason}`);
     },
     // Session Hierarchy (Multi-Agent) events
     onSessionHierarchyEvent: (event) => {
@@ -728,7 +723,6 @@
       // Play notification sound
       if (sound === "escalation") {
         // Could play a sound file here
-        console.log("[Sound] Playing escalation sound");
       }
     },
   });
@@ -1088,10 +1082,8 @@
       loadMcpServers(); // Load MCP server states
 
       // Initialize proactive hooks (skill scout, error detector, memory builder)
-      setupProactiveHooks().then((enabled) => {
-        if (enabled) {
-          console.log("[App] Proactive hooks enabled");
-        }
+      setupProactiveHooks().then(() => {
+        // Proactive hooks setup complete
       });
 
       client = new ClaudeClient();
@@ -1619,32 +1611,24 @@ Please walk me through the setup step by step. When I have the credentials, save
       }
 
       // Enable template skills for this project
-      console.log("[template] skillSlugs to enable:", skillSlugs);
       if (skillSlugs.length > 0) {
         try {
           // Sync global skills first to ensure they're in the library
-          console.log("[template] syncing global skills...");
           await skillsApi.syncGlobal();
           // Get all skills to find IDs by slug
           const allSkills = await skillsApi.list();
-          console.log("[template] all skills in library:", allSkills.map(s => s.slug));
           for (const slug of skillSlugs) {
             const skill = allSkills.find(s => s.slug === slug);
-            console.log(`[template] looking for skill "${slug}":`, skill ? `found (id: ${skill.id})` : "NOT FOUND");
             if (skill) {
               try {
-                console.log(`[template] enabling skill ${slug} for project ${newProject.id}...`);
                 await skillsApi.enableForProject(newProject.id, skill.id);
-                console.log(`[template] skill ${slug} enabled successfully`);
               } catch (e) {
-                console.warn(`Failed to enable skill ${slug}:`, e);
+                // Failed to enable skill
               }
-            } else {
-              console.warn(`Skill "${slug}" not found in library`);
             }
           }
         } catch (e) {
-          console.warn("Failed to enable template skills:", e);
+          // Failed to enable template skills
         }
       }
 
@@ -1778,8 +1762,8 @@ Please walk me through the setup step by step. When I have the credentials, save
           sessionStatus.setAwaitingInput(s.id, $session.projectId);
         }
       }
-    }).catch((e) => {
-      console.warn("Failed to load pending question:", e);
+    }).catch(() => {
+      // Failed to load pending question
     });
 
     inputText = $sessionDrafts.get(s.id) || "";
@@ -2336,7 +2320,6 @@ Please walk me through the setup step by step. When I have the credentials, save
           maxIterations: untilDoneMaxIterations,
           totalCost: 0,
         }));
-        console.log("[UntilDone] Enabled for session", sessionId);
       } catch (e) {
         console.error("[UntilDone] Failed to enable:", e);
       }
@@ -2346,7 +2329,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         await fetch(`${baseUrl}/api/sessions/${sessionId}/until-done`, { method: "DELETE" });
         untilDoneSessions.delete(sessionId);
         untilDoneSessions = new Map(untilDoneSessions);
-        console.log("[UntilDone] Disabled for session", sessionId);
       } catch (e) {
         console.error("[UntilDone] Failed to disable:", e);
       }
@@ -2961,7 +2943,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   function handleCodeRun(code: string, language: string) {
-    console.log('Running code:', { code, language });
+    // Code run handler
   }
 
   function handleMessageClick(e: MouseEvent) {
@@ -3275,19 +3257,14 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function forkFromMessage(msgId: string) {
-    console.log("[Fork] Starting fork from message:", msgId, "session:", $session.sessionId);
     if (!$session.sessionId) {
-      console.warn("[Fork] No session ID, aborting");
       return;
     }
 
     try {
-      console.log("[Fork] Calling API...");
       const forkedSession = await api.sessions.fork($session.sessionId, { fromMessageId: msgId });
-      console.log("[Fork] API returned:", forkedSession);
       sidebarSessions = [forkedSession, ...sidebarSessions];
       selectSession(forkedSession);
-      console.log("[Fork] Session selected");
     } catch (e) {
       console.error("[Fork] Failed to fork session:", e);
     }
@@ -3999,7 +3976,6 @@ Please walk me through the setup step by step. When I have the credentials, save
           snapshotId: conflictContext.snapshotId,
         };
         // Send the conflict resolution prompt to Claude
-        console.log("[MergeModal] Sending conflict resolution to Claude:", conflictContext.conflictingFiles.length, "files");
         sendCommand(prompt);
       }}
     />

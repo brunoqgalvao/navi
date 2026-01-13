@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/brunogalvao/navi/discussions
     about: Use GitHub Discussions for questions, ideas, or general discussion.
   - name: Security Issues
-    url: mailto:security@example.com
-    about: For security vulnerabilities, please email security@example.com instead of opening a public issue.
+    url: mailto:brunoqgalvao@hotmail.com
+    about: For security vulnerabilities, please email brunoqgalvao@hotmail.com instead of opening a public issue.

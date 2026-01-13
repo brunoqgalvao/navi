@@ -446,21 +446,17 @@
   }
 
   async function initTerminal() {
-    console.log("[TerminalPanel] initTerminal called, container:", terminalContainer);
     if (!terminalContainer) {
-      console.warn("[TerminalPanel] No container, aborting init");
       return;
     }
 
     try {
-      console.log("[TerminalPanel] Importing xterm...");
       const { Terminal } = await import("xterm");
       const { FitAddon } = await import("xterm-addon-fit");
       const { WebLinksAddon } = await import("xterm-addon-web-links");
 
       // Import CSS
       await import("xterm/css/xterm.css");
-      console.log("[TerminalPanel] xterm imported, creating terminal...");
 
       terminal = new Terminal({
         cursorBlink: true,
@@ -499,17 +495,14 @@
       terminal.focus();
       focusOnClick = () => terminal?.focus();
       terminalContainer.addEventListener("click", focusOnClick);
-      console.log("[TerminalPanel] Terminal opened, cols:", terminal.cols, "rows:", terminal.rows);
 
       // Try to create or reconnect to a PTY terminal via PTY server
       try {
         if (existingTerminalId) {
           terminal.writeln("\x1b[90mReconnecting to terminal...\x1b[0m");
-          console.log("[TerminalPanel] Reconnecting to existing terminal:", existingTerminalId);
           terminalId = existingTerminalId;
           connectPtyWebSocket("attach", existingTerminalId);
         } else {
-          console.log("[TerminalPanel] Creating new PTY, cwd:", cwd, "projectId:", projectId);
           connectPtyWebSocket("create");
         }
 
@@ -650,13 +643,11 @@
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        
+
         if (data.type === "created") {
           terminalId = data.terminalId;
           onTerminalIdChange?.(data.terminalId);
-          console.log("[TerminalPanel] PTY created:", data.terminalId);
         } else if (data.type === "attached") {
-          console.log("[TerminalPanel] Attached to PTY:", data.terminalId);
         } else if (data.type === "output" && terminal) {
           terminal.write(data.data);
           captureOutput(data.data);

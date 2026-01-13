@@ -2,7 +2,7 @@
 
 > A beautiful desktop GUI for Claude Code with real-time preview, multi-agent coordination, and powerful developer tools.
 
-![Navi Screenshot](docs/screenshot.png) *[Add screenshot here]*
+![Navi Screenshot](Screenshot%202026-01-12%20at%2016.59.12.png)
 
 ## ✨ Features
 
@@ -44,7 +44,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/navi.git
+git clone https://github.com/brunogalvao/navi.git
 cd navi
 
 # Install dependencies

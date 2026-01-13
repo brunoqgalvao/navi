@@ -114,8 +114,6 @@ const activeCloudExecutions = new Map<string, { executionId: string; ws: any; ab
  * Call this when a session is deleted to prevent memory leaks.
  */
 export function cleanupSessionState(sessionId: string) {
-  console.log(`[Memory] Cleaning up server state for session ${sessionId}`);
-
   // Clean active processes
   const active = activeProcesses.get(sessionId);
   if (active) {
@@ -167,8 +165,6 @@ export function cleanupSessionState(sessionId: string) {
 
   // Clean stream capture
   deleteStreamCapture(sessionId);
-
-  console.log(`[Memory] Session ${sessionId} cleanup complete`);
 }
 
 /**
@@ -483,6 +479,9 @@ const childSessionWorkers = new Map<string, ChildProcess>();
 /**
  * Start a child session's query in the background
  * This is called when a parent agent spawns a child agent
+ *
+ * For Claude backend: uses query-worker subprocess with Claude SDK
+ * For Codex/Gemini: uses adapter system directly (no multi-session tools)
  */
 function startChildSessionQuery(
   childSessionId: string,
@@ -491,11 +490,20 @@ function startChildSessionQuery(
     cwd: string;
     model: string;
     projectId: string;
+    backend?: string;
   }
 ) {
   const childSession = sessions.get(childSessionId);
   if (!childSession) {
     console.error(`[MultiSession] Child session ${childSessionId} not found`);
+    return;
+  }
+
+  const effectiveBackend = (config.backend || 'claude') as BackendId;
+
+  // Route non-Claude backends to adapter system
+  if (effectiveBackend !== 'claude') {
+    startChildSessionWithAdapter(childSessionId, config, effectiveBackend);
     return;
   }
 
@@ -530,6 +538,7 @@ function startChildSessionQuery(
     cwd: config.cwd,
     model: config.model,
     sessionId: childSessionId,
+    backend: config.backend, // Pass backend for non-Claude models (codex, gemini)
     permissionSettings: {
       autoAcceptAll: true, // Auto-accept for child sessions
       requireConfirmation: [],
@@ -548,11 +557,23 @@ function startChildSessionQuery(
   const workerEnv = { ...process.env };
   delete workerEnv.ANTHROPIC_API_KEY;
   delete workerEnv.ANTHROPIC_BASE_URL;
+  delete workerEnv.NAVI_ANTHROPIC_API_KEY;
+  delete workerEnv.NAVI_ANTHROPIC_BASE_URL;
+
+  // Resolve and inject auth for child session (inherit from parent settings, not OAuth default)
+  const authResult = resolveNaviClaudeAuth(config.model);
+
+  if (authResult.overrides.apiKey) {
+    workerEnv.NAVI_ANTHROPIC_API_KEY = authResult.overrides.apiKey;
+  }
+  if (authResult.overrides.baseUrl) {
+    workerEnv.NAVI_ANTHROPIC_BASE_URL = authResult.overrides.baseUrl;
+  }
+  workerEnv.NAVI_AUTH_MODE = authResult.mode;
+  workerEnv.NAVI_AUTH_SOURCE = authResult.source;
 
   const resolvedBunPath = resolveBunExecutable();
   const bunPath = resolvedBunPath ?? "bun";
-
-  console.log(`[MultiSession] Starting child worker for session ${childSessionId}`);
 
   // Save the initial user message to the database
   const userMsgId = crypto.randomUUID();
@@ -566,7 +587,6 @@ function startChildSessionQuery(
     null,
     0
   );
-  console.log(`[MultiSession] Created initial user message for child session ${childSessionId}`);
 
   const childProc = spawn(bunPath, ["run", "--env-file=/dev/null", workerPath, inputJson], {
     cwd: config.cwd,
@@ -623,8 +643,6 @@ function startChildSessionQuery(
           handleMultiSessionDeliver(childProc, childSessionId, msg);
         } else if (msg.type === "multi_session_log_decision") {
           handleMultiSessionLogDecision(childProc, childSessionId, msg);
-        } else if (msg.type === "complete") {
-          console.log(`[MultiSession] Child session ${childSessionId} completed`);
         }
       } catch (e) {
         console.error(`[MultiSession] Error parsing child worker output:`, e);
@@ -637,7 +655,6 @@ function startChildSessionQuery(
   });
 
   childProc.on("close", (code) => {
-    console.log(`[MultiSession] Child worker ${childSessionId} exited with code ${code}`);
     childSessionWorkers.delete(childSessionId);
   });
 
@@ -645,6 +662,120 @@ function startChildSessionQuery(
     console.error(`[MultiSession] Child worker ${childSessionId} error:`, err);
     childSessionWorkers.delete(childSessionId);
   });
+}
+
+/**
+ * Start a child session using the backend adapter system (for Codex, Gemini, etc.)
+ * Note: Adapter-based child sessions don't support multi-session tools (spawn_agent, etc.)
+ * They run as simple single-turn queries and auto-deliver results.
+ */
+async function startChildSessionWithAdapter(
+  childSessionId: string,
+  config: {
+    prompt: string;
+    cwd: string;
+    model: string;
+    projectId: string;
+  },
+  backendId: BackendId
+) {
+  const childSession = sessions.get(childSessionId);
+  if (!childSession) {
+    console.error(`[MultiSession] Child session ${childSessionId} not found`);
+    return;
+  }
+
+  // Save the initial user message
+  const userMsgId = crypto.randomUUID();
+  const now = Date.now();
+  messages.upsert(
+    userMsgId,
+    childSessionId,
+    "user",
+    JSON.stringify([{ type: "text", text: config.prompt }]),
+    now,
+    null,
+    0
+  );
+
+  // Get the adapter
+  const adapter = getAdapter(backendId);
+
+  // Update session to working status
+  sessionHierarchy.updateAgentStatus(childSessionId, "working");
+
+  // Broadcast start
+  broadcastToClients({
+    type: "system",
+    subtype: "status",
+    uiSessionId: childSessionId,
+    status: `Starting ${backendId} agent...`,
+  });
+
+  let lastContent: any[] = [];
+
+  try {
+    // Run query through adapter
+    for await (const event of adapter.query({
+      prompt: config.prompt,
+      cwd: config.cwd,
+      sessionId: childSessionId,
+      model: config.model,
+      permissionMode: "auto", // Auto-accept for child sessions
+    })) {
+      // Broadcast events
+      const uiEvent = convertNormalizedEventToUI(event, childSessionId);
+      if (uiEvent) {
+        broadcastToClients(uiEvent);
+      }
+
+      // Persist assistant messages
+      if (event.type === "assistant") {
+        const msgId = crypto.randomUUID();
+        messages.upsert(
+          msgId,
+          childSessionId,
+          "assistant",
+          JSON.stringify(event.content),
+          Date.now(),
+          null,
+          0
+        );
+        lastContent = event.content;
+      }
+    }
+
+    // Auto-deliver results from adapter-based child sessions
+    const summary = lastContent
+      .filter((c: any) => c.type === "text")
+      .map((c: any) => c.text)
+      .join("\n")
+      .slice(0, 500);
+
+    sessionManager.deliver(childSessionId, {
+      type: "research", // Generic type for adapter results
+      summary: summary || `Completed with ${backendId}`,
+      content: JSON.stringify(lastContent),
+    });
+
+  } catch (error: any) {
+    console.error(`[MultiSession] Child ${childSessionId} (${backendId}) error:`, error.message);
+
+    // Broadcast error
+    broadcastToClients({
+      type: "error",
+      uiSessionId: childSessionId,
+      error: error.message,
+      backend: backendId,
+    });
+
+    // Mark as delivered with error
+    sessionManager.deliver(childSessionId, {
+      type: "error",
+      summary: `Error: ${error.message}`,
+      content: error.message,
+    });
+  }
 }
 
 /**
@@ -665,6 +796,7 @@ function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefin
       role: msg.role,
       task: msg.task,
       model: msg.model,
+      backend: msg.backend,  // Pass backend for multi-model dispatch
       context: msg.context,
       agentType: msg.agent_type,
     });
@@ -674,8 +806,6 @@ function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefin
         success: true,
         childSessionId: child.id,
       });
-
-      console.log(`[MultiSession] Spawned child session ${child.id} (${msg.role}) for parent ${sessionId}`);
 
       // Auto-start the child session
       // Get parent session to determine project and working directory
@@ -689,8 +819,6 @@ function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefin
           ? `${msg.task}\n\nAdditional context from parent:\n${msg.context}`
           : msg.task;
 
-        console.log(`[MultiSession] Auto-starting child session ${child.id} with task: ${msg.task.substring(0, 50)}...`);
-
         // Start the child query in the background
         // We use setTimeout to not block the parent's spawn response
         setTimeout(() => {
@@ -699,6 +827,7 @@ function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefin
             cwd: workingDirectory,
             model: msg.model || parentSession.model || "opus",
             projectId: parentSession.project_id,
+            backend: msg.backend || parentSession.backend || "claude",
           });
         }, 100);
       }
@@ -775,7 +904,6 @@ function handleMultiSessionEscalate(proc: ChildProcess, sessionId: string | unde
 
     // The response will come later via resolveMultiSessionEscalation
     // when parent/human responds
-    console.log(`[MultiSession] Session ${sessionId} escalated: ${msg.summary}`);
   } catch (error) {
     sendWorkerResponse(proc, "multi_session_escalation_response", msg.requestId, {
       action: "abort",
@@ -830,8 +958,6 @@ function handleMultiSessionDeliver(proc: ChildProcess, sessionId: string | undef
       success: true,
     });
 
-    console.log(`[MultiSession] Session ${sessionId} delivered: ${msg.summary}`);
-
     // Inject the deliverable into the parent session's conversation
     if (childSession?.parent_session_id) {
       // Try to inject into running parent process (if active)
@@ -849,7 +975,6 @@ function handleMultiSessionDeliver(proc: ChildProcess, sessionId: string | undef
           },
         });
         parentProc.stdin.write(deliverableMessage + "\n");
-        console.log(`[MultiSession] Injected deliverable into running parent ${childSession.parent_session_id}`);
       }
 
       // Always create a synthetic message in the parent's conversation and broadcast to UI
@@ -882,7 +1007,6 @@ function handleMultiSessionDeliver(proc: ChildProcess, sessionId: string | undef
         isSynthetic: true,
         fromChildSession: sessionId,
       });
-      console.log(`[MultiSession] Broadcast deliverable to parent UI ${childSession.parent_session_id}`);
     }
   } catch (error) {
     sendWorkerResponse(proc, "multi_session_deliver_response", msg.requestId, {
@@ -968,8 +1092,6 @@ function handleSessionWaitStart(proc: ChildProcess, sessionId: string | undefine
     endTime,
     reason: msg.reason || "Waiting...",
   });
-
-  console.log(`[Wait] Session ${sessionId} started waiting ${msg.seconds}s: ${msg.reason || "no reason"}`);
 }
 
 /**
@@ -986,8 +1108,6 @@ function handleSessionWaitEnd(sessionId: string | undefined, msg: any) {
       skipped: msg.skipped || false,
     });
   }
-
-  console.log(`[Wait] Session ${sessionId} finished waiting (skipped: ${msg.skipped || false})`);
 }
 
 /**
@@ -996,7 +1116,6 @@ function handleSessionWaitEnd(sessionId: string | undefined, msg: any) {
 export function skipSessionWait(requestId: string): boolean {
   const pending = pendingWaits.get(requestId);
   if (!pending) {
-    console.log(`[Wait] No pending wait found for ${requestId}`);
     return false;
   }
 
@@ -1006,7 +1125,6 @@ export function skipSessionWait(requestId: string): boolean {
   });
 
   pendingWaits.delete(requestId);
-  console.log(`[Wait] Skipped wait ${requestId} for session ${pending.sessionId}`);
   return true;
 }
 
@@ -1110,8 +1228,6 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
   const workingDirectory = project?.path || process.cwd();
-
-  console.log(`[${sessionId}] Using ${backendId.toUpperCase()} backend for query`);
 
   // Save user message
   if (sessionId && prompt) {
@@ -1320,8 +1436,6 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
   const execDir = process.execPath ? dirname(process.execPath) : process.cwd();
   const workerCwd = existsSync(defaultWorkerCwd) ? defaultWorkerCwd : execDir;
 
-  console.log(`[${sessionId}] Spawning worker process (cwd: ${workerCwd}) for project ${workingDirectory}`);
-
   const permissionSettings = globalSettings.getPermissions();
 
   const needsAutoTitle = session?.title === "New Chat" || session?.title === "New conversation";
@@ -1360,7 +1474,6 @@ The user will explicitly approve the plan before any execution begins.
   // Inject plan mode instruction if enabled
   if (planMode) {
     effectivePrompt = `${PLAN_MODE_INSTRUCTION}\n\n${effectivePrompt}`;
-    console.log(`[${sessionId}] Plan mode enabled - Claude will plan before executing`);
   }
 
   const bundledWorkerPath = join(execDir, "..", "Resources", "resources", "query-worker.js");
@@ -1440,7 +1553,6 @@ The user will explicitly approve the plan before any execution begins.
   delete workerEnv.NAVI_ANTHROPIC_BASE_URL;
 
   const authResult = resolveNaviClaudeAuth(model);
-  console.log(`[${sessionId}] ${formatAuthForLog(authResult)}`);
 
   if (authResult.overrides.apiKey) {
     workerEnv.NAVI_ANTHROPIC_API_KEY = authResult.overrides.apiKey;
@@ -1506,17 +1618,6 @@ The user will explicitly approve the plan before any execution begins.
             const msgId = data.uuid || crypto.randomUUID();
             const timestamp = typeof data.timestamp === "number" ? data.timestamp : now;
 
-            const toolUseBlocks = Array.isArray(data.content)
-              ? data.content.filter((b: any) => b?.type === "tool_use")
-              : [];
-            console.log(`[Persist] Assistant message:`, {
-              uuid: msgId,
-              parentToolUseId: data.parentToolUseId,
-              blockTypes: Array.isArray(data.content) ? data.content.map((b: any) => b?.type) : [],
-              toolUseCount: toolUseBlocks.length,
-              toolNames: toolUseBlocks.map((b: any) => b?.name),
-            });
-
             messages.upsert(
               msgId,
               sessionId,
@@ -1534,13 +1635,6 @@ The user will explicitly approve the plan before any execution begins.
             const msgId = data.uuid || crypto.randomUUID();
             const timestamp = typeof data.timestamp === "number" ? data.timestamp : now;
             const content = data.content ?? [];
-
-            console.log(`[Persist] Saving user message:`, {
-              uuid: msgId,
-              parentToolUseId: data.parentToolUseId,
-              isSynthetic: data.isSynthetic,
-              contentPreview: JSON.stringify(content).slice(0, 200),
-            });
 
             messages.upsert(
               msgId,
@@ -1626,13 +1720,9 @@ The user will explicitly approve the plan before any execution begins.
             const costUsd = msg.resultData.total_cost_usd || 0;
             const usage = msg.resultData.usage || {};
             const contextUsage = msg.lastAssistantUsage || usage;
-            console.log("[DEBUG] resultData.usage:", JSON.stringify(usage));
-            console.log("[DEBUG] lastAssistantUsage:", JSON.stringify(msg.lastAssistantUsage));
-            console.log("[DEBUG] using contextUsage:", JSON.stringify(contextUsage));
             const totalInputTokens = (contextUsage.input_tokens || 0) +
               (contextUsage.cache_creation_input_tokens || 0) +
               (contextUsage.cache_read_input_tokens || 0);
-            console.log("[DEBUG] totalInputTokens calc:", `${contextUsage.input_tokens || 0} + ${contextUsage.cache_creation_input_tokens || 0} + ${contextUsage.cache_read_input_tokens || 0} = ${totalInputTokens}`);
             sessions.updateClaudeSession(
               msg.resultData.session_id,
               msg.resultData.model || null,

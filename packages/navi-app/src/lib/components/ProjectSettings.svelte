@@ -141,7 +141,6 @@
     savingModel = true;
     try {
       // TODO: Implement project-specific model settings API
-      console.log("Model setting saved locally:", defaultModel);
     } catch (e) {
       console.error("Failed to save model setting:", e);
     } finally {

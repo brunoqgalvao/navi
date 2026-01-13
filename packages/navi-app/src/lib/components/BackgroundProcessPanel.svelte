@@ -108,14 +108,12 @@
 
   async function loadProcesses() {
     try {
-      console.log("[ProcessPanel] Loading processes for sessionId:", sessionId);
       // Load both active and background processes in parallel
       // Note: Don't pass sessionId filter to API - we filter client-side to include "global" processes
       const [activeProcs, bgProcs] = await Promise.all([
         loadActiveProcesses(),
         backgroundProcessApi.list().catch(() => [] as BackgroundProcess[]),
       ]);
-      console.log("[ProcessPanel] Active processes:", activeProcs.length, "Background processes:", bgProcs.length);
 
       // Convert background processes to unified format
       // Only include processes that match our sessionId (if we have one), plus "global" processes

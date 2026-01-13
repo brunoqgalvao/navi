@@ -43,8 +43,20 @@ Available agent types with native UI:
 - 'reviewer': Code/document review, quality checks
 - 'general': Fallback for miscellaneous tasks
 
+Available backends:
+- 'claude' (default): Claude models (haiku, sonnet, opus)
+- 'codex': OpenAI Codex CLI (gpt-5.2-codex, o3, etc.)
+- 'gemini': Google Gemini (gemini-2.0-flash, etc.)
+
 The child agent has its own context window and can spawn its own children (up to depth 3).
-You will receive their deliverable when they complete.
+
+CRITICAL - MONITORING SPAWNED AGENTS:
+After spawning an agent, you MUST periodically check on its progress:
+1. Use get_context(source: 'sibling') to check child status and partial results
+2. Children may hit rate limits, errors, or get stuck - don't assume success
+3. If a child is taking too long or silent, query their status via get_context
+4. Be prepared to handle partial results if a child fails mid-task
+5. Consider using TaskOutput with block=false to poll background agents
 
 IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them yourself.`,
     parameters: {
@@ -73,8 +85,13 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
         model: {
           type: "string",
           description:
-            "Optional: Model to use (defaults to parent's model). Use 'haiku' for simpler tasks.",
-          enum: ["opus", "sonnet", "haiku"],
+            "Optional: Model to use. For Claude: 'haiku', 'sonnet', 'opus'. For Codex: 'gpt-5.2-codex', 'o3', etc. For Gemini: 'gemini-2.0-flash', etc. Defaults to parent's model.",
+        },
+        backend: {
+          type: "string",
+          description:
+            "Optional: Backend to use. 'claude' (default), 'codex' (OpenAI Codex CLI), or 'gemini'. Each backend has different models available.",
+          enum: ["claude", "codex", "gemini"],
         },
         context: {
           type: "string",
@@ -250,7 +267,7 @@ export async function executeMultiSessionTool(
   try {
     switch (toolName) {
       case "spawn_agent": {
-        const { title, role, task, agent_type, model, context: additionalContext } = params;
+        const { title, role, task, agent_type, model, backend, context: additionalContext } = params;
 
         // Check if can spawn
         const canSpawn = sessionManager.canSpawn(sessionId);
@@ -263,6 +280,7 @@ export async function executeMultiSessionTool(
           role,
           task,
           model,
+          backend,  // Pass backend for multi-model dispatch
           context: additionalContext,
           agentType: agent_type,  // Pass agent type for native UI
         };
@@ -277,13 +295,17 @@ export async function executeMultiSessionTool(
           await context.onSpawn(child);
         }
 
+        const backendInfo = backend ? ` using ${backend}` : '';
+        const modelInfo = model ? ` (${model})` : '';
         return {
           success: true,
           result: {
-            message: `Spawned ${agent_type || 'general'} agent '${role}' to work on: ${task}`,
+            message: `Spawned ${agent_type || 'general'} agent '${role}'${backendInfo}${modelInfo} to work on: ${task}`,
             childSessionId: child.id,
             childRole: role,
             agentType: agent_type || 'general',
+            backend: backend || 'claude',
+            model: model,
             note: "You will receive their deliverable when they complete. Continue with your own work.",
           },
         };

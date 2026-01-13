@@ -145,9 +145,7 @@
       } else if (result.error) {
         previewError = result.error;
         // If container runtime not available, suggest native mode
-        if (result.instructions) {
-          console.log("[Preview] Container runtime setup instructions:", result.instructions);
-        }
+      }
       }
     } catch (e: any) {
       previewError = e.message;
@@ -207,7 +205,6 @@
           await startContainerPreview();
           // If container preview failed (no image, network issue, etc.), fall back to native
           if (previewError) {
-            console.log("[Preview] Container preview failed, falling back to native");
             previewError = null;
             await startNativePreview();
           }

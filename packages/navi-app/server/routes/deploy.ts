@@ -78,11 +78,9 @@ async function handleDeploy(body: DeployRequest): Promise<Response> {
   try {
     // Step 1: Detect framework if not specified
     const detectedFramework = framework || (await detectFramework(projectPath));
-    console.log(`[Deploy] Framework: ${detectedFramework}`);
 
     // Step 2: Determine output directory
     const buildDir = outputDir || getBuildDir(detectedFramework, projectPath);
-    console.log(`[Deploy] Build dir: ${buildDir}`);
 
     // Step 3: Collect files from build directory
     const files = await collectFiles(buildDir);
@@ -96,14 +94,11 @@ async function handleDeploy(body: DeployRequest): Promise<Response> {
 
     // Calculate total size
     const totalSize = files.reduce((sum, f) => sum + f.content.length * 0.75, 0); // base64 is ~33% larger
-    console.log(`[Deploy] Collected ${files.length} files (${(totalSize / 1024 / 1024).toFixed(2)} MB)`);
 
     // Step 4: Generate slug if not provided
     const deploySlug = slug || generateSlug(projectPath);
 
     // Step 5: Deploy to Navi Cloud
-    console.log(`[Deploy] Deploying to ${NAVI_CLOUD_API}/deploy as '${deploySlug}'`);
-
     const response = await fetch(`${NAVI_CLOUD_API}/deploy`, {
       method: "POST",
       headers: {
@@ -122,12 +117,10 @@ async function handleDeploy(body: DeployRequest): Promise<Response> {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: "Unknown error" }));
-      console.error(`[Deploy] Failed:`, err);
       return error((err as any).error || "Deploy failed", response.status);
     }
 
     const result = await response.json() as any;
-    console.log(`[Deploy] Success: ${result.url}`);
 
     return json({
       success: true,
@@ -141,7 +134,6 @@ async function handleDeploy(body: DeployRequest): Promise<Response> {
       framework: detectedFramework,
     });
   } catch (err) {
-    console.error("[Deploy] Error:", err);
     return error(err instanceof Error ? err.message : "Deploy failed", 500);
   }
 }
@@ -286,7 +278,6 @@ async function collectFiles(
 
         // Skip large files
         if (stats.size > MAX_FILE_SIZE) {
-          console.warn(`[Deploy] Skipping large file (${(stats.size / 1024 / 1024).toFixed(2)} MB): ${entry.name}`);
           continue;
         }
 

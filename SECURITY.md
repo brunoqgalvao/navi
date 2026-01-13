@@ -16,7 +16,7 @@ The Navi team takes security vulnerabilities seriously. We appreciate your effor
 
 **Please do NOT report security vulnerabilities through public GitHub issues.**
 
-Instead, please send an email to: **[INSERT SECURITY EMAIL HERE]**
+Instead, please send an email to: **brunoqgalvao@hotmail.com**
 
 You should receive a response within 48 hours. If you don't, please follow up via the same email address.
 
@@ -151,7 +151,7 @@ We follow **Coordinated Vulnerability Disclosure**:
 For security questions not related to vulnerability reports:
 
 - **GitHub:** Use [Security Discussions](../../discussions/categories/security)
-- **Email:** [INSERT SECURITY EMAIL HERE]
+- **Email:** brunoqgalvao@hotmail.com
 
 ---
 

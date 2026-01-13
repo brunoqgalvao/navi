@@ -109,7 +109,6 @@ async function migrateEnvKeys() {
       if (key.startsWith("sk-ant-")) {
         globalSettings.set("anthropicApiKey", key);
         globalSettings.set("preferredAuth", "api_key");
-        console.log("Migrated ANTHROPIC_API_KEY from .env to database");
       }
     }
   } catch {}
@@ -120,17 +119,11 @@ await migrateEnvKeys();
 // Build search index if empty
 const stats = searchIndex.getStats();
 if (stats.total === 0) {
-  console.log("Building search index...");
   searchIndex.reindexAll();
-  console.log("Search index built:", searchIndex.getStats());
 }
 
 const PREFERRED_PORT = parseInt(process.argv[2] || Bun.env.PORT || "3001", 10);
 const PORT = await findAvailablePort(PREFERRED_PORT);
-
-if (PORT !== PREFERRED_PORT) {
-  console.log(`Port ${PREFERRED_PORT} in use, using ${PORT} instead`);
-}
 
 // Spawn PTY server when running in Tauri (bundled) mode
 // The PTY server runs separately because node-pty has issues with Bun's file descriptor handling
@@ -169,8 +162,6 @@ async function spawnPtyServer() {
     return;
   }
 
-  console.log(`[Server] Spawning PTY server on port ${ptyPort}...`);
-
   // Find node executable - check multiple locations
   let nodePath = "node";
   const nodeLocations = [
@@ -184,12 +175,9 @@ async function spawnPtyServer() {
   for (const loc of nodeLocations) {
     if (existsSync(loc)) {
       nodePath = loc;
-      console.log(`[Server] Found Node.js at: ${nodePath}`);
       break;
     }
   }
-
-  console.log(`[Server] Using PTY server: ${ptyServerPath}`);
   ptyServerProcess = spawn(nodePath, [ptyServerPath], {
     env: {
       ...process.env,
@@ -200,7 +188,7 @@ async function spawnPtyServer() {
   });
 
   ptyServerProcess.stdout?.on("data", (data: Buffer) => {
-    console.log(`[PTY] ${data.toString().trim()}`);
+    // PTY server output (silent in production)
   });
 
   ptyServerProcess.stderr?.on("data", (data: Buffer) => {
@@ -212,19 +200,14 @@ async function spawnPtyServer() {
   });
 
   ptyServerProcess.on("exit", (code, signal) => {
-    console.log(`[Server] PTY server exited with code ${code}, signal ${signal}`);
     ptyServerProcess = null;
   });
 }
 
 // Spawn PTY server if we're in Tauri mode (TAURI_RESOURCE_DIR is set)
 // This handles the bundled app case where PTY server isn't started separately
-console.log(`[Server] TAURI_RESOURCE_DIR=${process.env.TAURI_RESOURCE_DIR || "not set"}`);
 if (process.env.TAURI_RESOURCE_DIR) {
-  console.log("[Server] Running in Tauri mode, spawning PTY server...");
   await spawnPtyServer();
-} else {
-  console.log("[Server] Not in Tauri mode, skipping PTY server spawn");
 }
 
 // Get shared state for routes that need it
@@ -538,26 +521,20 @@ addProcessEventListener((event: ProcessEvent) => {
 // Initialize experimental features WebSocket broadcasting
 initExperimentalWebSocket(broadcastToClients);
 
-console.log(`Claude Code UI Server running on http://localhost:${PORT}`);
-console.log(`WebSocket endpoint: ws://localhost:${PORT}/ws`);
-
 // Cleanup PTY server on exit
 function cleanupPtyServer() {
   if (ptyServerProcess) {
-    console.log("[Server] Killing PTY server process...");
     ptyServerProcess.kill("SIGTERM");
     ptyServerProcess = null;
   }
 }
 
 process.on("SIGINT", () => {
-  console.log("[Server] Received SIGINT, shutting down...");
   cleanupPtyServer();
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
-  console.log("[Server] Received SIGTERM, shutting down...");
   cleanupPtyServer();
   process.exit(0);
 });

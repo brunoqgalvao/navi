@@ -88,11 +88,6 @@ export async function handleNativePreviewRoutes(
     // Use resolved path if package.json was in a subfolder
     const previewPath = compliance.resolvedPath || basePath;
 
-    console.log(`[NativePreview Route] Session: ${sessionId}`);
-    console.log(`[NativePreview Route] Base path: ${basePath}`);
-    console.log(`[NativePreview Route] Resolved path: ${previewPath}`);
-    console.log(`[NativePreview Route] Branch: ${branch}`);
-
     try {
       const result = await nativePreviewService.start(
         sessionId,

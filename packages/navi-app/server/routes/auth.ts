@@ -61,8 +61,13 @@ async function createNaviInbox(username: string): Promise<string | null> {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("[Auth] Failed to create inbox:", errorText);
+      const errorData = await response.json().catch(() => ({ message: "Unknown error" }));
+      console.error("[Auth] Failed to create inbox:", errorData);
+
+      // Provide specific error for limit exceeded
+      if (errorData.name === "LimitExceededError") {
+        throw new Error("AgentMail inbox limit reached. Please delete unused inboxes at agentmail.to or upgrade your plan.");
+      }
       return null;
     }
 
@@ -351,7 +356,12 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       const naviUsername = `navi-${emailUsername}-${randomBytes(4).toString("hex")}`;
 
       // Create AgentMail inbox
-      const naviEmail = await createNaviInbox(naviUsername);
+      let naviEmail: string | null;
+      try {
+        naviEmail = await createNaviInbox(naviUsername);
+      } catch (e: any) {
+        return errorResponse(e.message || "Failed to create Navi email. Please try again.", 500);
+      }
       if (!naviEmail) {
         return errorResponse("Failed to create Navi email. Please try again.", 500);
       }

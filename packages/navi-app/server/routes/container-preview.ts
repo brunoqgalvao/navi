@@ -346,7 +346,6 @@ function saveProjectPreviewConfig(projectId: string, config: string): void {
     [config, projectId]
   );
   saveDb();
-  console.log(`[ContainerPreview] Cached preview config for project ${projectId}`);
 }
 
 /**
@@ -359,5 +358,4 @@ function clearProjectPreviewConfig(projectId: string): void {
     [projectId]
   );
   saveDb();
-  console.log(`[ContainerPreview] Cleared preview config cache for project ${projectId}`);
 }
