@@ -412,6 +412,7 @@
               {renderMarkdown}
               {jsonBlocksMap}
               {shellBlocksMap}
+              sessionId={sessionId ?? ''}
             />
           {/if}
         </div>

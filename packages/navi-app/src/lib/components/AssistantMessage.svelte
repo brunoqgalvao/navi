@@ -33,6 +33,7 @@
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
     shellBlocksMap?: Map<string, { code: string; language: string }>;
+    sessionId?: string;
   }
 
   let {
@@ -51,6 +52,7 @@
     renderMarkdown,
     jsonBlocksMap = new Map(),
     shellBlocksMap = new Map(),
+    sessionId = '',
   }: Props = $props();
 
   let showMenu = $state(false);
@@ -345,7 +347,7 @@
         {@const text = (item as TextBlock).text}
         {@const rendered = renderTextContent(text)}
         <div class="text-sm leading-relaxed text-gray-800 dark:text-gray-200 markdown-body">
-          <MermaidRenderer content={rendered.genuiResult.processedContent} {renderMarkdown} {jsonBlocksMap} {shellBlocksMap} {onRunInTerminal} />
+          <MermaidRenderer content={rendered.genuiResult.processedContent} {renderMarkdown} {jsonBlocksMap} {shellBlocksMap} {onRunInTerminal} {sessionId} />
           {#if rendered.mediaResult.items.length > 0}
             <div class="my-4">
               <MediaDisplay items={rendered.mediaResult.items} layout={rendered.mediaResult.items.length === 1 ? 'single' : 'grid'} {basePath} />

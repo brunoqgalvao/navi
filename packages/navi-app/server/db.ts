@@ -1,5 +1,5 @@
 import initSqlJs, { type Database } from "sql.js";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
@@ -11,15 +11,21 @@ if (!existsSync(DATA_DIR)) {
 }
 
 let db: Database;
+let loadedDbMtimeMs: number | null = null;
 
 export async function initDb() {
   const SQL = await initSqlJs();
-  
+
   if (existsSync(DB_PATH)) {
+    // Record the file's modification time before reading
+    const stats = statSync(DB_PATH);
+    loadedDbMtimeMs = stats.mtimeMs;
+
     const buffer = readFileSync(DB_PATH);
     db = new SQL.Database(buffer);
   } else {
     db = new SQL.Database();
+    loadedDbMtimeMs = Date.now();
   }
 
   db.run(`
@@ -555,9 +561,30 @@ export async function initDb() {
 
 export function saveDb() {
   if (db) {
+    // Check if file on disk is newer than what we loaded
+    if (loadedDbMtimeMs !== null && existsSync(DB_PATH)) {
+      const currentMtimeMs = statSync(DB_PATH).mtimeMs;
+      if (currentMtimeMs > loadedDbMtimeMs) {
+        const ageMs = Date.now() - loadedDbMtimeMs;
+        const diskAgeMs = Date.now() - currentMtimeMs;
+
+        console.warn(`[DB] Save prevented: file on disk is newer than loaded data`);
+        console.warn(`[DB] Loaded data age: ${Math.round(ageMs / 1000)}s ago, Disk file age: ${Math.round(diskAgeMs / 1000)}s ago`);
+        console.warn(`[DB] This likely means another process has updated the database.`);
+        console.warn(`[DB] Skipping save to prevent data loss. Reload the app to get latest data.`);
+
+        // Update our loaded time to prevent spamming this warning
+        loadedDbMtimeMs = currentMtimeMs;
+        return;
+      }
+    }
+
     const data = db.export();
     const buffer = Buffer.from(data);
     writeFileSync(DB_PATH, buffer);
+
+    // Update the loaded time after successful save
+    loadedDbMtimeMs = Date.now();
   }
 }
 
@@ -842,9 +869,9 @@ export const sessions = {
       LIMIT ?
     `, [limit]),
   get: (id: string) => queryOne<Session>("SELECT * FROM sessions WHERE id = ?", [id]),
-  create: (id: string, project_id: string, title: string, created_at: number, updated_at: number) =>
-    run("INSERT INTO sessions (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        [id, project_id, title, created_at, updated_at]),
+  create: (id: string, project_id: string, title: string, created_at: number, updated_at: number, backend?: string) =>
+    run("INSERT INTO sessions (id, project_id, title, created_at, updated_at, backend) VALUES (?, ?, ?, ?, ?, ?)",
+        [id, project_id, title, created_at, updated_at, backend || null]),
   updateTitle: (title: string, updated_at: number, id: string) =>
     run("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", [title, updated_at, id]),
   updateModel: (model: string, id: string) =>

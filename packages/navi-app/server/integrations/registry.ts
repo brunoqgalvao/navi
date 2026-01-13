@@ -5,11 +5,17 @@
  * Defines providers, their authentication requirements, and how to connect to them.
  */
 
+import { hasRequiredCredentials, type CredentialScope } from "./credentials";
+import { integrations as oauthIntegrations } from "./db";
+
 // ============================================================================
 // Types
 // ============================================================================
 
 export type CredentialFieldType = "text" | "password" | "oauth";
+
+/** Authentication type for the integration */
+export type AuthType = "api_key" | "oauth" | "cli" | "browser" | "none";
 
 export interface CredentialField {
   key: string;
@@ -19,6 +25,24 @@ export interface CredentialField {
   helpUrl?: string;
   helpText?: string;
   required?: boolean;
+}
+
+/** Skill configuration for the integration */
+export interface SkillConfig {
+  /** Skill ID for using the integration (e.g., "linear") */
+  usage?: string;
+  /** Skill ID for setting up the integration (e.g., "connect-linear") */
+  setup?: string;
+}
+
+/** Default settings when integration is first connected */
+export interface IntegrationDefaultsConfig {
+  /** Whether enabled by default when credentials are added */
+  enabledGlobally: boolean;
+  /** Whether MCP server should auto-load */
+  mcpEnabled: boolean;
+  /** Whether skill should be available */
+  skillEnabled: boolean;
 }
 
 export interface MCPConfig {
@@ -68,10 +92,14 @@ export interface IntegrationProvider {
   id: string;
   /** Display name */
   name: string;
+  /** Short description of what this integration does */
+  description?: string;
   /** Icon color class (for UI) */
   color: string;
   /** SVG path data for icon */
   icon: string;
+  /** Authentication type */
+  authType: AuthType;
   /** Credentials required for this provider */
   credentials: CredentialField[];
   /** MCP server configuration (if this provider uses MCP) */
@@ -80,6 +108,10 @@ export interface IntegrationProvider {
   cli?: CLIConfig;
   /** Direct API configuration (if this provider uses REST API) */
   api?: APIConfig;
+  /** Skill configuration */
+  skill?: SkillConfig;
+  /** Default settings when integration is connected */
+  defaults: IntegrationDefaultsConfig;
   /** Whether this provider is currently available */
   available?: boolean;
   /** Setup guide for assisted onboarding */
@@ -93,8 +125,10 @@ export interface IntegrationProvider {
 const LINEAR_PROVIDER: IntegrationProvider = {
   id: "linear",
   name: "Linear",
+  description: "Issue tracking and project management",
   color: "text-blue-500 dark:text-blue-400",
   icon: "M4.5 2.5l-2 17 17-2-15-15z M6.5 6.5l10 10",
+  authType: "api_key",
   credentials: [
     {
       key: "apiKey",
@@ -107,10 +141,20 @@ const LINEAR_PROVIDER: IntegrationProvider = {
     },
   ],
   mcp: {
-    sse: "https://mcp.linear.app/sse",
+    sse: "https://mcp.linear.app/mcp",
     env: {
-      LINEAR_API_KEY: "{{apiKey}}",
+      // Linear MCP expects Authorization header with Bearer token
+      Authorization: "Bearer {{apiKey}}",
     },
+  },
+  skill: {
+    usage: "linear",
+    setup: "connect-linear",
+  },
+  defaults: {
+    enabledGlobally: true,
+    mcpEnabled: true,
+    skillEnabled: true,
   },
   setupGuide: {
     description: "Connect to Linear to manage issues, projects, and workflows directly from Navi.",
@@ -139,8 +183,10 @@ const LINEAR_PROVIDER: IntegrationProvider = {
 const NOTION_PROVIDER: IntegrationProvider = {
   id: "notion",
   name: "Notion",
+  description: "Workspace pages, databases, and content management",
   color: "text-gray-900 dark:text-gray-100",
   icon: "M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.98-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.166V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952l1.448.327s0 .84-1.168.84l-3.22.186c-.094-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.454-.233 4.764 7.279v-6.44l-1.215-.14c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.933.653.933 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.046-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.448-1.632z",
+  authType: "api_key",
   credentials: [
     {
       key: "integrationToken",
@@ -157,6 +203,15 @@ const NOTION_PROVIDER: IntegrationProvider = {
     env: {
       NOTION_API_KEY: "{{integrationToken}}",
     },
+  },
+  skill: {
+    usage: "notion",
+    setup: "connect-notion",
+  },
+  defaults: {
+    enabledGlobally: true,
+    mcpEnabled: true,
+    skillEnabled: true,
   },
   setupGuide: {
     description: "Connect to Notion to access your workspace's pages, databases, and content.",
@@ -187,8 +242,10 @@ const NOTION_PROVIDER: IntegrationProvider = {
 const GITHUB_PROVIDER: IntegrationProvider = {
   id: "github",
   name: "GitHub",
+  description: "Code hosting, issues, PRs, and workflows",
   color: "text-gray-900 dark:text-gray-100",
   icon: "M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z",
+  authType: "cli",
   credentials: [],
   cli: {
     command: "gh",
@@ -198,6 +255,15 @@ const GITHUB_PROVIDER: IntegrationProvider = {
     command: "npx",
     args: ["-y", "@modelcontextprotocol/server-github"],
     env: {},
+  },
+  skill: {
+    usage: "github",
+    setup: undefined,
+  },
+  defaults: {
+    enabledGlobally: true,
+    mcpEnabled: true,
+    skillEnabled: true,
   },
   available: true,
   setupGuide: {
@@ -225,8 +291,10 @@ const GITHUB_PROVIDER: IntegrationProvider = {
 const GOOGLE_PROVIDER: IntegrationProvider = {
   id: "google",
   name: "Google",
+  description: "Gmail, Calendar, Sheets, and Drive",
   color: "text-blue-600 dark:text-blue-400",
   icon: "M12.545 10.239v3.821h5.445c-.712 2.315-2.647 3.972-5.445 3.972a6.033 6.033 0 110-12.064c1.498 0 2.866.549 3.921 1.453l2.814-2.814A9.969 9.969 0 0012.545 2C7.021 2 2.543 6.477 2.543 12s4.478 10 10.002 10c8.396 0 10.249-7.85 9.426-11.748l-9.426-.013z",
+  authType: "oauth",
   credentials: [
     {
       key: "oauth",
@@ -239,6 +307,15 @@ const GOOGLE_PROVIDER: IntegrationProvider = {
     baseUrl: "https://www.googleapis.com",
     authHeader: "Authorization",
     authValueTemplate: "Bearer {{access_token}}",
+  },
+  skill: {
+    usage: "integrations",
+    setup: "connect-google",
+  },
+  defaults: {
+    enabledGlobally: true,
+    mcpEnabled: false,
+    skillEnabled: true,
   },
   available: true,
   setupGuide: {
@@ -267,8 +344,10 @@ const GOOGLE_PROVIDER: IntegrationProvider = {
 const SLACK_PROVIDER: IntegrationProvider = {
   id: "slack",
   name: "Slack",
+  description: "Team messaging and collaboration",
   color: "text-purple-600 dark:text-purple-400",
   icon: "M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z",
+  authType: "api_key",
   credentials: [
     {
       key: "botToken",
@@ -284,6 +363,15 @@ const SLACK_PROVIDER: IntegrationProvider = {
     baseUrl: "https://slack.com/api",
     authHeader: "Authorization",
     authValueTemplate: "Bearer {{botToken}}",
+  },
+  skill: {
+    usage: "slack",
+    setup: "connect-slack",
+  },
+  defaults: {
+    enabledGlobally: true,
+    mcpEnabled: false,
+    skillEnabled: true,
   },
   setupGuide: {
     description: "Connect to Slack to read messages, post updates, and interact with your workspace.",
@@ -338,6 +426,21 @@ export function getProvider(id: string): IntegrationProvider | undefined {
  */
 export function listProviders(): IntegrationProvider[] {
   return Object.values(PROVIDERS);
+}
+
+export interface IntegrationsRegistry {
+  providers: IntegrationProvider[];
+}
+
+export function getIntegrationsRegistry(
+  scope?: CredentialScope
+): IntegrationsRegistry {
+  const providers = Object.values(PROVIDERS).map((provider) => ({
+    ...provider,
+    available: resolveProviderAvailability(provider, scope),
+  }));
+
+  return { providers };
 }
 
 /**
@@ -424,4 +527,31 @@ export function isOAuthProvider(providerId: string): boolean {
 export function isCredentiallessProvider(providerId: string): boolean {
   const provider = getProvider(providerId);
   return !provider?.credentials.length;
+}
+
+function resolveProviderAvailability(
+  provider: IntegrationProvider,
+  scope?: CredentialScope
+): boolean {
+  if (typeof provider.available === "boolean") {
+    return provider.available;
+  }
+
+  if (provider.authType === "oauth") {
+    return oauthIntegrations.listByProvider(provider.id as any).length > 0;
+  }
+
+  if (!provider.credentials.length) {
+    return true;
+  }
+
+  const requiredKeys = provider.credentials
+    .filter((field) => field.required)
+    .map((field) => field.key);
+
+  if (requiredKeys.length === 0) {
+    return true;
+  }
+
+  return hasRequiredCredentials(provider.id, requiredKeys, scope);
 }

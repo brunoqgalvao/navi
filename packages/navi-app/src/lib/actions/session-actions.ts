@@ -6,7 +6,10 @@ import {
   sessionStatus,
   sessionModels,
   cleanupAuxiliaryStores,
+  sessionBackendStore,
+  defaultBackend,
   type ChatMessage,
+  type BackendId,
 } from "../stores";
 import { streamingStore } from "../handlers";
 import { get } from "svelte/store";
@@ -54,16 +57,26 @@ export function startNewChat(): void {
 /**
  * Actually create the database session (called when first message is sent).
  * Returns the new session ID.
+ * @param title - Optional title for the session
+ * @param backend - Optional backend (claude, codex, gemini). If not provided, uses defaultBackend store value.
  */
-export async function createNewChat(title?: string): Promise<string | null> {
+export async function createNewChat(title?: string, backend?: BackendId): Promise<string | null> {
   const session = get(currentSession);
   if (!session.projectId) return null;
 
+  // Use provided backend or get from defaultBackend store
+  const selectedBackend = backend || get(defaultBackend);
+
   try {
-    const newSession = await api.sessions.create(session.projectId, { title: title || "New Chat" });
+    const newSession = await api.sessions.create(session.projectId, {
+      title: title || "New Chat",
+      backend: selectedBackend,
+    });
     const sessions = callbacks?.getSidebarSessions() || [];
     callbacks?.setSidebarSessions([newSession, ...sessions]);
     currentSession.setSession(newSession.id, newSession.claude_session_id);
+    // Store the backend for this session
+    sessionBackendStore.set(newSession.id, selectedBackend);
     // Keep the selected model
     sessionMessages.setMessages(newSession.id, []);
     callbacks?.loadRecentChats();
@@ -74,9 +87,12 @@ export async function createNewChat(title?: string): Promise<string | null> {
   }
 }
 
-export async function createNewChatWithWorktree(description: string): Promise<string | null> {
+export async function createNewChatWithWorktree(description: string, backend?: BackendId): Promise<string | null> {
   const session = get(currentSession);
   if (!session.projectId) return null;
+
+  // Use provided backend or get from defaultBackend store
+  const selectedBackend = backend || get(defaultBackend);
 
   try {
     // Generate a smart branch name using LLM (fast haiku call)
@@ -90,8 +106,11 @@ export async function createNewChatWithWorktree(description: string): Promise<st
       // Will fall back to server-side generation from description
     }
 
-    // Create a new session first
-    const newSession = await api.sessions.create(session.projectId, { title: description || "New Chat" });
+    // Create a new session first with backend
+    const newSession = await api.sessions.create(session.projectId, {
+      title: description || "New Chat",
+      backend: selectedBackend,
+    });
 
     // Then create a worktree for it with the smart branch name
     const result = await worktreeApi.create(newSession.id, description, branchName);
@@ -100,7 +119,10 @@ export async function createNewChatWithWorktree(description: string): Promise<st
     callbacks?.setSidebarSessions([result.session, ...sessions]);
     currentSession.setSession(result.session.id, result.session.claude_session_id);
 
-    // Set default model (Opus) for new chat
+    // Store the backend for this session
+    sessionBackendStore.set(result.session.id, selectedBackend);
+
+    // Set default model for new chat
     const defaultModel = getDefaultModel();
     currentSession.setSelectedModel(defaultModel);
     sessionMessages.setMessages(result.session.id, []);

@@ -2,6 +2,10 @@
 
 Guide users through connecting Linear to Navi. You have full context on Linear's API, authentication, and capabilities.
 
+> **IMPORTANT**: This is Navi, not Claude Code CLI. Do NOT suggest `claude mcp add` commands.
+> Navi has its own integration system. Use the credentials API at `localhost:3001` to save credentials.
+> The MCP server loads automatically once credentials are saved.
+
 ## Trigger Phrases
 - "connect linear"
 - "setup linear"
@@ -71,7 +75,7 @@ A successful response includes the user's name:
 
 ## Linear API Quick Reference
 
-The Linear MCP (via SSE at `mcp.linear.app/sse`) provides these capabilities:
+The Linear MCP (via SSE at `mcp.linear.app/mcp`) provides these capabilities:
 
 ### Issues
 - `linear_createIssue` - Create new issues

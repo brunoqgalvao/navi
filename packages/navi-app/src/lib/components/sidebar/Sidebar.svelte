@@ -1404,15 +1404,13 @@
 
   <div class={`${sidebarCollapsed ? 'px-2' : 'px-4'} py-3 border-t border-gray-200 bg-gray-50/50 space-y-2`}>
     {#if $session.sessionId && !sidebarCollapsed}
-      <!-- Backend + Model selector row -->
-      <div class="flex gap-2 items-center">
-        <BackendSelector
-          value={`${backend}:${modelSelection}`}
-          onchange={(newBackend, newModel) => {
-            onBackendChange?.(newBackend);
-            onModelSelect?.(newModel);
-          }}
-          class="flex-1"
+      <!-- Model selector row (backend is locked, shown in ChatInput) -->
+      {@const backendModelsFiltered = getBackendModelsFormatted(backend, $backendModels)}
+      <div class="w-32">
+        <ModelSelector
+          models={backendModelsFiltered}
+          bind:selectedModel={modelSelection}
+          onSelect={onModelSelect}
         />
       </div>
     {/if}

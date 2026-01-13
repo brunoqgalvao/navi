@@ -2,6 +2,10 @@
 
 Guide users through connecting Slack to Navi. You have full context on creating Slack apps, OAuth scopes, and bot tokens.
 
+> **IMPORTANT**: This is Navi, not Claude Code CLI. Do NOT suggest `claude mcp add` commands.
+> Navi has its own integration system. Use the credentials API at `localhost:3001` to save credentials.
+> The MCP server loads automatically once credentials are saved.
+
 ## Trigger Phrases
 - "connect slack"
 - "setup slack"

@@ -84,12 +84,27 @@
     last_used_at?: number;
   }
 
+  // Unified status from the new API
+  interface UnifiedStatus {
+    provider: string;
+    name: string;
+    connected: boolean;
+    enabled: boolean;
+    enabledGlobal: boolean;
+    enabledProject: boolean | null;
+    health: "healthy" | "degraded" | "failed" | "unknown";
+    lastError: string | null;
+    errorCount: number;
+    authType: "oauth" | "api_key" | "credentialless";
+  }
+
   // State
   let oauthProviders = $state<ProviderInfo[]>([]);
   let credentialProviders = $state<ProviderInfo[]>([]);
   let integrations = $state<Integration[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let statusMap = $state<Map<string, UnifiedStatus>>(new Map());
 
   // Connect flow
   let connectingProvider = $state<IntegrationProvider | null>(null);
@@ -126,24 +141,35 @@
     loading = true;
     error = null;
     try {
-      const [oauthRes, credRes, integrationsRes] = await Promise.all([
+      const [oauthRes, credRes, integrationsRes, statusRes] = await Promise.all([
         fetch(`${API_BASE()}/api/integrations/providers`),
         fetch(buildUrl("/api/credentials/providers")),  // Include project context
         fetch(`${API_BASE()}/api/integrations`),
+        fetch(buildUrl("/api/integrations/status")),  // Load unified status
       ]);
 
-      if (!oauthRes.ok || !credRes.ok || !integrationsRes.ok) {
+      if (!oauthRes.ok || !credRes.ok || !integrationsRes.ok || !statusRes.ok) {
         throw new Error("Failed to load integrations data");
       }
 
       const oauthData = await oauthRes.json();
       const credData = await credRes.json();
+      const statusData = await statusRes.json();
 
       // Split providers by type
       oauthProviders = oauthData.filter((p: ProviderInfo) => p.isOAuth && !p.isCredentialless);
       credentialProviders = credData.filter((p: ProviderInfo) => !p.isOAuth && !p.isCredentialless);
 
       integrations = await integrationsRes.json();
+
+      // Build status map
+      const newStatusMap = new Map<string, UnifiedStatus>();
+      if (statusData.integrations) {
+        for (const status of statusData.integrations) {
+          newStatusMap.set(status.provider, status);
+        }
+      }
+      statusMap = newStatusMap;
     } catch (e) {
       error = e instanceof Error ? e.message : "Unknown error";
     } finally {
@@ -371,6 +397,44 @@
     }
   }
 
+  async function toggleIntegration(providerId: string, enabled: boolean, scope: "global" | "project") {
+    try {
+      const url = scope === "project" && effectiveProjectId
+        ? `${API_BASE()}/api/integrations/${providerId}/${enabled ? "enable" : "disable"}?projectId=${effectiveProjectId}`
+        : `${API_BASE()}/api/integrations/${providerId}/${enabled ? "enable" : "disable"}`;
+
+      const res = await fetch(url, { method: "POST" });
+
+      if (!res.ok) throw new Error(`Failed to ${enabled ? "enable" : "disable"} integration`);
+      await loadData();
+    } catch (e) {
+      error = e instanceof Error ? e.message : `Failed to ${enabled ? "enable" : "disable"} integration`;
+    }
+  }
+
+  // Helper to get health status color and icon
+  function getHealthIndicator(status: UnifiedStatus): { color: string; bgColor: string; tooltip: string } {
+    if (status.errorCount === 0) {
+      return {
+        color: "bg-green-500",
+        bgColor: "bg-green-100 dark:bg-green-900/30",
+        tooltip: "Healthy"
+      };
+    } else if (status.errorCount < 3) {
+      return {
+        color: "bg-yellow-500",
+        bgColor: "bg-yellow-100 dark:bg-yellow-900/30",
+        tooltip: `Degraded (${status.errorCount} error${status.errorCount > 1 ? 's' : ''})`
+      };
+    } else {
+      return {
+        color: "bg-red-500",
+        bgColor: "bg-red-100 dark:bg-red-900/30",
+        tooltip: `Failed (${status.errorCount} errors)`
+      };
+    }
+  }
+
   // OAuth App Configuration functions
   function openOAuthConfigModal(provider: ProviderInfo) {
     selectedOAuthProvider = provider;
@@ -478,6 +542,7 @@
         <div class="space-y-3">
           {#each integrations as integration}
             {@const provider = oauthProviders.find(p => p.id === integration.provider)}
+            {@const status = statusMap.get(integration.provider)}
             {#if provider}
               <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
                 <div class="flex items-start gap-4">
@@ -494,6 +559,13 @@
                         <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                         Connected
                       </span>
+                      {#if status}
+                        {@const healthIndicator = getHealthIndicator(status)}
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs {healthIndicator.bgColor}" title={healthIndicator.tooltip}>
+                          <span class="w-1.5 h-1.5 rounded-full {healthIndicator.color}"></span>
+                          {healthIndicator.tooltip}
+                        </span>
+                      {/if}
                     </div>
                     <p class="text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">{integration.account_id}</p>
 
@@ -504,6 +576,42 @@
                             {service}
                           </span>
                         {/each}
+                      </div>
+                    {/if}
+
+                    <!-- Error display -->
+                    {#if status?.lastError}
+                      <div class="mt-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-700 dark:text-red-400">
+                        <details>
+                          <summary class="cursor-pointer font-medium">Last error (click to expand)</summary>
+                          <p class="mt-1 text-red-600 dark:text-red-300">{status.lastError}</p>
+                        </details>
+                      </div>
+                    {/if}
+
+                    <!-- Enable/Disable toggles -->
+                    {#if status}
+                      <div class="mt-3 flex items-center gap-4 text-sm">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={status.enabledGlobal}
+                            onchange={(e) => toggleIntegration(integration.provider, e.currentTarget.checked, "global")}
+                            class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <span class="text-gray-700 dark:text-gray-300">Enabled globally</span>
+                        </label>
+                        {#if effectiveProjectId}
+                          <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={status.enabledProject ?? status.enabledGlobal}
+                              onchange={(e) => toggleIntegration(integration.provider, e.currentTarget.checked, "project")}
+                              class="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                            />
+                            <span class="text-gray-700 dark:text-gray-300">Enabled for this project</span>
+                          </label>
+                        {/if}
                       </div>
                     {/if}
                   </div>
@@ -538,41 +646,83 @@
         <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">API Key Connections</h3>
         <div class="space-y-3">
           {#each connectedCredentialProviders as provider}
+            {@const status = statusMap.get(provider.id)}
             <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-              <div class="flex items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                  <div class="shrink-0 w-10 h-10 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center">
-                    <svg class="w-5 h-5 {provider.color}" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1">
-                      <path d={getProviderIcon(provider.id)} />
-                    </svg>
-                  </div>
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="font-medium text-gray-900 dark:text-gray-100">{provider.name}</span>
-                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                        <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                        Connected
+              <div class="flex items-start gap-4">
+                <div class="shrink-0 w-10 h-10 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center">
+                  <svg class="w-5 h-5 {provider.color}" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1">
+                    <path d={getProviderIcon(provider.id)} />
+                  </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium text-gray-900 dark:text-gray-100">{provider.name}</span>
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+                      <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                      Connected
+                    </span>
+                    {#if status}
+                      {@const healthIndicator = getHealthIndicator(status)}
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs {healthIndicator.bgColor}" title={healthIndicator.tooltip}>
+                        <span class="w-1.5 h-1.5 rounded-full {healthIndicator.color}"></span>
+                        {healthIndicator.tooltip}
                       </span>
-                      {#if provider.hasProjectCredentials}
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400">
-                          Project
-                        </span>
-                      {:else if provider.hasUserCredentials}
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
-                          Global
-                        </span>
-                      {/if}
-                    </div>
-                    {#if provider.credentialStatus}
-                      {@const setCredentials = provider.credentialStatus.filter(c => c.isSet)}
-                      <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        {setCredentials.length} credential{setCredentials.length !== 1 ? 's' : ''} configured
-                      </p>
+                    {/if}
+                    {#if provider.hasProjectCredentials}
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400">
+                        Project
+                      </span>
+                    {:else if provider.hasUserCredentials}
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
+                        Global
+                      </span>
                     {/if}
                   </div>
+                  {#if provider.credentialStatus}
+                    {@const setCredentials = provider.credentialStatus.filter(c => c.isSet)}
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {setCredentials.length} credential{setCredentials.length !== 1 ? 's' : ''} configured
+                    </p>
+                  {/if}
+
+                  <!-- Error display -->
+                  {#if status?.lastError}
+                    <div class="mt-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-700 dark:text-red-400">
+                      <details>
+                        <summary class="cursor-pointer font-medium">Last error (click to expand)</summary>
+                        <p class="mt-1 text-red-600 dark:text-red-300">{status.lastError}</p>
+                      </details>
+                    </div>
+                  {/if}
+
+                  <!-- Enable/Disable toggles -->
+                  {#if status}
+                    <div class="mt-3 flex items-center gap-4 text-sm">
+                      <label class="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={status.enabledGlobal}
+                          onchange={(e) => toggleIntegration(provider.id, e.currentTarget.checked, "global")}
+                          class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <span class="text-gray-700 dark:text-gray-300">Enabled globally</span>
+                      </label>
+                      {#if effectiveProjectId}
+                        <label class="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={status.enabledProject ?? status.enabledGlobal}
+                            onchange={(e) => toggleIntegration(provider.id, e.currentTarget.checked, "project")}
+                            class="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                          />
+                          <span class="text-gray-700 dark:text-gray-300">Enabled for this project</span>
+                        </label>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
 
-                <div class="flex items-center gap-2">
+                <div class="shrink-0 flex items-center gap-2">
                   <button
                     class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                     onclick={() => openCredentialModal(provider)}

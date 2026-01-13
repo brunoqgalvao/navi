@@ -9,6 +9,9 @@ model: sonnet
 
 Access Linear to manage issues, projects, cycles (sprints), and team workflows.
 
+> **IMPORTANT**: This is Navi, not Claude Code CLI. Do NOT suggest `claude mcp add` commands.
+> If not connected, guide user to **Settings > Integrations** or use the `connect-linear` skill.
+
 ## Prerequisites
 
 Linear API key must be configured in **Settings > Integrations > Linear**.

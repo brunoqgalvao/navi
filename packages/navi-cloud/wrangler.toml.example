@@ -1,0 +1,30 @@
+# Navi Cloud - Router Worker Configuration Template
+# Copy this file to wrangler.toml and customize for your deployment
+
+name = "navi-cloud-router"
+main = "src/router.ts"
+compatibility_date = "2024-12-01"
+
+# Routes configuration - customize for your domain
+routes = [
+  { pattern = "*.yourdomain.com", zone_name = "yourdomain.com" }
+]
+
+[vars]
+ENVIRONMENT = "production"
+
+# D1 Database for app registry
+[[d1_databases]]
+binding = "REGISTRY_DB"
+database_name = "navi-cloud-registry"
+database_id = "your-database-id-here"
+
+# Secrets (set via `wrangler secret put`):
+# - DEPLOY_SECRET (auth for API routes)
+# - CLOUDFLARE_API_TOKEN (for Pages API)
+# - CLOUDFLARE_ACCOUNT_ID
+#
+# Example commands:
+# wrangler secret put DEPLOY_SECRET
+# wrangler secret put CLOUDFLARE_API_TOKEN
+# wrangler secret put CLOUDFLARE_ACCOUNT_ID

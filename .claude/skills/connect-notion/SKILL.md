@@ -2,6 +2,10 @@
 
 Guide users through connecting Notion to Navi. You have full context on Notion's API, authentication, and the critical step of connecting integrations to pages.
 
+> **IMPORTANT**: This is Navi, not Claude Code CLI. Do NOT suggest `claude mcp add` commands.
+> Navi has its own integration system. Use the credentials API at `localhost:3001` to save credentials.
+> The MCP server loads automatically once credentials are saved.
+
 ## Trigger Phrases
 - "connect notion"
 - "setup notion"

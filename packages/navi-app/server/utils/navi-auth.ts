@@ -20,13 +20,16 @@ export type NaviAuthResult = {
  * 2. Stored Anthropic API key (if preferredAuth === "api_key")
  * 3. OAuth (fallback - uses Claude Code's built-in OAuth flow)
  *
- * IMPORTANT: This intentionally ignores any project-level or env-level API keys.
- * All auth is controlled through Navi's settings UI.
+ * IMPORTANT: This intentionally ignores any project-level or env-level Anthropic API keys.
+ * Z.AI keys may be sourced from env for CLI/desktop setups where settings are unavailable.
+ * All other auth is controlled through Navi's settings UI.
  */
 export function resolveNaviClaudeAuth(model?: string): NaviAuthResult {
   const preferredAuth = globalSettings.get("preferredAuth") as "oauth" | "api_key" | null;
   const storedApiKey = globalSettings.get("anthropicApiKey") as string | null;
-  const zaiApiKey = globalSettings.get("zaiApiKey") as string | null;
+  const storedZaiApiKey = globalSettings.get("zaiApiKey") as string | null;
+  const envZaiApiKey = process.env.ZAI_API_KEY || null;
+  const zaiApiKey = storedZaiApiKey || envZaiApiKey;
 
   const isGlmModel = model?.startsWith("glm-");
 
@@ -35,7 +38,7 @@ export function resolveNaviClaudeAuth(model?: string): NaviAuthResult {
     return {
       mode: "zai",
       overrides: { apiKey: zaiApiKey, baseUrl: ZAI_ANTHROPIC_BASE_URL },
-      source: "Navi settings → Z.AI API key",
+      source: storedZaiApiKey ? "Navi settings → Z.AI API key" : "Environment → ZAI_API_KEY",
       keyPrefix: zaiApiKey.slice(0, 8),
     };
   }
@@ -67,4 +70,3 @@ export function formatAuthForLog(auth: NaviAuthResult): string {
   }
   return `[Auth] Mode: ${auth.mode.toUpperCase()} | Source: ${auth.source} | Key: ${auth.keyPrefix}...`;
 }
-

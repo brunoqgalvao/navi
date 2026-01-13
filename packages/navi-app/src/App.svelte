@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, auth, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, auth, planMode, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId } from "./lib/stores";
   import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill } from "./lib/api";
   import { mcpApi, type McpServer } from "./lib/features/mcp";
@@ -539,6 +539,8 @@
       // Reset activeSubagents for current session
       if (sessionId === $session.sessionId) {
         activeSubagents = new Map();
+        // Clear any pending question when streaming ends (agent moved on)
+        pendingQuestion = null;
       }
       // Clear merge conflict resolution state when streaming ends
       if (isResolvingMergeConflicts && sessionId === $session.sessionId) {
@@ -1249,8 +1251,8 @@ Please walk me through the setup step by step. When I have the credentials, save
       inputText = initialMessage;
       await tick();
 
-      // Trigger send
-      handleSend();
+      // Trigger send - use sendMessage which is the actual handler
+      sendMessage(initialMessage);
     };
     document.addEventListener("open-setup-chat", handleSetupChat as EventListener);
 
@@ -1327,7 +1329,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   // Load MCP servers
   async function loadMcpServers() {
     try {
-      mcpServers = await mcpApi.list();
+      mcpServers = await mcpApi.list(currentProject?.path);
     } catch (e) {
       console.error("Failed to load MCP servers:", e);
       mcpServers = [];
@@ -2477,6 +2479,8 @@ Please walk me through the setup step by step. When I have the credentials, save
       historyContext: historyCtx,
       agentId,
       backend,
+      // Plan mode - Claude plans before acting
+      planMode: get(planMode),
       // Cloud execution options
       executionMode: execSettings.mode,
       cloudRepoUrl: execSettings.repoUrl,
@@ -3751,6 +3755,19 @@ Please walk me through the setup step by step. When I have the credentials, save
                       argsHint: c.argsHint,
                       isBuiltIn: false,
                     }))}
+                    backend={$session.sessionId ? (sessionBackendStore.get($session.sessionId, $sessionBackendStore) || $defaultBackend) : $defaultBackend}
+                    onBackendChange={(newBackend) => {
+                      // Only allow backend change for new chats
+                      if ($session.isPending || !$session.sessionId || currentMessages.length === 0) {
+                        defaultBackend.set(newBackend);
+                        // Auto-select the default model for the new backend
+                        const models = getBackendModelsFormatted(newBackend, get(backendModels));
+                        if (models.length > 0) {
+                          modelSelection = models[0].value;
+                          handleModelSelect(models[0].value);
+                        }
+                      }
+                    }}
                 />
 
                 <div class="text-center mt-2">

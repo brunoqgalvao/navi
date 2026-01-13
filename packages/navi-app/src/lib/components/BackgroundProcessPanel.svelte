@@ -110,9 +110,10 @@
     try {
       console.log("[ProcessPanel] Loading processes for sessionId:", sessionId);
       // Load both active and background processes in parallel
+      // Note: Don't pass sessionId filter to API - we filter client-side to include "global" processes
       const [activeProcs, bgProcs] = await Promise.all([
         loadActiveProcesses(),
-        backgroundProcessApi.list(sessionId ? { sessionId } : undefined).catch(() => [] as BackgroundProcess[]),
+        backgroundProcessApi.list().catch(() => [] as BackgroundProcess[]),
       ]);
       console.log("[ProcessPanel] Active processes:", activeProcs.length, "Background processes:", bgProcs.length);
 
@@ -320,10 +321,9 @@
     }
   }
 
-  // Handle WebSocket events for real-time updates
+  // Handle background process events for real-time updates
   function handleBgProcessEvent(bgEvent: BackgroundProcessEvent) {
     try {
-
         switch (bgEvent.type) {
           case "process_started":
             if (bgEvent.process) {
@@ -387,19 +387,24 @@
     } catch {}
   }
 
+  // Unsubscribe function for the event listener
+  let unsubscribeEvents: (() => void) | null = null;
+
   onMount(() => {
     loadProcesses();
     pollInterval = setInterval(loadProcesses, 5000);
 
-    // Listen for WebSocket messages
-    window.addEventListener("message", handleWsMessage);
+    // Listen for background process events via the store
+    unsubscribeEvents = backgroundProcessEvents.addListener(handleBgProcessEvent);
   });
 
   onDestroy(() => {
     if (pollInterval) {
       clearInterval(pollInterval);
     }
-    window.removeEventListener("message", handleWsMessage);
+    if (unsubscribeEvents) {
+      unsubscribeEvents();
+    }
   });
 
   // Computed stats

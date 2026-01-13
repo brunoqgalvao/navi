@@ -74,6 +74,8 @@ export interface ClientMessage {
   agentId?: string;
   // Backend selection (claude, codex, gemini)
   backend?: "claude" | "codex" | "gemini";
+  // Plan mode - Claude plans before acting, no execution until approved
+  planMode?: boolean;
   // Question response fields
   questionRequestId?: string;
   answers?: Record<string, string | string[]>;
@@ -134,12 +136,13 @@ export function cleanupSessionState(sessionId: string) {
     }
   }
 
-  // Clean pending questions for this session
+  // Clean pending questions for this session (memory + database)
   for (const [reqId, req] of pendingQuestions) {
     if (req.sessionId === sessionId) {
       pendingQuestions.delete(reqId);
     }
   }
+  pendingQuestionsDb.deleteBySession(sessionId);
 
   // Clean pending escalations for this session
   for (const [reqId, esc] of pendingEscalations) {
@@ -1276,7 +1279,7 @@ function convertNormalizedEventToUI(event: NormalizedEvent, sessionId?: string):
 }
 
 export function handleQueryWithProcess(ws: any, data: ClientMessage) {
-  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext, agentId, backend } = data;
+  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext, agentId, backend, planMode } = data;
 
   // Determine which backend to use (default: claude)
   const effectiveBackend: BackendId = backend ||
@@ -1330,9 +1333,35 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
     searchIndex.indexMessage(msgId, sessionId, JSON.stringify(prompt), now);
   }
 
-  const effectivePrompt = historyContext
+  // Plan mode system prompt - instructs Claude to plan only, no execution
+  const PLAN_MODE_INSTRUCTION = `
+[PLAN MODE ENABLED]
+You MUST operate in planning-only mode. DO NOT execute any code, make file changes, or run commands.
+
+Instead:
+1. Analyze the user's request thoroughly
+2. Create a detailed, step-by-step implementation plan
+3. Present the plan using the TodoWrite tool with all steps as "pending" status
+4. Each step should be specific and actionable (e.g., "Create auth middleware in src/middleware/auth.ts")
+5. Note which files will be created/modified for each step
+6. After presenting the plan, ask: "Ready to execute this plan, or would you like to refine it?"
+
+DO NOT use any tools except:
+- TodoWrite (to present the plan)
+- Read, Glob, Grep (to understand existing code for planning)
+
+The user will explicitly approve the plan before any execution begins.
+`;
+
+  let effectivePrompt = historyContext
     ? `${historyContext}\n\nUser's new message:\n${prompt}`
     : prompt;
+
+  // Inject plan mode instruction if enabled
+  if (planMode) {
+    effectivePrompt = `${PLAN_MODE_INSTRUCTION}\n\n${effectivePrompt}`;
+    console.log(`[${sessionId}] Plan mode enabled - Claude will plan before executing`);
+  }
 
   const bundledWorkerPath = join(execDir, "..", "Resources", "resources", "query-worker.js");
   const bundledWorkerPathAlt = join(execDir, "..", "Resources", "query-worker.js");
@@ -1394,7 +1423,13 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
       requireConfirmation: permissionSettings.requireConfirmation,
     },
     multiSession: multiSessionContext,
-    mcpSettings: mcpSettings.getAll(), // Pass MCP server enabled/disabled states
+    mcpSettings: mcpSettings.getAll(workingDirectory), // Pass MCP server enabled/disabled states (for external servers)
+    mcpBuiltinSettings: {  // Pass built-in MCP server enabled/disabled states separately
+      "user-interaction": !mcpSettings.isDisabledBuiltin("user-interaction", workingDirectory),
+      "navi-context": !mcpSettings.isDisabledBuiltin("navi-context", workingDirectory),
+      "multi-session": !mcpSettings.isDisabledBuiltin("multi-session", workingDirectory),
+    },
+    externalMcpServers: mcpSettings.getEnabledExternalServerConfigs(workingDirectory), // Pass enabled external MCP server configs
     enabledSkillSlugs, // Skills enabled for this project (undefined = load all)
   });
 
@@ -1694,6 +1729,13 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
             setKanbanCardReview(sessionId, "Ready for review");
             activeProcesses.delete(sessionId);
             deleteStreamCapture(sessionId);
+            // Clear any pending questions for this session (memory + database)
+            for (const [reqId, req] of pendingQuestions) {
+              if (req.sessionId === sessionId) {
+                pendingQuestions.delete(reqId);
+              }
+            }
+            pendingQuestionsDb.deleteBySession(sessionId);
           }
         } else if (msg.type === "error") {
           sendToSession(sessionId, {

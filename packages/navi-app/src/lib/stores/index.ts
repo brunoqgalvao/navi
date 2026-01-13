@@ -185,3 +185,16 @@ export {
   type NaviUser,
   type AuthState,
 } from "./auth";
+
+// Planning stores (Plan Mode)
+export {
+  planMode,
+  sessionPlans,
+  getPlanForSession,
+  hasActivePlan,
+  PLAN_MODE_SYSTEM_PROMPT,
+  generatePlanModePrompt,
+  type Plan,
+  type PlanStep,
+  type PlanModeState,
+} from "./planning";

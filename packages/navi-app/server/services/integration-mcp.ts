@@ -22,8 +22,10 @@ import {
 import {
   getCredentials,
   hasRequiredCredentials,
+  isProviderEnabled,
   type CredentialScope,
 } from "../integrations/credentials";
+import { integrationDefaults } from "../integrations/db";
 import type { MCPServerConfig } from "./agent-loader";
 
 // Re-export scope type for convenience
@@ -51,18 +53,30 @@ export type MCPServerConfigWithSSE = MCPServerConfig | {
  * Check if an integration has the required credentials to launch its MCP
  * @param providerId - Integration provider ID (e.g., "linear", "notion")
  * @param scope - Optional project scope for project-specific credentials
- * @returns true if provider exists, has MCP config, and has required credentials
+ * @returns true if provider exists, has MCP config, has required credentials,
+ *          is enabled, and MCP is enabled for this scope
  */
 export function canLaunchMCP(providerId: string, scope?: CredentialScope): boolean {
   const provider = getProvider(providerId);
   if (!provider?.mcp) return false;
+
+  // Check if provider is enabled
+  if (!isProviderEnabled(providerId, scope)) {
+    return false;
+  }
+
+  // Check if MCP is enabled for this scope
+  const defaults = integrationDefaults.get(providerId, scope?.projectId);
+  if (!defaults.enabled || !defaults.mcpEnabled) {
+    return false;
+  }
 
   // Check if credentials are configured
   const requiredKeys = provider.credentials
     .filter((c) => c.required)
     .map((c) => c.key);
 
-  // If no credentials required, MCP is launchable
+  // If no credentials required (e.g., CLI-based like GitHub), MCP is launchable
   if (requiredKeys.length === 0) return true;
 
   return hasRequiredCredentials(providerId, requiredKeys, scope);

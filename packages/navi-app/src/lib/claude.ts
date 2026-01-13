@@ -511,6 +511,8 @@ export class ClaudeClient {
     agentId?: string;
     // Backend selection (claude, codex, gemini)
     backend?: "claude" | "codex" | "gemini";
+    // Plan mode - Claude plans before acting
+    planMode?: boolean;
     // Cloud execution options
     executionMode?: "local" | "cloud";
     cloudRepoUrl?: string;

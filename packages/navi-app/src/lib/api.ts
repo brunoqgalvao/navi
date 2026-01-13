@@ -241,7 +241,7 @@ export const api = {
       request<Session[]>(`/sessions/recent?limit=${limit}${includeArchived ? '&includeArchived=true' : ''}`),
     active: () => request<ActiveSessionStatus[]>("/sessions/active"),
     get: (id: string) => request<Session>(`/sessions/${id}`),
-    create: (projectId: string, data: { title?: string }) =>
+    create: (projectId: string, data: { title?: string; backend?: BackendId }) =>
       request<Session>(`/projects/${projectId}/sessions`, {
         method: "POST",
         body: JSON.stringify(data),

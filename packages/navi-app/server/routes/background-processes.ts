@@ -350,7 +350,8 @@ export async function listBackgroundProcesses(filter?: {
   let processes = Array.from(backgroundProcesses.values());
 
   if (filter?.sessionId) {
-    processes = processes.filter(p => p.sessionId === filter.sessionId);
+    // Include processes matching the sessionId OR "global" processes (visible to all sessions)
+    processes = processes.filter(p => p.sessionId === filter.sessionId || p.sessionId === "global");
   }
   if (filter?.projectId) {
     processes = processes.filter(p => p.projectId === filter.projectId);
@@ -385,7 +386,7 @@ async function getContainerPreviewsAsProcesses(filter?: {
 
     return previews
       .filter(p => {
-        if (filter?.sessionId && p.sessionId !== filter.sessionId) return false;
+        if (filter?.sessionId && p.sessionId !== filter.sessionId && p.sessionId !== "global") return false;
         if (filter?.projectId && p.projectId !== filter.projectId) return false;
         if (filter?.status && p.status !== filter.status) return false;
         return true;

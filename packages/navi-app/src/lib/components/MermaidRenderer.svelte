@@ -3,6 +3,8 @@
   import JsonTreeViewer from './JsonTreeViewer.svelte';
   import InteractiveCodeBlock from './InteractiveCodeBlock.svelte';
   import StockChart from './widgets/StockChart.svelte';
+  import PlanCard from './widgets/PlanCard.svelte';
+  import { sessionPlans, type Plan, type PlanStep } from '../stores';
 
   interface Props {
     content: string;
@@ -11,12 +13,13 @@
     shellBlocksMap?: Map<string, { code: string; language: string }>;
     stockBlocksMap?: Map<string, string>;
     onRunInTerminal?: (command: string) => void;
+    sessionId?: string;
   }
 
-  let { content, renderMarkdown, jsonBlocksMap = new Map(), shellBlocksMap = new Map(), stockBlocksMap = new Map(), onRunInTerminal }: Props = $props();
+  let { content, renderMarkdown, jsonBlocksMap = new Map(), shellBlocksMap = new Map(), stockBlocksMap = new Map(), onRunInTerminal, sessionId = '' }: Props = $props();
 
   interface ContentBlock {
-    type: 'markdown' | 'mermaid' | 'stocks';
+    type: 'markdown' | 'mermaid' | 'stocks' | 'plan';
     content: string;
   }
 
@@ -35,8 +38,8 @@
     const blocks: ContentBlock[] = [];
     if (!content) return blocks;
 
-    // Match both mermaid and stocks code blocks
-    const regex = /```(mermaid|stocks)\n([\s\S]*?)\n```/g;
+    // Match mermaid, stocks, and plan code blocks
+    const regex = /```(mermaid|stocks|plan)\n([\s\S]*?)\n```/g;
     let lastIndex = 0;
     let match;
 
@@ -50,7 +53,7 @@
       }
 
       // Add the special block
-      const blockType = match[1] as 'mermaid' | 'stocks';
+      const blockType = match[1] as 'mermaid' | 'stocks' | 'plan';
       blocks.push({ type: blockType, content: match[2] });
 
       lastIndex = match.index + match[0].length;
@@ -65,6 +68,43 @@
     }
 
     return blocks;
+  }
+
+  /**
+   * Parse a plan block content (JSON) and create/update the plan in store
+   */
+  function parsePlanBlock(planJson: string): Plan | null {
+    if (!sessionId) return null;
+
+    try {
+      const data = JSON.parse(planJson);
+
+      // Check if plan already exists for this session
+      let plan = sessionPlans.get(sessionId);
+
+      if (plan) {
+        // Update existing plan with new steps
+        sessionPlans.updateSteps(sessionId, data.steps || []);
+        plan = sessionPlans.get(sessionId);
+      } else {
+        // Create new plan
+        plan = sessionPlans.create(
+          sessionId,
+          data.title || 'Implementation Plan',
+          data.steps || [],
+          data.originalPrompt
+        );
+        if (data.description) {
+          // Update description after creation
+          plan.description = data.description;
+        }
+      }
+
+      return plan ?? null;
+    } catch (e) {
+      console.error('[MermaidRenderer] Failed to parse plan JSON:', e);
+      return null;
+    }
   }
 
   function parseHtmlForPlaceholders(html: string): ParsedContent[] {
@@ -135,6 +175,18 @@
     <div class="stock-chart-block">
       <StockChart content={block.content} />
     </div>
+  {:else if block.type === 'plan'}
+    {@const plan = parsePlanBlock(block.content)}
+    {#if plan}
+      <div class="plan-card-block">
+        <PlanCard {plan} {sessionId} />
+      </div>
+    {:else}
+      <!-- Fallback: show raw JSON if parsing failed -->
+      <div class="plan-parse-error">
+        <pre class="text-xs text-red-600 bg-red-50 rounded p-2">{block.content}</pre>
+      </div>
+    {/if}
   {/if}
 {/each}
 
@@ -180,5 +232,18 @@
   .markdown-content + .stock-chart-block,
   .stock-chart-block + .markdown-content {
     margin-top: 1rem;
+  }
+
+  .plan-card-block {
+    margin: 1rem 0;
+  }
+
+  .markdown-content + .plan-card-block,
+  .plan-card-block + .markdown-content {
+    margin-top: 1rem;
+  }
+
+  .plan-parse-error {
+    margin: 1rem 0;
   }
 </style>

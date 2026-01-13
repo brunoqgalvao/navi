@@ -37,6 +37,16 @@ import {
   isCredentiallessProvider,
   type IntegrationProvider,
 } from "../integrations/registry";
+import {
+  getUnifiedStatus,
+  getAllUnifiedStatuses,
+  getGroupedStatuses,
+  enableIntegration,
+  disableIntegration,
+  updateIntegrationSettings,
+  resetProjectSettings,
+  getToken,
+} from "../services/integration-status";
 
 // Helper to extract scope from URL
 function getScopeFromUrl(url: URL): CredentialScope {
@@ -52,7 +62,172 @@ export async function handleCredentialsRoutes(
   const pathname = url.pathname;
 
   // ==========================================================================
-  // List all providers with credential status
+  // Unified Integration Status (NEW)
+  // ==========================================================================
+
+  // GET /api/integrations/status - Get unified status for all integrations
+  if (pathname === "/api/integrations/status" && method === "GET") {
+    const projectId = url.searchParams.get("projectId") ?? undefined;
+    const grouped = url.searchParams.get("grouped") === "true";
+    const includeDisabled = url.searchParams.get("includeDisabled") === "true";
+
+    if (grouped) {
+      const statuses = getGroupedStatuses({ projectId, includeDisabled });
+      return json(statuses);
+    }
+
+    const statuses = getAllUnifiedStatuses({ projectId, includeDisabled });
+    return json({ integrations: statuses });
+  }
+
+  // GET /api/integrations/:provider/status - Get status for single provider
+  if (pathname.match(/^\/api\/integrations\/([^/]+)\/status$/) && method === "GET") {
+    const providerId = pathname.split("/")[3];
+    const projectId = url.searchParams.get("projectId") ?? undefined;
+
+    const status = getUnifiedStatus(providerId, { projectId });
+    if (!status) {
+      return error(`Unknown provider: ${providerId}`, 404);
+    }
+
+    return json(status);
+  }
+
+  // POST /api/integrations/:provider/enable - Enable integration
+  if (pathname.match(/^\/api\/integrations\/([^/]+)\/enable$/) && method === "POST") {
+    const providerId = pathname.split("/")[3];
+    const projectId = url.searchParams.get("projectId") ?? undefined;
+
+    const body = await req.json().catch(() => ({}));
+    const { mcpEnabled, skillEnabled } = body;
+
+    const success = enableIntegration(providerId, {
+      projectId,
+      mcpEnabled,
+      skillEnabled,
+    });
+
+    if (!success) {
+      return error(`Unknown provider: ${providerId}`, 404);
+    }
+
+    return json({
+      success: true,
+      provider: providerId,
+      enabled: true,
+      scope: projectId ? "project" : "global",
+    });
+  }
+
+  // POST /api/integrations/:provider/disable - Disable integration
+  if (pathname.match(/^\/api\/integrations\/([^/]+)\/disable$/) && method === "POST") {
+    const providerId = pathname.split("/")[3];
+    const projectId = url.searchParams.get("projectId") ?? undefined;
+
+    const success = disableIntegration(providerId, { projectId });
+
+    if (!success) {
+      return error(`Unknown provider: ${providerId}`, 404);
+    }
+
+    return json({
+      success: true,
+      provider: providerId,
+      enabled: false,
+      scope: projectId ? "project" : "global",
+    });
+  }
+
+  // POST /api/integrations/:provider/settings - Update MCP/skill settings
+  if (pathname.match(/^\/api\/integrations\/([^/]+)\/settings$/) && method === "POST") {
+    const providerId = pathname.split("/")[3];
+    const projectId = url.searchParams.get("projectId") ?? undefined;
+
+    const body = await req.json().catch(() => ({}));
+    const { enabled, mcpEnabled, skillEnabled } = body;
+
+    const success = updateIntegrationSettings(
+      providerId,
+      { enabled, mcpEnabled, skillEnabled },
+      projectId
+    );
+
+    if (!success) {
+      return error(`Unknown provider: ${providerId}`, 404);
+    }
+
+    return json({
+      success: true,
+      provider: providerId,
+      scope: projectId ? "project" : "global",
+      settings: { enabled, mcpEnabled, skillEnabled },
+    });
+  }
+
+  // DELETE /api/integrations/:provider/settings - Reset project settings
+  if (pathname.match(/^\/api\/integrations\/([^/]+)\/settings$/) && method === "DELETE") {
+    const providerId = pathname.split("/")[3];
+    const projectId = url.searchParams.get("projectId");
+
+    if (!projectId) {
+      return error("projectId is required to reset project-specific settings", 400);
+    }
+
+    const success = resetProjectSettings(providerId, projectId);
+
+    if (!success) {
+      return error(`Unknown provider: ${providerId}`, 404);
+    }
+
+    return json({
+      success: true,
+      provider: providerId,
+      message: "Project settings reset to global defaults",
+    });
+  }
+
+  // ==========================================================================
+  // Token Endpoint (for skills/custom integrations)
+  // ==========================================================================
+
+  // GET /api/credentials/:provider/token - Get API key/token for use
+  if (pathname.match(/^\/api\/credentials\/([^/]+)\/token$/) && method === "GET") {
+    const providerId = pathname.split("/")[3];
+    const projectId = url.searchParams.get("projectId") ?? undefined;
+    const service = url.searchParams.get("service") ?? undefined;
+
+    const provider = getProvider(providerId);
+    if (!provider) {
+      return error(`Unknown provider: ${providerId}`, 404);
+    }
+
+    // OAuth providers need special handling via /api/integrations/token
+    if (provider.authType === "oauth") {
+      return error(
+        "OAuth providers require /api/integrations/token endpoint",
+        400
+      );
+    }
+
+    const token = getToken(providerId, { projectId, service });
+
+    if (!token) {
+      return error(
+        `No credentials found or integration disabled for ${providerId}`,
+        404
+      );
+    }
+
+    return json({
+      provider: providerId,
+      type: token.type,
+      value: token.value,
+      expiresAt: token.expiresAt ?? null,
+    });
+  }
+
+  // ==========================================================================
+  // List all providers with credential status (existing)
   // ==========================================================================
   if (pathname === "/api/credentials/providers" && method === "GET") {
     const scope = getScopeFromUrl(url);

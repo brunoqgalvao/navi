@@ -43,7 +43,7 @@ export async function handleSessionRoutes(
       const body = await req.json();
       const id = crypto.randomUUID();
       const now = Date.now();
-      sessions.create(id, projectId, body.title || "New conversation", now, now);
+      sessions.create(id, projectId, body.title || "New conversation", now, now, body.backend);
       searchIndex.indexSession(id);
       return json(sessions.get(id), 201);
     }

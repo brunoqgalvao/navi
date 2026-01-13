@@ -23,13 +23,14 @@ export interface CredentialScope {
 export function initCredentialsTable() {
   const db = getDb();
 
-  // Check if table exists and has project_id column
+  // Check current table structure
   const tableInfo = db.exec("PRAGMA table_info(credentials)");
-  const hasProjectId = tableInfo.length > 0 &&
-    tableInfo[0].values.some((col: any) => col[1] === "project_id");
+  const columns = tableInfo.length > 0 ? tableInfo[0].values.map((col: any) => col[1]) : [];
+  const hasProjectId = columns.includes("project_id");
+  const hasEnabled = columns.includes("enabled");
 
+  // If table doesn't have project_id, we need full migration
   if (!hasProjectId) {
-    // Create or migrate table with project_id support
     db.run(`
       CREATE TABLE IF NOT EXISTS credentials_new (
         id TEXT PRIMARY KEY,
@@ -37,6 +38,10 @@ export function initCredentialsTable() {
         key TEXT NOT NULL,
         value_encrypted TEXT NOT NULL,
         project_id TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_used_at INTEGER,
+        last_error TEXT,
+        error_count INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         UNIQUE(provider, key, project_id)
@@ -46,8 +51,8 @@ export function initCredentialsTable() {
     // Migrate existing data if old table exists
     try {
       db.run(`
-        INSERT OR IGNORE INTO credentials_new (id, provider, key, value_encrypted, project_id, created_at, updated_at)
-        SELECT id, provider, key, value_encrypted, NULL, created_at, updated_at FROM credentials;
+        INSERT OR IGNORE INTO credentials_new (id, provider, key, value_encrypted, project_id, enabled, last_used_at, last_error, error_count, created_at, updated_at)
+        SELECT id, provider, key, value_encrypted, NULL, 1, NULL, NULL, 0, created_at, updated_at FROM credentials;
       `);
       db.run("DROP TABLE IF EXISTS credentials;");
     } catch (e) {
@@ -57,6 +62,19 @@ export function initCredentialsTable() {
     db.run("ALTER TABLE credentials_new RENAME TO credentials;");
     db.run("CREATE INDEX IF NOT EXISTS idx_credentials_provider ON credentials(provider);");
     db.run("CREATE INDEX IF NOT EXISTS idx_credentials_project ON credentials(project_id);");
+    db.run("CREATE INDEX IF NOT EXISTS idx_credentials_enabled ON credentials(enabled);");
+  }
+  // If table exists with project_id but missing new columns, add them
+  else if (!hasEnabled) {
+    try {
+      db.run("ALTER TABLE credentials ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;");
+      db.run("ALTER TABLE credentials ADD COLUMN last_used_at INTEGER;");
+      db.run("ALTER TABLE credentials ADD COLUMN last_error TEXT;");
+      db.run("ALTER TABLE credentials ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0;");
+      db.run("CREATE INDEX IF NOT EXISTS idx_credentials_enabled ON credentials(enabled);");
+    } catch (e) {
+      console.error("Failed to add new columns to credentials table:", e);
+    }
   }
 
   saveDb();
@@ -98,6 +116,10 @@ interface CredentialRow {
   key: string;
   value_encrypted: string;
   project_id: string | null;
+  enabled: number; // SQLite boolean (0 or 1)
+  last_used_at: number | null;
+  last_error: string | null;
+  error_count: number;
   created_at: number;
   updated_at: number;
 }
@@ -245,6 +267,39 @@ export function getCredentials(
   }
 
   return result;
+}
+
+export interface CredentialBundle {
+  provider: string;
+  scope: "user" | "project";
+  projectId?: string;
+  data: Record<string, string>;
+}
+
+export function getUserLevelCredential(provider: string): CredentialBundle | null {
+  const data = getCredentials(provider);
+  if (Object.keys(data).length === 0) return null;
+
+  return {
+    provider,
+    scope: "user",
+    data,
+  };
+}
+
+export function getProjectScopedCredential(
+  provider: string,
+  projectId: string
+): CredentialBundle | null {
+  const data = getCredentials(provider, { projectId });
+  if (Object.keys(data).length === 0) return null;
+
+  return {
+    provider,
+    scope: "project",
+    projectId,
+    data,
+  };
 }
 
 /**
@@ -447,9 +502,215 @@ export function exportCredentials(): CredentialRow[] {
 export function importCredentials(credentials: CredentialRow[]): void {
   for (const cred of credentials) {
     run(
-      `INSERT OR REPLACE INTO credentials (id, provider, key, value_encrypted, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [cred.id, cred.provider, cred.key, cred.value_encrypted, cred.created_at, cred.updated_at]
+      `INSERT OR REPLACE INTO credentials (id, provider, key, value_encrypted, project_id, enabled, last_used_at, last_error, error_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [cred.id, cred.provider, cred.key, cred.value_encrypted, cred.project_id ?? null, cred.enabled ?? 1, cred.last_used_at ?? null, cred.last_error ?? null, cred.error_count ?? 0, cred.created_at, cred.updated_at]
     );
   }
+}
+
+// ============================================================================
+// Enable/Disable Functions
+// ============================================================================
+
+/**
+ * Check if a provider is enabled for a given scope
+ * Lookup order: Project-specific → User-level fallback
+ */
+export function isProviderEnabled(provider: string, scope?: CredentialScope): boolean {
+  const projectId = scope?.projectId;
+
+  // If project scope, check project-specific first
+  if (projectId) {
+    const projectRow = queryOne<{ enabled: number }>(
+      "SELECT enabled FROM credentials WHERE provider = ? AND project_id = ? LIMIT 1",
+      [provider, projectId]
+    );
+    if (projectRow !== undefined) {
+      return projectRow.enabled === 1;
+    }
+  }
+
+  // Fall back to user-level
+  const userRow = queryOne<{ enabled: number }>(
+    "SELECT enabled FROM credentials WHERE provider = ? AND project_id IS NULL LIMIT 1",
+    [provider]
+  );
+
+  return userRow?.enabled === 1;
+}
+
+/**
+ * Enable a provider for a given scope
+ */
+export function enableProvider(provider: string, scope?: CredentialScope): void {
+  const projectId = scope?.projectId;
+  const now = Date.now();
+
+  if (projectId) {
+    run(
+      "UPDATE credentials SET enabled = 1, updated_at = ? WHERE provider = ? AND project_id = ?",
+      [now, provider, projectId]
+    );
+  } else {
+    run(
+      "UPDATE credentials SET enabled = 1, updated_at = ? WHERE provider = ? AND project_id IS NULL",
+      [now, provider]
+    );
+  }
+}
+
+/**
+ * Disable a provider for a given scope
+ */
+export function disableProvider(provider: string, scope?: CredentialScope): void {
+  const projectId = scope?.projectId;
+  const now = Date.now();
+
+  if (projectId) {
+    run(
+      "UPDATE credentials SET enabled = 0, updated_at = ? WHERE provider = ? AND project_id = ?",
+      [now, provider, projectId]
+    );
+  } else {
+    run(
+      "UPDATE credentials SET enabled = 0, updated_at = ? WHERE provider = ? AND project_id IS NULL",
+      [now, provider]
+    );
+  }
+}
+
+// ============================================================================
+// Usage Tracking Functions
+// ============================================================================
+
+/**
+ * Record that a provider was successfully used
+ */
+export function recordProviderUsed(provider: string, scope?: CredentialScope): void {
+  const projectId = scope?.projectId;
+  const now = Date.now();
+
+  if (projectId) {
+    run(
+      "UPDATE credentials SET last_used_at = ?, error_count = 0, last_error = NULL, updated_at = ? WHERE provider = ? AND project_id = ?",
+      [now, now, provider, projectId]
+    );
+  } else {
+    run(
+      "UPDATE credentials SET last_used_at = ?, error_count = 0, last_error = NULL, updated_at = ? WHERE provider = ? AND project_id IS NULL",
+      [now, now, provider]
+    );
+  }
+}
+
+/**
+ * Record that a provider had an error
+ */
+export function recordProviderError(provider: string, error: string, scope?: CredentialScope): void {
+  const projectId = scope?.projectId;
+  const now = Date.now();
+
+  if (projectId) {
+    run(
+      "UPDATE credentials SET last_error = ?, error_count = error_count + 1, updated_at = ? WHERE provider = ? AND project_id = ?",
+      [error, now, provider, projectId]
+    );
+  } else {
+    run(
+      "UPDATE credentials SET last_error = ?, error_count = error_count + 1, updated_at = ? WHERE provider = ? AND project_id IS NULL",
+      [error, now, provider]
+    );
+  }
+}
+
+/**
+ * Get error info for a provider
+ */
+export function getProviderErrorInfo(provider: string, scope?: CredentialScope): { errorCount: number; lastError: string | null } | null {
+  const projectId = scope?.projectId;
+
+  let row: { error_count: number; last_error: string | null } | undefined;
+
+  if (projectId) {
+    row = queryOne<{ error_count: number; last_error: string | null }>(
+      "SELECT error_count, last_error FROM credentials WHERE provider = ? AND project_id = ? LIMIT 1",
+      [provider, projectId]
+    );
+  }
+
+  if (!row) {
+    row = queryOne<{ error_count: number; last_error: string | null }>(
+      "SELECT error_count, last_error FROM credentials WHERE provider = ? AND project_id IS NULL LIMIT 1",
+      [provider]
+    );
+  }
+
+  if (!row) return null;
+
+  return {
+    errorCount: row.error_count,
+    lastError: row.last_error,
+  };
+}
+
+// ============================================================================
+// Provider Status (Unified View)
+// ============================================================================
+
+export interface ProviderStatus {
+  provider: string;
+  hasCredentials: boolean;
+  hasUserCredentials: boolean;
+  hasProjectCredentials: boolean;
+  enabled: boolean;
+  lastUsedAt: number | null;
+  lastError: string | null;
+  errorCount: number;
+  credentialScope: "user" | "project" | null;
+}
+
+/**
+ * Get full status for a provider
+ */
+export function getProviderStatus(provider: string, scope?: CredentialScope): ProviderStatus {
+  const projectId = scope?.projectId;
+
+  // Check user-level credentials
+  const userRow = queryOne<CredentialRow>(
+    "SELECT * FROM credentials WHERE provider = ? AND project_id IS NULL LIMIT 1",
+    [provider]
+  );
+
+  // Check project-level credentials
+  let projectRow: CredentialRow | undefined;
+  if (projectId) {
+    projectRow = queryOne<CredentialRow>(
+      "SELECT * FROM credentials WHERE provider = ? AND project_id = ? LIMIT 1",
+      [provider, projectId]
+    );
+  }
+
+  // Determine effective row (project overrides user)
+  const effectiveRow = projectRow || userRow;
+
+  return {
+    provider,
+    hasCredentials: !!effectiveRow,
+    hasUserCredentials: !!userRow,
+    hasProjectCredentials: !!projectRow,
+    enabled: effectiveRow?.enabled === 1,
+    lastUsedAt: effectiveRow?.last_used_at ?? null,
+    lastError: effectiveRow?.last_error ?? null,
+    errorCount: effectiveRow?.error_count ?? 0,
+    credentialScope: projectRow ? "project" : userRow ? "user" : null,
+  };
+}
+
+/**
+ * Get status for all configured providers
+ */
+export function getAllProviderStatuses(scope?: CredentialScope): ProviderStatus[] {
+  const providers = listProviders(scope);
+  return providers.map((p) => getProviderStatus(p, scope));
 }

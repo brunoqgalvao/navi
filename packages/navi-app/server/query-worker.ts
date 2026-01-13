@@ -522,6 +522,16 @@ interface WorkerInput {
   // MCP server enabled/disabled settings (server name -> enabled boolean)
   // If a server is not in the map, it defaults to enabled
   mcpSettings?: Record<string, boolean>;
+  // Built-in MCP server enabled/disabled states (separate from external servers)
+  mcpBuiltinSettings?: Record<string, boolean>;
+  // External MCP server configs from .mcp.json files (already filtered to enabled only)
+  externalMcpServers?: Record<string, {
+    type?: "stdio" | "sse" | "streamable-http";
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    url?: string;
+  }>;
   // Enabled skill slugs for this project (undefined = load all skills)
   enabledSkillSlugs?: string[];
 }
@@ -1238,7 +1248,7 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
 let sessionApprovedAll = false;
 
 async function runQuery(input: WorkerInput) {
-  const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, enabledSkillSlugs } = input;
+  const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs } = input;
 
   // Debug: Log multiSession state
   console.error(`[Worker] multiSession received:`, JSON.stringify(multiSession, null, 2));
@@ -1463,32 +1473,47 @@ You are currently acting as the @${agentId} agent. Follow the instructions above
     console.error(`[Worker]   - requireConfirmation:`, requireConfirmation);
     console.error(`[Worker]   - autoAllowedTools (${autoAllowedTools.length}):`, autoAllowedTools);
 
-    // Helper to check if an MCP server is enabled (defaults to true if not in settings)
+    // Helper to check if a built-in MCP server is enabled (uses mcpBuiltinSettings)
+    const isBuiltinMcpEnabled = (name: string) => mcpBuiltinSettings?.[name] !== false;
+    // Helper to check if an external MCP server is enabled (uses mcpSettings for external/agent servers)
     const isMcpEnabled = (name: string) => mcpSettings?.[name] !== false;
 
     // Build MCP servers - include built-in servers if enabled
     const mcpServers: Record<string, any> = {};
 
-    if (isMcpEnabled("user-interaction")) {
+    if (isBuiltinMcpEnabled("user-interaction")) {
       mcpServers["user-interaction"] = userInteractionServer;
       console.error(`[Worker] MCP server enabled: user-interaction`);
     } else {
       console.error(`[Worker] MCP server disabled: user-interaction`);
     }
 
-    if (isMcpEnabled("navi-context")) {
+    if (isBuiltinMcpEnabled("navi-context")) {
       mcpServers["navi-context"] = naviContextServer;
       console.error(`[Worker] MCP server enabled: navi-context (view_processes, view_terminal)`);
     } else {
       console.error(`[Worker] MCP server disabled: navi-context`);
     }
 
+    // Add external MCP servers from .mcp.json files (already filtered to enabled only)
+    if (externalMcpServers && Object.keys(externalMcpServers).length > 0) {
+      for (const [name, config] of Object.entries(externalMcpServers)) {
+        // Don't override built-in servers
+        if (!mcpServers[name]) {
+          mcpServers[name] = config;
+          console.error(`[Worker] Added external MCP server: ${name} (type: ${config.type || "stdio"})`);
+        }
+      }
+    }
+
     // Add agent's MCP servers if defined and enabled
     if (resolvedAgent?.mcpServers) {
       for (const [name, config] of Object.entries(resolvedAgent.mcpServers)) {
-        if (isMcpEnabled(name)) {
+        if (isMcpEnabled(name) && !mcpServers[name]) {
           mcpServers[name] = config;
           console.error(`[Worker] Added agent MCP server: ${name}`);
+        } else if (mcpServers[name]) {
+          console.error(`[Worker] Agent MCP server ${name} skipped (already loaded from external)`);
         } else {
           console.error(`[Worker] Agent MCP server disabled: ${name}`);
         }
@@ -1522,7 +1547,7 @@ You are currently acting as the @${agentId} agent. Follow the instructions above
     }
 
     // Enable multi-session tools if enabled (for all sessions that can spawn or are children)
-    if (multiSession?.enabled && isMcpEnabled("multi-session")) {
+    if (multiSession?.enabled && isBuiltinMcpEnabled("multi-session")) {
       mcpServers["multi-session"] = multiSessionServer;
       console.error(`[Worker] MCP server enabled: multi-session`);
     } else if (multiSession?.enabled) {

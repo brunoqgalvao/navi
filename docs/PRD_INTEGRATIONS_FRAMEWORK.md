@@ -172,9 +172,6 @@ interface IntegrationProvider {
     services: string[];               // "gmail", "sheets", etc.
   };
 
-  // Capabilities (what this integration provides)
-  capabilities: IntegrationCapability[];
-
   // Access methods
   mcp?: MCPConfig;                   // MCP server config
   cli?: CLIConfig;                   // CLI tool config
@@ -200,12 +197,8 @@ interface IntegrationProvider {
   };
 }
 
-interface IntegrationCapability {
-  id: string;                        // "read_issues", "create_issues"
-  name: string;                      // "Read Issues"
-  description: string;               // "List and search issues"
-  requiredScopes?: string[];         // OAuth scopes needed
-}
+// NOTE: IntegrationCapability removed - YAGNI
+// If needed later, capabilities can be derived from MCP tool schemas
 
 interface SkillConfig {
   // The main usage skill (what agents use to interact)
@@ -215,51 +208,12 @@ interface SkillConfig {
 }
 ```
 
-### F2: Progressive Disclosure Skills
+### F2: Integration Skills
 
-**Goal**: A layered skill system with a master skill that routes to provider-specific skills.
+**Goal**: Each integration has setup + usage skills. Claude picks directly based on description.
 
-#### Master Integration Skill (`integrations`)
-
-```markdown
----
-name: integrations
-description: Manage and use external service integrations. Use when the user wants to connect services, check integration status, or access integrated services.
-tools: Bash
----
-
-# Integrations Skill
-
-Master skill for managing integrations. Routes to provider-specific skills as needed.
-
-## Capabilities
-
-### List Available Integrations
-Check what integrations are available and their status.
-
-### Connect New Integration
-When user says "connect [provider]", delegate to the appropriate setup skill.
-
-### Use Integration
-When user wants to USE an integration (e.g., "read my emails"), delegate to the usage skill.
-
-## Routing Logic
-
-1. **Setup requests** → Route to `connect-{provider}` skill
-2. **Usage requests** → Route to `{provider}` skill
-3. **Status requests** → Check credentials API and report
-
-## Detection Patterns
-
-| User Says | Action |
-|-----------|--------|
-| "connect linear" | → `connect-linear` skill |
-| "setup notion" | → `connect-notion` skill |
-| "show my linear issues" | → `linear` skill |
-| "read my emails" | → `gmail` skill |
-| "what integrations are available?" | → List from registry |
-| "is linear connected?" | → Check credentials API |
-```
+> **Design Decision**: No master routing skill. Claude's skill selection already works via descriptions.
+> Adding a routing layer just adds indirection without benefit.
 
 #### Setup Skills (per provider)
 
@@ -658,163 +612,130 @@ curl -H "Authorization: Bearer $TOKEN" https://api.linear.app/graphql ...
 #### Setup Flow (Conversational)
 
 1. User types "connect linear"
-2. `integrations` skill activates, routes to `connect-linear`
+2. Claude picks `connect-linear` skill (based on description match)
 3. Skill guides user step-by-step
 4. Saves credentials via API
 5. Confirms success, suggests what to try
 
-### F7: Extensibility for Future Auth Types
+### F7: Future Auth Types (Out of Scope)
 
-**Goal**: Support browser scraping and other auth methods.
+> **Note**: Browser-based auth (cookie extraction for scraping) is deferred to a future PRD.
+> CLI auth (like `gh auth`) already works - GitHub integration uses `gh` directly.
 
-#### Browser Auth Type
+The current framework supports:
+- `api_key` - Manual API key entry
+- `oauth` - OAuth 2.0 flow (Google)
+- `cli` - External CLI tools (GitHub via `gh`)
+- `none` - No auth needed
 
-```typescript
-interface BrowserAuthConfig {
-  type: "browser";
-  loginUrl: string;
-  successUrlPattern: string;
-  cookiesToExtract: string[];
-  sessionStorage?: string[];
-  localStorage?: string[];
-}
+Browser auth (`browser` type) would require:
+- Cookie extraction from user's browser session
+- Security considerations for storing session cookies
+- Session refresh handling
 
-// Example: Scraping-based integration
-const TWITTER_PROVIDER: IntegrationProvider = {
-  id: "twitter",
-  name: "Twitter (Scraping)",
-  authType: "browser",
-  credentials: [
-    {
-      key: "cookies",
-      label: "Session Cookies",
-      type: "browser_session",
-    }
-  ],
-  browser: {
-    loginUrl: "https://twitter.com/login",
-    successUrlPattern: "https://twitter.com/home",
-    cookiesToExtract: ["auth_token", "ct0"]
-  },
-  // Uses browser-use skill for scraping
-  skill: {
-    usage: "twitter",
-    setup: "connect-twitter"
-  }
-};
-```
-
-#### CLI Auth Type
-
-```typescript
-interface CLIAuthConfig {
-  type: "cli";
-  command: string;
-  authCommand: string;
-  checkCommand: string;
-}
-
-// Example: GitHub CLI
-const GITHUB_PROVIDER: IntegrationProvider = {
-  id: "github",
-  authType: "cli",
-  cli: {
-    command: "gh",
-    authCommand: "gh auth login",
-    checkCommand: "gh auth status"
-  }
-};
-```
+This is a separate concern and should be its own PRD when needed.
 
 ---
 
 ## Implementation Plan
 
-### Phase 1: Foundation (Week 1)
+### Phase 1: Foundation ✅ DONE
 
-1. **Extend Registry Types**
-   - Add new fields to `IntegrationProvider`
-   - Add enable/disable support
-   - Add health tracking types
+1. **Extend Registry Types** ✅
+   - Added `authType`, `description`, `skill`, `defaults` to `IntegrationProvider`
+   - Added enable/disable support per scope
 
-2. **Database Migrations**
-   - Add `enabled` column to credentials
-   - Create `integration_status` table
-   - Create `integration_defaults` table
+2. **Database Schema** ✅
+   - Extended `credentials` table with `enabled`, `last_used_at`, `last_error`, `error_count`
+   - Created `integration_status` table for health tracking
+   - Created `integration_defaults` table for MCP/skill toggles per scope
 
-3. **Health Tracking Service**
-   - Implement `IntegrationHealthTracker`
-   - Add health check endpoints
-   - Wire into existing credential operations
+3. **Status Service** ✅
+   - Created `integration-status.ts` with unified status API
+   - Added enable/disable, health tracking, token access
+   - Wired MCP loading to check enabled state
 
-### Phase 2: Skills Restructure (Week 2)
+4. **API Endpoints** ✅
+   - `GET /api/integrations/status` - all integrations
+   - `GET/POST /api/integrations/:provider/*` - per-provider operations
+   - `GET /api/credentials/:provider/token` - credential access for skills
 
-1. **Consolidate Skills**
-   - Update `integrations` as master skill
-   - Standardize `connect-{provider}` pattern
-   - Standardize `{provider}` usage pattern
+### Phase 2: Setup Skills & UI ✅ DONE
 
-2. **Setup Skills**
-   - Rewrite `connect-linear`, `connect-notion`, `connect-slack`
-   - Add `connect-google`, `connect-github`
-   - Test conversational flows
+**Goal**: Make adding integrations delightful via chat or UI.
 
-3. **Usage Skills**
-   - Ensure each provider has usage skill
-   - Document MCP tool availability
-   - Add fallback CLI patterns
+> **Note**: No master routing skill. Claude picks skills directly based on description.
+> UI polish is incremental - not a separate phase.
 
-### Phase 3: UI Enhancement (Week 3)
+**Priority Providers** (in order):
+1. Linear - issue tracking, most requested
+2. Notion - docs/wiki
+3. Google - OAuth, Gmail/Sheets/Drive
+4. GitHub - already works via `gh` CLI
+5. Slack - team comms
 
-1. **Integration Settings v2**
-   - New card-based layout
-   - Enable/disable toggles
-   - Health status display
-   - Per-project override UI
+#### Setup Skills (`connect-{provider}`)
 
-2. **Setup Modals**
-   - Improved credential forms
-   - Inline setup guides
-   - "Help me set up" button
+| Provider | Skill | Status | Notes |
+|----------|-------|--------|-------|
+| Linear | `connect-linear` | ✅ Done | Full workflow, API key validation |
+| Notion | `connect-notion` | ✅ Done | Includes "connect pages" critical step |
+| Slack | `connect-slack` | ✅ Done | Bot token + scopes guidance |
+| Google | `connect-google` | ✅ Done | OAuth flow, client ID setup, Google Cloud Console walkthrough |
+| GitHub | `connect-github` | ✅ Done | `gh auth login` flow, no credentials in Navi |
 
-3. **Status Dashboard**
-   - Integration health overview
-   - Recent errors
-   - Usage statistics
+#### Usage Skills (`{provider}`)
 
-### Phase 4: Error Recovery (Week 4)
+| Provider | Skill | Status | Notes |
+|----------|-------|--------|-------|
+| Linear | `linear` | ✅ Done | MCP tools, error handling, states |
+| Google | `integrations` | ✅ Done | Gmail, Sheets, Drive via CLI |
+| Notion | `notion` | ✅ Done | MCP tools, page connection reminder |
+| Slack | `slack` | ✅ Done | Bot token ops, channel invite reminder |
+| GitHub | `github` | ✅ Done | Uses `gh` CLI directly |
 
-1. **Recovery Service**
-   - Implement `handleIntegrationError`
-   - OAuth token refresh
-   - Retry logic
+#### Settings UI (`IntegrationSettings.svelte`) ✅ DONE
 
-2. **MCP Wrapper**
-   - Wrap MCP tools with recovery
-   - Surface errors to agent context
-   - Automatic retry on transient failures
+- [x] Status badges (Connected with green dot)
+- [x] Scope badges (Global/Project)
+- [x] "Test Connection" button (in modal footer)
+- [x] "Help me set up" button → dispatches `open-setup-chat` event
+- [x] Setup guide with collapsible steps
+- [x] Project-scoped credential toggle
+- [x] OAuth app configuration modal (for Google)
+- [x] Enable/disable toggles per scope (global + project)
+- [x] Show `last_error` inline (collapsible details)
+- [x] Health indicator dot (green/yellow/red based on error count)
 
-3. **Agent Prompts**
-   - Add integration status to system prompt
-   - Include recovery instructions
-   - Test error scenarios
+### Phase 3: Error Handling (reactive)
 
-### Phase 5: Polish & Documentation (Week 5)
+**Goal**: Handle errors as they occur in production.
 
-1. **Developer Documentation**
-   - How to add new integrations
-   - Skill authoring guide
-   - MCP configuration guide
+> **Philosophy**: Don't build error handling systems before you have errors.
+> When something fails, fix it specifically. Learn from real failures.
 
-2. **User Documentation**
-   - Setup guides per provider
-   - Troubleshooting guide
-   - FAQ
+**When to add error handling:**
+- First OAuth token expiration → add refresh logic
+- First API key rejection → improve error message
+- First rate limit hit → add exponential backoff
 
-3. **Testing & QA**
-   - Integration tests
-   - Error recovery tests
-   - E2E flows
+**What we have now (sufficient to start):**
+- `recordProviderError()` tracks failures
+- `last_error` shown in UI
+- MCP errors surface to agent naturally via SDK
+
+**What to add when needed:**
+- OAuth token auto-refresh before expiration
+- Retry with backoff for transient failures
+- "Reconnect" flow when auth is permanently broken
+
+### Documentation (ongoing)
+
+Not a phase - document as you build.
+
+- Setup guides live in skill files (already there)
+- Troubleshooting hints inline in UI
+- Developer guide: how to add new integration (registry + skill pattern)
 
 ---
 

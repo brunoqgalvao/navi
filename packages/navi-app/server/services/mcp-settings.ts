@@ -13,6 +13,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { getCredential, setCredential, type CredentialScope } from "../integrations/credentials";
 
 // Types for external MCP server configurations
 export interface ExternalMcpServer {
@@ -26,6 +27,9 @@ export interface ExternalMcpServer {
   url?: string;
   // Common
   description?: string;
+  // Credential references - maps env var name to credential provider:key
+  // e.g., { "GITHUB_PERSONAL_ACCESS_TOKEN": "github:pat" }
+  credentialRefs?: Record<string, string>;
 }
 
 export interface McpServerInfo {
@@ -56,6 +60,8 @@ interface ExternalMcpServerConfig {
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  // Credential references for secure credential storage
+  credentialRefs?: Record<string, string>;
 }
 
 // .mcp.json structure
@@ -389,6 +395,7 @@ export const mcpSettings = {
   /**
    * Get external MCP server configs for passing to Claude Agent SDK
    * Only returns enabled servers with their full config
+   * Resolves credential references to actual values
    */
   getEnabledExternalServerConfigs(projectPath?: string): Record<string, ExternalMcpServerConfig> {
     const servers = this.getExternalServers(projectPath);
@@ -397,10 +404,11 @@ export const mcpSettings = {
     for (const server of servers) {
       if (server.enabled) {
         // Re-read the original config to get full details
-        // This is a bit redundant but ensures we have complete config
         const fullConfig = this.getServerConfig(server.name, projectPath);
         if (fullConfig) {
-          configs[server.name] = fullConfig;
+          // Resolve credential references to actual values
+          const resolvedConfig = this.resolveCredentials(fullConfig, projectPath);
+          configs[server.name] = resolvedConfig;
         }
       }
     }
@@ -453,4 +461,218 @@ export const mcpSettings = {
 
     return null;
   },
+
+  /**
+   * Add a new MCP server to project or global config
+   */
+  addServer(
+    name: string,
+    config: ExternalMcpServerConfig,
+    scope: "project" | "global",
+    projectPath?: string
+  ) {
+    if (scope === "project") {
+      if (!projectPath) {
+        throw new Error("projectPath is required for project scope");
+      }
+      const mcpJsonPath = join(projectPath, ".mcp.json");
+      let mcpConfig: McpJsonConfig = { mcpServers: {} };
+
+      try {
+        if (existsSync(mcpJsonPath)) {
+          const content = readFileSync(mcpJsonPath, "utf-8");
+          mcpConfig = JSON.parse(content);
+        }
+      } catch (e) {
+        console.error(`[MCP Settings] Failed to read project .mcp.json:`, e);
+      }
+
+      if (!mcpConfig.mcpServers) {
+        mcpConfig.mcpServers = {};
+      }
+
+      mcpConfig.mcpServers[name] = config;
+      writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2));
+      console.log(`[MCP Settings] Added server "${name}" to project .mcp.json`);
+    } else {
+      // Global scope
+      let mcpConfig: McpJsonConfig = { mcpServers: {} };
+
+      try {
+        if (existsSync(GLOBAL_MCP_JSON_PATH)) {
+          const content = readFileSync(GLOBAL_MCP_JSON_PATH, "utf-8");
+          mcpConfig = JSON.parse(content);
+        }
+      } catch (e) {
+        console.error(`[MCP Settings] Failed to read global .mcp.json:`, e);
+      }
+
+      if (!mcpConfig.mcpServers) {
+        mcpConfig.mcpServers = {};
+      }
+
+      mcpConfig.mcpServers[name] = config;
+      writeFileSync(GLOBAL_MCP_JSON_PATH, JSON.stringify(mcpConfig, null, 2));
+      console.log(`[MCP Settings] Added server "${name}" to global ~/.mcp.json`);
+    }
+  },
+
+  /**
+   * Remove an MCP server from project or global config
+   * Returns true if server was found and removed, false otherwise
+   */
+  removeServer(
+    name: string,
+    scope: "project" | "global",
+    projectPath?: string
+  ): boolean {
+    if (scope === "project") {
+      if (!projectPath) {
+        throw new Error("projectPath is required for project scope");
+      }
+      const mcpJsonPath = join(projectPath, ".mcp.json");
+
+      try {
+        if (!existsSync(mcpJsonPath)) {
+          return false;
+        }
+        const content = readFileSync(mcpJsonPath, "utf-8");
+        const mcpConfig: McpJsonConfig = JSON.parse(content);
+
+        if (!mcpConfig.mcpServers?.[name]) {
+          return false;
+        }
+
+        delete mcpConfig.mcpServers[name];
+        writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2));
+        console.log(`[MCP Settings] Removed server "${name}" from project .mcp.json`);
+        return true;
+      } catch (e) {
+        console.error(`[MCP Settings] Failed to remove server from project .mcp.json:`, e);
+        throw e;
+      }
+    } else {
+      // Global scope
+      try {
+        if (!existsSync(GLOBAL_MCP_JSON_PATH)) {
+          return false;
+        }
+        const content = readFileSync(GLOBAL_MCP_JSON_PATH, "utf-8");
+        const mcpConfig: McpJsonConfig = JSON.parse(content);
+
+        if (!mcpConfig.mcpServers?.[name]) {
+          return false;
+        }
+
+        delete mcpConfig.mcpServers[name];
+        writeFileSync(GLOBAL_MCP_JSON_PATH, JSON.stringify(mcpConfig, null, 2));
+        console.log(`[MCP Settings] Removed server "${name}" from global ~/.mcp.json`);
+        return true;
+      } catch (e) {
+        console.error(`[MCP Settings] Failed to remove server from global .mcp.json:`, e);
+        throw e;
+      }
+    }
+  },
+
+  /**
+   * Add a server with credential reference (stores credential securely, references in .mcp.json)
+   */
+  addServerWithCredentials(
+    name: string,
+    config: ExternalMcpServerConfig,
+    credentials: Record<string, string>,  // { envVarName: value }
+    scope: "project" | "global",
+    projectPath?: string
+  ) {
+    // 1. Store credentials in secure storage
+    const credentialRefs: Record<string, string> = {};
+    const credProvider = `mcp:${name}`;
+
+    for (const [envVar, value] of Object.entries(credentials)) {
+      if (value) {
+        // Create a credential key based on env var name
+        const credKey = envVar.toLowerCase().replace(/_/g, "-");
+        setCredential(credProvider, credKey, value, { projectId: scope === "project" ? projectPath : null });
+        credentialRefs[envVar] = `${credProvider}:${credKey}`;
+        console.log(`[MCP Settings] Stored credential ${credProvider}:${credKey}`);
+      }
+    }
+
+    // 2. Store server config with credential references (not raw values)
+    const serverConfig: ExternalMcpServerConfig = {
+      ...config,
+      credentialRefs: Object.keys(credentialRefs).length > 0 ? credentialRefs : undefined,
+      // Remove env vars that are now stored as credentials
+      env: config.env ? Object.fromEntries(
+        Object.entries(config.env).filter(([k]) => !credentials[k])
+      ) : undefined,
+    };
+
+    // Clean up empty env object
+    if (serverConfig.env && Object.keys(serverConfig.env).length === 0) {
+      delete serverConfig.env;
+    }
+
+    this.addServer(name, serverConfig, scope, projectPath);
+  },
+
+  /**
+   * Resolve credential references to actual values
+   * Used when loading MCP server configs for the agent
+   */
+  resolveCredentials(
+    config: ExternalMcpServerConfig,
+    projectPath?: string
+  ): ExternalMcpServerConfig {
+    if (!config.credentialRefs) {
+      return config;
+    }
+
+    const resolvedEnv: Record<string, string> = { ...(config.env || {}) };
+
+    for (const [envVar, credRef] of Object.entries(config.credentialRefs)) {
+      // Parse credential reference: "provider:key"
+      const [provider, key] = credRef.split(":");
+      if (provider && key) {
+        const value = getCredential(provider, key, { projectId: projectPath || null });
+        if (value) {
+          resolvedEnv[envVar] = value;
+        } else {
+          console.warn(`[MCP Settings] Credential not found: ${credRef}`);
+        }
+      }
+    }
+
+    return {
+      ...config,
+      env: Object.keys(resolvedEnv).length > 0 ? resolvedEnv : undefined,
+      credentialRefs: undefined, // Don't pass refs to agent, only resolved values
+    };
+  },
 };
+
+/**
+ * Helper to check if a server has unresolved credential references
+ */
+export function hasCredentialRefs(config: ExternalMcpServerConfig): boolean {
+  return !!(config.credentialRefs && Object.keys(config.credentialRefs).length > 0);
+}
+
+/**
+ * Helper to get credential info for display (without exposing values)
+ */
+export function getCredentialRefInfo(config: ExternalMcpServerConfig): { envVar: string; provider: string; key: string; hasValue: boolean }[] {
+  if (!config.credentialRefs) return [];
+
+  return Object.entries(config.credentialRefs).map(([envVar, credRef]) => {
+    const [provider, key] = credRef.split(":");
+    const value = getCredential(provider, key);
+    return {
+      envVar,
+      provider,
+      key,
+      hasValue: !!value,
+    };
+  });
+}
