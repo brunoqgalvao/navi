@@ -61,6 +61,8 @@ export async function fetchCommands(projectPath?: string): Promise<CustomCommand
           pluginId: cmd.pluginId,
           pluginName: cmd.pluginName,
         }));
+      } else if (pluginRes.status !== 404) {
+        console.error("Failed to fetch plugin commands:", await pluginRes.text());
       }
     } catch (err) {
       console.error("Failed to fetch plugin commands:", err);

@@ -158,7 +158,7 @@ export async function handleMcpRoutes(
       const body = await req.json();
       const { name, type, command, args, env, url, scope, projectPath, credentials } = body as {
         name: string;
-        type: "stdio" | "sse" | "streamable-http";
+        type: "stdio" | "sse" | "streamable-http" | "http";
         command?: string;
         args?: string[];
         env?: Record<string, string>;
@@ -176,7 +176,7 @@ export async function handleMcpRoutes(
         return error("stdio type requires a command", 400);
       }
 
-      if ((type === "sse" || type === "streamable-http") && !url) {
+      if ((type === "sse" || type === "streamable-http" || type === "http") && !url) {
         return error(`${type} type requires a url`, 400);
       }
 

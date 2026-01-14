@@ -16,16 +16,19 @@ import { homedir } from "os";
 import { getCredential, setCredential, type CredentialScope } from "../integrations/credentials";
 import { loadAllPlugins, type McpServerConfig as PluginMcpServerConfig } from "./plugin-loader";
 
+type McpServerTransport = "stdio" | "sse" | "streamable-http" | "http";
+
 // Types for external MCP server configurations
 export interface ExternalMcpServer {
   name: string;
-  type: "stdio" | "sse" | "streamable-http";
+  type: McpServerTransport;
   // stdio type
   command?: string;
   args?: string[];
   env?: Record<string, string>;
   // sse/http type
   url?: string;
+  headers?: Record<string, string>;
   // Common
   description?: string;
   // Credential references - maps env var name to credential provider:key
@@ -38,7 +41,7 @@ export interface McpServerInfo {
   enabled: boolean;
   isBuiltIn: boolean;
   toolCount?: number;
-  type?: "stdio" | "sse" | "streamable-http";
+  type?: McpServerTransport;
   command?: string;
   url?: string;
   source?: "builtin" | "project-mcp" | "global-mcp" | "claude-json";
@@ -59,11 +62,12 @@ interface ClaudeJsonProject {
 }
 
 interface ExternalMcpServerConfig {
-  type?: "stdio" | "sse" | "streamable-http";
+  type?: McpServerTransport;
   command?: string;
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  headers?: Record<string, string>;
   // Credential references for secure credential storage
   credentialRefs?: Record<string, string>;
 }
@@ -133,7 +137,7 @@ function loadExternalMcpServers(projectPath?: string): McpServerInfo[] {
                 name,
                 enabled: true, // Will be overridden by settings
                 isBuiltIn: false,
-                type: serverConfig.type || "stdio",
+                type: inferMcpTransport(serverConfig) || "stdio",
                 command: serverConfig.command,
                 url: serverConfig.url,
                 source: "project-mcp",
@@ -160,7 +164,7 @@ function loadExternalMcpServers(projectPath?: string): McpServerInfo[] {
               name,
               enabled: true,
               isBuiltIn: false,
-              type: serverConfig.type || "stdio",
+              type: inferMcpTransport(serverConfig) || "stdio",
               command: serverConfig.command,
               url: serverConfig.url,
               source: "global-mcp",
@@ -189,7 +193,7 @@ function loadExternalMcpServers(projectPath?: string): McpServerInfo[] {
                 name,
                 enabled: true,
                 isBuiltIn: false,
-                type: serverConfig.type || "stdio",
+                type: inferMcpTransport(serverConfig) || "stdio",
                 command: serverConfig.command,
                 url: serverConfig.url,
                 source: "claude-json",
@@ -215,6 +219,21 @@ function loadExternalMcpServers(projectPath?: string): McpServerInfo[] {
   }
 
   return servers;
+}
+
+function inferMcpTransport(config: ExternalMcpServerConfig): McpServerTransport | undefined {
+  if (config.type) return config.type;
+  if (config.url) return "sse";
+  if (config.command) return "stdio";
+  return undefined;
+}
+
+function normalizeMcpConfigForSdk(
+  config: ExternalMcpServerConfig
+): ExternalMcpServerConfig {
+  const inferred = inferMcpTransport(config);
+  const normalizedType = inferred === "streamable-http" ? "http" : inferred;
+  return normalizedType ? { ...config, type: normalizedType } : config;
 }
 
 export const mcpSettings = {
@@ -407,7 +426,7 @@ export const mcpSettings = {
         if (fullConfig) {
           // Resolve credential references to actual values
           const resolvedConfig = this.resolveCredentials(fullConfig, projectPath);
-          configs[server.name] = resolvedConfig;
+          configs[server.name] = normalizeMcpConfigForSdk(resolvedConfig);
         }
       }
     }
@@ -685,8 +704,17 @@ export function getPluginMcpServers(
   const allPlugins = loadAllPlugins();
   const servers: Record<string, ExternalMcpServerConfig> = {};
 
-  const expandPluginRoot = (value: string, pluginRoot: string) =>
-    value.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginRoot);
+  const expandPluginRoot = (value: string | undefined, pluginRoot: string) =>
+    value ? value.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginRoot) : value;
+
+  const expandRecord = (record: Record<string, string> | undefined, pluginRoot: string) => {
+    if (!record) return undefined;
+    const entries = Object.entries(record).map(([key, value]) => [
+      key,
+      expandPluginRoot(value, pluginRoot) || value,
+    ]);
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+  };
 
   for (const plugin of allPlugins) {
     // Check if plugin is enabled
@@ -699,19 +727,42 @@ export function getPluginMcpServers(
     // Add all MCP servers from this plugin
     for (const [serverName, serverConfig] of Object.entries(plugin.components.mcpServers)) {
       const namespacedName = `${plugin.id}/${serverName}`;
+      const rawType = inferMcpTransport(serverConfig);
+      const normalizedType = rawType === "streamable-http" ? "http" : rawType;
+
+      if (normalizedType === "sse" || normalizedType === "http") {
+        const url = expandPluginRoot(serverConfig.url, plugin.installPath);
+        if (!url) {
+          console.warn(`[MCP Settings] Plugin MCP ${namespacedName} missing url for ${normalizedType} transport`);
+          continue;
+        }
+
+        const expandedHeaders = expandRecord(serverConfig.headers, plugin.installPath);
+        const expandedEnv = expandRecord(serverConfig.env, plugin.installPath);
+        const mergedHeaders = {
+          ...(expandedEnv || {}),
+          ...(expandedHeaders || {}),
+        };
+
+        servers[namespacedName] = {
+          type: normalizedType,
+          url,
+          headers: Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined,
+        };
+        continue;
+      }
+
       const expandedCommand = expandPluginRoot(serverConfig.command, plugin.installPath);
+      if (!expandedCommand) {
+        console.warn(`[MCP Settings] Plugin MCP ${namespacedName} missing command for stdio transport`);
+        continue;
+      }
+
       const expandedArgs = serverConfig.args?.map((arg) =>
-        expandPluginRoot(arg, plugin.installPath)
+        expandPluginRoot(arg, plugin.installPath) || arg
       );
       const expandedEnv = {
-        ...(serverConfig.env
-          ? Object.fromEntries(
-              Object.entries(serverConfig.env).map(([key, value]) => [
-                key,
-                expandPluginRoot(value, plugin.installPath),
-              ])
-            )
-          : {}),
+        ...(expandRecord(serverConfig.env, plugin.installPath) || {}),
         CLAUDE_PLUGIN_ROOT: plugin.installPath,
       };
 
@@ -744,10 +795,17 @@ export function getAllEnabledMcpServers(
   }
 
   // Merge them (plugin servers won't conflict due to namespacing)
-  return {
+  const merged = {
     ...externalServers,
     ...pluginServers,
   };
+
+  const normalized: Record<string, ExternalMcpServerConfig> = {};
+  for (const [name, config] of Object.entries(merged)) {
+    normalized[name] = normalizeMcpConfigForSdk(config);
+  }
+
+  return normalized;
 }
 
 /**

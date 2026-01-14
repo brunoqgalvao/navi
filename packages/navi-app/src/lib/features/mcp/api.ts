@@ -11,7 +11,7 @@ export interface McpServer {
   enabled: boolean;
   toolCount?: number;
   isBuiltIn: boolean;
-  type?: "stdio" | "sse" | "streamable-http";
+  type?: "stdio" | "sse" | "streamable-http" | "http";
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -24,7 +24,7 @@ export interface McpServer {
 
 export interface CreateMcpServerRequest {
   name: string;
-  type: "stdio" | "sse" | "streamable-http";
+  type: "stdio" | "sse" | "streamable-http" | "http";
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -64,7 +64,7 @@ export interface MCPServerPreset {
   description: string;
   icon: string;
   category: string;
-  type: "stdio" | "sse" | "streamable-http";
+  type: "stdio" | "sse" | "streamable-http" | "http";
   command?: string;
   args?: string[];
   url?: string;

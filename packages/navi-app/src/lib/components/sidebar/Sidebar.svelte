@@ -1,11 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
-  import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, attentionItems, backendModels, getBackendModelsFormatted, type BackendId, channelsEnabled } from "../../stores";
+  import { currentSession as session, isConnected, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, attentionItems, backendModels, getBackendModelsFormatted, type BackendId, channelsEnabled } from "../../stores";
   import { api, type Project, type Session, type WorkspaceFolder, type SearchResult } from "../../api";
   import { getApiBase } from "../../config";
   import ModelSelector from "../ModelSelector.svelte";
-  import BackendSelector from "../BackendSelector.svelte";
   import StarButton from "../StarButton.svelte";
   import TitleSuggestion from "../TitleSuggestion.svelte";
   import RelativeTime from "../RelativeTime.svelte";
@@ -153,6 +152,14 @@
   // Channels state
   let channelsSectionCollapsed = $state(false);
   let showCreateChannelModal = $state(false);
+
+  // Backend selector state (session scoped, shown with model selector)
+  let showBackendMenu = $state(false);
+  const backendMeta: Record<BackendId, { icon: string; color: string; label: string; bgColor: string }> = {
+    claude: { icon: "C", color: "text-orange-600 dark:text-orange-400", label: "Claude", bgColor: "bg-orange-100 dark:bg-orange-900/30" },
+    codex: { icon: "X", color: "text-green-600 dark:text-green-400", label: "Codex", bgColor: "bg-green-100 dark:bg-green-900/30" },
+    gemini: { icon: "G", color: "text-blue-600 dark:text-blue-400", label: "Gemini", bgColor: "bg-blue-100 dark:bg-blue-900/30" },
+  };
 
   function handleSelectChannel(channel: Channel) {
     currentChannelId.set(channel.id);
@@ -1444,15 +1451,76 @@
   </div>
 
   <div class={`${sidebarCollapsed ? 'px-2' : 'px-4'} py-3 border-t border-gray-200 bg-gray-50/50 space-y-2`}>
-    {#if $session.sessionId && !sidebarCollapsed}
-      <!-- Model selector row (backend is locked, shown in ChatInput) -->
+    {#if currentProject && !sidebarCollapsed}
+      <!-- Model + backend selector row -->
       {@const backendModelsFiltered = getBackendModelsFormatted(backend, $backendModels)}
-      <div class="w-32">
-        <ModelSelector
-          models={backendModelsFiltered}
-          bind:selectedModel={modelSelection}
-          onSelect={onModelSelect}
-        />
+      <div class="flex items-center gap-2">
+        <div class="flex-1 min-w-0">
+          <ModelSelector
+            models={backendModelsFiltered}
+            bind:selectedModel={modelSelection}
+            onSelect={onModelSelect}
+          />
+        </div>
+        {#if onBackendChange}
+          {@const meta = backendMeta[backend] ?? backendMeta.claude}
+          <div class="relative">
+            <button
+              onclick={() => showBackendMenu = !showBackendMenu}
+              class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-all duration-150 {meta.bgColor} {meta.color} hover:opacity-80 border border-transparent"
+              title="Select AI backend"
+            >
+              <span class="w-4 h-4 rounded flex items-center justify-center {backend === 'claude' ? 'bg-orange-500' : backend === 'codex' ? 'bg-green-500' : 'bg-blue-500'} text-white text-[10px] font-bold">
+                {meta.icon}
+              </span>
+              <span class="text-[11px] font-medium">{meta.label}</span>
+              <svg class="w-3 h-3 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </button>
+
+            {#if showBackendMenu}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div
+                class="fixed inset-0 z-40"
+                onclick={() => showBackendMenu = false}
+              ></div>
+              <div class="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-2 z-50">
+                <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+                  <div class="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                    </svg>
+                    <span class="text-xs font-semibold uppercase tracking-wide">AI Backend</span>
+                  </div>
+                  <p class="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                    Choose which AI to use for this chat.
+                  </p>
+                </div>
+
+                <div class="py-1">
+                  {#each (["claude", "codex", "gemini"] as const) as backendId}
+                    {@const bMeta = backendMeta[backendId] ?? backendMeta.claude}
+                    <button
+                      onclick={() => { onBackendChange?.(backendId); showBackendMenu = false; }}
+                      class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2.5 transition-colors {backend === backendId ? bMeta.bgColor : ''}"
+                    >
+                      <span class="w-5 h-5 rounded flex items-center justify-center {backendId === 'claude' ? 'bg-orange-500' : backendId === 'codex' ? 'bg-green-500' : 'bg-blue-500'} text-white text-[11px] font-bold">
+                        {bMeta.icon}
+                      </span>
+                      <span class="text-sm {backend === backendId ? bMeta.color + ' font-medium' : 'text-gray-700 dark:text-gray-300'}">{bMeta.label}</span>
+                      {#if backend === backendId}
+                        <svg class="w-4 h-4 ml-auto {bMeta.color}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                        </svg>
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </div>
+        {/if}
       </div>
     {/if}
 

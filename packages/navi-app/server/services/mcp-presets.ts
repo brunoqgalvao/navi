@@ -68,7 +68,7 @@ export interface MCPServerPreset {
   /** Category for grouping */
   category: "popular" | "filesystem" | "development" | "ai" | "data" | "search";
   /** Type of MCP server */
-  type: "stdio" | "sse" | "streamable-http";
+  type: "stdio" | "sse" | "streamable-http" | "http";
   /** Command to run (for stdio type) */
   command?: string;
   /** Default arguments */
@@ -360,7 +360,7 @@ export const MCP_PRESETS: MCPServerPreset[] = [
     url: "https://mcp.notion.com/sse",
     requiresConfig: false,
     authType: "mcp_oauth",
-    authDescription: "OAuth starts when you first use a Notion tool in a session.",
+    authDescription: "Click 'How to Connect' after adding to learn how to authenticate.",
     setupSteps: [
       {
         id: "info",

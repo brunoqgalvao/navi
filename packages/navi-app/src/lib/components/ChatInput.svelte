@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, planMode, loopModeEnabled } from "../stores";
+  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, planMode, loopModeEnabled } from "../stores";
   import { agents, type Agent } from "../stores/agents";
   import FileAttachment from "./FileAttachment.svelte";
   import ReferenceChip from "./ReferenceChip.svelte";
@@ -85,29 +85,19 @@
     onArchiveSession?: () => void;
     onExecutionModeChange?: (mode: ExecutionMode) => void;
     onCloudBranchChange?: (branch: string) => void;
-    // Backend selection (claude, codex, gemini)
-    backend?: BackendId;
-    onBackendChange?: (backend: BackendId) => void;
     // Slash commands from SDK
     slashCommands?: SlashCommand[];
     // UI-only command handlers
     onUICommand?: (command: string, args?: string) => boolean; // Return true if handled
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], backend = "claude", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, onBackendChange, slashCommands = [], onUICommand }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, slashCommands = [], onUICommand }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
   let worktreeDescription = $state("");
   let showWorktreeMenu = $state(false);
 
-  // Backend selector state (for new chats)
-  let showBackendMenu = $state(false);
-  const backendMeta: Record<BackendId, { icon: string; color: string; label: string; bgColor: string }> = {
-    claude: { icon: "C", color: "text-orange-600 dark:text-orange-400", label: "Claude", bgColor: "bg-orange-100 dark:bg-orange-900/30" },
-    codex: { icon: "X", color: "text-green-600 dark:text-green-400", label: "Codex", bgColor: "bg-green-100 dark:bg-green-900/30" },
-    gemini: { icon: "G", color: "text-blue-600 dark:text-blue-400", label: "Gemini", bgColor: "bg-blue-100 dark:bg-blue-900/30" },
-  };
 
   function handleToggle() {
     worktreeEnabled = !worktreeEnabled;
@@ -1473,79 +1463,6 @@
             </svg>
           </button>
         </Tooltip>
-      {/if}
-
-      <!-- Backend Selector (only for new chats) -->
-      {#if isNewChat && onBackendChange}
-        {@const meta = backendMeta[backend]}
-        <div class="relative">
-          <button
-            onclick={() => showBackendMenu = !showBackendMenu}
-            class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-150 {meta.bgColor} {meta.color} hover:opacity-80"
-            title="Select AI backend"
-          >
-            <span class="w-4 h-4 rounded flex items-center justify-center {backend === 'claude' ? 'bg-orange-500' : backend === 'codex' ? 'bg-green-500' : 'bg-blue-500'} text-white text-[10px] font-bold">
-              {meta.icon}
-            </span>
-            <span class="text-[11px] font-medium">{meta.label}</span>
-            <svg class="w-3 h-3 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
-            </svg>
-          </button>
-
-          {#if showBackendMenu}
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div
-              class="fixed inset-0 z-40"
-              onclick={() => showBackendMenu = false}
-            ></div>
-            <div class="absolute bottom-full left-0 mb-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-2 z-50">
-              <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700">
-                <div class="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
-                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-                  </svg>
-                  <span class="text-xs font-semibold uppercase tracking-wide">AI Backend</span>
-                </div>
-                <p class="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
-                  Choose which AI to use. Can't be changed after starting chat.
-                </p>
-              </div>
-
-              <div class="py-1">
-                {#each (["claude", "codex", "gemini"] as const) as backendId}
-                  {@const bMeta = backendMeta[backendId]}
-                  <button
-                    onclick={() => { onBackendChange(backendId); showBackendMenu = false; }}
-                    class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2.5 transition-colors {backend === backendId ? bMeta.bgColor : ''}"
-                  >
-                    <span class="w-5 h-5 rounded flex items-center justify-center {backendId === 'claude' ? 'bg-orange-500' : backendId === 'codex' ? 'bg-green-500' : 'bg-blue-500'} text-white text-[11px] font-bold">
-                      {bMeta.icon}
-                    </span>
-                    <span class="text-sm {backend === backendId ? bMeta.color + ' font-medium' : 'text-gray-700 dark:text-gray-300'}">{bMeta.label}</span>
-                    {#if backend === backendId}
-                      <svg class="w-4 h-4 ml-auto {bMeta.color}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-                      </svg>
-                    {/if}
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/if}
-        </div>
-      {:else if !isNewChat}
-        <!-- Read-only backend indicator for existing chats -->
-        {@const meta = backendMeta[backend]}
-        <div
-          class="flex items-center gap-1.5 px-2 py-1 rounded-md {meta.bgColor} {meta.color} opacity-70 cursor-default"
-          title="Backend: {meta.label} (locked)"
-        >
-          <span class="w-4 h-4 rounded flex items-center justify-center {backend === 'claude' ? 'bg-orange-500' : backend === 'codex' ? 'bg-green-500' : 'bg-blue-500'} text-white text-[10px] font-bold">
-            {meta.icon}
-          </span>
-          <span class="text-[11px] font-medium">{meta.label}</span>
-        </div>
       {/if}
 
       <!-- Cloud Execution Toggle -->

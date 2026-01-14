@@ -1,5 +1,5 @@
 import { api, costsApi, backendsApi, type BackendId } from "../api";
-import { availableModels, costStore, sessionStatus, currentSession as session, showArchivedWorkspaces, backendModels } from "../stores";
+import { availableModels, costStore, sessionStatus, currentSession as session, showArchivedWorkspaces, backendModels, getBackendModelsFormatted, defaultBackend } from "../stores";
 import { get } from "svelte/store";
 import type { Session } from "../api";
 import { showError } from "../errorHandler";
@@ -36,21 +36,39 @@ export function getDefaultModel(): string {
   return opus?.value || models[0].value;
 }
 
+export function getDefaultModelForBackend(backend: BackendId): string {
+  if (backend === "claude") {
+    const claudeDefault = getDefaultModel();
+    if (claudeDefault) return claudeDefault;
+    const modelsByBackend = get(backendModels);
+    const models = getBackendModelsFormatted("claude", modelsByBackend);
+    return models[0]?.value || "";
+  }
+  const modelsByBackend = get(backendModels);
+  const models = getBackendModelsFormatted(backend, modelsByBackend);
+  if (models.length > 0) return models[0].value;
+  return "";
+}
+
 export async function loadModels() {
   try {
     const models = await api.models.list();
     availableModels.set(models);
-    const sessionState = get(session);
-    if (models.length > 0 && !sessionState.selectedModel) {
-      // Prefer Opus 4.5 as default, fall back to first available
-      const opus = models.find(m => m.value === "opus" || m.value.includes("opus"));
-      session.setSelectedModel(opus?.value || models[0].value);
-    }
-
-    // Also load backend-specific models
-    await loadBackendModels();
   } catch (e) {
+    availableModels.set([]);
     showError({ title: "Models Error", message: "Failed to load available models", error: e });
+  }
+
+  // Always attempt to load backend-specific models, even if Claude models failed
+  await loadBackendModels();
+
+  const sessionState = get(session);
+  if (!sessionState.selectedModel) {
+    const backend = get(defaultBackend);
+    const defaultModel = getDefaultModelForBackend(backend);
+    if (defaultModel) {
+      session.setSelectedModel(defaultModel);
+    }
   }
 }
 
@@ -67,9 +85,18 @@ export async function loadBackendModels() {
       gemini: [],
     };
 
-    // Claude models (already loaded in availableModels)
+    // Claude models (prefer availableModels, fallback to adapter models)
     const claudeModels = get(availableModels);
-    formatted.claude = claudeModels;
+    if (claudeModels.length > 0) {
+      formatted.claude = claudeModels;
+    } else if (allModels.claude) {
+      formatted.claude = allModels.claude.map((m) => ({
+        value: m,
+        displayName: formatClaudeModelName(m),
+        description: "",
+        provider: "anthropic",
+      }));
+    }
 
     // Codex models
     if (allModels.codex) {
@@ -113,6 +140,13 @@ function formatModelName(model: string, backend: string): string {
       .replace("-preview", " (Preview)");
   }
   return model;
+}
+
+function formatClaudeModelName(model: string): string {
+  return model
+    .replace(/^claude-/, "")
+    .replace(/-20\d{6}$/, "")
+    .replace(/-/g, " ");
 }
 
 function getModelDescription(model: string, backend: string): string {

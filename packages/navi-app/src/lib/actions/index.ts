@@ -57,6 +57,7 @@ export {
   loadRecentChats,
   loadActiveSessions,
   getDefaultModel,
+  getDefaultModelForBackend,
   type DataLoaderCallbacks,
 } from "./data-loaders";
 

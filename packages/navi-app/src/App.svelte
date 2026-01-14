@@ -181,7 +181,7 @@
     startNewChatWithSummary,
     hasPrunedContext,
     hasRollbackContext,
-    getDefaultModel,
+    getDefaultModelForBackend,
   } from "./lib/actions";
 
   let sidecarProcess: any = null;
@@ -1023,6 +1023,15 @@
   let currentSessionLoading = $derived($session.sessionId && $loadingSessions.has($session.sessionId));
   let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.sessionId === $session.sessionId).length : 0);
   let showOnboarding = $derived(!$onboardingComplete);
+  let currentBackend = $derived(() => {
+    const sessionId = $session.sessionId;
+    if (!sessionId) return $defaultBackend;
+    const cachedBackend = $sessionBackendStore.get(sessionId);
+    if (cachedBackend) return cachedBackend;
+    const sessionData = sidebarSessions.find(s => s.id === sessionId);
+    const inferred = inferBackendFromModel(sessionData?.model || null);
+    return (sessionData?.backend as BackendId) || inferred || "claude";
+  });
 
   // Context usage percentage for current session
   const contextWindow = $derived(currentProject?.context_window || 200000);
@@ -1465,6 +1474,62 @@ Please walk me through the setup step by step. When I have the credentials, save
     loadRecentChatsAction();
   });
 
+  function inferBackendFromModel(model?: string | null): BackendId | null {
+    if (!model) return null;
+    const lower = model.toLowerCase();
+    if (lower.includes("gemini")) return "gemini";
+    if (lower.includes("gpt") || lower.includes("codex") || lower.startsWith("o1") || lower.startsWith("o3")) {
+      return "codex";
+    }
+    return "claude";
+  }
+
+  function resolveBackendForSession(sessionId: string | null): BackendId {
+    if (!sessionId) {
+      return get(defaultBackend);
+    }
+    const backendMap = get(sessionBackendStore);
+    const cachedBackend = backendMap.get(sessionId);
+    if (cachedBackend) return cachedBackend;
+    const sessionData = sidebarSessions.find(s => s.id === sessionId);
+    if (sessionData?.backend) {
+      const backend = sessionData.backend as BackendId;
+      sessionBackendStore.set(sessionId, backend);
+      return backend;
+    }
+    const inferred = inferBackendFromModel(sessionData?.model || null);
+    if (inferred) {
+      sessionBackendStore.set(sessionId, inferred);
+      return inferred;
+    }
+    return "claude";
+  }
+
+  function resolveModelForSession(sessionId: string | null, backend: BackendId): string {
+    if (!sessionId) {
+      const state = get(session);
+      return state.selectedModel || getDefaultModelForBackend(backend);
+    }
+    const current = get(session);
+    if (current.sessionId === sessionId && current.selectedModel) {
+      return current.selectedModel;
+    }
+    const models = get(sessionModels);
+    const cachedModel = models.get(sessionId);
+    if (cachedModel) return cachedModel;
+    const sessionData = sidebarSessions.find(s => s.id === sessionId);
+    if (sessionData?.model) return sessionData.model;
+    return getDefaultModelForBackend(backend);
+  }
+
+  function resolveClaudeSessionId(sessionId: string | null): string | undefined {
+    if (!sessionId) return undefined;
+    const current = get(session);
+    if (current.sessionId === sessionId) return current.claudeSessionId || undefined;
+    const sessionData = sidebarSessions.find(s => s.id === sessionId);
+    return sessionData?.claude_session_id || undefined;
+  }
+
   async function handleModelSelect(model: string) {
     modelSelection = model;
     session.setSelectedModel(model);
@@ -1483,6 +1548,39 @@ Please walk me through the setup step by step. When I have the credentials, save
         console.error("Failed to save model:", e);
       }
     }
+  }
+
+  async function handleBackendChange(newBackend: BackendId) {
+    const sessionId = $session.sessionId;
+
+    if (sessionId) {
+      sessionBackendStore.set(sessionId, newBackend);
+      const idx = sidebarSessions.findIndex(s => s.id === sessionId);
+      if (idx !== -1) {
+        sidebarSessions[idx] = { ...sidebarSessions[idx], backend: newBackend };
+      }
+      try {
+        await api.sessions.update(sessionId, { backend: newBackend });
+      } catch (e) {
+        console.error("Failed to persist backend:", e);
+      }
+    } else {
+      defaultBackend.set(newBackend);
+    }
+
+    const currentModel = get(session).selectedModel;
+    const models = getBackendModelsFormatted(newBackend, get(backendModels));
+    const hasModel = models.some(m => m.value === currentModel);
+    const nextModel = hasModel ? currentModel : (models[0]?.value || getDefaultModelForBackend(newBackend));
+    if (!nextModel) {
+      modelSelection = "";
+      session.setSelectedModel("");
+      if (sessionId) {
+        sessionModels.clearSession(sessionId);
+      }
+      return;
+    }
+    await handleModelSelect(nextModel);
   }
 
   async function selectProject(project: Project) {
@@ -1840,6 +1938,12 @@ Please walk me through the setup step by step. When I have the credentials, save
     session.setCost(s.total_cost_usd || 0);
     session.setUsage(s.input_tokens || 0, s.output_tokens || 0);
 
+    const backendMap = get(sessionBackendStore);
+    const cachedBackend = backendMap.get(s.id);
+    const inferredBackend = inferBackendFromModel(s.model);
+    const resolvedBackend = (s.backend as BackendId) || cachedBackend || inferredBackend || "claude";
+    sessionBackendStore.set(s.id, resolvedBackend);
+
     // Restore model for this session from cache or DB, default to Opus
     const cachedModel = $sessionModels.get(s.id);
     if (cachedModel) {
@@ -1848,18 +1952,10 @@ Please walk me through the setup step by step. When I have the credentials, save
       session.setSelectedModel(s.model);
       sessionModels.setModel(s.id, s.model);
     } else {
-      // No model set - use default (Opus)
-      const defaultModel = getDefaultModel();
+      // No model set - use backend default
+      const defaultModel = getDefaultModelForBackend(resolvedBackend);
       session.setSelectedModel(defaultModel);
     }
-
-    // Restore backend for this session from DB if specified
-    // Always trust the session's stored backend over cache (cache may have stale defaults)
-    if (s.backend) {
-      sessionBackendStore.set(s.id, s.backend as BackendId);
-    }
-    // If session doesn't have a backend, check the map directly to see if we have a cached value
-    // (The get() method returns "claude" as default, which could be wrong for a codex session)
 
     sessionStatus.markSeen(s.id);
 
@@ -2394,14 +2490,15 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
 
     // Get the backend for this session
-    const backend = sessionBackendStore.get(sessionId, get(sessionBackendStore)) || get(defaultBackend);
+    const backend = resolveBackendForSession(sessionId);
+    const model = resolveModelForSession(sessionId, backend);
 
     client.query({
       prompt,
       projectId: $session.projectId || undefined,
       sessionId,
-      claudeSessionId: $session.claudeSessionId || undefined,
-      model: $session.selectedModel || undefined,
+      claudeSessionId: resolveClaudeSessionId(sessionId),
+      model: model || undefined,
       backend,
     });
 
@@ -2513,14 +2610,15 @@ Please walk me through the setup step by step. When I have the credentials, save
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
 
-    const backend = sessionBackendStore.get(currentSessionId, get(sessionBackendStore)) || get(defaultBackend);
+    const backend = resolveBackendForSession(currentSessionId);
+    const model = resolveModelForSession(currentSessionId, backend);
 
     client.query({
       prompt: command,
       projectId: $session.projectId,
       sessionId: currentSessionId,
-      claudeSessionId: $session.claudeSessionId || undefined,
-      model: $session.selectedModel || undefined,
+      claudeSessionId: resolveClaudeSessionId(currentSessionId),
+      model: model || undefined,
       backend,
     });
   }
@@ -2534,6 +2632,7 @@ Please walk me through the setup step by step. When I have the credentials, save
 
     let currentSessionId = $session.sessionId;
 
+    let createdNewSession = false;
     // If in pending state or no session, create the actual DB session now
     if (!currentSessionId || $session.isPending) {
         // Use first line of message (up to 50 chars) as title hint
@@ -2541,6 +2640,13 @@ Please walk me through the setup step by step. When I have the credentials, save
         const newSessionId = await createNewChatAction(titleHint);
         if (!newSessionId) return;
         currentSessionId = newSessionId;
+        createdNewSession = true;
+    }
+    if (createdNewSession) {
+      const selectedModel = get(session).selectedModel;
+      if (selectedModel) {
+        await handleModelSelect(selectedModel);
+      }
     }
     const isCurrentSessionLoading = $loadingSessions.has(currentSessionId);
     
@@ -2611,7 +2717,8 @@ Please walk me through the setup step by step. When I have the credentials, save
       promptWithoutAgent = messageContent.slice(agentMatch[0].length);
     }
 
-    const backend = sessionBackendStore.get(currentSessionId, get(sessionBackendStore)) || get(defaultBackend);
+    const backend = resolveBackendForSession(currentSessionId);
+    const model = resolveModelForSession(currentSessionId, backend);
 
     // For non-Claude backends, build history context from messages if not already provided
     // Claude maintains its own session state via claudeSessionId, but Gemini/Codex need the full context
@@ -2624,8 +2731,8 @@ Please walk me through the setup step by step. When I have the credentials, save
       prompt: promptWithoutAgent,
       projectId: $session.projectId || undefined,
       sessionId: currentSessionId,
-      claudeSessionId: backend === "claude" ? ($session.claudeSessionId || undefined) : undefined,
-      model: $session.selectedModel || undefined,
+      claudeSessionId: backend === "claude" ? resolveClaudeSessionId(currentSessionId) : undefined,
+      model: model || undefined,
       historyContext: historyCtx,
       agentId,
       backend,
@@ -2711,7 +2818,8 @@ Please walk me through the setup step by step. When I have the credentials, save
     loadingSessions.update(s => { s.add(targetSessionId); return new Set(s); });
     sessionStatus.setRunning(targetSessionId, $session.projectId!);
 
-    const backend = sessionBackendStore.get(targetSessionId, get(sessionBackendStore)) || get(defaultBackend);
+    const backend = resolveBackendForSession(targetSessionId);
+    const model = resolveModelForSession(targetSessionId, backend);
 
     // For non-Claude backends, build history context from messages
     let historyCtx = $sessionHistoryContext.get(targetSessionId);
@@ -2723,8 +2831,8 @@ Please walk me through the setup step by step. When I have the credentials, save
       prompt: messageContent,
       projectId: $session.projectId || undefined,
       sessionId: targetSessionId,
-      claudeSessionId: backend === "claude" ? ($session.claudeSessionId || undefined) : undefined,
-      model: $session.selectedModel || undefined,
+      claudeSessionId: backend === "claude" ? resolveClaudeSessionId(targetSessionId) : undefined,
+      model: model || undefined,
       historyContext: historyCtx,
       backend,
     });
@@ -2754,7 +2862,8 @@ Please walk me through the setup step by step. When I have the credentials, save
     loadingSessions.update(s => { s.add(targetSessionId); return new Set(s); });
     sessionStatus.setRunning(targetSessionId, $session.projectId!);
 
-    const backend = sessionBackendStore.get(targetSessionId, get(sessionBackendStore)) || get(defaultBackend);
+    const backend = resolveBackendForSession(targetSessionId);
+    const model = resolveModelForSession(targetSessionId, backend);
 
     // Check sessionHistoryContext first (for forked sessions, rollback, etc.)
     // For non-Claude backends, fall back to building history from messages
@@ -2767,8 +2876,8 @@ Please walk me through the setup step by step. When I have the credentials, save
       prompt: messageContent,
       projectId: $session.projectId || undefined,
       sessionId: targetSessionId,
-      claudeSessionId: backend === "claude" ? ($session.claudeSessionId || undefined) : undefined,
-      model: $session.selectedModel || undefined,
+      claudeSessionId: backend === "claude" ? resolveClaudeSessionId(targetSessionId) : undefined,
+      model: model || undefined,
       historyContext: historyCtx,
       backend,
     });
@@ -3608,25 +3717,8 @@ Please walk me through the setup step by step. When I have the credentials, save
       }
     }}
     onModelSelect={handleModelSelect}
-    backend={$session.sessionId ? (sessionBackendStore.get($session.sessionId, $sessionBackendStore) || $defaultBackend) : $defaultBackend}
-    onBackendChange={async (newBackend) => {
-      if ($session.sessionId) {
-        sessionBackendStore.set($session.sessionId, newBackend);
-        // Persist to database
-        try {
-          await api.sessions.update($session.sessionId, { backend: newBackend });
-        } catch (e) {
-          console.error("Failed to persist backend:", e);
-        }
-      }
-      defaultBackend.set(newBackend);
-      // Auto-select the default model for the new backend
-      const models = getBackendModelsFormatted(newBackend, get(backendModels));
-      if (models.length > 0) {
-        modelSelection = models[0].value;
-        handleModelSelect(models[0].value);
-      }
-    }}
+    backend={currentBackend}
+    onBackendChange={handleBackendChange}
     onTitleApply={handleTitleSuggestionApply}
     onStartResizing={startResizingLeft}
     isResizing={isResizingLeft}
@@ -3997,6 +4089,10 @@ Please walk me through the setup step by step. When I have the credentials, save
                     onCreateWithWorktree={async (description, message) => {
                       const newSessionId = await createNewChatWithWorktree(description);
                       if (newSessionId && message.trim()) {
+                        const selectedModel = get(session).selectedModel;
+                        if (selectedModel) {
+                          await handleModelSelect(selectedModel);
+                        }
                         // Refresh sessions and send the first message
                         const sessionsList = await api.sessions.list($session.projectId!, $showArchivedWorkspaces);
                         sidebarSessions = sessionsList;
@@ -4012,19 +4108,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                       argsHint: c.argsHint,
                       isBuiltIn: false,
                     }))}
-                    backend={$session.sessionId ? (sessionBackendStore.get($session.sessionId, $sessionBackendStore) || $defaultBackend) : $defaultBackend}
-                    onBackendChange={(newBackend) => {
-                      // Only allow backend change for new chats
-                      if ($session.isPending || !$session.sessionId || currentMessages.length === 0) {
-                        defaultBackend.set(newBackend);
-                        // Auto-select the default model for the new backend
-                        const models = getBackendModelsFormatted(newBackend, get(backendModels));
-                        if (models.length > 0) {
-                          modelSelection = models[0].value;
-                          handleModelSelect(models[0].value);
-                        }
-                      }
-                    }}
                 />
 
                 <div class="text-center mt-2">

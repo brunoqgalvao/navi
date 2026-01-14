@@ -11,7 +11,7 @@
 
   export interface WizardResult {
     name: string;
-    type: "stdio" | "sse" | "streamable-http";
+    type: "stdio" | "sse" | "streamable-http" | "http";
     command?: string;
     args?: string[];
     url?: string;
@@ -31,7 +31,7 @@
 
   // Custom server state (when no preset)
   let customName = $state("");
-  let customType = $state<"stdio" | "sse" | "streamable-http">("stdio");
+  let customType = $state<"stdio" | "sse" | "streamable-http" | "http">("stdio");
   let customCommand = $state("npx");
   let customArgs = $state("");
   let customUrl = $state("");

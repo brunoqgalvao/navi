@@ -14,11 +14,21 @@ import {
 } from "../stores";
 import { streamingStore } from "../handlers";
 import { get } from "svelte/store";
-import { getDefaultModel } from "./data-loaders";
+import { getDefaultModelForBackend } from "./data-loaders";
 import { showError, showSuccess } from "../errorHandler";
 
 // Default page size for progressive message loading
 const MESSAGE_PAGE_SIZE = 20;
+
+function inferBackendFromModel(model?: string | null): BackendId | null {
+  if (!model) return null;
+  const lower = model.toLowerCase();
+  if (lower.includes("gemini")) return "gemini";
+  if (lower.includes("gpt") || lower.includes("codex") || lower.startsWith("o1") || lower.startsWith("o3")) {
+    return "codex";
+  }
+  return "claude";
+}
 
 export interface SessionActionCallbacks {
   setSidebarSessions: (sessions: Session[]) => void;
@@ -47,8 +57,9 @@ export function startNewChat(): void {
   // Set pending state - no DB session created yet
   currentSession.setPending(true);
 
-  // Set default model for new chat
-  const defaultModel = getDefaultModel();
+  // Set default model for new chat based on backend
+  const backend = get(defaultBackend);
+  const defaultModel = getDefaultModelForBackend(backend);
   currentSession.setSelectedModel(defaultModel);
 
   // Clear any input text
@@ -78,6 +89,10 @@ export async function createNewChat(title?: string, backend?: BackendId): Promis
     currentSession.setSession(newSession.id, newSession.claude_session_id);
     // Store the backend for this session
     sessionBackendStore.set(newSession.id, selectedBackend);
+    const selectedModel = get(currentSession).selectedModel;
+    if (selectedModel) {
+      sessionModels.setModel(newSession.id, selectedModel);
+    }
     // Keep the selected model
     sessionMessages.setMessages(newSession.id, []);
     callbacks?.loadRecentChats();
@@ -121,9 +136,13 @@ export async function createNewChatWithWorktree(description: string, backend?: B
 
     // Store the backend for this session
     sessionBackendStore.set(result.session.id, selectedBackend);
+    const selectedModel = get(currentSession).selectedModel;
+    if (selectedModel) {
+      sessionModels.setModel(result.session.id, selectedModel);
+    }
 
-    // Set default model for new chat
-    const defaultModel = getDefaultModel();
+    // Set default model for new chat based on backend (preserve pending selection if set)
+    const defaultModel = selectedModel || getDefaultModelForBackend(selectedBackend);
     currentSession.setSelectedModel(defaultModel);
     sessionMessages.setMessages(result.session.id, []);
     callbacks?.loadRecentChats();
@@ -170,6 +189,16 @@ export async function selectSession(s: Session) {
   currentSession.setCost(s.total_cost_usd || 0);
   currentSession.setUsage(s.input_tokens || 0, s.output_tokens || 0);
 
+  // Resolve backend for this session (DB > cached > default)
+  const backendMap = get(sessionBackendStore);
+  const inferredBackend = inferBackendFromModel(s.model);
+  const resolvedBackend = (s.backend as BackendId) || backendMap.get(s.id) || inferredBackend || "claude";
+
+  // Cache backend for this session
+  if (resolvedBackend) {
+    sessionBackendStore.set(s.id, resolvedBackend);
+  }
+
   // Load model from sessionModels store first, then fall back to session model from DB
   const models = get(sessionModels);
   const cachedModel = models.get(s.id);
@@ -179,8 +208,8 @@ export async function selectSession(s: Session) {
     currentSession.setSelectedModel(s.model);
     sessionModels.setModel(s.id, s.model);
   } else {
-    // No model set - use default (Opus)
-    const defaultModel = getDefaultModel();
+    // No model set - use backend default
+    const defaultModel = getDefaultModelForBackend(resolvedBackend);
     currentSession.setSelectedModel(defaultModel);
   }
   sessionStatus.markSeen(s.id);

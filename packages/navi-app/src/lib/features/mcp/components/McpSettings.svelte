@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { mcpApi, type McpServer, type CreateMcpServerRequest } from "../api";
-  import { showError, showSuccess } from "$lib/errorHandler";
+  import { showError, showSuccess, showInfo } from "$lib/errorHandler";
   import { currentProject } from "$lib/stores/projects";
   import McpPresetsBrowser from "./McpPresetsBrowser.svelte";
   import McpSetupWizard from "./McpSetupWizard.svelte";
@@ -24,7 +24,7 @@
 
   // Form state (legacy - keeping for fallback)
   let newServerName = $state("");
-  let newServerType = $state<"stdio" | "sse" | "streamable-http">("stdio");
+  let newServerType = $state<"stdio" | "sse" | "streamable-http" | "http">("stdio");
   let newServerCommand = $state("");
   let newServerArgs = $state("");
   let newServerUrl = $state("");
@@ -123,7 +123,7 @@
       return;
     }
 
-    if ((newServerType === "sse" || newServerType === "streamable-http") && !newServerUrl.trim()) {
+    if ((newServerType === "sse" || newServerType === "streamable-http" || newServerType === "http") && !newServerUrl.trim()) {
       showError({ title: "Validation error", message: "URL is required for SSE/HTTP servers" });
       return;
     }
@@ -267,7 +267,9 @@
     }
     switch (server.type) {
       case "sse": return "🌐";
-      case "streamable-http": return "🔗";
+      case "streamable-http":
+      case "http":
+        return "🔗";
       case "stdio":
       default: return "⚡";
     }
@@ -314,13 +316,25 @@
   function getTypeLabel(type?: string): string | null {
     switch (type) {
       case "sse": return "SSE";
-      case "streamable-http": return "HTTP";
+      case "streamable-http":
+      case "http":
+        return "HTTP";
       case "stdio": return "stdio";
       default: return null;
     }
   }
 
   function openAuth(server: McpServer) {
+    if (server.authType === "mcp_oauth") {
+      // For MCP OAuth, we need to trigger it by using a tool in a session
+      // Show instructions for the user
+      showInfo(
+        "How to Connect",
+        `Start a new chat and ask to use a ${server.name} tool (e.g., "Search my ${server.name}"). The OAuth flow will start automatically when you use a tool.`
+      );
+      return;
+    }
+
     const authUrl = server.authUrl;
     if (!authUrl) {
       showError({
@@ -460,6 +474,7 @@
             <option value="stdio">stdio (Command)</option>
             <option value="sse">SSE (Server-Sent Events)</option>
             <option value="streamable-http">HTTP (Streamable)</option>
+            <option value="http">HTTP</option>
           </select>
         </div>
       </div>
@@ -625,13 +640,13 @@
               </div>
 
               <div class="flex items-center gap-2 flex-shrink-0">
-                {#if server.authType === "oauth"}
+                {#if server.authType === "oauth" || server.authType === "mcp_oauth"}
                   <button
                     onclick={() => openAuth(server)}
                     class="px-2.5 py-1 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
-                    title="Start OAuth flow"
+                    title={server.authType === "mcp_oauth" ? "Connect in a chat session" : "Start OAuth flow"}
                   >
-                    Connect
+                    {server.authType === "mcp_oauth" ? "How to Connect" : "Connect"}
                   </button>
                 {/if}
                 {#if canDelete(server)}

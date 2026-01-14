@@ -526,14 +526,28 @@ interface WorkerInput {
   mcpBuiltinSettings?: Record<string, boolean>;
   // External MCP server configs from .mcp.json files (already filtered to enabled only)
   externalMcpServers?: Record<string, {
-    type?: "stdio" | "sse" | "streamable-http";
+    type?: "stdio" | "sse" | "streamable-http" | "http";
     command?: string;
     args?: string[];
     env?: Record<string, string>;
     url?: string;
+    headers?: Record<string, string>;
   }>;
   // Enabled skill slugs for this project (undefined = load all skills)
   enabledSkillSlugs?: string[];
+}
+
+function normalizeMcpServerConfigForSdk<T extends Record<string, any>>(config: T): T {
+  if (!config || typeof config !== "object") return config;
+  if (config.type === "sdk") return config;
+
+  const inferredType = config.type || (config.url ? "sse" : config.command ? "stdio" : undefined);
+  if (!inferredType) return config;
+
+  const normalizedType = inferredType === "streamable-http" ? "http" : inferredType;
+  if (normalizedType === config.type) return config;
+
+  return { ...config, type: normalizedType };
 }
 
 const pendingPermissions = new Map<string, (result: { approved: boolean; approveAll?: boolean }) => void>();
@@ -1694,7 +1708,7 @@ NEVER tell the user "I'll let you know when they complete" without actually chec
       for (const [name, config] of Object.entries(externalMcpServers)) {
         // Don't override built-in servers
         if (!mcpServers[name]) {
-          mcpServers[name] = config;
+          mcpServers[name] = normalizeMcpServerConfigForSdk(config);
           console.error(`[Worker] Added external MCP server: ${name} (type: ${config.type || "stdio"})`);
         }
       }
@@ -1704,7 +1718,7 @@ NEVER tell the user "I'll let you know when they complete" without actually chec
     if (resolvedAgent?.mcpServers) {
       for (const [name, config] of Object.entries(resolvedAgent.mcpServers)) {
         if (isMcpEnabled(name) && !mcpServers[name]) {
-          mcpServers[name] = config;
+          mcpServers[name] = normalizeMcpServerConfigForSdk(config);
           console.error(`[Worker] Added agent MCP server: ${name}`);
         } else if (mcpServers[name]) {
           console.error(`[Worker] Agent MCP server ${name} skipped (already loaded from external)`);
@@ -1732,7 +1746,7 @@ NEVER tell the user "I'll let you know when they complete" without actually chec
 
       for (const [name, config] of Object.entries(integrationMCPs)) {
         if (isMcpEnabled(name) && !mcpServers[name]) {
-          mcpServers[name] = config;
+          mcpServers[name] = normalizeMcpServerConfigForSdk(config);
           console.error(`[Worker] Added integration MCP server: ${name}${projectId ? ` (project: ${projectId})` : ""}`);
         }
       }
