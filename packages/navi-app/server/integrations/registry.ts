@@ -15,7 +15,7 @@ import { integrations as oauthIntegrations } from "./db";
 export type CredentialFieldType = "text" | "password" | "oauth";
 
 /** Authentication type for the integration */
-export type AuthType = "api_key" | "oauth" | "cli" | "browser" | "none";
+export type AuthType = "api_key" | "oauth" | "cli" | "browser" | "none" | "mcp_oauth";
 
 export interface CredentialField {
   key: string;
@@ -128,24 +128,11 @@ const LINEAR_PROVIDER: IntegrationProvider = {
   description: "Issue tracking and project management",
   color: "text-blue-500 dark:text-blue-400",
   icon: "M4.5 2.5l-2 17 17-2-15-15z M6.5 6.5l10 10",
-  authType: "api_key",
-  credentials: [
-    {
-      key: "apiKey",
-      label: "API Key",
-      type: "password",
-      placeholder: "lin_api_...",
-      helpUrl: "https://linear.app/settings/account/security/api-keys/new",
-      helpText: "Settings → Account → Security → API Keys → Create new key",
-      required: true,
-    },
-  ],
+  authType: "mcp_oauth",
+  credentials: [],
   mcp: {
-    sse: "https://mcp.linear.app/mcp",
-    env: {
-      // Linear MCP expects Authorization header with Bearer token
-      Authorization: "Bearer {{apiKey}}",
-    },
+    sse: "https://mcp.linear.app/sse",
+    env: {},
   },
   skill: {
     usage: "linear",
@@ -156,13 +143,15 @@ const LINEAR_PROVIDER: IntegrationProvider = {
     mcpEnabled: true,
     skillEnabled: true,
   },
+  available: true,
   setupGuide: {
-    description: "Connect to Linear to manage issues, projects, and workflows directly from Navi.",
+    description: "Connect to Linear using OAuth 2.1 - no API keys required. The MCP server handles authentication automatically.",
     steps: [
-      "Click the link above or go to **linear.app/settings/account/security/api-keys/new**",
-      "Give your new key a label (e.g., 'Navi')",
-      "Click **Create** and copy the key (starts with `lin_api_`)",
-      "Paste it below and click Save",
+      "Enable the Linear MCP server in your settings",
+      "When you first use a Linear tool, you'll be redirected to Linear's OAuth page",
+      "Click **Allow** to grant Navi access to your workspace",
+      "That's it! No tokens to copy or manage",
+      "You can revoke access anytime from your Linear settings",
     ],
     capabilities: [
       "Create, update, and close issues",
@@ -170,6 +159,7 @@ const LINEAR_PROVIDER: IntegrationProvider = {
       "Manage projects and cycles",
       "View team workload and priorities",
       "Link issues to code changes",
+      "OAuth 2.1 with dynamic client registration",
     ],
     examplePrompts: [
       "Show me my assigned issues in Linear",
@@ -186,23 +176,11 @@ const NOTION_PROVIDER: IntegrationProvider = {
   description: "Workspace pages, databases, and content management",
   color: "text-gray-900 dark:text-gray-100",
   icon: "M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.98-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.166V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952l1.448.327s0 .84-1.168.84l-3.22.186c-.094-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.454-.233 4.764 7.279v-6.44l-1.215-.14c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.933.653.933 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.046-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.448-1.632z",
-  authType: "api_key",
-  credentials: [
-    {
-      key: "integrationToken",
-      label: "Integration Token",
-      type: "password",
-      placeholder: "ntn_...",
-      helpUrl: "https://www.notion.so/profile/integrations",
-      helpText: "Create an internal integration and copy the Internal Integration Secret",
-      required: true,
-    },
-  ],
+  authType: "mcp_oauth",
+  credentials: [],
   mcp: {
-    package: "@notionhq/notion-mcp-server",
-    env: {
-      NOTION_API_KEY: "{{integrationToken}}",
-    },
+    sse: "https://mcp.notion.com/sse",
+    env: {},
   },
   skill: {
     usage: "notion",
@@ -213,22 +191,22 @@ const NOTION_PROVIDER: IntegrationProvider = {
     mcpEnabled: true,
     skillEnabled: true,
   },
+  available: true,
   setupGuide: {
-    description: "Connect to Notion to access your workspace's pages, databases, and content.",
+    description: "Connect to Notion using OAuth - no API keys required. The MCP server handles authentication automatically.",
     steps: [
-      "Go to **notion.so/profile/integrations**",
-      "Click **New integration**",
-      "Name it (e.g., 'Navi') and select your workspace",
-      "Click **Submit** to create the integration",
-      "Copy the **Internal Integration Secret** (starts with `ntn_`)",
-      "**Important**: Go to the pages you want Navi to access",
-      "Click ••• → **Connect to** → Select your integration",
+      "Enable the Notion MCP server in your settings",
+      "When you first use a Notion tool, you'll be redirected to Notion's OAuth page",
+      "Click **Allow** to grant Navi access to your workspace",
+      "That's it! No tokens to copy or manage",
+      "You can revoke access anytime from your Notion settings",
     ],
     capabilities: [
       "Read and search pages and databases",
       "Create and update pages",
       "Query database entries",
       "Access comments and discussions",
+      "OAuth-based - no manual token management",
     ],
     examplePrompts: [
       "What's in my Product Roadmap database?",

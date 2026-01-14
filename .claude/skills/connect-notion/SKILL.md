@@ -1,16 +1,16 @@
 # Connect Notion Skill
 
-Guide users through connecting Notion to Navi. You have full context on Notion's API, authentication, and the critical step of connecting integrations to pages.
+Guide users through connecting Notion to Navi using OAuth. No API tokens required!
 
 > **IMPORTANT**: This is Navi, not Claude Code CLI. Do NOT suggest `claude mcp add` commands.
-> Navi has its own integration system. Use the credentials API at `localhost:3001` to save credentials.
-> The MCP server loads automatically once credentials are saved.
+> Notion's MCP server uses **OAuth 2.1 with dynamic client registration** - authentication is handled automatically when you connect.
+> Simply enable the Notion MCP server and you'll be prompted to authenticate via your browser.
 
 ## Trigger Phrases
 - "connect notion"
 - "setup notion"
 - "add notion integration"
-- "notion api token"
+- "notion oauth"
 
 ## What Notion Enables
 - Read and search pages and databases
@@ -21,77 +21,62 @@ Guide users through connecting Notion to Navi. You have full context on Notion's
 
 ## Authentication
 
-Notion uses **Internal Integration Tokens** for authentication.
+Notion MCP uses **OAuth 2.1 with dynamic client registration**. This means:
 
-### How to Get an Integration Token
+- **No API tokens to copy or manage**
+- **No need to create integrations manually**
+- **The MCP server handles the OAuth flow automatically**
 
-1. Go to **https://www.notion.so/profile/integrations**
-2. Click **New integration**
-3. Fill in:
-   - **Name**: "Navi" (or whatever you prefer)
-   - **Associated workspace**: Select your workspace
-4. Click **Submit**
-5. Copy the **Internal Integration Secret** (starts with `ntn_`)
+### How It Works
 
-### CRITICAL: Connect Integration to Pages
+1. Enable the Notion MCP server in Navi's settings
+2. When you first use a Notion tool, you'll be redirected to Notion's OAuth page
+3. Click **Allow** to grant Navi access to your workspace
+4. That's it! The MCP server stores the OAuth token securely
 
-**This step is required!** Notion integrations can only access pages they're explicitly connected to.
+### OAuth Benefits
 
-For each page/database you want Navi to access:
-1. Open the page in Notion
-2. Click the **•••** menu (top right)
-3. Click **Connect to** → Select your integration ("Navi")
+- **Security**: No API keys stored in Navi's database
+- **Revocable**: Revoke access anytime from your Notion settings
+- **Scoped**: You choose what permissions to grant
+- **Refreshable**: Tokens auto-refresh when expired
 
-Without this step, the API will return empty results!
+## Setup Steps
 
-### Key Format
-- Starts with: `ntn_` (newer) or `secret_` (older)
-- Example: `ntn_abc123def456...`
-
-## Saving the Credential
-
-Once the user provides their token:
-
-```bash
-# Save globally (all projects)
-curl -X POST http://localhost:3001/api/credentials/notion \
-  -H "Content-Type: application/json" \
-  -d '{"credentials": {"integrationToken": "ntn_..."}}'
-
-# Save for current project only
-curl -X POST "http://localhost:3001/api/credentials/notion?projectId=PROJECT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"credentials": {"integrationToken": "ntn_..."}, "scope": "project"}'
-```
+1. **Enable the MCP server**: Go to Navi Settings → Integrations → Notion
+2. **Toggle "Enable MCP server"**: This activates the Notion MCP connection
+3. **Use a Notion tool**: Try asking Navi to search your Notion workspace
+4. **Complete OAuth**: You'll be redirected to Notion - click "Allow"
+5. **Done!**: Start using Notion tools immediately
 
 ## Testing the Connection
 
-After saving, test the credentials:
+After enabling the MCP server, try:
 
 ```bash
-curl -X POST http://localhost:3001/api/credentials/notion/test
+# Ask Navi to search Notion
+"Search my Notion workspace for 'project roadmap'"
+
+# Or use a Notion tool directly
+"What databases do I have access to in Notion?"
 ```
 
-A successful response:
-```json
-{"success": true, "provider": "notion", "message": "Connected as Navi Integration"}
-```
+If the OAuth flow completed successfully, you'll see results from your workspace.
 
 ## Common Errors
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| 401 Unauthorized | Invalid token | Check token format, regenerate |
-| Empty results | Page not connected | Connect integration to pages (see above) |
-| 403 Forbidden | Missing capabilities | Check integration capabilities in settings |
-| "object not found" | Page not shared | Connect the specific page to integration |
+| "Not authenticated" | OAuth not completed | Use a Notion tool and complete the OAuth flow |
+| "Access denied" | OAuth was declined | Re-run the OAuth flow and click Allow |
+| "No pages found" | No workspace access | Ensure you have a Notion account with workspace access |
 
-## Notion API Quick Reference
+## Notion MCP Quick Reference
 
-The Notion MCP (`@notionhq/notion-mcp-server`) provides:
+The Notion MCP server (`https://mcp.notion.com/sse`) provides:
 
 ### Pages
-- `notion_search` - Search across all connected pages
+- `notion_search` - Search across all pages in your workspace
 - `notion_get_page` - Get page content
 - `notion_create_page` - Create new page
 - `notion_update_page` - Update page properties
@@ -116,21 +101,31 @@ Once connected, users can try:
 
 ## Workflow
 
-1. **Check if already connected**: `GET /api/credentials/notion`
-2. **Guide to integrations page**: https://www.notion.so/profile/integrations
-3. **Help create integration**: Name it, select workspace
-4. **Wait for token**: User copies `ntn_...` or `secret_...`
-5. **IMPORTANT**: Remind to connect pages!
-6. **Save credential**: POST to credentials API
-7. **Test connection**: POST to test endpoint
-8. **If empty results**: Re-emphasize page connection step
-9. **Confirm success**: Show what they can now do
+1. **Check if MCP server is enabled**: Look in Navi Settings → Integrations
+2. **Guide to enable**: If not enabled, tell user to enable Notion MCP
+3. **Trigger OAuth**: Ask user to try a Notion command
+4. **Complete authentication**: User will see browser OAuth prompt
+5. **Verify success**: Test with a simple search or query
+6. **Confirm capabilities**: Show what they can now do
 
-## Troubleshooting "Can't See My Pages"
+## Troubleshooting
 
-This is the #1 issue with Notion integrations. Always ask:
+### "I don't see the OAuth prompt"
+- Make sure the Notion MCP server is enabled in settings
+- Try using a Notion tool to trigger the connection
+- Check that your browser allows popups/redirects
 
-1. "Did you connect the integration to the specific pages you want to access?"
-2. "Go to the page → ••• menu → Connect to → Select 'Navi'"
-3. "You need to do this for EACH page or database you want me to see"
-4. "Parent pages don't automatically share with child pages - connect the specific ones you need"
+### "OAuth keeps failing"
+- Clear your browser's OAuth cache (`~/.mcp-auth` on some systems)
+- Make sure you're logged into Notion in your browser
+- Try revoking access from Notion settings and reconnecting
+
+### "Can't see my pages"
+- OAuth gives access to your entire workspace
+- Make sure you're logged into the correct Notion account
+- Check that you have workspace permissions (not just guest access)
+
+## Sources
+
+- [Notion MCP Documentation](https://developers.notion.com/docs/mcp)
+- [MCP OAuth 2.1 Guide](https://dev.to/composiodev/mcp-oauth-21-a-complete-guide-3g91)

@@ -47,12 +47,8 @@ export async function runVerifier(
 ): Promise<VerifierResult> {
   const prompt = generateVerifierPrompt(state);
 
-  // Use haiku by default for cost efficiency, but can use sonnet for complex verification
-  const modelMap: Record<string, string> = {
-    haiku: "claude-3-5-haiku-20241022",
-    sonnet: "claude-sonnet-4-20250514",
-  };
-  const model = modelMap[state.verifierModel] || modelMap.haiku;
+  // Use the specified model, or default to haiku if none specified
+  const model = state.verifierModel || "claude-3-5-haiku-20241022";
 
   const { overrides } = resolveNaviClaudeAuth(model);
   const { query } = await getSDK();

@@ -58,8 +58,7 @@ export type PanelMode =
   | "preview-unified"
   | "context"         // Context sidebar view
   | "email"           // Email inbox view
-  | "browser-preview" // Browser-use preview
-  | "resources";      // Resource monitor (@experimental)
+  | "browser-preview"; // Browser-use preview
 
 // =============================================================================
 // 2. MESSAGE WIDGETS (Inline in Chat Messages)

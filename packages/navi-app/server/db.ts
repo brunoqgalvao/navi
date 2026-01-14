@@ -64,6 +64,11 @@ export async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+
+    -- Performance indexes for common queries
+    CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_sessions_favorite ON sessions(favorite);
+    CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
   `);
 
   try {
@@ -253,6 +258,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_cost_entries_session ON cost_entries(session_id);
     CREATE INDEX IF NOT EXISTS idx_cost_entries_project ON cost_entries(project_id);
     CREATE INDEX IF NOT EXISTS idx_cost_entries_timestamp ON cost_entries(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_cost_entries_project_timestamp ON cost_entries(project_id, timestamp);
   `);
 
   db.run(`
@@ -717,8 +723,25 @@ function queryOne<T>(sql: string, params: any[] = []): T | undefined {
   return results[0];
 }
 
+let saveDbTimeout: Timer | null = null;
+
 function run(sql: string, params: any[] = []) {
   db.run(sql, params);
+
+  // Debounce disk writes - batch multiple operations together
+  if (saveDbTimeout) clearTimeout(saveDbTimeout);
+  saveDbTimeout = setTimeout(() => {
+    saveDb();
+    saveDbTimeout = null;
+  }, 1000); // Wait 1s before flushing to disk
+}
+
+// Immediate save for critical operations (export for use in shutdown handlers)
+export function saveDbImmediate() {
+  if (saveDbTimeout) {
+    clearTimeout(saveDbTimeout);
+    saveDbTimeout = null;
+  }
   saveDb();
 }
 

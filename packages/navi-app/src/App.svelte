@@ -17,6 +17,12 @@
   import { marked, type Tokens } from "marked";
   import hljs from "highlight.js";
 
+  // These need to be at module scope as they're referenced in the template
+  let jsonBlocksMap = new Map<string, any>();
+  let jsonBlockCounter = 0;
+  let shellBlocksMap = new Map<string, { code: string; language: string }>();
+  let shellBlockCounter = 0;
+
   const renderer = new marked.Renderer();
   renderer.link = ({ href, title, text }: Tokens.Link) => {
     const titleAttr = title ? ` title="${title}"` : "";
@@ -42,14 +48,9 @@
       }
     }
     return `<a href="${url}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
-  };
-  
-  let jsonBlocksMap = new Map<string, any>();
-  let jsonBlockCounter = 0;
-  let shellBlocksMap = new Map<string, { code: string; language: string }>();
-  let shellBlockCounter = 0;
+    };
 
-  renderer.code = ({ text, lang }: Tokens.Code) => {
+    renderer.code = ({ text, lang }: Tokens.Code) => {
     const language = lang || '';
     const shellLanguages = ['bash', 'sh', 'shell', 'zsh', 'console', 'terminal'];
 
@@ -83,7 +84,7 @@
     const langLabel = language ? `<span class="code-language">${language}</span>` : '';
     return `<div class="code-block-wrapper"><div class="code-header">${langLabel}</div><pre class="hljs"><code>${highlighted}</code></pre></div>`;
   };
-  
+
   marked.setOptions({ renderer });
   
   import Modal from "./lib/components/Modal.svelte";
@@ -1129,21 +1130,24 @@
     // Initialize browser-use and email features
     initBrowserEmail();
 
-    startSidecar().then(() => {
+    startSidecar().then(async () => {
       serverReady = true;
 
       // Initialize auth state (check if user is already logged in)
       auth.init();
 
-      loadProjects();
-      loadRecentChatsAction();
-      loadFolders();
-      loadConfigAction();
-      loadModelsAction();
-      loadPermissionsAction();
-      loadCostsAction();
-      loadLibrary(); // Load agents for sidebar
-      loadMcpServers(); // Load MCP server states
+      // Parallelize independent data loading for faster startup
+      await Promise.all([
+        loadProjects(),
+        loadRecentChatsAction(),
+        loadFolders(),
+        loadConfigAction(),
+        loadModelsAction(),
+        loadPermissionsAction(),
+        loadCostsAction(),
+        loadLibrary(), // Load agents for sidebar
+        loadMcpServers(), // Load MCP server states
+      ]);
 
       // Initialize proactive hooks (skill scout, error detector, memory builder)
       setupProactiveHooks().then(() => {

@@ -678,7 +678,7 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
           context: args.context,
         });
 
-        const result = await new Promise<{ success: boolean; childSessionId?: string; error?: string }>((resolve) => {
+        const result = await new Promise<{ success: boolean; childSessionId?: string; model?: string; backend?: string; error?: string }>((resolve) => {
           pendingSpawnRequests.set(requestId, resolve);
         });
 
@@ -747,10 +747,13 @@ ${deliverable.deliverable.artifacts?.length ? `### Artifacts Created:\n${deliver
           }
         }
 
+        const modelInfo = result.model ? ` (${result.model})` : '';
+        const backendInfo = result.backend && result.backend !== 'claude' ? ` using ${result.backend}` : '';
+
         return {
           content: [{
             type: "text" as const,
-            text: `Spawned ${args.agent_type || 'general'} agent '${args.role}' to work on: ${args.task}
+            text: `Spawned ${args.agent_type || 'general'} agent '${args.role}'${modelInfo}${backendInfo} to work on: ${args.task}
 
 Child session ID: ${result.childSessionId}
 

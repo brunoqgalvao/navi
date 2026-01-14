@@ -186,6 +186,15 @@
                         Remote
                       </span>
                     {/if}
+                    {#if preset.authType === "oauth"}
+                      <span class="text-xs px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full">
+                        OAuth
+                      </span>
+                    {:else if preset.authType === "mcp_oauth"}
+                      <span class="text-xs px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full">
+                        OAuth on first use
+                      </span>
+                    {/if}
                   </div>
                   <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
                     {preset.description}

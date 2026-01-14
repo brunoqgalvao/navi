@@ -83,6 +83,12 @@ export interface MCPServerPreset {
   helpUrl?: string;
   /** Whether this preset requires additional configuration beyond credentials */
   requiresConfig: boolean;
+  /** Authentication type (if any) for this preset */
+  authType?: "oauth" | "mcp_oauth" | "api_key" | "none";
+  /** Optional URL to kick off auth flow in browser */
+  authUrl?: string;
+  /** Optional extra auth guidance */
+  authDescription?: string;
   /** Setup wizard steps - if defined, shows wizard before adding */
   setupSteps?: MCPSetupStep[];
 }
@@ -351,8 +357,10 @@ export const MCP_PRESETS: MCPServerPreset[] = [
     icon: "📓",
     category: "popular",
     type: "sse",
-    url: "https://mcp.notion.com/mcp",
+    url: "https://mcp.notion.com/sse",
     requiresConfig: false,
+    authType: "mcp_oauth",
+    authDescription: "OAuth starts when you first use a Notion tool in a session.",
     setupSteps: [
       {
         id: "info",

@@ -320,6 +320,24 @@
     }
   }
 
+  function openAuth(server: McpServer) {
+    const authUrl = server.authUrl;
+    if (!authUrl) {
+      showError({
+        title: "No OAuth URL available",
+        message: "This server doesn't expose a direct OAuth URL. Use a tool in a session to trigger the flow.",
+      });
+      return;
+    }
+    const popup = window.open(authUrl, "_blank");
+    if (!popup) {
+      showError({
+        title: "Popup blocked",
+        message: "Allow popups to open the OAuth window.",
+      });
+    }
+  }
+
   function canDelete(server: McpServer): boolean {
     return !server.isBuiltIn && (server.source === "project-mcp" || server.source === "global-mcp");
   }
@@ -585,14 +603,37 @@
                         {typeLabel}
                       </span>
                     {/if}
+                    {#if server.authType === "oauth"}
+                      <span class="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full">
+                        OAuth required
+                      </span>
+                    {:else if server.authType === "mcp_oauth"}
+                      <span class="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full">
+                        OAuth on first use
+                      </span>
+                    {/if}
                   </div>
                   <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 break-all font-mono">
                     {getServerDescription(server)}
                   </p>
+                  {#if (server.authType === "oauth" || server.authType === "mcp_oauth") && server.authDescription}
+                    <p class="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                      {server.authDescription}
+                    </p>
+                  {/if}
                 </div>
               </div>
 
               <div class="flex items-center gap-2 flex-shrink-0">
+                {#if server.authType === "oauth"}
+                  <button
+                    onclick={() => openAuth(server)}
+                    class="px-2.5 py-1 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+                    title="Start OAuth flow"
+                  >
+                    Connect
+                  </button>
+                {/if}
                 {#if canDelete(server)}
                   <button
                     onclick={() => deleteServer(server)}

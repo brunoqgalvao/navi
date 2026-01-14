@@ -378,7 +378,16 @@ export function loadPluginMcpServers(
   }
 
   try {
-    return JSON.parse(readFileSync(mcpPath, "utf-8"));
+    const parsed = JSON.parse(readFileSync(mcpPath, "utf-8"));
+    if (parsed && typeof parsed === "object") {
+      if (parsed.mcpServers && typeof parsed.mcpServers === "object") {
+        return parsed.mcpServers as Record<string, McpServerConfig>;
+      }
+      if (parsed.servers && typeof parsed.servers === "object") {
+        return parsed.servers as Record<string, McpServerConfig>;
+      }
+    }
+    return parsed as Record<string, McpServerConfig>;
   } catch {
     return {};
   }

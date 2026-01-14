@@ -71,7 +71,7 @@ export interface LoopState {
 
   // Model config
   workerModel?: string;
-  verifierModel: "haiku" | "sonnet";
+  verifierModel: string;  // Any Claude model ID
 
   // Context for handoff
   lastContext?: string;       // Summary for next iteration
@@ -246,7 +246,7 @@ export function createLoop(config: {
   originalPrompt: string;
   definitionOfDone: string[];
   workerModel?: string;
-  verifierModel?: "haiku" | "sonnet";
+  verifierModel?: string;  // Any Claude model ID
   maxIterations?: number;
   maxCost?: number;
   maxDurationMs?: number;
@@ -276,7 +276,7 @@ export function createLoop(config: {
     startedAt: Date.now(),
     status: "running",
     workerModel: config.workerModel,
-    verifierModel: config.verifierModel ?? "haiku",
+    verifierModel: config.verifierModel ?? "claude-3-5-haiku-20241022",
   };
 
   activeLoops.set(loopId, state);

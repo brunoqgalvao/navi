@@ -39,6 +39,17 @@ export async function handleMcpRoutes(
 ): Promise<Response | null> {
   const path = url.pathname;
 
+  function enrichWithPresetAuth(server: McpServerInfo): McpServerInfo {
+    const preset = getPresetById(server.name);
+    if (!preset) return server;
+    return {
+      ...server,
+      authType: preset.authType,
+      authUrl: preset.authUrl,
+      authDescription: preset.authDescription,
+    };
+  }
+
   // GET /api/mcp/servers - List all MCP servers (built-in + external)
   // Query params: ?projectPath=/path/to/project (required for external servers)
   if (path === "/api/mcp/servers" && method === "GET") {
@@ -57,7 +68,7 @@ export async function handleMcpRoutes(
     );
 
     // External servers from filesystem (.mcp.json, ~/.claude.json)
-    const externalServers = mcpSettings.getExternalServers(projectPath);
+    const externalServers = mcpSettings.getExternalServers(projectPath).map(enrichWithPresetAuth);
     servers.push(...externalServers);
 
     return json(servers);
@@ -116,7 +127,7 @@ export async function handleMcpRoutes(
     }
 
     // Check external servers
-    const externalServers = mcpSettings.getExternalServers(projectPath);
+    const externalServers = mcpSettings.getExternalServers(projectPath).map(enrichWithPresetAuth);
     const external = externalServers.find(s => s.name === name);
     if (external) {
       return json(external);

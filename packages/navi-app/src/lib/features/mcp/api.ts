@@ -17,6 +17,9 @@ export interface McpServer {
   env?: Record<string, string>;
   url?: string;
   source?: "builtin" | "project-mcp" | "global-mcp" | "claude-json";
+  authType?: "oauth" | "mcp_oauth" | "api_key" | "none";
+  authUrl?: string;
+  authDescription?: string;
 }
 
 export interface CreateMcpServerRequest {
@@ -73,6 +76,9 @@ export interface MCPServerPreset {
   };
   helpUrl?: string;
   requiresConfig: boolean;
+  authType?: "oauth" | "mcp_oauth" | "api_key" | "none";
+  authUrl?: string;
+  authDescription?: string;
   hasCredentials?: boolean;
   credentialsStored?: boolean;
   setupSteps?: MCPSetupStep[];

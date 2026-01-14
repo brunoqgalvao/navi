@@ -71,6 +71,12 @@ export function canLaunchMCP(providerId: string, scope?: CredentialScope): boole
     return false;
   }
 
+  // OAuth-based MCPs don't require pre-configured credentials
+  // The MCP server itself handles the OAuth flow
+  if (provider.authType === "mcp_oauth") {
+    return true;
+  }
+
   // Check if credentials are configured
   const requiredKeys = provider.credentials
     .filter((c) => c.required)
@@ -99,6 +105,12 @@ export function getMCPServerWithCredentials(
 
   // Check if we can launch this MCP
   if (!canLaunchMCP(providerId, scope)) return null;
+
+  // For OAuth-based MCPs, return the config directly without credentials
+  // The MCP server handles OAuth flow itself
+  if (provider.authType === "mcp_oauth") {
+    return convertToMCPServerConfig(provider.mcp);
+  }
 
   // Get credentials (with project fallback to user-level)
   const credentials = getCredentials(providerId, scope);

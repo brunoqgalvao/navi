@@ -42,6 +42,9 @@ export interface McpServerInfo {
   command?: string;
   url?: string;
   source?: "builtin" | "project-mcp" | "global-mcp" | "claude-json";
+  authType?: "oauth" | "mcp_oauth" | "api_key" | "none";
+  authUrl?: string;
+  authDescription?: string;
 }
 
 interface McpSettingsData {
@@ -682,6 +685,9 @@ export function getPluginMcpServers(
   const allPlugins = loadAllPlugins();
   const servers: Record<string, ExternalMcpServerConfig> = {};
 
+  const expandPluginRoot = (value: string, pluginRoot: string) =>
+    value.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginRoot);
+
   for (const plugin of allPlugins) {
     // Check if plugin is enabled
     const isEnabled =
@@ -693,11 +699,27 @@ export function getPluginMcpServers(
     // Add all MCP servers from this plugin
     for (const [serverName, serverConfig] of Object.entries(plugin.components.mcpServers)) {
       const namespacedName = `${plugin.id}/${serverName}`;
+      const expandedCommand = expandPluginRoot(serverConfig.command, plugin.installPath);
+      const expandedArgs = serverConfig.args?.map((arg) =>
+        expandPluginRoot(arg, plugin.installPath)
+      );
+      const expandedEnv = {
+        ...(serverConfig.env
+          ? Object.fromEntries(
+              Object.entries(serverConfig.env).map(([key, value]) => [
+                key,
+                expandPluginRoot(value, plugin.installPath),
+              ])
+            )
+          : {}),
+        CLAUDE_PLUGIN_ROOT: plugin.installPath,
+      };
+
       servers[namespacedName] = {
         type: "stdio",
-        command: serverConfig.command,
-        args: serverConfig.args,
-        env: serverConfig.env,
+        command: expandedCommand,
+        args: expandedArgs,
+        env: Object.keys(expandedEnv).length > 0 ? expandedEnv : undefined,
       };
     }
   }

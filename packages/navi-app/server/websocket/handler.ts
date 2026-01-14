@@ -403,7 +403,7 @@ export function enableInfiniteLoop(
     maxCost?: number;
     definitionOfDone?: string[];
     contextResetThreshold?: number;
-    verifierModel?: "haiku" | "sonnet";
+    verifierModel?: string;  // Any Claude model ID
     contextWindow?: number;
   } = {}
 ) {
@@ -417,7 +417,7 @@ export function enableInfiniteLoop(
       "No obvious errors or bugs",
     ],
     workerModel: options.model,
-    verifierModel: options.verifierModel ?? "haiku",
+    verifierModel: options.verifierModel ?? "claude-3-5-haiku-20241022",
     maxIterations: options.maxIterations ?? 100, // Effectively infinite
     maxCost: options.maxCost ?? 50,
     contextResetThreshold: options.contextResetThreshold ?? 0.7,
@@ -439,7 +439,7 @@ export function enableInfiniteLoop(
     loopId: loop.loopId,
     definitionOfDone: options.definitionOfDone,
     contextResetThreshold: options.contextResetThreshold ?? 0.7,
-    verifierModel: options.verifierModel ?? "haiku",
+    verifierModel: options.verifierModel ?? "claude-3-5-haiku-20241022",
     contextWindow: options.contextWindow ?? 200000,
   });
 
@@ -987,14 +987,19 @@ function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefin
     });
 
     if (child) {
-      sendWorkerResponse(proc, "multi_session_spawn_response", msg.requestId, {
-        success: true,
-        childSessionId: child.id,
-      });
-
       // Auto-start the child session
       // Get parent session to determine project and working directory
       const parentSession = sessions.get(sessionId);
+      const resolvedModel = msg.model || (parentSession ? parentSession.model : null) || "opus";
+      const resolvedBackend = msg.backend || (parentSession ? parentSession.backend : null) || "claude";
+
+      sendWorkerResponse(proc, "multi_session_spawn_response", msg.requestId, {
+        success: true,
+        childSessionId: child.id,
+        model: resolvedModel,
+        backend: resolvedBackend,
+      });
+
       if (parentSession) {
         const project = projects.get(parentSession.project_id);
         const workingDirectory = parentSession.worktree_path || project?.path || process.cwd();
@@ -1010,9 +1015,9 @@ function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefin
           startChildSessionQuery(child.id, {
             prompt: initialPrompt,
             cwd: workingDirectory,
-            model: msg.model || parentSession.model || "opus",
+            model: resolvedModel,
             projectId: parentSession.project_id,
-            backend: msg.backend || parentSession.backend || "claude",
+            backend: resolvedBackend,
           });
         }, 100);
       }
@@ -1729,6 +1734,8 @@ The user will explicitly approve the plan before any execution begins.
   // Get enabled skills for this project (global + project-specific)
   const enabledSkillSlugs = projectId ? getEnabledSkillSlugs(projectId) : undefined;
 
+  const mcpProjectPath = project?.path || workingDirectory;
+
   const inputJson = JSON.stringify({
     prompt: effectivePrompt,
     cwd: workingDirectory,
@@ -1742,13 +1749,13 @@ The user will explicitly approve the plan before any execution begins.
       requireConfirmation: permissionSettings.requireConfirmation,
     },
     multiSession: multiSessionContext,
-    mcpSettings: mcpSettings.getAll(workingDirectory), // Pass MCP server enabled/disabled states (for external servers)
+    mcpSettings: mcpSettings.getAll(mcpProjectPath), // Pass MCP server enabled/disabled states (for external servers)
     mcpBuiltinSettings: {  // Pass built-in MCP server enabled/disabled states separately
-      "user-interaction": !mcpSettings.isDisabledBuiltin("user-interaction", workingDirectory),
-      "navi-context": !mcpSettings.isDisabledBuiltin("navi-context", workingDirectory),
-      "multi-session": !mcpSettings.isDisabledBuiltin("multi-session", workingDirectory),
+      "user-interaction": !mcpSettings.isDisabledBuiltin("user-interaction", mcpProjectPath),
+      "navi-context": !mcpSettings.isDisabledBuiltin("navi-context", mcpProjectPath),
+      "multi-session": !mcpSettings.isDisabledBuiltin("multi-session", mcpProjectPath),
     },
-    externalMcpServers: getAllEnabledMcpServers(workingDirectory), // Pass enabled external MCP + plugin MCP server configs
+    externalMcpServers: getAllEnabledMcpServers(mcpProjectPath), // Pass enabled external MCP + plugin MCP server configs
     enabledSkillSlugs, // Skills enabled for this project (undefined = load all)
   });
 

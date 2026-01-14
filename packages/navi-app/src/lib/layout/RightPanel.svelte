@@ -16,14 +16,13 @@
   import { KanbanPanel } from "../features/kanban";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
-  import ResourceMonitorPanel from "../components/ResourceMonitorPanel.svelte";
   import PreviewPanel from "../components/PreviewPanel.svelte";
   import EmailPanel from "../features/email/EmailPanel.svelte";
   import { ContextPanel } from "../features/context";
   import AuthGate from "../components/AuthGate.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "resources";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email";
 
   interface Props {
     mode: PanelMode;
@@ -300,11 +299,6 @@
             <EmailPanel />
           {/snippet}
         </AuthGate>
-      </div>
-    {:else if mode === "resources"}
-      <!-- Resource Monitor panel - @experimental -->
-      <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <ResourceMonitorPanel />
       </div>
     {/if}
   </div>

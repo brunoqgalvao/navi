@@ -1,6 +1,8 @@
 <script lang="ts">
   import Modal from "./Modal.svelte";
   import { getServerUrl } from "$lib/api";
+  import { backendModels, getBackendModelsFormatted } from "$lib/stores";
+  import { get } from "svelte/store";
 
   interface Props {
     open: boolean;
@@ -13,13 +15,16 @@
 
   let { open, sessionId, projectId, prompt, onClose, onStart }: Props = $props();
 
+  // Get available Claude models for verifier
+  let claudeModels = $derived(getBackendModelsFormatted("claude", get(backendModels)));
+
   // Configuration state
   let definitionOfDone = $state<string[]>(["Task is functionally complete"]);
   let newDodItem = $state("");
   let maxIterations = $state(100);
   let maxCost = $state(50);
   let contextResetThreshold = $state(70);
-  let verifierModel = $state<"haiku" | "sonnet">("haiku");
+  let verifierModel = $state("claude-3-5-haiku-20241022"); // Default to haiku
   let isStarting = $state(false);
   let error = $state<string | null>(null);
 
@@ -243,8 +248,18 @@
             bind:value={verifierModel}
             class="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
           >
-            <option value="haiku">Haiku (fast, cheap)</option>
-            <option value="sonnet">Sonnet (thorough)</option>
+            {#each claudeModels as model}
+              <option value={model.id}>
+                {model.name}
+                {#if model.id.includes("haiku")}
+                  (fast, cheap)
+                {:else if model.id.includes("sonnet")}
+                  (balanced)
+                {:else if model.id.includes("opus")}
+                  (thorough)
+                {/if}
+              </option>
+            {/each}
           </select>
           <p class="text-xs text-gray-500 mt-1">Agent that checks completion</p>
         </div>

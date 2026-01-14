@@ -1,3 +1,12 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "Linear": {
+      "type": "sse",
+      "url": "https://mcp.linear.app/sse"
+    },
+    "notion": {
+      "type": "sse",
+      "url": "https://mcp.notion.com/sse"
+    }
+  }
 }
