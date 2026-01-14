@@ -2,7 +2,13 @@
 
 > A beautiful desktop GUI for Claude Code with real-time preview, multi-agent coordination, and powerful developer tools.
 
-![Navi Screenshot](Screenshot%202026-01-12%20at%2016.59.12.png)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/brunoqgalvao/navi?style=social)](https://github.com/brunoqgalvao/navi/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/brunoqgalvao/navi)](https://github.com/brunoqgalvao/navi/issues)
+[![Built with Svelte](https://img.shields.io/badge/Svelte-5.0-FF3E00?logo=svelte)](https://svelte.dev)
+[![Built with Tauri](https://img.shields.io/badge/Tauri-2.0-FFC131?logo=tauri)](https://tauri.app)
+
+![Navi Screenshot](docs/demo-screenshot.png)
 
 ## ✨ Features
 
