@@ -8,6 +8,7 @@ import {
   skills as skillsDb,
   enabledSkills as enabledSkillsDb,
   skillVersions,
+  SKILL_CATEGORIES,
 } from "../db";
 import {
   SKILL_LIBRARY_PATH,
@@ -716,10 +717,53 @@ export async function handleSkillRoutes(url: URL, method: string, req: Request):
 
   if (url.pathname === "/api/skills/scan" && method === "POST") {
     try {
+      const body = await req.json().catch(() => ({}));
+      const projectPath = body.projectPath as string | undefined;
+
       const results = {
         library: { added: [] as string[], updated: [] as string[], removed: [] as string[] },
+        global: { synced: [] as string[], skipped: [] as string[] },
+        project: { synced: [] as string[], skipped: [] as string[] },
       };
 
+      // 1. First, auto-import from global skills (~/.claude/skills/)
+      const globalSkills = scanGlobalClaudeSkills();
+      for (const { slug, path, parsed } of globalSkills) {
+        const existingInLibrary = existsSync(safeJoin(SKILL_LIBRARY_PATH, slug));
+        if (existingInLibrary) {
+          results.global.skipped.push(slug);
+          continue;
+        }
+        try {
+          const targetDir = safeJoin(SKILL_LIBRARY_PATH, slug);
+          copyDirRecursive(path, targetDir);
+          results.global.synced.push(slug);
+        } catch (e: any) {
+          console.error(`Failed to sync global skill ${slug}:`, e.message);
+        }
+      }
+
+      // 2. Auto-import from project skills (.claude/skills/) if projectPath provided
+      if (projectPath) {
+        const projectSkillsDir = getProjectSkillsDir(projectPath);
+        const projectSkills = scanSkillDirectory(projectSkillsDir);
+        for (const { slug, path } of projectSkills) {
+          const existingInLibrary = existsSync(safeJoin(SKILL_LIBRARY_PATH, slug));
+          if (existingInLibrary) {
+            results.project.skipped.push(slug);
+            continue;
+          }
+          try {
+            const targetDir = safeJoin(SKILL_LIBRARY_PATH, slug);
+            copyDirRecursive(path, targetDir);
+            results.project.synced.push(slug);
+          } catch (e: any) {
+            console.error(`Failed to sync project skill ${slug}:`, e.message);
+          }
+        }
+      }
+
+      // 3. Now scan the library and sync to DB
       const librarySkills = scanSkillDirectory(SKILL_LIBRARY_PATH);
       const dbSkills = skillsDb.list();
 
@@ -1287,6 +1331,34 @@ Generate comprehensive instructions for this skill that can be reused in future 
       console.error("Skill generation failed:", e);
       return json({ error: e.message || "Failed to generate skill" }, 500);
     }
+  }
+
+  // GET /api/skills/categories - List predefined skill categories
+  if (url.pathname === "/api/skills/categories" && method === "GET") {
+    return json(SKILL_CATEGORIES);
+  }
+
+  // GET /api/skills/default-enabled - List skills marked as default for new projects
+  if (url.pathname === "/api/skills/default-enabled" && method === "GET") {
+    const defaultSkills = skillsDb.listDefaultEnabled();
+    return json(defaultSkills.map(skill => ({
+      ...skill,
+      allowed_tools: skill.allowed_tools ? JSON.parse(skill.allowed_tools) : null,
+      tags: skill.tags ? JSON.parse(skill.tags) : null,
+    })));
+  }
+
+  // POST /api/skills/:id/default-enabled - Toggle default enabled status
+  const defaultEnabledMatch = url.pathname.match(/^\/api\/skills\/([^/]+)\/default-enabled$/);
+  if (defaultEnabledMatch && (method === "POST" || method === "DELETE")) {
+    const id = defaultEnabledMatch[1];
+    const skill = skillsDb.get(id);
+    if (!skill) return json({ error: "Skill not found" }, 404);
+
+    const enabled = method === "POST";
+    skillsDb.setDefaultEnabled(id, enabled);
+
+    return json({ success: true, default_enabled: enabled });
   }
 
   return null;

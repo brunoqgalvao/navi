@@ -7,6 +7,7 @@
     onDelete?: () => void;
     onToggleGlobal?: () => void;
     onToggleProject?: () => void;
+    onToggleDefault?: (enabled: boolean) => void;
     onSync?: () => void;
     projectId?: string | null;
     compact?: boolean;
@@ -19,11 +20,28 @@
     onDelete,
     onToggleGlobal,
     onToggleProject,
+    onToggleDefault,
     onSync,
     projectId = null,
     compact = false,
     needsSync = false,
   }: Props = $props();
+
+  let togglingDefault = $state(false);
+
+  async function handleToggleDefault() {
+    togglingDefault = true;
+    try {
+      const newValue = skill.default_enabled !== 1;
+      await skillsApi.setDefaultEnabled(skill.id, newValue);
+      onToggleDefault?.(newValue);
+    } catch (e) {
+      console.error("Toggle default failed:", e);
+    } finally {
+      togglingDefault = false;
+      showMenu = false;
+    }
+  }
 
   let exporting = $state(false);
   let savingToStore = $state(false);
@@ -93,6 +111,9 @@
       <div class="flex items-center gap-2">
         <h3 class="font-medium text-gray-900 truncate">{skill.name}</h3>
         <span class="text-xs text-gray-400 font-mono">v{skill.version}</span>
+        {#if skill.default_enabled === 1}
+          <span class="text-xs text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded" title="Auto-enabled for new projects">Default</span>
+        {/if}
         {#if skill.enabled_globally}
           <span class="text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded">Global</span>
         {/if}
@@ -211,6 +232,18 @@
                     {savingToStore ? "Saving..." : "Save to Global Store"}
                   </button>
                 {/if}
+              {/if}
+              {#if onToggleDefault}
+                <button
+                  onclick={handleToggleDefault}
+                  disabled={togglingDefault}
+                  class="w-full flex items-center gap-2 px-3 py-2 text-sm {skill.default_enabled === 1 ? 'text-gray-700 hover:bg-gray-50' : 'text-purple-700 hover:bg-purple-50'} transition-colors disabled:opacity-50"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                  </svg>
+                  {togglingDefault ? "Updating..." : skill.default_enabled === 1 ? "Remove from defaults" : "Add to defaults"}
+                </button>
               {/if}
               <button
                 onclick={handleExport}

@@ -12,7 +12,7 @@
   import GLBViewer from "./components/GLBViewer.svelte";
   import LogViewer from "./components/LogViewer.svelte";
   import { api } from "./api";
-  import { getApiBase } from "./config";
+  import { getApiBase, getServerUrl } from "./config";
   import { textReferences } from "./stores";
   import type { TextReference } from "./stores/types";
 
@@ -240,6 +240,9 @@
 
   function getProxiedUrl(url: string): string {
     const formatted = formatUrl(url);
+    // IMPORTANT: Use absolute URL with getServerUrl() to ensure requests go to backend (port 3001/3011)
+    // not the frontend dev server (port 1420) which would serve the Navi UI instead
+    const serverUrl = getServerUrl();
 
     // For localhost URLs, use preview proxy to inject inspector script
     if (isLocalUrl(formatted)) {
@@ -247,14 +250,14 @@
         const parsed = new URL(formatted);
         const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
         const path = parsed.pathname + parsed.search + parsed.hash;
-        return `/api/preview/proxy/${port}${path}`;
+        return `${serverUrl}/api/preview/proxy/${port}${path}`;
       } catch {
         return formatted;
       }
     }
 
     // For external URLs, use the general proxy
-    return `${getApiBase()}/proxy?url=${encodeURIComponent(formatted)}`;
+    return `${serverUrl}/api/proxy?url=${encodeURIComponent(formatted)}`;
   }
 
   function renderMarkdown(md: string): string {

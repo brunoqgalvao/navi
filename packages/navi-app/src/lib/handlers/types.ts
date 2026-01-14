@@ -41,12 +41,31 @@ export interface UntilDoneContinueData {
   maxIterations: number;
   totalCost: number;
   reason: string;
+  // Infinite loop mode additions
+  contextReset?: boolean;
+  contextPercent?: number;
+  nextAction?: string;
+  loopId?: string;
 }
 
 export interface UntilDoneCompleteData {
   totalIterations: number;
   totalCost: number;
   reason: string;
+  // Infinite loop mode additions
+  loopId?: string;
+  confidence?: number;
+}
+
+export interface UntilDoneVerifyingData {
+  iteration: number;
+  message: string;
+}
+
+export interface UntilDoneContextResetData {
+  iteration: number;
+  contextPercent: number;
+  message: string;
 }
 export interface HandlerCallbacks {
   onSessionInit?: (sessionId: string, data: { claudeSessionId?: string; model?: string; cwd?: string; tools?: string[]; skills?: string[] }) => void;
@@ -66,6 +85,8 @@ export interface HandlerCallbacks {
   onCompactEnd?: (sessionId: string, metadata?: CompactMetadata) => void;
   onUntilDoneContinue?: (sessionId: string, data: UntilDoneContinueData) => void;
   onUntilDoneComplete?: (sessionId: string, data: UntilDoneCompleteData) => void;
+  onUntilDoneVerifying?: (sessionId: string, data: UntilDoneVerifyingData) => void;
+  onUntilDoneContextReset?: (sessionId: string, data: UntilDoneContextResetData) => void;
   // Session Hierarchy (Multi-Agent)
   onSessionHierarchyEvent?: (event: SessionHierarchyEvent) => void;
   // Wait/Pause

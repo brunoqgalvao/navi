@@ -89,6 +89,8 @@
   import Modal from "./lib/components/Modal.svelte";
   import Onboarding from "./lib/components/Onboarding.svelte";
   import Settings from "./lib/components/Settings.svelte";
+  import InfiniteLoopConfig from "./lib/components/InfiniteLoopConfig.svelte";
+  import InfiniteLoopStatus from "./lib/components/InfiniteLoopStatus.svelte";
 
   // Proactive Hooks - AI-powered suggestions (skill scout, error detector, memory builder)
   import {
@@ -118,7 +120,6 @@
   import ProcessManager from "./lib/components/ProcessManager.svelte";
   import { useMessageHandler } from "./lib/handlers";
   import SessionDebug from "./lib/components/SessionDebug.svelte";
-  import WaitCountdown from "./lib/components/widgets/WaitCountdown.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
   import UpdateChecker from "./lib/components/UpdateChecker.svelte";
@@ -138,6 +139,8 @@
   import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
   import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
+  import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
+  import EscalationBanner from "./lib/features/session-hierarchy/components/EscalationBanner.svelte";
   import { SessionsBoard, type BoardSession } from "./lib/features/sessions-board";
   import { fetchCommands, type CustomCommand } from "./lib/features/commands";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
@@ -348,8 +351,26 @@
   let globalPermissionSettings = $state<PermissionSettings | null>(null);
   let permissionDefaults = $state<{ tools: string[]; dangerous: string[] }>({ tools: [], dangerous: [] });
 
-  // Until Done mode state (per-session)
-  let untilDoneSessions = $state<Map<string, { enabled: boolean; iteration: number; maxIterations: number; totalCost: number }>>(new Map());
+  // Until Done / Infinite Loop mode state (per-session)
+  interface LoopSessionState {
+    enabled: boolean;
+    iteration: number;
+    maxIterations: number;
+    totalCost: number;
+    // Infinite loop mode additions
+    loopId?: string;
+    isVerifying?: boolean;
+    contextPercent?: number;
+    contextResets?: number;
+    lastReason?: string;
+    nextAction?: string;
+    definitionOfDone?: Array<{ id: string; description: string; verified: boolean }>;
+  }
+  let untilDoneSessions = $state<Map<string, LoopSessionState>>(new Map());
+
+  // Infinite loop config modal state
+  let showInfiniteLoopConfig = $state(false);
+  let infiniteLoopPendingPrompt = $state("");
 
   // Derived state for current session
   let currentUntilDone = $derived(
@@ -357,6 +378,7 @@
   );
   let untilDoneEnabled = $derived(currentUntilDone?.enabled ?? false);
   let untilDoneIteration = $derived(currentUntilDone?.iteration ?? 0);
+  let isInfiniteLoopMode = $derived(!!currentUntilDone?.loopId);
   let untilDoneMaxIterations = 10; // Default max iterations
 
   // Cloud execution state
@@ -666,13 +688,29 @@
       }
     },
     onUntilDoneContinue: (sessionId, data) => {
-      // Update the session's until-done state
+      // Update the session's until-done state (preserve existing fields)
+      const existing = untilDoneSessions.get(sessionId);
       untilDoneSessions = new Map(untilDoneSessions.set(sessionId, {
+        ...existing,
         enabled: true,
         iteration: data.iteration,
         maxIterations: data.maxIterations,
         totalCost: data.totalCost,
+        loopId: data.loopId || existing?.loopId,
+        isVerifying: false,
+        contextPercent: data.contextPercent,
+        lastReason: data.reason,
+        nextAction: data.nextAction,
       }));
+
+      // Show notification on context reset
+      if (data.contextReset && sessionId === $session.sessionId) {
+        notifications.add({
+          type: "info",
+          title: "Context Reset",
+          message: `Fresh context at iteration ${data.iteration} (was ${data.contextPercent}% full)`,
+        });
+      }
     },
     onUntilDoneComplete: (sessionId, data) => {
       // Remove from tracking
@@ -681,11 +719,33 @@
 
       // Show notification only if it's the current session
       if (sessionId === $session.sessionId) {
+        const isVerified = data.loopId && data.confidence;
         notifications.add({
           type: "success",
-          title: "Task Complete",
-          message: `Finished in ${data.totalIterations} iteration${data.totalIterations > 1 ? 's' : ''} ($${data.totalCost.toFixed(2)})`,
+          title: isVerified ? "✅ Verified Complete" : "Task Complete",
+          message: `Finished in ${data.totalIterations} iteration${data.totalIterations > 1 ? 's' : ''} ($${data.totalCost.toFixed(2)})${data.confidence ? ` - ${Math.round(data.confidence * 100)}% confidence` : ''}`,
         });
+      }
+    },
+    onUntilDoneVerifying: (sessionId, data) => {
+      // Mark session as verifying
+      const existing = untilDoneSessions.get(sessionId);
+      if (existing) {
+        untilDoneSessions = new Map(untilDoneSessions.set(sessionId, {
+          ...existing,
+          isVerifying: true,
+        }));
+      }
+    },
+    onUntilDoneContextReset: (sessionId, data) => {
+      // Update context reset info
+      const existing = untilDoneSessions.get(sessionId);
+      if (existing) {
+        untilDoneSessions = new Map(untilDoneSessions.set(sessionId, {
+          ...existing,
+          contextResets: (existing.contextResets || 0) + 1,
+          contextPercent: data.contextPercent,
+        }));
       }
     },
     // Session Hierarchy (Multi-Agent) events
@@ -734,10 +794,11 @@
   let showGitPanel = $state(false);
   let showTerminal = $state(false);
   let showKanban = $state(false);
+  let showContext = $state(false);
   let showEmail = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "email">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "resources">("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
@@ -1877,10 +1938,20 @@ Please walk me through the setup step by step. When I have the credentials, save
   async function duplicateSession(sess: Session, e: Event) {
     e.stopPropagation();
     try {
-      const forked = await api.sessions.fork(sess.id, { title: `${sess.title} (copy)` });
+      const result = await api.sessions.fork(sess.id, { title: `${sess.title} (copy)` });
+      const { historyContext, ...forked } = result;
       sidebarSessions = [forked, ...sidebarSessions];
       loadRecentChatsAction();
       selectSession(forked);
+
+      // If the fork returned historyContext (no SDK session was copied),
+      // store it so Claude has context for the first message
+      if (historyContext) {
+        sessionHistoryContext.update(map => {
+          map.set(forked.id, historyContext);
+          return new Map(map);
+        });
+      }
     } catch (err) {
       console.error("Failed to duplicate session:", err);
     }
@@ -1945,13 +2016,16 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function openProjectInNewWindow(project: Project) {
-    if (!isTauri) {
+    console.log("[CMD+CLICK] openProjectInNewWindow called for:", project.name, "isTauri:", isTauri());
+    if (!isTauri()) {
       // In browser mode, open in a new browser tab
+      console.log("[CMD+CLICK] Opening in browser tab");
       window.open(`#/project/${project.id}`, '_blank');
       return;
     }
 
     try {
+      console.log("[CMD+CLICK] Calling Tauri invoke");
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("open_project_in_new_window", {
         projectId: project.id,
@@ -1962,6 +2036,62 @@ Please walk me through the setup step by step. When I have the credentials, save
       notifications.add({
         title: "Error",
         message: "Failed to open project in new window",
+        type: "error"
+      });
+    }
+  }
+
+  async function openSessionInNewWindow(sess: Session) {
+    if (!selectedProject) return;
+
+    if (!isTauri()) {
+      // In browser mode, open in a new browser tab
+      window.open(`#/project/${selectedProject.id}/chat/${sess.id}`, '_blank');
+      return;
+    }
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_session_in_new_window", {
+        projectId: selectedProject.id,
+        sessionId: sess.id,
+        sessionTitle: sess.title || "Chat"
+      });
+    } catch (e) {
+      console.error("Failed to open session in new window:", e);
+      notifications.add({
+        title: "Error",
+        message: "Failed to open session in new window",
+        type: "error"
+      });
+    }
+  }
+
+  async function openHomeInNewWindow() {
+    if (!isTauri()) {
+      // In browser mode, open in a new browser tab
+      window.open('#/', '_blank');
+      return;
+    }
+
+    try {
+      // Use create_new_window by opening without a project
+      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      const windowNum = Date.now();
+      new WebviewWindow(`home-${windowNum}`, {
+        url: 'index.html',
+        title: 'Navi',
+        width: 1200,
+        height: 800,
+        minWidth: 800,
+        minHeight: 600,
+        center: true
+      });
+    } catch (e) {
+      console.error("Failed to open home in new window:", e);
+      notifications.add({
+        title: "Error",
+        message: "Failed to open new window",
         type: "error"
       });
     }
@@ -2309,7 +2439,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const currentlyEnabled = untilDoneSessions.has(sessionId);
 
     if (!currentlyEnabled) {
-      // Enable until done mode
+      // Enable until done mode (basic mode - for infinite loop, use openInfiniteLoopConfig)
       try {
         await fetch(`${baseUrl}/api/sessions/${sessionId}/until-done`, {
           method: "POST",
@@ -2326,8 +2456,13 @@ Please walk me through the setup step by step. When I have the credentials, save
         console.error("[UntilDone] Failed to enable:", e);
       }
     } else {
-      // Disable until done mode
+      // Disable until done mode (and infinite loop if active)
+      const existing = untilDoneSessions.get(sessionId);
       try {
+        if (existing?.loopId) {
+          // Stop the infinite loop
+          await fetch(`${baseUrl}/api/loops/${existing.loopId}/stop`, { method: "POST" });
+        }
         await fetch(`${baseUrl}/api/sessions/${sessionId}/until-done`, { method: "DELETE" });
         untilDoneSessions.delete(sessionId);
         untilDoneSessions = new Map(untilDoneSessions);
@@ -2335,6 +2470,32 @@ Please walk me through the setup step by step. When I have the credentials, save
         console.error("[UntilDone] Failed to disable:", e);
       }
     }
+  }
+
+  // Open infinite loop configuration modal
+  function openInfiniteLoopConfig(prompt: string) {
+    infiniteLoopPendingPrompt = prompt;
+    showInfiniteLoopConfig = true;
+  }
+
+  // Handle infinite loop started
+  function handleInfiniteLoopStarted(loopId: string) {
+    const sessionId = $session.sessionId;
+    if (!sessionId) return;
+
+    untilDoneSessions = new Map(untilDoneSessions.set(sessionId, {
+      enabled: true,
+      iteration: 1,
+      maxIterations: 100,
+      totalCost: 0,
+      loopId,
+    }));
+
+    notifications.add({
+      type: "info",
+      title: "🔄 Infinite Loop Started",
+      message: "Claude will work until your Definition of Done is verified",
+    });
   }
 
   // Send a command/message programmatically (e.g., /compact)
@@ -2590,9 +2751,10 @@ Please walk me through the setup step by step. When I have the credentials, save
 
     const backend = sessionBackendStore.get(targetSessionId, get(sessionBackendStore)) || get(defaultBackend);
 
-    // For non-Claude backends, build history context from messages
-    let historyCtx: string | undefined;
-    if (backend !== "claude") {
+    // Check sessionHistoryContext first (for forked sessions, rollback, etc.)
+    // For non-Claude backends, fall back to building history from messages
+    let historyCtx = $sessionHistoryContext.get(targetSessionId);
+    if (!historyCtx && backend !== "claude") {
       historyCtx = buildHistoryContextFromMessages(targetSessionId);
     }
 
@@ -2605,6 +2767,14 @@ Please walk me through the setup step by step. When I have the credentials, save
       historyContext: historyCtx,
       backend,
     });
+
+    // Clear history context after use (one-time injection)
+    if ($sessionHistoryContext.get(targetSessionId)) {
+      sessionHistoryContext.update(map => {
+        map.delete(targetSessionId);
+        return new Map(map);
+      });
+    }
 
     scrollToBottom();
   }
@@ -2790,6 +2960,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     showGitPanel = false;
     showTerminal = false;
     showKanban = false;
+    showContext = false;
     showEmail = false;
     previewSource = "";
     terminalInitialCommand = "";
@@ -2888,11 +3059,11 @@ Please walk me through the setup step by step. When I have the credentials, save
    * Handle extension toolbar clicks - toggles the corresponding panel
    */
   function handleExtensionClick(mode: string) {
-    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "email";
+    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "resources";
     const panelMode = mode as PanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showEmail;
+    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showEmail;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -2918,6 +3089,9 @@ Please walk me through the setup step by step. When I have the credentials, save
         break;
       case "preview-unified":
         showPreview = true;
+        break;
+      case "context":
+        showContext = true;
         break;
       case "email":
         showEmail = true;
@@ -3272,6 +3446,52 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
     closeMessageMenu();
   }
+
+  // Quote selected text from message - adds to input as blockquote
+  function quoteTextInChat(text: string) {
+    // Format as a markdown blockquote
+    const quotedText = text
+      .split("\n")
+      .map(line => `> ${line}`)
+      .join("\n");
+
+    // Append to current input or set as new input
+    if (inputText.trim()) {
+      inputText = `${inputText}\n\n${quotedText}\n\n`;
+    } else {
+      inputText = `${quotedText}\n\n`;
+    }
+
+    // Clear any text selection
+    window.getSelection()?.removeAllRanges();
+  }
+
+  // Fork session with quoted text pre-filled
+  async function forkWithQuote(text: string) {
+    if (!$session.sessionId) {
+      return;
+    }
+
+    try {
+      // Create a fork from the current point
+      const forkedSession = await api.sessions.fork($session.sessionId);
+      sidebarSessions = [forkedSession, ...sidebarSessions];
+      await selectSession(forkedSession);
+
+      // Pre-fill the input with the quoted text
+      const quotedText = text
+        .split("\n")
+        .map(line => `> ${line}`)
+        .join("\n");
+      inputText = `${quotedText}\n\n`;
+
+      // Clear any text selection
+      window.getSelection()?.removeAllRanges();
+    } catch (e) {
+      console.error("[ForkWithQuote] Failed to fork session:", e);
+      showError({ title: "Fork Failed", message: "Could not fork the chat", error: e });
+    }
+  }
 </script>
 
 <svelte:window onmousemove={handleMouseMove} onmouseup={() => { stopResizingRight(); stopResizingLeft(); }} onkeydown={handleGlobalKeydown} />
@@ -3364,16 +3584,22 @@ Please walk me through the setup step by step. When I have the credentials, save
     onArchiveAllNonStarred={archiveAllNonStarred}
     onToggleSessionMarkedForReview={toggleSessionMarkedForReview}
     onToggleSessionBacklog={toggleSessionBacklog}
-    onProjectReorder={async (order) => { 
-      await api.projects.reorder(order); 
+    onProjectReorder={(order) => {
       const orderMap = new Map(order.map((id, i) => [id, i]));
+      const previousProjects = sidebarProjects;
       sidebarProjects = [...sidebarProjects].sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+      api.projects.reorder(order).catch(() => {
+        sidebarProjects = previousProjects;
+      });
     }}
-    onSessionReorder={async (order) => { 
+    onSessionReorder={(order) => {
       if (currentProject) {
-        await api.sessions.reorder(currentProject.id, order);
         const orderMap = new Map(order.map((id, i) => [id, i]));
+        const previousSessions = sidebarSessions;
         sidebarSessions = [...sidebarSessions].sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+        api.sessions.reorder(currentProject.id, order).catch(() => {
+          sidebarSessions = previousSessions;
+        });
       }
     }}
     onModelSelect={handleModelSelect}
@@ -3410,6 +3636,8 @@ Please walk me through the setup step by step. When I have the credentials, save
     onToggleFolderPin={toggleFolderPin}
     onNewProjectInFolder={(folderId) => { newProjectTargetFolderId = folderId; showNewProjectModal = true; }}
     onOpenProjectInNewWindow={openProjectInNewWindow}
+    onOpenSessionInNewWindow={openSessionInNewWindow}
+    onOpenHomeInNewWindow={openHomeInNewWindow}
     onOpenSessionsBoard={(projectId) => { sessionsDashboardProjectId = projectId; showSessionsDashboard = true; }}
     onOpenAgentBuilder={() => showAgentBuilder = true}
     agents={sidebarAgents}
@@ -3584,6 +3812,40 @@ Please walk me through the setup step by step. When I have the credentials, save
               </div>
             {/if}
 
+            <!-- Subagent sticky header - stays visible when scrolling in child agent sessions -->
+            {#if currentSessionHierarchy()?.hasParent && $session.sessionId}
+              <div class="sticky top-0 z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
+                <div class="max-w-3xl mx-auto w-full px-4 py-2">
+                  <SessionBreadcrumbs
+                    sessionId={$session.sessionId}
+                    onSelectSession={(sess) => {
+                      if (sess.id && sess.id !== $session.sessionId) {
+                        selectSession(sess as Session);
+                      }
+                    }}
+                  />
+                </div>
+
+                <!-- Escalation banner - show when this child session is blocked -->
+                {#if currentSessionHierarchy()?.isBlocked && currentSessionHierarchy()?.escalation}
+                  <div class="max-w-3xl mx-auto w-full px-4 py-2">
+                    <EscalationBanner
+                      sessionId={$session.sessionId}
+                      escalation={currentSessionHierarchy()?.escalation ?? null}
+                      sessionTitle={currentSessionData?.title || ''}
+                      sessionRole={currentSessionHierarchy()?.role || undefined}
+                      onResolved={async () => {
+                        if ($session.projectId) {
+                          const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+                          sidebarSessions = sessionsList;
+                        }
+                      }}
+                    />
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
             <ChatView
               sessionId={$session.sessionId}
               projectPath={currentProject?.path || ''}
@@ -3605,6 +3867,8 @@ Please walk me through the setup step by step. When I have the credentials, save
               onRunInTerminal={handleExecCommand}
               onSendToClaude={handleBashSendToClaude}
               onMessageClick={handleMessageClick}
+              onQuoteText={quoteTextInChat}
+              onForkWithQuote={forkWithQuote}
               onPermissionApprove={handlePermissionApprove}
               onPermissionDeny={handlePermissionDeny}
               onQuestionAnswer={handleQuestionAnswer}
@@ -3721,6 +3985,8 @@ Please walk me through the setup step by step. When I have the credentials, save
                     onManageSkills={() => { projectSettingsInitialTab = "skills"; showProjectSettings = true; }}
                     onManageMcp={() => { settingsInitialTab = "mcp"; showSettings = true; }}
                     onToggleUntilDone={toggleUntilDone}
+                    onOpenInfiniteLoop={() => openInfiniteLoopConfig(inputText)}
+                    {isInfiniteLoopMode}
                     onExecutionModeChange={handleExecutionModeChange}
                     onCloudBranchChange={handleCloudBranchChange}
                     onCreateWithWorktree={async (description, message) => {
@@ -3767,8 +4033,8 @@ Please walk me through the setup step by step. When I have the credentials, save
 
   </main>
 
-  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Email) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showEmail}
+  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context / Email) -->
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showEmail}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -3791,6 +4057,7 @@ Please walk me through the setup step by step. When I have the credentials, save
         else if (mode === "terminal") showTerminal = true;
         else if (mode === "kanban") showKanban = true;
         else if (mode === "preview-unified") showPreview = true;
+        else if (mode === "context") showContext = true;
       }}
       onClose={closeRightPanel}
       onStartResize={startResizingRight}
@@ -4056,6 +4323,21 @@ Please walk me through the setup step by step. When I have the credentials, save
     }}
   />
 
+  <!-- Infinite Loop Configuration Modal -->
+  {#if $session.sessionId && $session.projectId}
+    <InfiniteLoopConfig
+      open={showInfiniteLoopConfig}
+      sessionId={$session.sessionId}
+      projectId={$session.projectId}
+      prompt={infiniteLoopPendingPrompt}
+      onClose={() => {
+        showInfiniteLoopConfig = false;
+        infiniteLoopPendingPrompt = "";
+      }}
+      onStart={handleInfiniteLoopStarted}
+    />
+  {/if}
+
   {#if showHotkeysHelp}
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30" onclick={() => showHotkeysHelp = false} role="dialog" aria-modal="true" tabindex="-1">
       <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200" onclick={(e) => e.stopPropagation()}>
@@ -4196,7 +4478,6 @@ Please walk me through the setup step by step. When I have the credentials, save
 <NotificationToast />
 <UpdateChecker />
 <ConnectivityBanner />
-<WaitCountdown />
 
 <style>
 

@@ -530,6 +530,8 @@ export const sessionDebugInfo = createSessionDebugStore();
 export const sessionStatus = createSessionStatusStore();
 export const executionModeStore = createExecutionModeStore();
 export const loadingSessions = writable<Set<string>>(new Set());
+// Track sessions that are loading initial messages from DB (different from streaming)
+export const loadingMessagesSessions = writable<Set<string>>(new Set());
 export const availableModels = writable<ModelInfo[]>([]);
 
 // Backend selection store (claude, codex, gemini)

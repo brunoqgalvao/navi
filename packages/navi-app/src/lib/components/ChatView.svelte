@@ -9,7 +9,7 @@
   import StreamingPreview from "./StreamingPreview.svelte";
   import WorkingIndicator from "./WorkingIndicator.svelte";
   import { streamingStore, type StreamingState } from "../handlers";
-  import { sessionMessages, loadingSessions, sessionTodos, type ChatMessage, type SessionPaginationState } from "../stores";
+  import { sessionMessages, loadingSessions, loadingMessagesSessions, sessionTodos, currentSessionWait, type ChatMessage, type SessionPaginationState } from "../stores";
   import type { ContentBlock } from "../claude";
   import BackgroundProcessBadge from "./BackgroundProcessBadge.svelte";
   import EmptyStateWelcome from "./EmptyStateWelcome.svelte";
@@ -19,6 +19,7 @@
   import ChildSessionCard from "../features/session-hierarchy/components/ChildSessionCard.svelte";
   import { sessionHierarchyApi, parseEscalation, type Escalation, type HierarchySession, isActiveStatus } from "../features/session-hierarchy";
   import { loadMoreMessages } from "../actions/session-actions";
+  import WaitCountdown from "./widgets/WaitCountdown.svelte";
 
   interface Props {
     sessionId: string | null;
@@ -53,6 +54,8 @@
     onRunInTerminal?: (command: string) => void;
     onSendToClaude?: (context: string) => void;
     onMessageClick?: (e: MouseEvent) => void;
+    onQuoteText?: (text: string) => void;
+    onForkWithQuote?: (text: string) => void;
     onPermissionApprove?: (approveAll?: boolean) => void;
     onPermissionDeny?: () => void;
     onQuestionAnswer?: (answers: Record<string, string | string[]>) => void;
@@ -102,6 +105,8 @@
     onRunInTerminal,
     onSendToClaude,
     onMessageClick,
+    onQuoteText,
+    onForkWithQuote,
     onPermissionApprove,
     onPermissionDeny,
     onQuestionAnswer,
@@ -124,6 +129,7 @@
   let messagesMap = $state<Map<string, ChatMessage[]>>(new Map());
   let streamingMap = $state<Map<string, StreamingState>>(new Map());
   let paginationMap = $state<Map<string, SessionPaginationState>>(new Map());
+  let loadingMessagesSet = $state<Set<string>>(new Set());
   let childSessions = $state<HierarchySession[]>([]);
   let childSessionsRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -131,6 +137,7 @@
   const unsubMessages = sessionMessages.subscribe(v => messagesMap = v);
   const unsubStreaming = streamingStore.subscribe(v => streamingMap = v);
   const unsubPagination = sessionMessages.paginationStore.subscribe(v => paginationMap = v);
+  const unsubLoadingMessages = loadingMessagesSessions.subscribe(v => loadingMessagesSet = v);
 
   // Load child sessions for inline display
   async function loadChildSessions() {
@@ -147,6 +154,7 @@
     unsubMessages();
     unsubStreaming();
     unsubPagination();
+    unsubLoadingMessages();
     if (childSessionsRefreshInterval) clearInterval(childSessionsRefreshInterval);
   });
 
@@ -173,6 +181,7 @@
   const streamingState = $derived(sessionId ? streamingMap.get(sessionId) : undefined);
   const pagination = $derived(sessionId ? paginationMap.get(sessionId) : undefined);
   const isLoading = $derived(sessionId ? $loadingSessions.has(sessionId) : false);
+  const isLoadingMessages = $derived(sessionId ? loadingMessagesSet.has(sessionId) : false);
   const todos = $derived(sessionId ? ($sessionTodos.get(sessionId) || []) : []);
   const isStreaming = $derived(streamingState?.isStreaming ?? false);
 
@@ -288,32 +297,8 @@
 </script>
 
 <div class="flex flex-col h-full">
-  <!-- Fixed header section - only show when inside a child agent session -->
-  {#if sessionHierarchy?.hasParent && sessionId}
-    <div class="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
-      <div class="max-w-3xl mx-auto w-full px-4 py-2">
-        <SessionBreadcrumbs
-          {sessionId}
-          onSelectSession={(sess) => onSelectHierarchySession?.(sess)}
-        />
-      </div>
-
-      <!-- Escalation banner - show when this child session is blocked -->
-      {#if sessionHierarchy.isBlocked && sessionHierarchy.escalation}
-        <div class="max-w-3xl mx-auto w-full px-4 py-2">
-          <EscalationBanner
-            {sessionId}
-            escalation={sessionHierarchy.escalation}
-            sessionTitle={sessionTitle}
-            sessionRole={sessionHierarchy.role || undefined}
-            onResolved={() => onEscalationResolved?.()}
-          />
-        </div>
-      {/if}
-    </div>
-  {/if}
-
   <!-- Content area - scrolling handled by parent container in App.svelte -->
+  <!-- Note: Subagent sticky header is rendered in App.svelte for proper sticky behavior -->
   <div class="flex-1">
     <div class="max-w-3xl mx-auto w-full md:pt-6 space-y-3 pb-64 px-4" style="overflow-anchor: none;">
     <!-- Background process badge -->
@@ -345,7 +330,18 @@
       </div>
     {/if}
 
-    {#if messages.length === 0 && !isStreaming && emptyState !== "none"}
+    {#if isLoadingMessages}
+      <!-- Loading messages from database -->
+      <div class="flex items-center justify-center py-12">
+        <div class="flex items-center gap-3 text-gray-500 dark:text-gray-400">
+          <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span class="text-sm">Loading messages...</span>
+        </div>
+      </div>
+    {:else if messages.length === 0 && !isStreaming && emptyState !== "none"}
       <EmptyStateWelcome {onSuggestionClick} {projectContext} {projectDescription} {isGitRepo} />
     {/if}
 
@@ -384,6 +380,8 @@
               onFork={() => onFork?.(msg.id)}
               onDelete={() => onDelete?.(msg.id)}
               {onPreview}
+              {onQuoteText}
+              {onForkWithQuote}
             />
           {:else if msg.role === 'system'}
             {@const content = typeof msg.content === 'string' ? msg.content : ''}
@@ -405,6 +403,8 @@
               {onRunInTerminal}
               {onSendToClaude}
               {onMessageClick}
+              {onQuoteText}
+              {onForkWithQuote}
               {renderMarkdown}
               {jsonBlocksMap}
               {shellBlocksMap}
@@ -428,6 +428,9 @@
         />
       </div>
     {/if}
+
+    <!-- Wait countdown - inline in message flow -->
+    <WaitCountdown />
 
     {#if pendingPermissionRequest}
       <PermissionRequest
@@ -472,7 +475,7 @@
 
     {#if todos.length > 0}
       <TodoProgress {todos} showWhenEmpty={false} />
-    {:else if isLoading && !isStreaming}
+    {:else if isLoading && !isStreaming && !$currentSessionWait && !pendingPermissionRequest && !pendingQuestion}
       <div class="h-8 flex items-center">
         <WorkingIndicator variant="doodle" size="md" label="Thinking..." />
       </div>

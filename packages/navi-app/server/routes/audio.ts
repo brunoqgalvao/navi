@@ -1,4 +1,5 @@
 import { json } from "../utils/response";
+import { globalSettings } from "../db";
 
 export async function handleAudioRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/transcribe" && method === "POST") {
@@ -13,7 +14,9 @@ export async function handleAudioRoutes(url: URL, method: string, req: Request):
       const audioBuffer = await audioFile.arrayBuffer();
       const audioBytes = new Uint8Array(audioBuffer);
 
-      const whisperApiKey = process.env.OPENAI_API_KEY;
+      // Check globalSettings first, then fall back to env var
+      const storedKey = globalSettings.get("openaiApiKey") as string | null;
+      const whisperApiKey = storedKey || process.env.OPENAI_API_KEY;
       if (!whisperApiKey) {
         return json({ error: "OPENAI_API_KEY not configured" }, 500);
       }

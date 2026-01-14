@@ -209,13 +209,37 @@ export function createMessageHandler(config: MessageHandlerConfig) {
             .join(" ")
             .toLowerCase();
 
+          const errorLower = errorText.toLowerCase();
+
+          // Check for file too large errors (PDF, images, etc.)
+          const isFileTooLarge =
+            errorLower.includes("pdf too large") ||
+            errorLower.includes("file too large") ||
+            errorLower.includes("image too large") ||
+            lastAssistantContent.includes("pdf too large") ||
+            lastAssistantContent.includes("file too large");
+
+          if (isFileTooLarge) {
+            // Add a friendly system message for file size errors
+            sessionMessages.addMessage(uiSessionId, {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: "⚠️ **File too large** — The file exceeds Claude's processing limit. You can:\n• Split the PDF into smaller parts\n• Extract specific pages you need\n• Use `pdftotext` to extract text only\n• Try a smaller file",
+              timestamp: new Date(),
+            });
+
+            callbacks.onError?.(uiSessionId, errorMsg.error);
+            callbacks.onStreamingEnd?.(uiSessionId, "error");
+            return;
+          }
+
           const isContextOverflow =
-            errorText.toLowerCase().includes("prompt is too long") ||
-            errorText.toLowerCase().includes("request too large") ||
-            errorText.toLowerCase().includes("context length") ||
-            errorText.toLowerCase().includes("maximum context") ||
-            errorText.toLowerCase().includes("token limit") ||
-            errorText.toLowerCase().includes("exceeds the model") ||
+            errorLower.includes("prompt is too long") ||
+            errorLower.includes("request too large") ||
+            errorLower.includes("context length") ||
+            errorLower.includes("maximum context") ||
+            errorLower.includes("token limit") ||
+            errorLower.includes("exceeds the model") ||
             lastAssistantContent.includes("prompt is too long") ||
             lastAssistantContent.includes("request too large");
 
@@ -343,12 +367,20 @@ export function createMessageHandler(config: MessageHandlerConfig) {
             maxIterations: number;
             totalCost: number;
             reason: string;
+            contextReset?: boolean;
+            contextPercent?: number;
+            nextAction?: string;
+            loopId?: string;
           };
           callbacks.onUntilDoneContinue?.(uiSessionId, {
             iteration: continueMsg.iteration,
             maxIterations: continueMsg.maxIterations,
             totalCost: continueMsg.totalCost,
             reason: continueMsg.reason,
+            contextReset: continueMsg.contextReset,
+            contextPercent: continueMsg.contextPercent,
+            nextAction: continueMsg.nextAction,
+            loopId: continueMsg.loopId,
           });
         }
         break;
@@ -361,11 +393,47 @@ export function createMessageHandler(config: MessageHandlerConfig) {
             totalIterations: number;
             totalCost: number;
             reason: string;
+            loopId?: string;
+            confidence?: number;
           };
           callbacks.onUntilDoneComplete?.(uiSessionId, {
             totalIterations: completeMsg.totalIterations,
             totalCost: completeMsg.totalCost,
             reason: completeMsg.reason,
+            loopId: completeMsg.loopId,
+            confidence: completeMsg.confidence,
+          });
+        }
+        break;
+      }
+
+      case "until_done_verifying": {
+        if (uiSessionId) {
+          const verifyMsg = msg as {
+            type: "until_done_verifying";
+            iteration: number;
+            message: string;
+          };
+          callbacks.onUntilDoneVerifying?.(uiSessionId, {
+            iteration: verifyMsg.iteration,
+            message: verifyMsg.message,
+          });
+        }
+        break;
+      }
+
+      case "until_done_context_reset": {
+        if (uiSessionId) {
+          const resetMsg = msg as {
+            type: "until_done_context_reset";
+            iteration: number;
+            contextPercent: number;
+            message: string;
+          };
+          callbacks.onUntilDoneContextReset?.(uiSessionId, {
+            iteration: resetMsg.iteration,
+            contextPercent: resetMsg.contextPercent,
+            message: resetMsg.message,
           });
         }
         break;

@@ -26,10 +26,13 @@
 
   async function checkApiKey() {
     try {
+      console.log("[AudioRecorder] Checking API key...");
       const config = await api.config.get();
+      console.log("[AudioRecorder] Config response:", config);
       hasApiKey = config.hasOpenAIKey;
+      console.log("[AudioRecorder] hasApiKey set to:", hasApiKey);
     } catch (e) {
-      console.error("Failed to check API key:", e);
+      console.error("[AudioRecorder] Failed to check API key:", e);
       hasApiKey = false;
     }
   }
@@ -158,13 +161,15 @@
   }
 
   function handleClick() {
+    console.log("[AudioRecorder] handleClick - disabled:", disabled, "hasApiKey:", hasApiKey, "recordingState:", recordingState);
     if (disabled) return;
-    
-    if (hasApiKey === false) {
+
+    if (hasApiKey === false || hasApiKey === null) {
+      console.log("[AudioRecorder] Showing API key modal");
       showApiKeyModal = true;
       return;
     }
-    
+
     if (recordingState === "idle") {
       startRecording();
     } else if (recordingState === "recording") {
@@ -195,25 +200,29 @@
   }
 
   async function saveApiKey() {
+    console.log("[AudioRecorder] saveApiKey called, input length:", apiKeyInput.length);
     if (!apiKeyInput.trim()) {
       apiKeyError = "Please enter an API key";
       return;
     }
-    
+
     if (!apiKeyInput.startsWith("sk-")) {
       apiKeyError = "API key should start with 'sk-'";
       return;
     }
-    
+
     savingKey = true;
     apiKeyError = null;
-    
+
     try {
+      console.log("[AudioRecorder] Calling api.config.setOpenAIKey...");
       await api.config.setOpenAIKey(apiKeyInput.trim());
+      console.log("[AudioRecorder] API key saved successfully");
       hasApiKey = true;
       showApiKeyModal = false;
       apiKeyInput = "";
     } catch (e: any) {
+      console.error("[AudioRecorder] Failed to save API key:", e);
       apiKeyError = e.message || "Failed to save API key";
     } finally {
       savingKey = false;
@@ -227,7 +236,7 @@
   }
 </script>
 
-<div class="flex items-center gap-2 relative">
+<div class="flex items-center gap-2 relative z-10">
   {#if recordingState === "recording"}
     <button
       onclick={handleCancel}
@@ -244,13 +253,13 @@
     </span>
   {/if}
   
-  <Tooltip text={hasApiKey === false ? "Setup Voice Input" : recordingState === "idle" ? "Voice Input" : recordingState === "recording" ? "Stop Recording" : "Processing..."} position="top">
+  <Tooltip text={hasApiKey === false || hasApiKey === null ? "Setup Voice Input" : recordingState === "idle" ? "Voice Input" : recordingState === "recording" ? "Stop Recording" : "Processing..."} position="top">
     <button
       onclick={handleClick}
-      disabled={disabled || recordingState === "processing" || hasApiKey === null}
-      class={`relative p-2 rounded-lg transition-all ${
+      disabled={disabled || recordingState === "processing"}
+      class={`relative p-2 rounded-lg transition-all cursor-pointer ${
         recordingState === "idle"
-          ? hasApiKey === false
+          ? hasApiKey === false || hasApiKey === null
             ? "text-amber-500 hover:text-amber-600 hover:bg-amber-50"
             : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
           : recordingState === "recording"
@@ -273,7 +282,7 @@
       </svg>
     {/if}
     
-    {#if hasApiKey === false && recordingState === "idle"}
+    {#if (hasApiKey === false || hasApiKey === null) && recordingState === "idle"}
       <span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border-2 border-white"></span>
     {/if}
   </button>
@@ -312,15 +321,21 @@
           </svg>
         </button>
       </div>
-      
+
       <div class="p-6 space-y-4">
-        <p class="text-sm text-gray-600">
-          Voice input uses OpenAI's Whisper API for transcription. Enter your OpenAI API key to enable this feature.
-        </p>
-        
+        <div class="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <svg class="w-5 h-5 text-amber-600 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div class="text-sm text-amber-800">
+            <p class="font-medium">OpenAI API key required</p>
+            <p class="text-amber-700 mt-0.5">Voice input uses OpenAI's Whisper for transcription. Add your API key below or set <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">OPENAI_API_KEY</code> in your environment.</p>
+          </div>
+        </div>
+
         <div class="space-y-1.5">
           <label class="text-xs font-medium text-gray-700">OpenAI API Key</label>
-          <input 
+          <input
             type="password"
             bind:value={apiKeyInput}
             placeholder="sk-..."
@@ -328,39 +343,45 @@
             onkeydown={(e) => e.key === "Enter" && saveApiKey()}
           />
         </div>
-        
+
         {#if apiKeyError}
           <div class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
             {apiKeyError}
           </div>
         {/if}
-        
-        <div class="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-200">
-          <p class="font-medium text-gray-700 mb-1">Get your API key:</p>
-          <a 
-            href="https://platform.openai.com/api-keys" 
-            target="_blank" 
+
+        <div class="flex gap-2">
+          <a
+            href="https://platform.openai.com/api-keys"
+            target="_blank"
             rel="noopener noreferrer"
-            class="text-blue-600 hover:text-blue-700 underline"
+            class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition-colors"
           >
-            platform.openai.com/api-keys
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+            Get API Key
           </a>
         </div>
+
+        <p class="text-xs text-gray-500 text-center">
+          Key will be securely stored in Navi's database
+        </p>
       </div>
-      
+
       <div class="px-6 py-4 bg-gray-50 flex justify-end gap-3 border-t border-gray-100">
-        <button 
-          onclick={closeModal} 
+        <button
+          onclick={closeModal}
           class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
         >
           Cancel
         </button>
-        <button 
+        <button
           onclick={saveApiKey}
-          disabled={savingKey}
-          class="px-4 py-2 text-sm font-medium bg-gray-900 hover:bg-black text-white rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50"
+          disabled={savingKey || !apiKeyInput.trim()}
+          class="px-4 py-2 text-sm font-medium bg-gray-900 hover:bg-black text-white rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {savingKey ? "Saving..." : "Save API Key"}
+          {savingKey ? "Saving..." : "Save & Enable Voice"}
         </button>
       </div>
     </div>

@@ -59,6 +59,10 @@
   <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
     <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v4M8 3v4M16 3v4M5 7h14M6 7v5a6 6 0 0012 0V7M12 18v3" />
   </svg>
+{:else if icon === "layers"}
+  <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+  </svg>
 {:else}
   <!-- Fallback: puzzle piece -->
   <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">

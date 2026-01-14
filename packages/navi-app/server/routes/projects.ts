@@ -1,5 +1,5 @@
 import { json } from "../utils/response";
-import { projects, sessions, searchIndex } from "../db";
+import { projects, sessions, searchIndex, skills as skillsDb, enabledSkills as enabledSkillsDb } from "../db";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
 import { resolveNaviClaudeAuth } from "../utils/navi-auth";
 import { getSDK } from "../utils/sdk-loader";
@@ -25,6 +25,26 @@ export async function handleProjectRoutes(url: URL, method: string, req: Request
       const now = Date.now();
       projects.create(id, body.name, body.path, body.description || null, now, now);
       searchIndex.indexProject(id);
+
+      // Auto-enable default skills for new project
+      const defaultSkills = skillsDb.listDefaultEnabled();
+      for (const skill of defaultSkills) {
+        const existing = enabledSkillsDb.get(skill.id, "project", id);
+        if (!existing) {
+          enabledSkillsDb.create({
+            id: crypto.randomUUID(),
+            skill_id: skill.id,
+            scope: "project",
+            project_id: id,
+            library_version: skill.version,
+            local_hash: skill.content_hash,
+            has_local_changes: 0,
+            enabled_at: now,
+            updated_at: now,
+          });
+        }
+      }
+
       return json(projects.get(id), 201);
     }
   }

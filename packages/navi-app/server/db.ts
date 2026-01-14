@@ -307,6 +307,11 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_skill_versions_skill ON skill_versions(skill_id);
   `);
 
+  // Skills table migrations
+  try {
+    db.run("ALTER TABLE skills ADD COLUMN default_enabled INTEGER DEFAULT 0");
+  } catch {}
+
   db.run(`
     CREATE TABLE IF NOT EXISTS workspace_folders (
       id TEXT PRIMARY KEY,
@@ -1478,9 +1483,26 @@ export interface Skill {
   source_type: string;
   source_url: string | null;
   source_version: string | null;
+  default_enabled: number; // 0 or 1 - auto-enable for new projects
   created_at: number;
   updated_at: number;
 }
+
+// Predefined skill categories
+export const SKILL_CATEGORIES = [
+  { id: "browser", label: "Browser & Web", icon: "🌐" },
+  { id: "coding", label: "Coding & Development", icon: "💻" },
+  { id: "integration", label: "Integrations", icon: "🔌" },
+  { id: "ai", label: "AI & LLM", icon: "🤖" },
+  { id: "devops", label: "DevOps & Deploy", icon: "🚀" },
+  { id: "testing", label: "Testing & QA", icon: "🧪" },
+  { id: "docs", label: "Documentation", icon: "📝" },
+  { id: "media", label: "Media & Design", icon: "🎨" },
+  { id: "data", label: "Data & Analysis", icon: "📊" },
+  { id: "utility", label: "Utilities", icon: "🔧" },
+] as const;
+
+export type SkillCategory = typeof SKILL_CATEGORIES[number]["id"];
 
 export interface EnabledSkill {
   id: string;
@@ -1544,6 +1566,9 @@ export const skills = {
     run(`UPDATE skills SET ${fields.join(", ")} WHERE id = ?`, values);
   },
   delete: (id: string) => run("DELETE FROM skills WHERE id = ?", [id]),
+  listDefaultEnabled: () => queryAll<Skill>("SELECT * FROM skills WHERE default_enabled = 1"),
+  setDefaultEnabled: (id: string, enabled: boolean) =>
+    run("UPDATE skills SET default_enabled = ? WHERE id = ?", [enabled ? 1 : 0, id]),
 };
 
 export const enabledSkills = {

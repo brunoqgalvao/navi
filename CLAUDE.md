@@ -592,6 +592,34 @@ Accent colors are dynamically generated from configurable hue/saturation values.
 
 ---
 
+## Optimistic Updates Pattern
+
+For snappy UI, use optimistic updates. Update UI immediately, persist in background, revert on failure.
+
+```typescript
+// BAD: Laggy (waits for server)
+async function togglePin(item: Item) {
+  await api.items.togglePin(item.id, !item.pinned);
+  items = items.map(i => i.id === item.id ? { ...i, pinned: !i.pinned } : i);
+}
+
+// GOOD: Optimistic (instant feedback)
+function togglePin(item: Item) {
+  const previous = items;
+  items = items.map(i => i.id === item.id ? { ...i, pinned: !i.pinned } : i);
+  api.items.togglePin(item.id, !item.pinned).catch(() => {
+    items = previous;  // Revert on failure
+  });
+}
+```
+
+**Use for:** Reordering, toggling (pin/favorite/archive), renaming, status changes
+**Avoid for:** Creates needing server IDs, destructive deletes, actions requiring server validation
+
+See `.claude/skills/optimistic-updates/SKILL.md` for full pattern.
+
+---
+
 ## Development Tips
 
 1. **Type checking:** Run `bun run --cwd packages/navi-app check` before committing
@@ -600,3 +628,4 @@ Accent colors are dynamically generated from configurable hue/saturation values.
 4. **New features:** Follow the `features/git/` pattern for consistency
 5. **Stores:** One store file per domain, export via barrel file
 6. **Debugging:** Check `~/.claude-code-ui/logs/navi-server.log`
+7. **Optimistic updates:** Use for toggles, reorders, renames - see pattern above

@@ -11,9 +11,11 @@
 
   const completedCount = $derived(todos.filter(t => t.status === "completed").length);
   const hasInProgress = $derived(todos.some(t => t.status === "in_progress"));
-  
-  // Only show if there are todos OR if showWhenEmpty is true
-  const shouldShow = $derived(todos.length > 0 || showWhenEmpty);
+  const allCompleted = $derived(todos.length > 0 && completedCount === todos.length);
+
+  // Only show if there are todos that aren't all completed
+  // Hide when all tasks are done (the work is finished!)
+  const shouldShow = $derived((todos.length > 0 && !allCompleted) || showWhenEmpty);
 </script>
 
 {#if shouldShow}

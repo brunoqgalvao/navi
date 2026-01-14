@@ -254,7 +254,7 @@ export const api = {
     delete: (id: string) =>
       request<{ success: boolean }>(`/sessions/${id}`, { method: "DELETE" }),
     fork: (id: string, data: { fromMessageId?: string; title?: string }) =>
-      request<Session>(`/sessions/${id}/fork`, {
+      request<Session & { historyContext?: string }>(`/sessions/${id}/fork`, {
         method: "POST",
         body: JSON.stringify(data),
       }),
@@ -601,12 +601,19 @@ export interface Skill {
   source_type: 'local' | 'marketplace' | 'import';
   source_url: string | null;
   source_version: string | null;
+  default_enabled: number; // 0 or 1 - auto-enable for new projects
   created_at: number;
   updated_at: number;
   enabled_globally: boolean;
   enabled_projects: string[];
   needs_sync?: boolean;
   body?: string;
+}
+
+export interface SkillCategory {
+  id: string;
+  label: string;
+  icon: string;
 }
 
 export interface CreateSkillInput {
@@ -660,7 +667,10 @@ export const skillsApi = {
     }),
   listEnabled: () => request<Skill[]>("/skills/enabled"),
   listProjectSkills: (projectId: string) => request<Skill[]>(`/projects/${projectId}/skills`),
-  scan: () => request<{ success: boolean; results: any }>("/skills/scan", { method: "POST" }),
+  scan: (projectPath?: string) => request<{ success: boolean; results: any }>("/skills/scan", {
+    method: "POST",
+    body: JSON.stringify({ projectPath }),
+  }),
   syncGlobal: () => request<{ synced: string[]; skipped: string[]; errors: string[]; total_global: number }>("/skills/sync-global", { method: "POST" }),
   listGlobal: () => request<Array<{ slug: string; name: string; description: string; path: string }>>("/skills/global"),
   createExamples: () =>
@@ -715,6 +725,14 @@ export const skillsApi = {
     request<{ success: boolean; path: string; editor: string }>(`/skills/${id}/open`, {
       method: "POST",
       body: JSON.stringify({ editor }),
+    }),
+  // Categories
+  listCategories: () => request<SkillCategory[]>("/skills/categories"),
+  // Default enabled (auto-enable for new projects)
+  listDefaultEnabled: () => request<Skill[]>("/skills/default-enabled"),
+  setDefaultEnabled: (id: string, enabled: boolean) =>
+    request<{ success: boolean; default_enabled: boolean }>(`/skills/${id}/default-enabled`, {
+      method: enabled ? "POST" : "DELETE",
     }),
 };
 

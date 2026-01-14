@@ -11,7 +11,9 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
     const { join } = await import("path");
     const defaultProjectsDir = join(homedir(), "claude-projects");
     const isTestMode = process.env.DEV_ENV === "TEST";
-    const openAIKey = isTestMode ? null : process.env.OPENAI_API_KEY;
+    // Check globalSettings first, then fall back to env var
+    const storedOpenAIKey = globalSettings.get("openaiApiKey") as string | null;
+    const openAIKey = isTestMode ? null : (storedOpenAIKey || process.env.OPENAI_API_KEY);
     const hasOpenAIKey = !!openAIKey;
     const openAIKeyPreview = openAIKey ? `${openAIKey.slice(0, 7)}...${openAIKey.slice(-4)}` : null;
     const autoTitleEnabled = process.env.AUTO_TITLE !== "false";
@@ -81,17 +83,9 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
       return json({ error: "Invalid API key format" }, 400);
     }
 
+    // Store in globalSettings (encrypted in database) and set in process.env for current session
+    globalSettings.set("openaiApiKey", apiKey);
     process.env.OPENAI_API_KEY = apiKey;
-
-    const { homedir } = await import("os");
-    const { join } = await import("path");
-    const fs = await import("fs/promises");
-
-    const configDir = join(homedir(), ".claude-code-ui");
-    await fs.mkdir(configDir, { recursive: true });
-
-    const envPath = join(configDir, ".env");
-    await fs.writeFile(envPath, `OPENAI_API_KEY=${apiKey}\n`);
 
     return json({ success: true });
   }

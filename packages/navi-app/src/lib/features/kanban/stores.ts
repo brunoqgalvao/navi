@@ -54,43 +54,57 @@ function createKanbanStore() {
     },
 
     /**
-     * Update a card
+     * Update a card (optimistic)
      */
-    async updateCard(
+    updateCard(
       projectId: string,
       cardId: string,
       updates: Partial<KanbanCard>
-    ): Promise<void> {
-      const updatedCard = await kanbanApi.updateCard(projectId, cardId, updates);
+    ): void {
+      let previousCards: KanbanCard[] = [];
       update((state) => {
         const cards = state.get(projectId) || [];
+        previousCards = [...cards];
         const idx = cards.findIndex((c) => c.id === cardId);
         if (idx >= 0) {
-          cards[idx] = updatedCard;
+          cards[idx] = { ...cards[idx], ...updates };
           state.set(projectId, [...cards]);
         }
         return new Map(state);
       });
+      kanbanApi.updateCard(projectId, cardId, updates).catch(() => {
+        update((state) => {
+          state.set(projectId, previousCards);
+          return new Map(state);
+        });
+      });
     },
 
     /**
-     * Update card status
+     * Update card status (optimistic)
      */
-    async updateStatus(
+    updateStatus(
       projectId: string,
       cardId: string,
       status: KanbanStatus,
       statusMessage?: string
-    ): Promise<void> {
-      const updatedCard = await kanbanApi.updateCardStatus(projectId, cardId, status, statusMessage);
+    ): void {
+      let previousCards: KanbanCard[] = [];
       update((state) => {
         const cards = state.get(projectId) || [];
+        previousCards = [...cards];
         const idx = cards.findIndex((c) => c.id === cardId);
         if (idx >= 0) {
-          cards[idx] = updatedCard;
+          cards[idx] = { ...cards[idx], status, status_message: statusMessage ?? null };
           state.set(projectId, [...cards]);
         }
         return new Map(state);
+      });
+      kanbanApi.updateCardStatus(projectId, cardId, status, statusMessage).catch(() => {
+        update((state) => {
+          state.set(projectId, previousCards);
+          return new Map(state);
+        });
       });
     },
 
@@ -110,18 +124,25 @@ function createKanbanStore() {
     },
 
     /**
-     * Archive a card
+     * Archive a card (optimistic)
      */
-    async archiveCard(projectId: string, cardId: string): Promise<void> {
-      await kanbanApi.archiveCard(projectId, cardId);
+    archiveCard(projectId: string, cardId: string): void {
+      let previousCards: KanbanCard[] = [];
       update((state) => {
         const cards = state.get(projectId) || [];
+        previousCards = [...cards];
         const idx = cards.findIndex((c) => c.id === cardId);
         if (idx >= 0) {
           cards[idx] = { ...cards[idx], status: "archived" };
           state.set(projectId, [...cards]);
         }
         return new Map(state);
+      });
+      kanbanApi.archiveCard(projectId, cardId).catch(() => {
+        update((state) => {
+          state.set(projectId, previousCards);
+          return new Map(state);
+        });
       });
     },
 

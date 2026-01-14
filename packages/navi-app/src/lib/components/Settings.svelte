@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, costsApi, containerPreviewApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project, type ContainerPreview } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
+  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, loopModeEnabled, deployToCloudEnabled, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
@@ -1416,6 +1416,48 @@
                   {#if $hooksEnabled}
                     <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
                       Proactive hooks are enabled. You'll see suggestions after conversations based on detected patterns.
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Loop Mode</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Allow Claude to continue working automatically until the task is done</p>
+                    </div>
+                    <button
+                      onclick={() => loopModeEnabled.toggle()}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$loopModeEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$loopModeEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+
+                  {#if $loopModeEnabled}
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                      Loop mode toggle will appear in the chat input. When enabled, Claude will continue iterating on a task until complete.
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Deploy to Cloud</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Enable deployment of apps to Navi Cloud (*.usenavi.app)</p>
+                    </div>
+                    <button
+                      onclick={() => deployToCloudEnabled.toggle()}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$deployToCloudEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$deployToCloudEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+
+                  {#if $deployToCloudEnabled}
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                      Use the "ship-it" skill or say "deploy this" to publish your app to the cloud. Supports Vite + React and static HTML.
                     </p>
                   {/if}
                 </div>

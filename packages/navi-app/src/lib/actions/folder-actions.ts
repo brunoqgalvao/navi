@@ -31,10 +31,13 @@ export async function createFolder(name: string): Promise<WorkspaceFolder> {
   return folder;
 }
 
-export async function updateFolder(id: string, name: string): Promise<void> {
-  await api.folders.update(id, name);
+export function updateFolder(id: string, name: string): void {
   const folders = callbacks?.getWorkspaceFolders() || [];
+  const previousFolders = folders;
   callbacks?.setWorkspaceFolders(folders.map(f => f.id === id ? { ...f, name } : f));
+  api.folders.update(id, name).catch(() => {
+    callbacks?.setWorkspaceFolders(previousFolders);
+  });
 }
 
 export async function deleteFolder(id: string): Promise<void> {
@@ -46,40 +49,46 @@ export async function deleteFolder(id: string): Promise<void> {
   callbacks?.setSidebarProjects(projects.map(p => p.folder_id === id ? { ...p, folder_id: null } : p));
 }
 
-export async function toggleFolderCollapse(id: string, collapsed: boolean): Promise<void> {
-  await api.folders.toggleCollapse(id, collapsed);
+export function toggleFolderCollapse(id: string, collapsed: boolean): void {
   const folders = callbacks?.getWorkspaceFolders() || [];
+  const previousFolders = folders;
   callbacks?.setWorkspaceFolders(folders.map(f => f.id === id ? { ...f, collapsed: collapsed ? 1 : 0 } : f));
+  api.folders.toggleCollapse(id, collapsed).catch(() => {
+    callbacks?.setWorkspaceFolders(previousFolders);
+  });
 }
 
-export async function setProjectFolder(projectId: string, folderId: string | null): Promise<void> {
-  await api.projects.setFolder(projectId, folderId);
+export function setProjectFolder(projectId: string, folderId: string | null): void {
   const projects = callbacks?.getSidebarProjects() || [];
+  const previousProjects = projects;
   callbacks?.setSidebarProjects(projects.map(p => p.id === projectId ? { ...p, folder_id: folderId } : p));
+  api.projects.setFolder(projectId, folderId).catch(() => {
+    callbacks?.setSidebarProjects(previousProjects);
+  });
 }
 
-export async function reorderFolders(order: string[]): Promise<void> {
-  await api.folders.reorder(order);
+export function reorderFolders(order: string[]): void {
   const orderMap = new Map(order.map((id, idx) => [id, idx]));
   const folders = callbacks?.getWorkspaceFolders() || [];
+  const previousFolders = folders;
   callbacks?.setWorkspaceFolders([...folders].sort((a, b) => (orderMap.get(a.id) || 0) - (orderMap.get(b.id) || 0)));
+  api.folders.reorder(order).catch(() => {
+    callbacks?.setWorkspaceFolders(previousFolders);
+  });
 }
 
-export async function toggleFolderPin(folder: WorkspaceFolder): Promise<boolean> {
+export function toggleFolderPin(folder: WorkspaceFolder): void {
   const newPinned = !folder.pinned;
-  try {
-    await api.folders.togglePin(folder.id, newPinned);
-    const folders = callbacks?.getWorkspaceFolders() || [];
-    callbacks?.setWorkspaceFolders(
-      folders.map(f => f.id === folder.id ? { ...f, pinned: newPinned ? 1 : 0 } : f)
-        .sort((a, b) => {
-          if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
-          return (a.sort_order || 0) - (b.sort_order || 0);
-        })
-    );
-    return true;
-  } catch (e) {
-    console.error("Failed to toggle folder pin:", e);
-    return false;
-  }
+  const folders = callbacks?.getWorkspaceFolders() || [];
+  const previousFolders = folders;
+  callbacks?.setWorkspaceFolders(
+    folders.map(f => f.id === folder.id ? { ...f, pinned: newPinned ? 1 : 0 } : f)
+      .sort((a, b) => {
+        if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+        return (a.sort_order || 0) - (b.sort_order || 0);
+      })
+  );
+  api.folders.togglePin(folder.id, newPinned).catch(() => {
+    callbacks?.setWorkspaceFolders(previousFolders);
+  });
 }

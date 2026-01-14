@@ -1,5 +1,6 @@
 /**
  * Deploy Routes - Navi Cloud Integration
+ * @experimental This feature is gated behind the "Deploy to Cloud" experimental setting
  *
  * Handles deployment of apps from the local machine to Navi Cloud.
  * Acts as a proxy to the Navi Cloud API with local file reading capabilities.
@@ -8,6 +9,9 @@
 import { json, error } from "../utils/response";
 import { readdir, readFile, stat } from "fs/promises";
 import { join, relative } from "path";
+
+// Feature flag check - reads from query param passed by frontend
+// The frontend checks localStorage for the experimental setting
 
 // Navi Cloud API endpoint
 const NAVI_CLOUD_API = process.env.NAVI_CLOUD_API || "https://api.usenavi.app";
@@ -36,8 +40,15 @@ export async function handleDeployRoutes(
   method: string,
   req: Request
 ): Promise<Response | null> {
+  // Check if feature is enabled via query param (passed from frontend)
+  // The skill also has its own check but API routes are additionally gated
+  const featureEnabled = url.searchParams.get("experimentalEnabled") === "true";
+
   // Deploy an app
   if (url.pathname === "/api/deploy" && method === "POST") {
+    if (!featureEnabled) {
+      return error("Deploy to Cloud is an experimental feature. Enable it in Settings → Experimental to use this feature.", 403);
+    }
     const body = (await req.json()) as DeployRequest;
     return await handleDeploy(body);
   }

@@ -40,8 +40,10 @@ export type ExtensionId =
   | "processes"
   | "kanban"
   | "preview"
+  | "context"         // Session context visibility
   | "email"           // Navi's email inbox
-  | "browser-preview"; // Browser-use live preview
+  | "browser-preview" // Browser-use live preview
+  | "resources";      // Resource monitor (@experimental)
 
 /**
  * Panel modes - what the right sidebar can display
@@ -55,8 +57,10 @@ export type PanelMode =
   | "processes"
   | "kanban"
   | "preview-unified"
+  | "context"         // Context sidebar view
   | "email"           // Email inbox view
-  | "browser-preview"; // Browser-use preview
+  | "browser-preview" // Browser-use preview
+  | "resources";      // Resource monitor (@experimental)
 
 // =============================================================================
 // 2. MESSAGE WIDGETS (Inline in Chat Messages)

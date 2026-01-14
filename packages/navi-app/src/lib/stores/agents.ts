@@ -30,7 +30,7 @@ function createAgentStore() {
       if (loaded && loadedForProject === path) return;
 
       try {
-        const url = new URL(`${getApiBase()}/api/agents`);
+        const url = new URL(`${getApiBase()}/agents`);
         if (path) {
           url.searchParams.set("projectPath", path);
         }

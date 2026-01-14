@@ -16,7 +16,35 @@ import { resolveClaudeCodeExecutable } from "../utils/claude-code";
 import { describePath, writeDebugLog } from "../utils/logging";
 // Multi-backend support
 import { getAdapter, type BackendId, type NormalizedEvent } from "../backends";
-import { mcpSettings } from "../services/mcp-settings";
+import { mcpSettings, getAllEnabledMcpServers } from "../services/mcp-settings";
+import { getCommandContent as getPluginCommandContent, loadAllPlugins } from "../services/plugin-loader";
+import {
+  executeSessionStartHooks,
+  executePostToolUseHooks,
+  executeStopHooks,
+  getPromptInjections,
+  hasHooksForEvent,
+} from "../services/hook-executor";
+import { readFileSync } from "fs";
+import { homedir } from "os";
+// Infinite Loop Mode (Ralph Wiggum bot)
+import {
+  createLoop,
+  getLoop,
+  getLoopBySession,
+  startIteration,
+  endIteration,
+  updateLoopContext,
+  shouldStopLoop,
+  shouldResetContext,
+  completeLoop,
+  failLoop,
+  stopLoop,
+  generateHandoffPrompt,
+  generateStatusMd,
+  type LoopState,
+} from "../services/loop-manager";
+import { runVerifier, quickVerifyCheck } from "../services/verifier-agent";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -110,6 +138,62 @@ const connectedClients = new Set<any>();
 const activeCloudExecutions = new Map<string, { executionId: string; ws: any; aborted: boolean }>();
 
 /**
+ * Expand plugin slash commands in the prompt
+ * Converts /owner/repo:commandName args to the actual command content
+ */
+function expandPluginCommands(prompt: string, projectPath: string): string {
+  if (!prompt) return prompt;
+
+  // Match /owner/repo:command pattern at the start of prompt
+  // Allows alphanumeric, dash, underscore, and dot in owner/repo/command names
+  const pluginCommandMatch = prompt.match(/^\/([\w.-]+\/[\w.-]+):([\w.-]+)(?:\s+(.*))?$/);
+  if (!pluginCommandMatch) {
+    return prompt;
+  }
+
+  const [, pluginId, commandName, args] = pluginCommandMatch;
+
+  // Check if this plugin is enabled
+  const userSettingsPath = join(homedir(), ".claude", "settings.json");
+  const projectSettingsPath = join(projectPath, ".claude", "settings.json");
+
+  let userSettings: any = {};
+  let projectSettings: any = {};
+
+  try {
+    if (existsSync(userSettingsPath)) {
+      userSettings = JSON.parse(readFileSync(userSettingsPath, "utf-8"));
+    }
+  } catch {}
+
+  try {
+    if (existsSync(projectSettingsPath)) {
+      projectSettings = JSON.parse(readFileSync(projectSettingsPath, "utf-8"));
+    }
+  } catch {}
+
+  const isEnabled =
+    projectSettings.enabledPlugins?.[pluginId] ||
+    userSettings.enabledPlugins?.[pluginId];
+
+  if (!isEnabled) {
+    // Plugin not enabled, return original prompt
+    return prompt;
+  }
+
+  // Get command content
+  const commandContent = getPluginCommandContent(pluginId, commandName, args);
+
+  if (!commandContent) {
+    // Command not found, return original prompt
+    return prompt;
+  }
+
+  // Return expanded command content
+  return commandContent;
+}
+
+/**
  * Clean up all server-side state for a session.
  * Call this when a session is deleted to prevent memory leaks.
  */
@@ -183,7 +267,7 @@ export function getMemoryStats() {
   };
 }
 
-// Until Done mode tracking
+// Until Done mode tracking (basic mode)
 interface UntilDoneState {
   enabled: boolean;
   iteration: number;
@@ -192,6 +276,14 @@ interface UntilDoneState {
   projectId: string;
   model?: string;
   totalCost: number;
+  // Enhanced infinite loop mode
+  infiniteMode?: boolean;         // Use full infinite loop with verifier
+  loopId?: string;                // Loop manager ID for persistence
+  definitionOfDone?: string[];    // User-defined completion criteria
+  contextResetThreshold?: number; // Default 0.7 (70%)
+  verifierModel?: "haiku" | "sonnet";
+  lastTokenCount?: number;        // Track context usage
+  contextWindow?: number;         // Project's context window size
 }
 const untilDoneSessions = new Map<string, UntilDoneState>();
 
@@ -251,6 +343,37 @@ function isTaskLikelyComplete(content: any[]): { complete: boolean; reason: stri
   return { complete: true, reason: "No incomplete signals detected" };
 }
 
+/**
+ * Extract a summary from the assistant's last output for loop tracking
+ */
+function extractIterationSummary(content: any[]): string {
+  // Look for text content and extract a meaningful summary
+  const textBlocks = content.filter((b: any) => b?.type === "text");
+  if (textBlocks.length === 0) return "";
+
+  const lastText = textBlocks[textBlocks.length - 1]?.text || "";
+
+  // Try to find summary-like content
+  const summaryMatch = lastText.match(/(?:summary|completed|done|finished|progress)[:\s]*([^\n]{20,200})/i);
+  if (summaryMatch) {
+    return summaryMatch[1].trim();
+  }
+
+  // Look for task completion mentions
+  const taskMatch = lastText.match(/(?:I(?:'ve| have)|successfully|completed)[^\n]{10,150}/i);
+  if (taskMatch) {
+    return taskMatch[0].trim();
+  }
+
+  // Fallback: last meaningful paragraph (truncated)
+  const paragraphs = lastText.split(/\n\n+/).filter((p: string) => p.trim().length > 20);
+  if (paragraphs.length > 0) {
+    return paragraphs[paragraphs.length - 1].trim().slice(0, 150) + "...";
+  }
+
+  return "Work in progress";
+}
+
 export function getUntilDoneSessions() {
   return untilDoneSessions;
 }
@@ -267,7 +390,69 @@ export function enableUntilDone(sessionId: string, originalPrompt: string, proje
   });
 }
 
+/**
+ * Enable enhanced infinite loop mode with verifier agent and context reset
+ */
+export function enableInfiniteLoop(
+  sessionId: string,
+  originalPrompt: string,
+  projectId: string,
+  options: {
+    model?: string;
+    maxIterations?: number;
+    maxCost?: number;
+    definitionOfDone?: string[];
+    contextResetThreshold?: number;
+    verifierModel?: "haiku" | "sonnet";
+    contextWindow?: number;
+  } = {}
+) {
+  // Create persistent loop state
+  const loop = createLoop({
+    sessionId,
+    projectId,
+    originalPrompt,
+    definitionOfDone: options.definitionOfDone || [
+      "Task is functionally complete",
+      "No obvious errors or bugs",
+    ],
+    workerModel: options.model,
+    verifierModel: options.verifierModel ?? "haiku",
+    maxIterations: options.maxIterations ?? 100, // Effectively infinite
+    maxCost: options.maxCost ?? 50,
+    contextResetThreshold: options.contextResetThreshold ?? 0.7,
+  });
+
+  // Start first iteration
+  startIteration(loop.loopId);
+
+  untilDoneSessions.set(sessionId, {
+    enabled: true,
+    iteration: 1,
+    maxIterations: options.maxIterations ?? 100,
+    originalPrompt,
+    projectId,
+    model: options.model,
+    totalCost: 0,
+    // Enhanced mode
+    infiniteMode: true,
+    loopId: loop.loopId,
+    definitionOfDone: options.definitionOfDone,
+    contextResetThreshold: options.contextResetThreshold ?? 0.7,
+    verifierModel: options.verifierModel ?? "haiku",
+    contextWindow: options.contextWindow ?? 200000,
+  });
+
+  console.log(`[InfiniteLoop] Started loop ${loop.loopId} for session ${sessionId}`);
+  return loop;
+}
+
 export function disableUntilDone(sessionId: string) {
+  const state = untilDoneSessions.get(sessionId);
+  if (state?.loopId) {
+    // Stop the persistent loop
+    stopLoop(state.loopId);
+  }
   untilDoneSessions.delete(sessionId);
 }
 
@@ -1466,9 +1651,31 @@ DO NOT use any tools except:
 The user will explicitly approve the plan before any execution begins.
 `;
 
+  // Expand plugin commands if present (e.g., /owner/plugin:command args)
+  const expandedPrompt = workingDirectory ? expandPluginCommands(prompt || "", workingDirectory) : prompt;
+
   let effectivePrompt = historyContext
-    ? `${historyContext}\n\nUser's new message:\n${prompt}`
-    : prompt;
+    ? `${historyContext}\n\nUser's new message:\n${expandedPrompt}`
+    : expandedPrompt;
+
+  // Execute SessionStart hooks from enabled plugins (async, don't block)
+  if (workingDirectory && hasHooksForEvent(workingDirectory, "SessionStart")) {
+    executeSessionStartHooks(workingDirectory, sessionId).then((results) => {
+      const injections = getPromptInjections(results);
+      if (injections.length > 0) {
+        // Log hook injections (they're already sent to Claude via the prompt system)
+        console.log(`[Hooks] SessionStart injections for ${sessionId}:`, injections.length);
+      }
+      // Log any errors
+      for (const r of results) {
+        if (!r.result.success) {
+          console.error(`[Hooks] SessionStart hook error (${r.pluginId}):`, r.result.error);
+        }
+      }
+    }).catch(err => {
+      console.error("[Hooks] SessionStart error:", err);
+    });
+  }
 
   // Inject plan mode instruction if enabled
   if (planMode) {
@@ -1541,7 +1748,7 @@ The user will explicitly approve the plan before any execution begins.
       "navi-context": !mcpSettings.isDisabledBuiltin("navi-context", workingDirectory),
       "multi-session": !mcpSettings.isDisabledBuiltin("multi-session", workingDirectory),
     },
-    externalMcpServers: mcpSettings.getEnabledExternalServerConfigs(workingDirectory), // Pass enabled external MCP server configs
+    externalMcpServers: getAllEnabledMcpServers(workingDirectory), // Pass enabled external MCP + plugin MCP server configs
     enabledSkillSlugs, // Skills enabled for this project (undefined = load all)
   });
 
@@ -1757,54 +1964,265 @@ The user will explicitly approve the plan before any execution begins.
             const costUsd = msg.resultData?.total_cost_usd || 0;
             untilDoneState.totalCost += costUsd;
 
-            const { complete, reason } = isTaskLikelyComplete(msg.lastAssistantContent || []);
+            // Calculate current context usage
+            const contextUsage = msg.lastAssistantUsage || msg.resultData?.usage || {};
+            const currentTokens = (contextUsage.input_tokens || 0) +
+              (contextUsage.cache_creation_input_tokens || 0) +
+              (contextUsage.cache_read_input_tokens || 0) +
+              (contextUsage.output_tokens || 0);
+            untilDoneState.lastTokenCount = currentTokens;
 
-            if (!complete && untilDoneState.iteration < untilDoneState.maxIterations) {
-              // NOT DONE - Continue working
-              untilDoneState.iteration++;
-
-              // Notify UI about continuation
-              sendToSession(sessionId, {
-                type: "until_done_continue",
-                uiSessionId: sessionId,
-                iteration: untilDoneState.iteration,
-                maxIterations: untilDoneState.maxIterations,
-                totalCost: untilDoneState.totalCost,
-                reason,
-              });
-
-              // Clean up current process tracking
-              activeProcesses.delete(sessionId);
-              deleteStreamCapture(sessionId);
-
-              // Re-invoke with continuation prompt after a short delay
-              setTimeout(() => {
-                handleQueryWithProcess(ws, {
-                  prompt: "Continue working on the task. Check your progress and keep going until everything is complete.",
-                  projectId: untilDoneState.projectId,
-                  sessionId,
-                  claudeSessionId: msg.resultData?.session_id,
-                  model: untilDoneState.model,
+            // ═══════════════════════════════════════════════════════════════
+            // INFINITE LOOP MODE (with verifier + context reset)
+            // ═══════════════════════════════════════════════════════════════
+            if (untilDoneState.infiniteMode && untilDoneState.loopId) {
+              const loopState = getLoop(untilDoneState.loopId);
+              if (!loopState) {
+                console.error(`[InfiniteLoop] Loop ${untilDoneState.loopId} not found, falling back to basic mode`);
+                untilDoneState.infiniteMode = false;
+              } else {
+                // End current iteration and record results
+                endIteration(loopState.loopId, {
+                  tokensUsed: currentTokens,
+                  costUsd,
+                  outcome: "partial",
+                  summary: extractIterationSummary(msg.lastAssistantContent || []),
                 });
-              }, 500);
 
-              return; // Don't send "done" yet
+                // Check if we should stop the loop
+                const stopCheck = shouldStopLoop(loopState.loopId);
+                if (stopCheck.stop) {
+                  console.log(`[InfiniteLoop] Stopping: ${stopCheck.reason}`);
+                  completeLoop(loopState.loopId, stopCheck.reason!);
+
+                  sendToSession(sessionId, {
+                    type: "until_done_complete",
+                    uiSessionId: sessionId,
+                    totalIterations: untilDoneState.iteration,
+                    totalCost: untilDoneState.totalCost,
+                    reason: stopCheck.reason,
+                    loopId: loopState.loopId,
+                  });
+
+                  untilDoneSessions.delete(sessionId);
+                  // Continue to send "done" message below
+                } else {
+                  // Check context usage - reset at 70% threshold
+                  const contextWindow = untilDoneState.contextWindow || 200000;
+                  const contextPercent = currentTokens / contextWindow;
+                  const needsContextReset = contextPercent >= (untilDoneState.contextResetThreshold || 0.7);
+
+                  console.log(`[InfiniteLoop] Iteration ${untilDoneState.iteration} complete. Context: ${Math.round(contextPercent * 100)}% (${currentTokens}/${contextWindow})`);
+
+                  // Run verifier agent to check if truly done
+                  (async () => {
+                    try {
+                      sendToSession(sessionId, {
+                        type: "until_done_verifying",
+                        uiSessionId: sessionId,
+                        iteration: untilDoneState.iteration,
+                        message: "Running verifier agent...",
+                      });
+
+                      const verifierResult = await runVerifier(loopState, workingDirectory);
+                      console.log(`[InfiniteLoop] Verifier decision:`, verifierResult.decision);
+
+                      // Update costs
+                      untilDoneState.totalCost += verifierResult.costUsd;
+
+                      if (verifierResult.decision.complete) {
+                        // DONE - Task is verified complete
+                        completeLoop(loopState.loopId, verifierResult.decision.reason);
+
+                        sendToSession(sessionId, {
+                          type: "until_done_complete",
+                          uiSessionId: sessionId,
+                          totalIterations: untilDoneState.iteration,
+                          totalCost: untilDoneState.totalCost,
+                          reason: `Verified complete: ${verifierResult.decision.reason}`,
+                          loopId: loopState.loopId,
+                          confidence: verifierResult.decision.confidence,
+                        });
+
+                        untilDoneSessions.delete(sessionId);
+                        sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
+                        return;
+                      }
+
+                      if (!verifierResult.decision.shouldContinue) {
+                        // Stuck or blocked - stop the loop
+                        failLoop(loopState.loopId, verifierResult.decision.reason);
+
+                        sendToSession(sessionId, {
+                          type: "until_done_complete",
+                          uiSessionId: sessionId,
+                          totalIterations: untilDoneState.iteration,
+                          totalCost: untilDoneState.totalCost,
+                          reason: `Stopped: ${verifierResult.decision.reason}`,
+                          loopId: loopState.loopId,
+                        });
+
+                        untilDoneSessions.delete(sessionId);
+                        sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
+                        return;
+                      }
+
+                      // NOT DONE - Continue with next iteration
+                      untilDoneState.iteration++;
+                      startIteration(loopState.loopId);
+
+                      // Clean up current process tracking
+                      activeProcesses.delete(sessionId);
+                      deleteStreamCapture(sessionId);
+
+                      // Determine continuation prompt
+                      let continuationPrompt: string;
+                      let newClaudeSessionId: string | undefined;
+
+                      if (needsContextReset) {
+                        // CONTEXT RESET - Start fresh session with handoff prompt
+                        console.log(`[InfiniteLoop] Context reset triggered (${Math.round(contextPercent * 100)}% used)`);
+
+                        // Update loop state with context for handoff
+                        if (verifierResult.decision.updatedContext) {
+                          updateLoopContext(loopState.loopId, verifierResult.decision.updatedContext);
+                        }
+
+                        // Mark this iteration as having a context reset
+                        const currentIter = loopState.iterations[loopState.iterations.length - 1];
+                        if (currentIter) currentIter.contextResetAfter = true;
+
+                        // Generate handoff prompt for fresh session
+                        const freshLoopState = getLoop(loopState.loopId)!;
+                        continuationPrompt = generateHandoffPrompt(freshLoopState);
+                        newClaudeSessionId = undefined; // Force new Claude session
+
+                        sendToSession(sessionId, {
+                          type: "until_done_context_reset",
+                          uiSessionId: sessionId,
+                          iteration: untilDoneState.iteration,
+                          contextPercent: Math.round(contextPercent * 100),
+                          message: "Context reset - starting fresh session with preserved state",
+                        });
+                      } else {
+                        // Same session continuation
+                        continuationPrompt = verifierResult.decision.nextActionHint
+                          ? `Continue working on the task. Focus on: ${verifierResult.decision.nextActionHint}`
+                          : "Continue working on the task. Check your progress and keep going until everything is complete.";
+                        newClaudeSessionId = msg.resultData?.session_id;
+                      }
+
+                      // Notify UI about continuation
+                      sendToSession(sessionId, {
+                        type: "until_done_continue",
+                        uiSessionId: sessionId,
+                        iteration: untilDoneState.iteration,
+                        maxIterations: untilDoneState.maxIterations,
+                        totalCost: untilDoneState.totalCost,
+                        reason: verifierResult.decision.reason,
+                        contextReset: needsContextReset,
+                        contextPercent: Math.round(contextPercent * 100),
+                        nextAction: verifierResult.decision.nextActionHint,
+                      });
+
+                      // Re-invoke with continuation/handoff prompt
+                      setTimeout(() => {
+                        handleQueryWithProcess(ws, {
+                          prompt: continuationPrompt,
+                          projectId: untilDoneState.projectId,
+                          sessionId,
+                          claudeSessionId: newClaudeSessionId,
+                          model: untilDoneState.model,
+                        });
+                      }, 500);
+
+                    } catch (verifierError) {
+                      console.error(`[InfiniteLoop] Verifier error:`, verifierError);
+
+                      // On verifier error, continue without verification
+                      untilDoneState.iteration++;
+                      activeProcesses.delete(sessionId);
+                      deleteStreamCapture(sessionId);
+
+                      sendToSession(sessionId, {
+                        type: "until_done_continue",
+                        uiSessionId: sessionId,
+                        iteration: untilDoneState.iteration,
+                        maxIterations: untilDoneState.maxIterations,
+                        totalCost: untilDoneState.totalCost,
+                        reason: "Verifier error - continuing anyway",
+                      });
+
+                      setTimeout(() => {
+                        handleQueryWithProcess(ws, {
+                          prompt: "Continue working on the task. Check your progress and keep going until everything is complete.",
+                          projectId: untilDoneState.projectId,
+                          sessionId,
+                          claudeSessionId: msg.resultData?.session_id,
+                          model: untilDoneState.model,
+                        });
+                      }, 500);
+                    }
+                  })();
+
+                  return; // Don't send "done" yet - async verifier handling
+                }
+              }
             }
 
-            // Task is complete OR max iterations reached
-            const finalReason = complete ? "Task completed" : `Max iterations (${untilDoneState.maxIterations}) reached`;
+            // ═══════════════════════════════════════════════════════════════
+            // BASIC UNTIL DONE MODE (pattern-based, no verifier)
+            // ═══════════════════════════════════════════════════════════════
+            if (!untilDoneState.infiniteMode) {
+              const { complete, reason } = isTaskLikelyComplete(msg.lastAssistantContent || []);
 
-            // Send completion notification
-            sendToSession(sessionId, {
-              type: "until_done_complete",
-              uiSessionId: sessionId,
-              totalIterations: untilDoneState.iteration,
-              totalCost: untilDoneState.totalCost,
-              reason: finalReason,
-            });
+              if (!complete && untilDoneState.iteration < untilDoneState.maxIterations) {
+                // NOT DONE - Continue working
+                untilDoneState.iteration++;
 
-            // Clean up until done state
-            untilDoneSessions.delete(sessionId);
+                // Notify UI about continuation
+                sendToSession(sessionId, {
+                  type: "until_done_continue",
+                  uiSessionId: sessionId,
+                  iteration: untilDoneState.iteration,
+                  maxIterations: untilDoneState.maxIterations,
+                  totalCost: untilDoneState.totalCost,
+                  reason,
+                });
+
+                // Clean up current process tracking
+                activeProcesses.delete(sessionId);
+                deleteStreamCapture(sessionId);
+
+                // Re-invoke with continuation prompt after a short delay
+                setTimeout(() => {
+                  handleQueryWithProcess(ws, {
+                    prompt: "Continue working on the task. Check your progress and keep going until everything is complete.",
+                    projectId: untilDoneState.projectId,
+                    sessionId,
+                    claudeSessionId: msg.resultData?.session_id,
+                    model: untilDoneState.model,
+                  });
+                }, 500);
+
+                return; // Don't send "done" yet
+              }
+
+              // Task is complete OR max iterations reached
+              const finalReason = complete ? "Task completed" : `Max iterations (${untilDoneState.maxIterations}) reached`;
+
+              // Send completion notification
+              sendToSession(sessionId, {
+                type: "until_done_complete",
+                uiSessionId: sessionId,
+                totalIterations: untilDoneState.iteration,
+                totalCost: untilDoneState.totalCost,
+                reason: finalReason,
+              });
+
+              // Clean up until done state
+              untilDoneSessions.delete(sessionId);
+            }
           }
 
           sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
@@ -1820,6 +2238,19 @@ The user will explicitly approve the plan before any execution begins.
               }
             }
             pendingQuestionsDb.deleteBySession(sessionId);
+
+            // Execute Stop hooks from enabled plugins (async, don't block)
+            if (workingDirectory && hasHooksForEvent(workingDirectory, "Stop")) {
+              executeStopHooks(workingDirectory, sessionId).then((results) => {
+                for (const r of results) {
+                  if (!r.result.success) {
+                    console.error(`[Hooks] Stop hook error (${r.pluginId}):`, r.result.error);
+                  }
+                }
+              }).catch(err => {
+                console.error("[Hooks] Stop error:", err);
+              });
+            }
           }
         } else if (msg.type === "error") {
           sendToSession(sessionId, {

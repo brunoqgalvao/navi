@@ -185,7 +185,13 @@ export async function handleSessionRoutes(
     const now = Date.now();
     const title = body.title || `Fork of ${sourceSession.title}`;
 
-    sessions.create(newSessionId, sourceSession.project_id, title, now, now);
+    // Copy backend from source session
+    sessions.create(newSessionId, sourceSession.project_id, title, now, now, sourceSession.backend);
+
+    // Copy model from source session if it exists
+    if (sourceSession.model) {
+      sessions.updateModel(sourceSession.model, newSessionId);
+    }
 
     for (const msg of messagesToCopy) {
       messages.create(
@@ -200,6 +206,8 @@ export async function handleSessionRoutes(
     }
 
     let newClaudeSessionId: string | null = null;
+
+    // Copy the Claude SDK session file if the source session has one
     if (sourceSession.claude_session_id) {
       try {
         const { homedir } = await import("os");
@@ -258,17 +266,80 @@ export async function handleSessionRoutes(
 
               await fs.writeFile(newSessionFile, updatedLines.join("\n") + "\n");
               sessions.updateClaudeSession(newClaudeSessionId, sourceSession.model, 0, 0, 0, 0, now, newSessionId);
+              console.log(`[Fork] Copied SDK session file for ${newSessionId}, claude_session_id: ${newClaudeSessionId}`);
+            } else {
+              console.warn(`[Fork] No lines to keep from source session file for ${sourceSessionId}, will use historyContext fallback`);
             }
           } catch (e) {
-            console.error("Failed to copy Claude session file:", e);
+            // SDK file copy failed - historyContext fallback will be used
+            console.error(`[Fork] Failed to copy Claude session file for ${sourceSessionId} (will use historyContext fallback):`, e);
           }
+        } else {
+          console.warn(`[Fork] Project not found for source session ${sourceSessionId}`);
         }
       } catch (e) {
-        console.error("Failed to fork Claude internal session:", e);
+        console.error(`[Fork] Failed to fork Claude internal session for ${sourceSessionId}:`, e);
       }
+    } else {
+      // Source session has no claude_session_id - this means it was never used with the SDK
+      // The messages will be copied to the new session, but we need to synthesize context
+      // when the user sends their first message in the forked session
+      console.log(`[Fork] Source session ${sourceSessionId} has no claude_session_id, copied ${messagesToCopy.length} messages to display only`);
     }
 
-    return json(sessions.get(newSessionId), 201);
+    const newSession = sessions.get(newSessionId);
+    console.log(`[Fork] Created forked session ${newSessionId} from ${sourceSessionId}, claude_session_id: ${newSession?.claude_session_id || 'none'}`);
+
+    // If no SDK session was copied, synthesize historyContext from the copied messages
+    // so Claude has context when the user sends their first message
+    let historyContext: string | undefined;
+    if (!newSession?.claude_session_id && messagesToCopy.length > 0) {
+      // Extract text content from messages to build history context
+      const extractText = (content: string): string => {
+        try {
+          const parsed = JSON.parse(content);
+          if (typeof parsed === "string") return parsed;
+          if (Array.isArray(parsed)) {
+            return parsed
+              .filter((b: any) => b.type === "text")
+              .map((b: any) => b.text)
+              .join("\n");
+          }
+          return "";
+        } catch {
+          return content;
+        }
+      };
+
+      // Build context from message history (limit to prevent token overflow)
+      const contextParts: string[] = [
+        "# Previous Conversation Context",
+        "",
+        "This is a continuation of a previous conversation. Here's what was discussed:",
+        ""
+      ];
+
+      // Include last N messages (keep it reasonable)
+      const recentMessages = messagesToCopy.slice(-20);
+      for (const msg of recentMessages) {
+        const text = extractText(msg.content).slice(0, 2000); // Truncate long messages
+        if (text.trim()) {
+          const role = msg.role === "user" ? "User" : "Assistant";
+          contextParts.push(`## ${role}:`);
+          contextParts.push(text);
+          contextParts.push("");
+        }
+      }
+
+      contextParts.push("---");
+      contextParts.push("");
+      contextParts.push("Continue the conversation from here. The user will now send a new message.");
+
+      historyContext = contextParts.join("\n");
+      console.log(`[Fork] Generated historyContext for session ${newSessionId} (${historyContext.length} chars)`);
+    }
+
+    return json({ ...newSession, historyContext }, 201);
   }
 
   const resetTokensMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/reset-tokens$/);

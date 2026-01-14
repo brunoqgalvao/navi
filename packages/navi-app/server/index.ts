@@ -68,6 +68,10 @@ import { handleChannelRoutes } from "./routes/channels";
 import { handlePluginRoutes } from "./routes/plugins";
 // MCP Server Settings
 import { handleMcpRoutes } from "./routes/mcp";
+// Infinite Loop Mode (Ralph Wiggum bot)
+import { handleLoopRoutes } from "./routes/loops";
+// Resource Monitor (@experimental - disabled by default)
+import { handleResourceRoutes } from "./routes/resources";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -93,8 +97,15 @@ initIntegrationsTable();
 // Install global error handler for PTY crashes
 installPtyErrorHandler();
 
-// Migrate env keys to database
-async function migrateEnvKeys() {
+// Load env keys from database and ~/.claude-code-ui/.env, migrate as needed
+async function loadAndMigrateEnvKeys() {
+  // First, load keys from globalSettings into process.env for current session
+  const storedOpenAIKey = globalSettings.get("openaiApiKey") as string | null;
+  if (storedOpenAIKey && !process.env.OPENAI_API_KEY) {
+    process.env.OPENAI_API_KEY = storedOpenAIKey;
+  }
+
+  // Then check .env file for any keys to migrate
   const { homedir } = await import("os");
   const { join } = await import("path");
   const fs = await import("fs/promises");
@@ -103,6 +114,23 @@ async function migrateEnvKeys() {
   try {
     const content = await fs.readFile(envPath, "utf-8");
 
+    // Migrate OPENAI_API_KEY from .env to database if not already stored
+    const openaiMatch = content.match(/OPENAI_API_KEY=(.+)/);
+    if (openaiMatch && !globalSettings.get("openaiApiKey")) {
+      const key = openaiMatch[1].trim();
+      if (key.startsWith("sk-")) {
+        globalSettings.set("openaiApiKey", key);
+        process.env.OPENAI_API_KEY = key;
+      }
+    }
+
+    // Load AUTO_TITLE setting
+    const autoTitleMatch = content.match(/AUTO_TITLE=(.+)/);
+    if (autoTitleMatch && !process.env.AUTO_TITLE) {
+      process.env.AUTO_TITLE = autoTitleMatch[1].trim();
+    }
+
+    // Migrate Anthropic key to database
     const anthropicMatch = content.match(/ANTHROPIC_API_KEY=(.+)/);
     if (anthropicMatch && !globalSettings.get("anthropicApiKey")) {
       const key = anthropicMatch[1].trim();
@@ -114,7 +142,7 @@ async function migrateEnvKeys() {
   } catch {}
 }
 
-await migrateEnvKeys();
+await loadAndMigrateEnvKeys();
 
 // Build search index if empty
 const stats = searchIndex.getStats();
@@ -241,26 +269,45 @@ const server = Bun.serve({
       return json({ status: "ok", port: PORT });
     }
 
-    // Internet connectivity check - tests if we can reach external APIs
+    // Internet connectivity check - tests if we can reach external endpoints
     if (url.pathname === "/api/health/internet") {
-      try {
-        // Try to reach Anthropic's API (lightweight check)
+      const checks: Array<{ url: string; method: "GET" | "HEAD" }> = [
+        { url: "https://example.com", method: "HEAD" },
+        { url: "https://www.google.com/generate_204", method: "GET" },
+        { url: "https://api.anthropic.com/v1/models", method: "HEAD" },
+      ];
+
+      const timeoutMs = 3000;
+
+      const checkEndpoint = async (
+        check: { url: string; method: "GET" | "HEAD" }
+      ): Promise<boolean> => {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-        const res = await fetch("https://api.anthropic.com/v1/models", {
-          method: "HEAD",
-          signal: controller.signal,
-        }).catch(() => null);
+        try {
+          const res = await fetch(check.url, {
+            method: check.method,
+            signal: controller.signal,
+          });
+          res.body?.cancel();
+          return true;
+        } catch {
+          return false;
+        } finally {
+          clearTimeout(timeout);
+        }
+      };
 
-        clearTimeout(timeout);
-
-        // Any response (even 401) means we have internet
-        const online = res !== null;
-        return json({ online, checkedAt: Date.now() });
-      } catch {
-        return json({ online: false, checkedAt: Date.now() });
+      let online = false;
+      for (const check of checks) {
+        if (await checkEndpoint(check)) {
+          online = true;
+          break;
+        }
       }
+
+      return json({ online, checkedAt: Date.now() });
     }
 
     // Ports discovery endpoint
@@ -324,6 +371,14 @@ const server = Bun.serve({
 
     // MCP server settings routes
     response = await handleMcpRoutes(url, method, req);
+    if (response) return response;
+
+    // Infinite Loop Mode routes
+    response = await handleLoopRoutes(url, method, req);
+    if (response) return response;
+
+    // Resource Monitor routes (@experimental)
+    response = await handleResourceRoutes(url, method, req);
     if (response) return response;
 
     // Dashboard routes (isolated feature)

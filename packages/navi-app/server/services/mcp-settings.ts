@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { getCredential, setCredential, type CredentialScope } from "../integrations/credentials";
+import { loadAllPlugins, type McpServerConfig as PluginMcpServerConfig } from "./plugin-loader";
 
 // Types for external MCP server configurations
 export interface ExternalMcpServer {
@@ -647,6 +648,84 @@ export const mcpSettings = {
  */
 export function hasCredentialRefs(config: ExternalMcpServerConfig): boolean {
   return !!(config.credentialRefs && Object.keys(config.credentialRefs).length > 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Plugin MCP Servers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get MCP servers from enabled plugins
+ * Returns servers namespaced as "pluginId/serverName"
+ */
+export function getPluginMcpServers(
+  projectPath: string
+): Record<string, ExternalMcpServerConfig> {
+  const projectSettingsPath = join(projectPath, ".claude", "settings.json");
+  const userSettingsPath = join(homedir(), ".claude", "settings.json");
+
+  let projectSettings: any = {};
+  let userSettings: any = {};
+
+  try {
+    if (existsSync(projectSettingsPath)) {
+      projectSettings = JSON.parse(readFileSync(projectSettingsPath, "utf-8"));
+    }
+  } catch {}
+
+  try {
+    if (existsSync(userSettingsPath)) {
+      userSettings = JSON.parse(readFileSync(userSettingsPath, "utf-8"));
+    }
+  } catch {}
+
+  const allPlugins = loadAllPlugins();
+  const servers: Record<string, ExternalMcpServerConfig> = {};
+
+  for (const plugin of allPlugins) {
+    // Check if plugin is enabled
+    const isEnabled =
+      projectSettings.enabledPlugins?.[plugin.id] ||
+      userSettings.enabledPlugins?.[plugin.id];
+
+    if (!isEnabled) continue;
+
+    // Add all MCP servers from this plugin
+    for (const [serverName, serverConfig] of Object.entries(plugin.components.mcpServers)) {
+      const namespacedName = `${plugin.id}/${serverName}`;
+      servers[namespacedName] = {
+        type: "stdio",
+        command: serverConfig.command,
+        args: serverConfig.args,
+        env: serverConfig.env,
+      };
+    }
+  }
+
+  return servers;
+}
+
+/**
+ * Get all enabled MCP servers including plugin servers
+ * This is the main function to use when starting the agent
+ */
+export function getAllEnabledMcpServers(
+  projectPath?: string
+): Record<string, ExternalMcpServerConfig> {
+  // Get standard external servers
+  const externalServers = mcpSettings.getEnabledExternalServerConfigs(projectPath);
+
+  // Get plugin servers if we have a project path
+  let pluginServers: Record<string, ExternalMcpServerConfig> = {};
+  if (projectPath) {
+    pluginServers = getPluginMcpServers(projectPath);
+  }
+
+  // Merge them (plugin servers won't conflict due to namespacing)
+  return {
+    ...externalServers,
+    ...pluginServers,
+  };
 }
 
 /**

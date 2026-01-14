@@ -610,6 +610,24 @@ const pendingDeliverRequests = new Map<string, (result: { success: boolean }) =>
 const pendingDecisionRequests = new Map<string, (result: { success: boolean; decisionId?: string }) => void>();
 const pendingWaitRequests = new Map<string, (result: { skipped: boolean }) => void>();
 
+// Queue for child deliverables received during the session
+// These are injected via get_context(source: 'sibling') or when checking spawned agents
+interface PendingDeliverable {
+  childSessionId: string;
+  childRole: string;
+  deliverable: {
+    type: string;
+    summary: string;
+    content: string;
+    artifacts?: Array<{ path: string; description?: string }>;
+  };
+  receivedAt: number;
+}
+const pendingChildDeliverables: PendingDeliverable[] = [];
+
+// Track spawned child sessions for this parent (to check for deliverables)
+const spawnedChildren = new Map<string, { role: string; task: string; spawnedAt: number }>();
+
 // Create MCP server with multi-session tools
 const multiSessionServer = createSdkMcpServer({
   name: "multi-session",
@@ -644,6 +662,7 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
         agent_type: z.enum(["browser", "coding", "runner", "research", "planning", "reviewer", "general"]).optional().describe("Type of agent to spawn - determines UI and capabilities. Choose based on task nature."),
         model: z.enum(["opus", "sonnet", "haiku"]).optional().describe("Optional: Model to use (defaults to parent's model). Use 'haiku' for simpler tasks."),
         context: z.string().optional().describe("Optional: Additional context to pass to the child that they should know."),
+        wait_for_completion: z.boolean().optional().describe("If true, this tool will block until the child completes and return their deliverable. Default: false (async)."),
       },
       async (args) => {
         const requestId = crypto.randomUUID();
@@ -672,6 +691,62 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
           };
         }
 
+        // Track this spawned child
+        if (result.childSessionId) {
+          spawnedChildren.set(result.childSessionId, {
+            role: args.role,
+            task: args.task,
+            spawnedAt: Date.now(),
+          });
+        }
+
+        // If wait_for_completion is true, block until we receive the deliverable
+        if (args.wait_for_completion && result.childSessionId) {
+          console.error(`[Worker] Waiting for child ${result.childSessionId} to complete...`);
+
+          // Wait for the deliverable to arrive (polling pendingChildDeliverables)
+          const deliverable = await new Promise<PendingDeliverable | null>((resolve) => {
+            const checkInterval = setInterval(() => {
+              const idx = pendingChildDeliverables.findIndex(d => d.childSessionId === result.childSessionId);
+              if (idx >= 0) {
+                const delivered = pendingChildDeliverables.splice(idx, 1)[0];
+                clearInterval(checkInterval);
+                resolve(delivered);
+              }
+            }, 500);
+
+            // Timeout after 10 minutes
+            setTimeout(() => {
+              clearInterval(checkInterval);
+              resolve(null);
+            }, 10 * 60 * 1000);
+          });
+
+          if (deliverable) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: `## Child Agent "${args.role}" Completed
+
+**Type:** ${deliverable.deliverable.type}
+**Summary:** ${deliverable.deliverable.summary}
+
+### Deliverable Content:
+${deliverable.deliverable.content}
+
+${deliverable.deliverable.artifacts?.length ? `### Artifacts Created:\n${deliverable.deliverable.artifacts.map(a => `- ${a.path}${a.description ? `: ${a.description}` : ''}`).join('\n')}` : ''}`,
+              }],
+            };
+          } else {
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Child agent '${args.role}' (${result.childSessionId}) timed out after 10 minutes. Use get_context(source: 'sibling') to check if it completed, or check the session hierarchy.`,
+              }],
+            };
+          }
+        }
+
         return {
           content: [{
             type: "text" as const,
@@ -679,7 +754,7 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
 
 Child session ID: ${result.childSessionId}
 
-The child agent is now working independently. You will receive their deliverable when they complete. Continue with your own work in the meantime.`,
+The child agent is now working independently. Their deliverable will be available via get_context(source: 'sibling') when they complete. Continue with your own work - use get_context to check on their progress or retrieve their results.`,
           }],
         };
       }
@@ -692,11 +767,12 @@ Use this when you need information beyond your immediate task context.
 
 Sources:
 - 'parent': Get information about the parent session's task and status
-- 'sibling': Get information about sibling sessions (other children of your parent)
+- 'sibling': Get information about sibling sessions (other children of your parent). Also returns any completed deliverables from children you spawned.
 - 'decisions': Get project-wide decisions that have been logged
 - 'artifacts': Get list of artifacts created in this session tree
 
-Be specific in your query to get relevant information. You'll receive excerpts, not full dumps.`,
+Be specific in your query to get relevant information. You'll receive excerpts, not full dumps.
+NOTE: Use this to check on spawned child agents and retrieve their deliverables when complete.`,
       {
         source: z.enum(["parent", "sibling", "decisions", "artifacts"]).describe("Where to get context from"),
         query: z.string().describe("What specific information do you need?"),
@@ -717,10 +793,37 @@ Be specific in your query to get relevant information. You'll receive excerpts, 
           pendingContextRequests.set(requestId, resolve);
         });
 
+        // If querying siblings, also include any pending deliverables we've received
+        let responseContent = result.content;
+
+        if (args.source === "sibling" && pendingChildDeliverables.length > 0) {
+          // Filter deliverables by role if specified
+          const relevantDeliverables = args.sibling_role
+            ? pendingChildDeliverables.filter(d => d.childRole === args.sibling_role)
+            : pendingChildDeliverables;
+
+          if (relevantDeliverables.length > 0) {
+            const deliverablesSummary = relevantDeliverables.map(d =>
+              `\n### 📬 Deliverable from "${d.childRole}" (session: ${d.childSessionId})
+**Type:** ${d.deliverable.type}
+**Summary:** ${d.deliverable.summary}
+
+${d.deliverable.content}
+
+${d.deliverable.artifacts?.length ? `**Artifacts:**\n${d.deliverable.artifacts.map(a => `- ${a.path}${a.description ? `: ${a.description}` : ''}`).join('\n')}` : ''}`
+            ).join('\n\n---\n');
+
+            responseContent += `\n\n## 📬 Received Deliverables\n\nThe following child agents have completed and delivered their results:${deliverablesSummary}`;
+
+            // Clear delivered items (they've been reported)
+            // Keep them in case agent needs to re-query
+          }
+        }
+
         return {
           content: [{
             type: "text" as const,
-            text: result.content,
+            text: responseContent,
           }],
         };
       }
@@ -826,6 +929,68 @@ Action: ${result.action}
 Response: ${result.content}
 
 You can now continue with your task.`,
+          }],
+        };
+      }
+    ),
+
+    tool(
+      "check_spawned_agents",
+      `Check on the status and deliverables of child agents you have spawned.
+Use this to retrieve results from agents working in parallel.
+
+Returns:
+- List of spawned agents and their current status
+- Any deliverables that have been completed
+- Whether agents are still working
+
+IMPORTANT: If you spawn agents in parallel, YOU MUST use this tool to retrieve their results before responding to the user.`,
+      {},
+      async () => {
+        // Check for any deliverables we've received
+        if (pendingChildDeliverables.length === 0 && spawnedChildren.size === 0) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: "No spawned agents found. You haven't spawned any child agents in this session.",
+            }],
+          };
+        }
+
+        let response = "## Spawned Agent Status\n\n";
+
+        // List all spawned children
+        if (spawnedChildren.size > 0) {
+          response += "### Spawned Agents:\n";
+          spawnedChildren.forEach((info, sessionId) => {
+            const hasDelivered = pendingChildDeliverables.some(d => d.childSessionId === sessionId);
+            const status = hasDelivered ? "✅ Completed" : "🔄 Working...";
+            response += `- **${info.role}** (${sessionId}): ${status}\n  Task: ${info.task}\n`;
+          });
+          response += "\n";
+        }
+
+        // Show any deliverables
+        if (pendingChildDeliverables.length > 0) {
+          response += "### 📬 Received Deliverables:\n\n";
+          for (const d of pendingChildDeliverables) {
+            response += `---\n#### From: ${d.childRole} (${d.childSessionId})\n`;
+            response += `**Type:** ${d.deliverable.type}\n`;
+            response += `**Summary:** ${d.deliverable.summary}\n\n`;
+            response += `${d.deliverable.content}\n\n`;
+            if (d.deliverable.artifacts?.length) {
+              response += `**Artifacts:**\n${d.deliverable.artifacts.map(a => `- ${a.path}${a.description ? `: ${a.description}` : ''}`).join('\n')}\n\n`;
+            }
+          }
+        } else if (spawnedChildren.size > 0) {
+          response += "### No deliverables yet\n";
+          response += "Your spawned agents are still working. Check again in a moment, or use `wait` tool to pause.";
+        }
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: response,
           }],
         };
       }
@@ -1038,7 +1203,7 @@ Use this to check what's happening in the user's terminal, look for errors, or g
 The user will see a countdown and can skip the wait if needed.
 Prefer this over bash sleep commands for better UX.`,
       {
-        seconds: z.number().min(1).max(300).describe("How many seconds to wait (1-300)"),
+        seconds: z.number().min(1).max(432000).describe("How many seconds to wait (1-432000, up to 5 days)"),
         reason: z.string().optional().describe("Why you're waiting (shown to user, e.g., 'Waiting for dev server to start')"),
       },
       async (args) => {
@@ -1436,11 +1601,37 @@ You are currently acting as the @${agentId} agent. Follow the instructions above
       }
     }
 
-    // Add multi-session context if this is a child session
-    if (multiSession?.enabled && multiSession.parentSessionId) {
-      const multiSessionContext = buildMultiSessionSystemPrompt(multiSession);
-      systemPromptAppend = multiSessionContext + '\n\n' + systemPromptAppend;
-      console.error(`[Worker] Multi-session enabled. Depth: ${multiSession.depth}, Role: ${multiSession.role}`);
+    // Add multi-session context
+    if (multiSession?.enabled) {
+      if (multiSession.parentSessionId) {
+        // Child session - full multi-session prompt
+        const multiSessionContext = buildMultiSessionSystemPrompt(multiSession);
+        systemPromptAppend = multiSessionContext + '\n\n' + systemPromptAppend;
+        console.error(`[Worker] Multi-session child session. Depth: ${multiSession.depth}, Role: ${multiSession.role}`);
+      } else {
+        // Root orchestrator session - add spawning guidance
+        const rootOrchestratorPrompt = `
+## Multi-Agent Orchestration
+
+You can spawn child agents to handle subtasks using the \`spawn_agent\` MCP tool. When you spawn agents:
+
+1. **Parallel execution**: Agents work independently. Continue with your own work after spawning.
+2. **CRITICAL**: After spawning agents, you MUST use \`check_spawned_agents\` to retrieve their results before responding to the user.
+3. **Blocking option**: Set \`wait_for_completion: true\` to block until a single agent completes.
+4. **Check results**: Use \`check_spawned_agents\` to see status and retrieve deliverables from all spawned agents.
+
+Example workflow:
+1. spawn_agent(role: "frontend", task: "Build login form")
+2. spawn_agent(role: "backend", task: "Create auth API")
+3. Continue doing your own work...
+4. **check_spawned_agents()** → retrieves completed deliverables
+5. Summarize results to user
+
+NEVER tell the user "I'll let you know when they complete" without actually checking. Always use \`check_spawned_agents\` to get results.
+`;
+        systemPromptAppend = rootOrchestratorPrompt + '\n\n' + systemPromptAppend;
+        console.error(`[Worker] Multi-session root orchestrator. Can spawn up to depth 3.`);
+      }
     }
 
     console.error(`[Worker] System prompt append (${systemPromptAppend.length} chars)`);
@@ -1700,10 +1891,14 @@ rl.on("line", (line) => {
     }
     // Child deliverable injection (when a child completes)
     else if (msg.type === "child_deliverable") {
-      // This message is sent when a child session delivers
-      // It will be injected into the conversation
-      console.error(`[Worker] Received child deliverable from ${msg.childRole}: ${msg.summary}`);
-      // The actual injection happens through a synthetic user message
+      // Queue the deliverable for injection
+      console.error(`[Worker] Received child deliverable from ${msg.childRole}: ${msg.deliverable?.summary || "no summary"}`);
+      pendingChildDeliverables.push({
+        childSessionId: msg.childSessionId,
+        childRole: msg.childRole,
+        deliverable: msg.deliverable,
+        receivedAt: Date.now(),
+      });
     }
   } catch {}
 });

@@ -1,9 +1,12 @@
 ---
 name: ship-it
 description: Deploy apps to Navi Cloud with one command. Use when the user says "ship it", "deploy this", "make it live", "publish", or wants to deploy their vibe-coded app to production.
+experimental: true
 ---
 
 # Ship It - Deploy to Navi Cloud
+
+> **⚠️ Experimental Feature**: This skill requires the "Deploy to Cloud" experimental feature to be enabled in Settings → Experimental.
 
 Deploy apps to `*.usenavi.app` with zero configuration.
 

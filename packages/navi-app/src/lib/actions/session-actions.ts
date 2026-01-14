@@ -8,6 +8,7 @@ import {
   cleanupAuxiliaryStores,
   sessionBackendStore,
   defaultBackend,
+  loadingMessagesSessions,
   type ChatMessage,
   type BackendId,
 } from "../stores";
@@ -158,6 +159,13 @@ export async function selectSession(s: Session) {
   // Clean up auxiliary data from old sessions (LRU eviction)
   cleanupAuxiliaryStores(s.id);
 
+  // Set loading state BEFORE updating currentSession so the UI shows loading immediately
+  const messages = get(sessionMessages);
+  const needsLoad = !messages.has(s.id);
+  if (needsLoad) {
+    loadingMessagesSessions.update(set => { set.add(s.id); return new Set(set); });
+  }
+
   currentSession.setSession(s.id, s.claude_session_id);
   currentSession.setCost(s.total_cost_usd || 0);
   currentSession.setUsage(s.input_tokens || 0, s.output_tokens || 0);
@@ -194,14 +202,16 @@ export async function selectSession(s: Session) {
   }
 
   // Load messages if not already loaded (paginated - most recent first)
-  const messages = get(sessionMessages);
-  if (!messages.has(s.id)) {
+  if (needsLoad) {
     try {
       const result = await api.messages.listPaginated(s.id, MESSAGE_PAGE_SIZE, 0);
       const loadedMsgs = parseMessages(result.messages);
       sessionMessages.setMessagesPaginated(s.id, loadedMsgs, result.total, result.hasMore);
     } catch (e) {
       showError({ title: "Messages Error", message: "Failed to load chat messages", error: e });
+    } finally {
+      // Clear loading state
+      loadingMessagesSessions.update(set => { set.delete(s.id); return new Set(set); });
     }
   }
 
@@ -270,11 +280,24 @@ export async function deleteSession(id: string): Promise<boolean> {
 
 export async function duplicateSession(sess: Session): Promise<Session | null> {
   try {
-    const forked = await api.sessions.fork(sess.id, { title: `${sess.title} (copy)` });
+    const result = await api.sessions.fork(sess.id, { title: `${sess.title} (copy)` });
+    const { historyContext, ...forked } = result;
+
     const sessions = callbacks?.getSidebarSessions() || [];
     callbacks?.setSidebarSessions([forked, ...sessions]);
     callbacks?.loadRecentChats();
     await selectSession(forked);
+
+    // If the fork returned historyContext (no SDK session was copied),
+    // store it so Claude has context for the first message
+    if (historyContext) {
+      const { sessionHistoryContext } = await import("../stores");
+      sessionHistoryContext.update(map => {
+        map.set(forked.id, historyContext);
+        return new Map(map);
+      });
+    }
+
     return forked;
   } catch (err) {
     showError({ title: "Duplicate Failed", message: "Failed to duplicate chat", error: err });
@@ -282,90 +305,83 @@ export async function duplicateSession(sess: Session): Promise<Session | null> {
   }
 }
 
-export async function updateSessionTitle(sessionId: string, title: string): Promise<boolean> {
+export function updateSessionTitle(sessionId: string, title: string): boolean {
   if (!title.trim()) return false;
 
-  try {
-    await api.sessions.update(sessionId, { title: title.trim() });
-    const sessions = callbacks?.getSidebarSessions() || [];
-    callbacks?.setSidebarSessions(
-      sessions.map(s => s.id === sessionId ? { ...s, title: title.trim() } : s)
-    );
-    return true;
-  } catch (e) {
+  const sessions = callbacks?.getSidebarSessions() || [];
+  const previousSessions = sessions;
+  callbacks?.setSidebarSessions(
+    sessions.map(s => s.id === sessionId ? { ...s, title: title.trim() } : s)
+  );
+  api.sessions.update(sessionId, { title: title.trim() }).catch((e) => {
+    callbacks?.setSidebarSessions(previousSessions);
     showError({ title: "Update Failed", message: "Failed to update chat title", error: e });
-    return false;
-  }
+  });
+  return true;
 }
 
-export async function toggleSessionPin(sess: Session): Promise<boolean> {
+export function toggleSessionPin(sess: Session): void {
   const newPinned = !sess.pinned;
-  try {
-    await api.sessions.togglePin(sess.id, newPinned);
-    const sessions = callbacks?.getSidebarSessions() || [];
-    const updated = sessions
-      .map(s => s.id === sess.id ? { ...s, pinned: newPinned ? 1 : 0 } : s)
-      .sort((a, b) => {
-        if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
-        if ((b.favorite || 0) !== (a.favorite || 0)) return (b.favorite || 0) - (a.favorite || 0);
-        if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
-        return b.updated_at - a.updated_at;
-      });
-    callbacks?.setSidebarSessions(updated);
-    return true;
-  } catch (e) {
-    // Silent for pin toggle - not critical
-    console.error("Failed to toggle session pin:", e);
-    return false;
-  }
+  const sessions = callbacks?.getSidebarSessions() || [];
+  const previousSessions = sessions;
+  const updated = sessions
+    .map(s => s.id === sess.id ? { ...s, pinned: newPinned ? 1 : 0 } : s)
+    .sort((a, b) => {
+      if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+      if ((b.favorite || 0) !== (a.favorite || 0)) return (b.favorite || 0) - (a.favorite || 0);
+      if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
+      return b.updated_at - a.updated_at;
+    });
+  callbacks?.setSidebarSessions(updated);
+  api.sessions.togglePin(sess.id, newPinned).catch(() => {
+    callbacks?.setSidebarSessions(previousSessions);
+  });
 }
 
-export async function toggleSessionFavorite(sess: Session): Promise<boolean> {
+export function toggleSessionFavorite(sess: Session): void {
   const newFavorite = !sess.favorite;
-  try {
-    await api.sessions.toggleFavorite(sess.id, newFavorite);
-    const sessions = callbacks?.getSidebarSessions() || [];
-    const updated = sessions
-      .map(s => s.id === sess.id ? { ...s, favorite: newFavorite ? 1 : 0 } : s)
-      .sort((a, b) => {
-        if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
-        if ((b.favorite || 0) !== (a.favorite || 0)) return (b.favorite || 0) - (a.favorite || 0);
-        if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
-        return b.updated_at - a.updated_at;
-      });
-    callbacks?.setSidebarSessions(updated);
-    return true;
-  } catch (e) {
-    // Silent for favorite toggle - not critical
-    console.error("Failed to toggle session favorite:", e);
-    return false;
-  }
+  const sessions = callbacks?.getSidebarSessions() || [];
+  const previousSessions = sessions;
+  const updated = sessions
+    .map(s => s.id === sess.id ? { ...s, favorite: newFavorite ? 1 : 0 } : s)
+    .sort((a, b) => {
+      if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+      if ((b.favorite || 0) !== (a.favorite || 0)) return (b.favorite || 0) - (a.favorite || 0);
+      if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
+      return b.updated_at - a.updated_at;
+    });
+  callbacks?.setSidebarSessions(updated);
+  api.sessions.toggleFavorite(sess.id, newFavorite).catch(() => {
+    callbacks?.setSidebarSessions(previousSessions);
+  });
 }
 
-export async function toggleSessionArchive(sess: Session, showArchivedWorkspaces: boolean): Promise<boolean> {
+export function toggleSessionArchive(sess: Session, showArchivedWorkspaces: boolean): void {
   const newArchived = !sess.archived;
-  try {
-    await api.sessions.setArchived(sess.id, newArchived);
-    const sessions = callbacks?.getSidebarSessions() || [];
+  const sessions = callbacks?.getSidebarSessions() || [];
+  const previousSessions = sessions;
+  const previousSessionId = get(currentSession).sessionId;
 
-    if (newArchived && !showArchivedWorkspaces) {
-      // Remove from sidebar if archiving and not showing archived
-      callbacks?.setSidebarSessions(sessions.filter(s => s.id !== sess.id));
-      const session = get(currentSession);
-      if (session.sessionId === sess.id) {
-        currentSession.setSession(null);
-      }
-    } else {
-      callbacks?.setSidebarSessions(
-        sessions.map(s => s.id === sess.id ? { ...s, archived: newArchived ? 1 : 0 } : s)
-      );
+  if (newArchived && !showArchivedWorkspaces) {
+    // Remove from sidebar if archiving and not showing archived
+    callbacks?.setSidebarSessions(sessions.filter(s => s.id !== sess.id));
+    if (previousSessionId === sess.id) {
+      currentSession.setSession(null);
     }
-    callbacks?.loadRecentChats();
-    return true;
-  } catch (err) {
-    showError({ title: "Archive Failed", message: "Failed to toggle chat archive", error: err });
-    return false;
+  } else {
+    callbacks?.setSidebarSessions(
+      sessions.map(s => s.id === sess.id ? { ...s, archived: newArchived ? 1 : 0 } : s)
+    );
   }
+  callbacks?.loadRecentChats();
+
+  api.sessions.setArchived(sess.id, newArchived).catch((err) => {
+    callbacks?.setSidebarSessions(previousSessions);
+    if (previousSessionId === sess.id && newArchived && !showArchivedWorkspaces) {
+      currentSession.setSession(previousSessionId);
+    }
+    showError({ title: "Archive Failed", message: "Failed to toggle chat archive", error: err });
+  });
 }
 
 export async function reorderSessions(projectId: string, sessionIds: string[]): Promise<boolean> {

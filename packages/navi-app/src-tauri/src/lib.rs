@@ -503,6 +503,34 @@ async fn open_project_in_new_window(
     Ok(())
 }
 
+#[tauri::command(rename_all = "camelCase")]
+async fn open_session_in_new_window(
+    app: tauri::AppHandle,
+    project_id: String,
+    session_id: String,
+    session_title: String,
+) -> Result<(), String> {
+    let window_num = WINDOW_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let window_label = format!("session-{}", window_num);
+
+    // Build URL with project ID and session ID as hash parameters
+    let url = format!("index.html#/project/{}/chat/{}", project_id, session_id);
+
+    WebviewWindowBuilder::new(
+        &app,
+        &window_label,
+        WebviewUrl::App(url.into())
+    )
+    .title(format!("Navi - {}", session_title))
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(800.0, 600.0)
+    .center()
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 /// Check for updates and show dialog if available
 #[cfg(desktop)]
 async fn check_for_updates_with_dialog(app: tauri::AppHandle) {
@@ -683,6 +711,7 @@ pub fn run() {
             greet,
             get_server_ports,
             open_project_in_new_window,
+            open_session_in_new_window,
             send_notification,
             set_dock_badge,
             add_recent_project,

@@ -16,8 +16,11 @@ export interface CustomCommand {
   name: string;
   description: string;
   argsHint?: string;
-  source: "global" | "project";
+  source: "global" | "project" | "plugin";
   path: string;
+  // Plugin-specific fields
+  pluginId?: string;
+  pluginName?: string;
 }
 
 export interface CustomCommandWithContent extends CustomCommand {
@@ -29,15 +32,42 @@ const API_BASE = () => getApiBase();
 
 /**
  * Fetch all custom commands for a project (basic list without settings)
+ * Includes both local commands and plugin commands
  */
 export async function fetchCommands(projectPath?: string): Promise<CustomCommand[]> {
+  // Fetch local commands
   const params = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : "";
-  const res = await fetch(`${API_BASE()}/commands${params}`);
-  if (!res.ok) {
-    console.error("Failed to fetch commands:", await res.text());
-    return [];
+  const localRes = await fetch(`${API_BASE()}/commands${params}`);
+
+  let localCommands: CustomCommand[] = [];
+  if (localRes.ok) {
+    localCommands = await localRes.json();
+  } else {
+    console.error("Failed to fetch local commands:", await localRes.text());
   }
-  return res.json();
+
+  // Fetch plugin commands if we have a project path
+  let pluginCommands: CustomCommand[] = [];
+  if (projectPath) {
+    try {
+      const pluginRes = await fetch(`${API_BASE()}/plugins/commands?cwd=${encodeURIComponent(projectPath)}`);
+      if (pluginRes.ok) {
+        const pluginCmds = await pluginRes.json();
+        pluginCommands = pluginCmds.map((cmd: any) => ({
+          name: cmd.fullName, // Use full name (plugin:command) as the command name
+          description: cmd.description || `Command from ${cmd.pluginName}`,
+          source: "plugin" as const,
+          path: "",
+          pluginId: cmd.pluginId,
+          pluginName: cmd.pluginName,
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to fetch plugin commands:", err);
+    }
+  }
+
+  return [...localCommands, ...pluginCommands];
 }
 
 /**

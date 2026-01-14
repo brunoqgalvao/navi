@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, planMode } from "../stores";
+  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, planMode, loopModeEnabled } from "../stores";
   import { agents, type Agent } from "../stores/agents";
   import FileAttachment from "./FileAttachment.svelte";
   import ReferenceChip from "./ReferenceChip.svelte";
@@ -78,6 +78,8 @@
     onManageMcp?: () => void;
     onNavigateToChat?: (sessionId: string) => void;
     onToggleUntilDone?: () => void;
+    onOpenInfiniteLoop?: () => void;  // Open infinite loop config modal
+    isInfiniteLoopMode?: boolean;     // Whether infinite loop mode is active
     onCreateWithWorktree?: (description: string, message: string) => void;
     onMergeWorktree?: () => void;
     onArchiveSession?: () => void;
@@ -92,7 +94,7 @@
     onUICommand?: (command: string, args?: string) => boolean; // Return true if handled
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], backend = "claude", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, onBackendChange, slashCommands = [], onUICommand }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], backend = "claude", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, onBackendChange, slashCommands = [], onUICommand }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
@@ -112,6 +114,7 @@
   }
 
   let showSkillsMenu = $state(false);
+  let showLoopMenu = $state(false);
   let showMcpMenu = $state(false);
 
   // Compute enabled MCP servers count (exclude built-in/native MCPs)
@@ -873,7 +876,8 @@
   function parseHighlights(text: string): HighlightSegment[] {
     const segments: HighlightSegment[] = [];
     // Match @chat:"..." @terminal:"..." and @path/to/file - must be at start or preceded by whitespace (not email)
-    const mentionRegex = /(?:^|(?<=\s))(@chat:"[^"]*"|@terminal:"[^"]*"|@[\w./\-]+)/g;
+    // Extended to support unicode characters (accented letters), underscores, and common filename chars
+    const mentionRegex = /(?:^|(?<=\s))(@chat:"[^"]*"|@terminal:"[^"]*"|@[\p{L}\p{N}_./\-]+)/gu;
     let lastIndex = 0;
     let match;
 
@@ -1099,11 +1103,9 @@
       </div>
     {:else if $planMode}
       <!-- Plan Mode indicator -->
-      <div class="absolute left-3 top-2 flex items-center gap-1.5 text-[10px] font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 px-2 py-0.5 rounded z-10">
-        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-        </svg>
-        <span>plan mode</span>
+      <div class="absolute left-3 top-2 flex items-center gap-1.5 text-[10px] font-medium text-violet-600 dark:text-violet-300 bg-violet-500/10 dark:bg-violet-500/20 px-2 py-0.5 rounded-full z-10 backdrop-blur-sm border border-violet-500/20 dark:border-violet-400/20">
+        <span class="w-1.5 h-1.5 rounded-full bg-violet-500 dark:bg-violet-400 plan-dot-pulse"></span>
+        <span>plan</span>
       </div>
     {/if}
 
@@ -1122,7 +1124,7 @@
           {:else if segment.type === "file"}
             <span class="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded-md px-0.5 -mx-0.5 box-decoration-clone">{segment.text}</span>
           {:else}
-            <span class="text-transparent">{segment.text}</span>
+            <span class="text-gray-900 dark:text-gray-100">{segment.text}</span>
           {/if}
         {/each}
       </div>
@@ -1137,6 +1139,10 @@
       onscroll={syncScroll}
       placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : ($planMode ? "Describe what you want to build... Claude will plan first" : "Message Claude... (@ files, @terminal, @chat, ! shell)")}
       {disabled}
+      spellcheck="false"
+      autocomplete="off"
+      autocorrect="off"
+      autocapitalize="off"
       class="w-full bg-transparent border-none rounded-xl pl-4 pr-24 {isShellCommand(value) ? 'pt-8 text-[#c0caf5] placeholder-[#565f89] font-mono' : $planMode ? 'pt-8 placeholder-indigo-400 dark:placeholder-indigo-500' : 'pt-3.5 placeholder-gray-400 dark:placeholder-gray-500'} pb-3.5 focus:outline-none focus:ring-0 resize-none min-h-[56px] text-[15px] disabled:opacity-50 overflow-y-auto relative z-[1]"
       rows="1"
       style={!isShellCommand(value) && highlightedSegments.some(s => s.type !== "text") ? "color: transparent; caret-color: #111;" : ""}
@@ -1562,17 +1568,85 @@
         </button>
       </Tooltip>
 
-      <!-- Loop/Until Done toggle -->
-      <Tooltip text={untilDoneEnabled ? 'Loop Mode: ON' : 'Loop Mode'} position="top">
-        <button
-          onclick={() => onToggleUntilDone?.()}
-          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {untilDoneEnabled ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-          </svg>
-        </button>
-      </Tooltip>
+      <!-- Loop/Until Done toggle (experimental) -->
+      {#if $loopModeEnabled}
+        <div class="relative">
+          <Tooltip text={isInfiniteLoopMode ? '∞ Infinite Loop' : untilDoneEnabled ? 'Loop Mode: ON' : 'Loop Mode'} position="top">
+            <button
+              onclick={() => showLoopMenu = !showLoopMenu}
+              class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {isInfiniteLoopMode ? 'bg-emerald-200 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-300 dark:hover:bg-emerald-800/70' : untilDoneEnabled ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+            >
+              {#if isInfiniteLoopMode}
+                <span class="text-sm font-bold">∞</span>
+              {:else}
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+              {/if}
+            </button>
+          </Tooltip>
+
+          {#if showLoopMenu}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="fixed inset-0 z-40"
+              onclick={() => showLoopMenu = false}
+            ></div>
+            <div class="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-2 z-50">
+              <div class="px-3 py-2 text-[11px] text-gray-500 dark:text-gray-400 font-semibold uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                🔄 Loop Mode
+              </div>
+
+              <!-- Basic Loop Mode -->
+              <button
+                onclick={() => { onToggleUntilDone?.(); showLoopMenu = false; }}
+                class="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3"
+              >
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center {untilDoneEnabled && !isInfiniteLoopMode ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="font-medium text-gray-900 dark:text-gray-100">Basic Loop</div>
+                  <div class="text-xs text-gray-500 dark:text-gray-400">Pattern-based completion</div>
+                </div>
+                {#if untilDoneEnabled && !isInfiniteLoopMode}
+                  <span class="ml-auto text-emerald-500">✓</span>
+                {/if}
+              </button>
+
+              <!-- Infinite Loop Mode -->
+              <button
+                onclick={() => { onOpenInfiniteLoop?.(); showLoopMenu = false; }}
+                class="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3"
+              >
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center {isInfiniteLoopMode ? 'bg-emerald-200 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">
+                  <span class="text-sm font-bold">∞</span>
+                </div>
+                <div>
+                  <div class="font-medium text-gray-900 dark:text-gray-100">Infinite Loop</div>
+                  <div class="text-xs text-gray-500 dark:text-gray-400">With verifier & DoD</div>
+                </div>
+                {#if isInfiniteLoopMode}
+                  <span class="ml-auto text-emerald-500">✓</span>
+                {/if}
+              </button>
+
+              {#if untilDoneEnabled || isInfiniteLoopMode}
+                <div class="border-t border-gray-100 dark:border-gray-700 mt-1 pt-1">
+                  <button
+                    onclick={() => { onToggleUntilDone?.(); showLoopMenu = false; }}
+                    class="w-full px-3 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    Stop Loop
+                  </button>
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       <!-- Skills dropdown -->
       <div class="relative">
@@ -1699,3 +1773,14 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .plan-dot-pulse {
+    animation: dot-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes dot-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+</style>

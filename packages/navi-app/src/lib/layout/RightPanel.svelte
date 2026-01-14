@@ -16,12 +16,14 @@
   import { KanbanPanel } from "../features/kanban";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
+  import ResourceMonitorPanel from "../components/ResourceMonitorPanel.svelte";
   import PreviewPanel from "../components/PreviewPanel.svelte";
   import EmailPanel from "../features/email/EmailPanel.svelte";
+  import { ContextPanel } from "../features/context";
   import AuthGate from "../components/AuthGate.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "email";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "resources";
 
   interface Props {
     mode: PanelMode;
@@ -285,6 +287,11 @@
           {onElementInspected}
         />
       </div>
+    {:else if mode === "context"}
+      <!-- Context panel - session context visibility -->
+      <div class="flex-1 flex flex-col w-full overflow-hidden">
+        <ContextPanel {sessionId} />
+      </div>
     {:else if mode === "email"}
       <!-- Email panel - requires auth -->
       <div class="flex-1 flex flex-col w-full overflow-hidden">
@@ -293,6 +300,11 @@
             <EmailPanel />
           {/snippet}
         </AuthGate>
+      </div>
+    {:else if mode === "resources"}
+      <!-- Resource Monitor panel - @experimental -->
+      <div class="flex-1 flex flex-col w-full overflow-hidden">
+        <ResourceMonitorPanel />
       </div>
     {/if}
   </div>

@@ -245,6 +245,16 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     defaultEnabled: true,
     defaultOrder: 6,
   },
+  context: {
+    id: "context",
+    name: "Context",
+    icon: "layers",
+    description: "Session context visibility - see what Claude has accessed",
+    panelMode: "context",
+    requiresProject: false,
+    defaultEnabled: true,
+    defaultOrder: 7,
+  },
   email: {
     id: "email",
     name: "Email",
@@ -264,6 +274,16 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     requiresProject: false,
     defaultEnabled: false,
     defaultOrder: 101,
+  },
+  resources: {
+    id: "resources",
+    name: "Resources",
+    icon: "activity",
+    description: "Monitor Navi server & process resource usage (experimental)",
+    panelMode: "resources",
+    requiresProject: false,
+    defaultEnabled: false, // @experimental - disabled by default
+    defaultOrder: 102,
   },
 };
 

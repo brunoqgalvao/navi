@@ -412,6 +412,13 @@ async function getContainerPreviewsAsProcesses(filter?: {
 }
 
 /**
+ * Get all background processes (for resource monitoring)
+ */
+export function getBackgroundProcesses(): Omit<BackgroundProcess, "process">[] {
+  return Array.from(backgroundProcesses.values()).map(sanitizeProcessForApi);
+}
+
+/**
  * Get a specific background process
  */
 export function getBackgroundProcess(id: string): Omit<BackgroundProcess, "process"> | null {

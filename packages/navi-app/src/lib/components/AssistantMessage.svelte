@@ -16,6 +16,9 @@
   import { parseCopyableContent } from "../copyable-parser";
   import { parseMarkdownFileContent } from "../markdown-file-parser";
   import CopyableText from "./CopyableText.svelte";
+  import TextSelectionContextMenu from "./TextSelectionContextMenu.svelte";
+  import AgentBrowserWidget from "./widgets/AgentBrowserWidget.svelte";
+  import { isAgentBrowserCommand } from "$lib/utils/agent-browser-parser";
 
   interface Props {
     content: ContentBlock[];
@@ -30,6 +33,8 @@
     onRunInTerminal?: (command: string) => void;
     onSendToClaude?: (context: string) => void;
     onMessageClick?: (e: MouseEvent) => void;
+    onQuoteText?: (text: string) => void;
+    onForkWithQuote?: (text: string) => void;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
     shellBlocksMap?: Map<string, { code: string; language: string }>;
@@ -49,6 +54,8 @@
     onRunInTerminal,
     onSendToClaude,
     onMessageClick,
+    onQuoteText,
+    onForkWithQuote,
     renderMarkdown,
     jsonBlocksMap = new Map(),
     shellBlocksMap = new Map(),
@@ -59,6 +66,33 @@
   let showDeleteConfirm = $state(false);
   let expandedBlocks = $state<Set<number>>(new Set());
   let openSubagentModal = $state<{ toolUseId: string; description: string; subagentType: string } | null>(null);
+
+  // Text selection context menu state
+  let selectionMenu = $state<{ x: number; y: number; text: string } | null>(null);
+
+  function handleContextMenu(e: MouseEvent) {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim();
+
+    if (selectedText && selectedText.length > 0) {
+      e.preventDefault();
+      selectionMenu = {
+        x: e.clientX,
+        y: e.clientY,
+        text: selectedText,
+      };
+    }
+  }
+
+  function handleQuote(text: string) {
+    onQuoteText?.(text);
+    selectionMenu = null;
+  }
+
+  function handleForkWithQuote(text: string) {
+    onForkWithQuote?.(text);
+    selectionMenu = null;
+  }
 
   function toggleBlock(idx: number) {
     if (expandedBlocks.has(idx)) {
@@ -83,6 +117,10 @@
 
   function isTodoWrite(block: ToolUseBlock): boolean {
     return block.name === "TodoWrite";
+  }
+
+  function isAgentBrowserTool(block: ToolUseBlock): boolean {
+    return block.name === "Bash" && isAgentBrowserCommand(block.input?.command || "");
   }
 
   function getToolSummary(tool: ToolUseBlock): string {
@@ -205,7 +243,7 @@
   <div class="w-full relative group">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="flex-1 min-w-0 relative space-y-2" onclick={onMessageClick}>
+    <div class="flex-1 min-w-0 relative space-y-2" onclick={onMessageClick} oncontextmenu={handleContextMenu}>
       <!-- Hover actions -->
       <div class="absolute -top-5 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm px-1 py-0.5 z-20">
         <CopyButton text={copyText} />
@@ -283,6 +321,14 @@
             todos={tool.input?.todos || []}
             {expanded}
             onToggle={() => toggleBlock(originalIdx)}
+          />
+        {:else if isAgentBrowserTool(tool)}
+          {@const resultContent = result ? extractToolResultContent(result.content) : ''}
+          <AgentBrowserWidget
+            command={tool.input?.command || ""}
+            output={resultContent}
+            isError={result?.is_error}
+            isRunning={!result}
           />
         {:else}
           {@const expanded = expandedBlocks.has(originalIdx)}
@@ -403,6 +449,18 @@
     {/each}
     </div>
   </div>
+
+<!-- Text Selection Context Menu -->
+{#if selectionMenu}
+  <TextSelectionContextMenu
+    x={selectionMenu.x}
+    y={selectionMenu.y}
+    selectedText={selectionMenu.text}
+    onQuote={handleQuote}
+    onForkWithQuote={handleForkWithQuote}
+    onClose={() => selectionMenu = null}
+  />
+{/if}
 
 <!-- Subagent Modal -->
 <SubagentModal

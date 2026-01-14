@@ -145,6 +145,16 @@ export const DEFAULT_EXTENSIONS: Record<string, Extension> = {
     defaultEnabled: true,
     defaultOrder: 6,
   },
+  context: {
+    id: "context",
+    name: "Context",
+    icon: "layers",
+    description: "Session context visibility - see what Claude has accessed",
+    panelMode: "context",
+    requiresProject: false,
+    defaultEnabled: true,
+    defaultOrder: 7,
+  },
 };
 
 /**

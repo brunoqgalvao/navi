@@ -3,6 +3,7 @@
   import CopyButton from "./CopyButton.svelte";
   import MediaDisplay from "./MediaDisplay.svelte";
   import UserReferenceDisplay from "./UserReferenceDisplay.svelte";
+  import TextSelectionContextMenu from "./TextSelectionContextMenu.svelte";
   import { parseUserMediaContent, type MediaItem } from "../media-parser";
 
   interface Props {
@@ -18,6 +19,8 @@
     onFork?: () => void;
     onDelete?: () => void;
     onPreview?: (path: string) => void;
+    onQuoteText?: (text: string) => void;
+    onForkWithQuote?: (text: string) => void;
   }
 
   let {
@@ -32,12 +35,41 @@
     onRollback,
     onFork,
     onDelete,
-    onPreview
+    onPreview,
+    onQuoteText,
+    onForkWithQuote,
   }: Props = $props();
 
   let showDeleteConfirm = $state(false);
 
   let showMenu = $state(false);
+
+  // Text selection context menu state
+  let selectionMenu = $state<{ x: number; y: number; text: string } | null>(null);
+
+  function handleContextMenu(e: MouseEvent) {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim();
+
+    if (selectedText && selectedText.length > 0) {
+      e.preventDefault();
+      selectionMenu = {
+        x: e.clientX,
+        y: e.clientY,
+        text: selectedText,
+      };
+    }
+  }
+
+  function handleQuote(text: string) {
+    onQuoteText?.(text);
+    selectionMenu = null;
+  }
+
+  function handleForkWithQuote(text: string) {
+    onForkWithQuote?.(text);
+    selectionMenu = null;
+  }
 
   interface ParsedContent {
     files: { path: string; name: string }[];
@@ -134,7 +166,8 @@
       </div>
     </div>
   {:else}
-    <div class="bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-4 py-2 rounded-xl rounded-tr-sm text-sm leading-normal max-w-[85%] w-fit">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-4 py-2 rounded-xl rounded-tr-sm text-sm leading-normal max-w-[85%] w-fit" oncontextmenu={handleContextMenu}>
       {#if parsed.files.length > 0}
         <div class="mb-2">
           <FileAttachment files={parsed.files} onPreview={onPreview} />
@@ -219,3 +252,15 @@
     {timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
   </span>
 </div>
+
+<!-- Text Selection Context Menu -->
+{#if selectionMenu}
+  <TextSelectionContextMenu
+    x={selectionMenu.x}
+    y={selectionMenu.y}
+    selectedText={selectionMenu.text}
+    onQuote={handleQuote}
+    onForkWithQuote={handleForkWithQuote}
+    onClose={() => selectionMenu = null}
+  />
+{/if}

@@ -304,15 +304,15 @@ export async function createProject(
   }
 }
 
-export async function updateProject(projectId: string, name: string, path: string): Promise<boolean> {
-  try {
-    await api.projects.update(projectId, { name, path });
-    await loadProjects();
-    return true;
-  } catch (e) {
+export function updateProject(projectId: string, name: string, path: string): boolean {
+  const projects = getSidebarProjectsValue();
+  const previousProjects = projects;
+  setSidebarProjectsValue(projects.map(p => p.id === projectId ? { ...p, name, path } : p));
+  api.projects.update(projectId, { name, path }).catch((e) => {
+    setSidebarProjectsValue(previousProjects);
     showError({ title: "Update Failed", message: "Failed to update project", error: e });
-    return false;
-  }
+  });
+  return true;
 }
 
 export async function deleteProject(projectId: string): Promise<boolean> {
@@ -331,23 +331,21 @@ export async function deleteProject(projectId: string): Promise<boolean> {
   }
 }
 
-export async function toggleProjectPin(project: Project): Promise<boolean> {
+export function toggleProjectPin(project: Project): void {
   const newPinned = !project.pinned;
-  try {
-    await api.projects.togglePin(project.id, newPinned);
-    const projects = getSidebarProjectsValue();
-    const updated = projects
-      .map(p => p.id === project.id ? { ...p, pinned: newPinned ? 1 : 0 } : p)
-      .sort((a, b) => {
-        if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
-        return (a.sort_order || 0) - (b.sort_order || 0);
-      });
-    setSidebarProjectsValue(updated);
-    return true;
-  } catch (e) {
+  const projects = getSidebarProjectsValue();
+  const previousProjects = projects;
+  const updated = projects
+    .map(p => p.id === project.id ? { ...p, pinned: newPinned ? 1 : 0 } : p)
+    .sort((a, b) => {
+      if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+      return (a.sort_order || 0) - (b.sort_order || 0);
+    });
+  setSidebarProjectsValue(updated);
+  api.projects.togglePin(project.id, newPinned).catch((e) => {
+    setSidebarProjectsValue(previousProjects);
     showError({ title: "Pin Failed", message: "Failed to toggle project pin", error: e });
-    return false;
-  }
+  });
 }
 
 export async function reorderProjects(projectIds: string[]): Promise<boolean> {

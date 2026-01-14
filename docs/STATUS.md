@@ -131,6 +131,36 @@ Working features that don't need active development.
 
 ---
 
+### Loop Mode
+**Status:** EXPERIMENTAL - Default OFF
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Feature flag | `stores/ui.ts` (`loopModeEnabled`) | Toggle in Settings |
+| UI toggle | `components/ChatInput.svelte` | Button in chat input |
+| Handler | `handlers/useMessageHandler.ts` | Until-done iteration logic |
+
+**Enable:** Settings → Experimental → Loop Mode
+
+**Goal:** Allow Claude to continue working automatically until a task is complete.
+
+---
+
+### Deploy to Cloud
+**Status:** EXPERIMENTAL - Default OFF
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Feature flag | `stores/ui.ts` (`deployToCloudEnabled`) | Toggle in Settings |
+| Routes | `routes/deploy.ts` | API endpoints for deployment |
+| Skill | `.claude/skills/ship-it/` | "Ship it" deployment skill |
+
+**Enable:** Settings → Experimental → Deploy to Cloud
+
+**Goal:** Deploy apps to Navi Cloud (`*.usenavi.app`) with zero configuration.
+
+---
+
 ## DEPRECATED / TO REMOVE
 
 These features are candidates for removal.

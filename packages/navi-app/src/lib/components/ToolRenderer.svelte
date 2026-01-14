@@ -6,6 +6,11 @@
   import WebSearchPreview from "./tools/WebSearchPreview.svelte";
   import WebFetchPreview from "./tools/WebFetchPreview.svelte";
   import BashPreview from "./tools/BashPreview.svelte";
+  import UserInteractionWidget from "./tools/mcp/UserInteractionWidget.svelte";
+  import MultiSessionWidget from "./tools/mcp/MultiSessionWidget.svelte";
+  import NaviContextWidget from "./tools/mcp/NaviContextWidget.svelte";
+  import AgentBrowserWidget from "./widgets/AgentBrowserWidget.svelte";
+  import { isAgentBrowserCommand } from "$lib/utils/agent-browser-parser";
 
   interface Props {
     tool: ToolUseBlock;
@@ -19,8 +24,23 @@
   }
 
   let { tool, toolResult, onPreview, onRunInTerminal, onSendToClaude, compact = false, index, hideHeader = false }: Props = $props();
-  
+
   const input = $derived(tool.input || {});
+
+  // Check if this is a native MCP tool that we have custom UI for
+  function parseNativeMcpInfo(): { server: string; toolName: string } | null {
+    const match = tool.name.match(/^mcp__([^_]+)__(.+)$/);
+    if (!match) return null;
+    const [, server, mcpToolName] = match;
+    // Only handle our built-in native MCPs
+    if (['user-interaction', 'multi-session', 'navi-context'].includes(server)) {
+      return { server, toolName: mcpToolName };
+    }
+    return null;
+  }
+
+  const nativeMcpInfo = $derived(parseNativeMcpInfo());
+  const isNativeMcp = $derived(!!nativeMcpInfo);
 
   const toolIcons: Record<string, string> = {
     Read: "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253",
@@ -129,7 +149,31 @@
   }
 </script>
 
-{#if compact}
+{#if isNativeMcp && nativeMcpInfo}
+  <!-- Native MCP tools get purpose-built UIs -->
+  {#if nativeMcpInfo.server === 'user-interaction'}
+    <UserInteractionWidget
+      toolName={nativeMcpInfo.toolName}
+      input={input}
+      result={toolResult}
+      {compact}
+    />
+  {:else if nativeMcpInfo.server === 'multi-session'}
+    <MultiSessionWidget
+      toolName={nativeMcpInfo.toolName}
+      input={input}
+      result={toolResult}
+      {compact}
+    />
+  {:else if nativeMcpInfo.server === 'navi-context'}
+    <NaviContextWidget
+      toolName={nativeMcpInfo.toolName}
+      input={input}
+      result={toolResult}
+      {compact}
+    />
+  {/if}
+{:else if compact}
   <div class="flex items-center gap-2 py-1 px-2 rounded border border-gray-200 bg-gray-50/50 text-xs">
     {#if index !== undefined}
       <span class="text-[10px] text-gray-400 font-mono w-4">#{index + 1}</span>
@@ -200,15 +244,24 @@
       />
 
     {:else if tool.name === "Bash"}
-      <BashPreview
-        command={input.command || ""}
-        description={input.description}
-        timeout={input.timeout}
-        resultContent={toolResult?.content}
-        isError={toolResult?.is_error}
-        {onRunInTerminal}
-        {onSendToClaude}
-      />
+      {#if isAgentBrowserCommand(input.command || "")}
+        <AgentBrowserWidget
+          command={input.command || ""}
+          output={toolResult?.content}
+          isError={toolResult?.is_error}
+          isRunning={!toolResult}
+        />
+      {:else}
+        <BashPreview
+          command={input.command || ""}
+          description={input.description}
+          timeout={input.timeout}
+          resultContent={toolResult?.content}
+          isError={toolResult?.is_error}
+          {onRunInTerminal}
+          {onSendToClaude}
+        />
+      {/if}
 
     {:else if tool.name === "Glob"}
       <div class="flex items-center gap-2 flex-wrap">
