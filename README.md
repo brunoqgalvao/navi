@@ -44,7 +44,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/brunogalvao/navi.git
+git clone https://github.com/brunoqgalvao/navi.git
 cd navi
 
 # Install dependencies
@@ -193,4 +193,4 @@ Built with amazing open-source tools:
 
 ---
 
-**Made with ❤️ by [Bruno Galvao](https://github.com/brunogalvao)**
+**Made with ❤️ by [Bruno Galvao](https://github.com/brunoqgalvao)**

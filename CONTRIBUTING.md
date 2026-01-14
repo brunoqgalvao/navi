@@ -58,7 +58,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/navi.git
+git clone https://github.com/brunoqgalvao/navi.git
 cd navi
 
 # Install dependencies

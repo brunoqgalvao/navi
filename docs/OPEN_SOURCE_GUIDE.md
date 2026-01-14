@@ -161,5 +161,5 @@ For cloud deployment:
 ## Questions?
 
 - **Documentation:** Check `docs/` folder
-- **Issues:** [GitHub Issues](https://github.com/brunogalvao/navi/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/brunogalvao/navi/discussions)
+- **Issues:** [GitHub Issues](https://github.com/brunoqgalvao/navi/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/brunoqgalvao/navi/discussions)
