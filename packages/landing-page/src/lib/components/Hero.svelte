@@ -80,9 +80,14 @@
         >
           Get Early Access
         </button>
-        <button class="px-8 py-4 bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:bg-gray-50 transition-all">
+        <a
+          href="https://github.com/brunoqgalvao/navi"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="px-8 py-4 bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:bg-gray-50 transition-all"
+        >
           View on GitHub
-        </button>
+        </a>
       </div>
     </div>
     

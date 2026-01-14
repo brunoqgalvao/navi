@@ -11,9 +11,7 @@
       </div>
       
       <div class="flex gap-8">
-        <a href="#" class="text-gray-500 hover:text-gray-900 transition-colors font-medium">Twitter</a>
-        <a href="#" class="text-gray-500 hover:text-gray-900 transition-colors font-medium">GitHub</a>
-        <a href="#" class="text-gray-500 hover:text-gray-900 transition-colors font-medium">Discord</a>
+        <a href="https://github.com/brunoqgalvao/navi" target="_blank" rel="noopener noreferrer" class="text-gray-500 hover:text-gray-900 transition-colors font-medium">GitHub</a>
       </div>
     </div>
     
