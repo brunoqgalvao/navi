@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, costsApi, containerPreviewApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project, type ContainerPreview } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, loopModeEnabled, deployToCloudEnabled, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
+  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
@@ -45,7 +45,8 @@
   let hasOAuth = $state(false);
   let preferredAuth: "oauth" | "api_key" | null = $state(null);
   let switchingAuth = $state(false);
-  let loading = $state(true);
+  let loadingApiTab = $state(false);
+  let apiTabLoaded = $state(false);
   let autoTitleEnabled = $state(true);
   let telemetryEnabled = $state(isTelemetryEnabled());
 
@@ -73,12 +74,16 @@
   let defaultTools = $state<string[]>([]);
   let dangerousTools = $state<string[]>([]);
   let savingPermissions = $state(false);
+  let loadingPermissions = $state(false);
+  let permissionsLoaded = $state(false);
 
   let defaultClaudeMd = $state("");
   let defaultClaudeMdExists = $state(false);
   let editingClaudeMd = $state(false);
   let claudeMdDraft = $state("");
   let savingClaudeMd = $state(false);
+  let loadingClaudeMd = $state(false);
+  let claudeMdLoaded = $state(false);
 
   // Update check state
   let updateCheckResult = $state<"up-to-date" | "available" | null>(null);
@@ -107,30 +112,39 @@
   ];
 
   onMount(() => {
-    if (open) loadStatus();
     // Ensure we have the current app version
     updateStore.getCurrentVersion();
   });
 
   $effect(() => {
-    if (open) {
-      loadStatus();
-    } else {
+    if (!open) {
       // Reset loaded flags when modal closes so data refreshes next time
       previewsLoaded = false;
+      apiTabLoaded = false;
+      permissionsLoaded = false;
+      claudeMdLoaded = false;
     }
   });
 
+  // Lazy load data per tab
   $effect(() => {
+    if (!open) return;
+
+    if (activeTab === "api" && !apiTabLoaded && !loadingApiTab) {
+      loadApiTab();
+    }
+    if (activeTab === "permissions" && !permissionsLoaded && !loadingPermissions) {
+      loadPermissionsTab();
+    }
+    if (activeTab === "claude-md" && !claudeMdLoaded && !loadingClaudeMd) {
+      loadClaudeMdTab();
+    }
     if (activeTab === "analytics" && !loadingAnalytics && projectsList.length === 0) {
       loadProjectsList();
     }
     if (activeTab === "analytics" && !analytics && !loadingAnalytics) {
       loadAnalytics();
     }
-  });
-
-  $effect(() => {
     if (activeTab === "previews" && !previewsLoaded && !loadingPreviews) {
       previewsLoaded = true;
       loadPreviews();
@@ -195,14 +209,12 @@
     loadAnalytics();
   }
 
-  async function loadStatus() {
-    loading = true;
+  async function loadApiTab() {
+    loadingApiTab = true;
     try {
-      const [config, auth, perms, claudeMd] = await Promise.all([
+      const [config, auth] = await Promise.all([
         api.config.get(),
         api.auth.status(),
-        api.permissions.get(),
-        api.claudeMd.getDefault(),
       ]);
       hasOpenAIKey = config.hasOpenAIKey;
       openAIKeyPreview = config.openAIKeyPreview;
@@ -215,15 +227,40 @@
       preferredAuth = auth.preferredAuth;
       hasZaiKey = auth.hasZaiKey;
       zaiKeyPreview = auth.zaiKeyPreview;
+      apiTabLoaded = true;
+    } catch (e) {
+      console.error("Failed to load API settings:", e);
+    } finally {
+      loadingApiTab = false;
+    }
+  }
+
+  async function loadPermissionsTab() {
+    loadingPermissions = true;
+    try {
+      const perms = await api.permissions.get();
       permissionSettings = perms.global;
       defaultTools = perms.defaults.tools;
       dangerousTools = perms.defaults.dangerous;
+      permissionsLoaded = true;
+    } catch (e) {
+      console.error("Failed to load permissions:", e);
+    } finally {
+      loadingPermissions = false;
+    }
+  }
+
+  async function loadClaudeMdTab() {
+    loadingClaudeMd = true;
+    try {
+      const claudeMd = await api.claudeMd.getDefault();
       defaultClaudeMd = claudeMd.content;
       defaultClaudeMdExists = claudeMd.exists;
+      claudeMdLoaded = true;
     } catch (e) {
-      console.error("Failed to load settings:", e);
+      console.error("Failed to load CLAUDE.md:", e);
     } finally {
-      loading = false;
+      loadingClaudeMd = false;
     }
   }
 
@@ -476,14 +513,15 @@
         </div>
 
         <div class="flex-1 overflow-y-auto p-6">
-          {#if loading}
-            <div class="flex items-center justify-center h-full">
-              <svg class="w-8 h-8 animate-spin text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            </div>
-          {:else if activeTab === "api"}
+          {#if activeTab === "api"}
+            {#if loadingApiTab}
+              <div class="flex items-center justify-center h-32">
+                <svg class="w-6 h-6 animate-spin text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            {:else}
             <div class="space-y-6 max-w-2xl">
               <div>
                 <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">API Keys</h4>
@@ -825,6 +863,7 @@
                 </div>
               </div>
             </div>
+            {/if}
 
           {:else if activeTab === "integrations"}
             <div class="max-w-3xl">
@@ -836,6 +875,14 @@
             </div>
 
           {:else if activeTab === "permissions"}
+            {#if loadingPermissions}
+              <div class="flex items-center justify-center h-32">
+                <svg class="w-6 h-6 animate-spin text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            {:else}
             <div class="space-y-6 max-w-2xl">
               <div>
                 <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Tool Permissions</h4>
@@ -913,8 +960,17 @@
                 {/if}
               {/if}
             </div>
+            {/if}
 
           {:else if activeTab === "claude-md"}
+            {#if loadingClaudeMd}
+              <div class="flex items-center justify-center h-32">
+                <svg class="w-6 h-6 animate-spin text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            {:else}
             <div class="space-y-6">
               <div>
                 <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Default CLAUDE.md Template</h4>
@@ -970,6 +1026,7 @@
                 When you select a project, if it doesn't have a <code class="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded font-mono text-xs">CLAUDE.md</code> file, this template will be copied to create one.
               </p>
             </div>
+            {/if}
 
           {:else if activeTab === "skills"}
             <div class="space-y-6">
@@ -1243,6 +1300,28 @@
                   {#if $debugMode}
                     <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
                       Timeline view shows all SDK events chronologically. Useful for debugging and understanding the execution flow.
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Resource Monitor</h5>
+                      <span class="px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 rounded">experimental</span>
+                    </div>
+                    <button
+                      onclick={() => resourceMonitorEnabled.toggle()}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$resourceMonitorEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$resourceMonitorEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+                  <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Monitor Navi server memory, CPU, and process resource usage</p>
+
+                  {#if $resourceMonitorEnabled}
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                      Open the Resources panel from the sidebar to view real-time stats.
                     </p>
                   {/if}
                 </div>

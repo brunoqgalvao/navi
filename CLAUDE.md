@@ -45,6 +45,15 @@ Navi has **8 distinct component categories** defined in `src/lib/core/`:
 | **Commands** | Slash commands (/review, /deploy) | `.claude/commands/` | File-based |
 | **Hooks** | Lifecycle event handlers | `.claude/settings.json` | Config-based |
 
+**Important: Extensions vs Global Settings Feature Toggles**
+
+- **Extensions** are **session/project-scoped** panels. They appear in the right sidebar, can be enabled/disabled per project, and are relevant to the current chat context (Files, Git, Terminal, Kanban, etc.).
+- **Global Settings Features** are **app-wide toggles** (Settings → Features tab). Use these for features that monitor or affect the entire app, not specific sessions. Examples: Resource Monitor, Debug Mode, Advanced Mode, Telemetry.
+
+When adding a new panel/feature:
+- If it's contextual to a session/project → use **Extensions** (`extensionRegistry`)
+- If it's app-wide monitoring/debugging → use **Settings Features** (`stores/ui.ts` toggle)
+
 ```typescript
 // Import from core module
 import {

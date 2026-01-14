@@ -5,6 +5,35 @@ import { resolveNaviClaudeAuth, formatAuthForLog } from "../utils/navi-auth";
 import { describePath, writeDebugLog } from "../utils/logging";
 import { getSDK } from "../utils/sdk-loader";
 
+const MODELS_TIMEOUT_MS = 5000;
+const MODELS_INTERRUPT_TIMEOUT_MS = 500;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+      error.name = "TimeoutError";
+      reject(error);
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
+async function interruptWithTimeout(q: { interrupt: () => Promise<void> }) {
+  try {
+    await withTimeout(q.interrupt(), MODELS_INTERRUPT_TIMEOUT_MS, "interrupt");
+  } catch (e) {
+    logModelsDiagnostics("interrupt_error", {
+      message: e instanceof Error ? e.message : String(e),
+      name: e instanceof Error ? e.name : null,
+    });
+  }
+}
+
 export async function handleConfigRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/config") {
     const { homedir } = await import("os");
@@ -206,7 +235,7 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
           ...runtimeOptions,
         },
       });
-      const sdkModels = await q.supportedModels();
+      const sdkModels = await withTimeout(q.supportedModels(), MODELS_TIMEOUT_MS, "supportedModels");
       logModelsDiagnostics("success", {
         modelCount: Array.isArray(sdkModels) ? sdkModels.length : null,
       });
@@ -242,14 +271,7 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
       return json({ error: "Failed to fetch models" }, 500);
     } finally {
       if (q) {
-        try {
-          await q.interrupt();
-        } catch (e) {
-          logModelsDiagnostics("interrupt_error", {
-            message: e instanceof Error ? e.message : String(e),
-            name: e instanceof Error ? e.name : null,
-          });
-        }
+        await interruptWithTimeout(q);
       }
     }
   }

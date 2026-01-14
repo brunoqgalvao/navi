@@ -42,8 +42,7 @@ export type ExtensionId =
   | "preview"
   | "context"         // Session context visibility
   | "email"           // Navi's email inbox
-  | "browser-preview" // Browser-use live preview
-  | "resources";      // Resource monitor (@experimental)
+  | "browser-preview"; // Browser-use live preview
 
 /**
  * Panel modes - what the right sidebar can display

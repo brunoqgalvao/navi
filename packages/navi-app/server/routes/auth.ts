@@ -10,6 +10,27 @@ import { createHash, randomBytes } from "crypto";
 // ============================================
 
 const AGENTMAIL_API_BASE = "https://api.agentmail.to/v0";
+const AUTH_STATUS_TIMEOUT_MS = 2000;
+const AUTH_INTERRUPT_TIMEOUT_MS = 500;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
+async function interruptQuietly(q: { interrupt: () => Promise<void> }) {
+  try {
+    await withTimeout(q.interrupt(), AUTH_INTERRUPT_TIMEOUT_MS);
+  } catch {}
+}
 
 // In-memory user store (replace with DB later)
 interface NaviUser {
@@ -151,12 +172,16 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
           ...getClaudeCodeRuntimeOptions(),
         },
       });
-      const models = await q.supportedModels();
-      await q.interrupt();
-
-      if (models && models.length > 0) {
-        hasOAuth = true;
-        claudeInstalled = true;
+      try {
+        const models = await withTimeout(q.supportedModels(), AUTH_STATUS_TIMEOUT_MS);
+        if (models && models.length > 0) {
+          hasOAuth = true;
+          claudeInstalled = true;
+        }
+      } catch (e: any) {
+        hasOAuth = false;
+      } finally {
+        await interruptQuietly(q);
       }
     } catch (e: any) {
       hasOAuth = false;

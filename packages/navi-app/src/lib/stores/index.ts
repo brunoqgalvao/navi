@@ -84,6 +84,7 @@ export {
   channelsEnabled,
   loopModeEnabled,
   deployToCloudEnabled,
+  resourceMonitorEnabled,
   newChatView,
   showArchivedWorkspaces,
   tour,

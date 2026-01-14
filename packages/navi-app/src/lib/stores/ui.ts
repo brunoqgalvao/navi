@@ -16,6 +16,7 @@ const DASHBOARD_ENABLED_KEY = "claude-code-ui-dashboard-enabled";
 const CHANNELS_ENABLED_KEY = "claude-code-ui-channels-enabled";
 const LOOP_MODE_ENABLED_KEY = "claude-code-ui-loop-mode-enabled";
 const DEPLOY_TO_CLOUD_ENABLED_KEY = "claude-code-ui-deploy-to-cloud-enabled";
+const RESOURCE_MONITOR_ENABLED_KEY = "claude-code-ui-resource-monitor-enabled";
 
 // Onboarding store
 function createOnboardingStore() {
@@ -183,6 +184,31 @@ function createDeployToCloudEnabledStore() {
     set: (value: boolean) => {
       if (typeof window !== "undefined") {
         localStorage.setItem(DEPLOY_TO_CLOUD_ENABLED_KEY, String(value));
+      }
+      set(value);
+    },
+  };
+}
+
+// Resource Monitor feature store (experimental - default off)
+function createResourceMonitorEnabledStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(RESOURCE_MONITOR_ENABLED_KEY) : null;
+  const { subscribe, set } = writable(stored === "true");
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current = false;
+      subscribe(v => current = v)();
+      const newValue = !current;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(RESOURCE_MONITOR_ENABLED_KEY, String(newValue));
+      }
+      set(newValue);
+    },
+    set: (value: boolean) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(RESOURCE_MONITOR_ENABLED_KEY, String(value));
       }
       set(value);
     },
@@ -626,6 +652,7 @@ export const dashboardEnabled = createDashboardEnabledStore();
 export const channelsEnabled = createChannelsEnabledStore();
 export const loopModeEnabled = createLoopModeEnabledStore();
 export const deployToCloudEnabled = createDeployToCloudEnabledStore();
+export const resourceMonitorEnabled = createResourceMonitorEnabledStore();
 export const newChatView = createNewChatViewStore();
 export const showArchivedWorkspaces = createShowArchivedStore();
 export const tour = createTourStore();

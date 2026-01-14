@@ -1016,12 +1016,22 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="relative group rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.6)] border transition-all duration-200 {isShellCommand(value) ? 'bg-[#1a1b26] border-[#3d59a1] focus-within:border-[#7aa2f7] shadow-[0_8px_30px_rgb(0,0,0,0.3)]' : 'bg-white dark:bg-gray-800 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.8)]'} {isDraggingOver ? 'border-blue-400 bg-blue-50/30 dark:border-blue-500 dark:bg-blue-900/30' : isShellCommand(value) ? '' : 'border-gray-200 dark:border-gray-700 focus-within:border-gray-300 dark:focus-within:border-gray-600'}"
+  class="relative group rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.6)] border transition-all duration-200 {isShellCommand(value) ? 'bg-[#1a1b26] border-[#3d59a1] focus-within:border-[#7aa2f7] shadow-[0_8px_30px_rgb(0,0,0,0.3)]' : $planMode ? 'bg-white dark:bg-gray-800 border-blue-400 dark:border-blue-500 shadow-[0_0_0_1px_rgba(59,130,246,0.1)]' : 'bg-white dark:bg-gray-800 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.8)]'} {isDraggingOver ? 'border-blue-400 bg-blue-50/30 dark:border-blue-500 dark:bg-blue-900/30' : isShellCommand(value) || $planMode ? '' : 'border-gray-200 dark:border-gray-700 focus-within:border-gray-300 dark:focus-within:border-gray-600'}"
   ondragenter={handleDragEnter}
   ondragleave={handleDragLeave}
   ondragover={handleDragOver}
   ondrop={handleDrop}
 >
+  <!-- Plan Mode ribbon -->
+  {#if $planMode && !isShellCommand(value)}
+    <div class="flex items-center justify-center gap-2 py-1.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-[11px] font-medium tracking-wide rounded-t-[11px]">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+      </svg>
+      <span>PLAN MODE</span>
+    </div>
+  {/if}
+
   {#if isDraggingOver}
     <div class="absolute inset-0 flex items-center justify-center bg-blue-50/80 dark:bg-blue-900/80 rounded-xl z-10 pointer-events-none">
       <div class="flex items-center gap-2 text-blue-600 dark:text-blue-400">
@@ -1101,12 +1111,6 @@
         <span class="text-[#9ece6a]">$</span>
         <span>terminal</span>
       </div>
-    {:else if $planMode}
-      <!-- Plan Mode indicator -->
-      <div class="absolute left-3 top-2 flex items-center gap-1.5 text-[10px] font-medium text-violet-600 dark:text-violet-300 bg-violet-500/10 dark:bg-violet-500/20 px-2 py-0.5 rounded-full z-10 backdrop-blur-sm border border-violet-500/20 dark:border-violet-400/20">
-        <span class="w-1.5 h-1.5 rounded-full bg-violet-500 dark:bg-violet-400 plan-dot-pulse"></span>
-        <span>plan</span>
-      </div>
     {/if}
 
     <!-- Highlight overlay - renders colored backgrounds for @mentions -->
@@ -1143,7 +1147,7 @@
       autocomplete="off"
       autocorrect="off"
       autocapitalize="off"
-      class="w-full bg-transparent border-none rounded-xl pl-4 pr-24 {isShellCommand(value) ? 'pt-8 text-[#c0caf5] placeholder-[#565f89] font-mono' : $planMode ? 'pt-8 placeholder-indigo-400 dark:placeholder-indigo-500' : 'pt-3.5 placeholder-gray-400 dark:placeholder-gray-500'} pb-3.5 focus:outline-none focus:ring-0 resize-none min-h-[56px] text-[15px] disabled:opacity-50 overflow-y-auto relative z-[1]"
+      class="w-full bg-transparent border-none rounded-xl pl-4 pr-24 {isShellCommand(value) ? 'pt-8 text-[#c0caf5] placeholder-[#565f89] font-mono' : 'pt-3.5 placeholder-gray-400 dark:placeholder-gray-500'} pb-3.5 focus:outline-none focus:ring-0 resize-none min-h-[56px] text-[15px] disabled:opacity-50 overflow-y-auto relative z-[1]"
       rows="1"
       style={!isShellCommand(value) && highlightedSegments.some(s => s.type !== "text") ? "color: transparent; caret-color: #111;" : ""}
     ></textarea>
@@ -1773,14 +1777,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  .plan-dot-pulse {
-    animation: dot-pulse 2s ease-in-out infinite;
-  }
-
-  @keyframes dot-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
-</style>

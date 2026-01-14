@@ -175,6 +175,16 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
         if (projectId) {
           sessionStatus.setRunning(sessionId, projectId);
         }
+        // Failsafe: auto-clear loading state after 30 seconds if streamingEnd never fires
+        setTimeout(() => {
+          loadingSessions.update(s => {
+            if (s.has(sessionId)) {
+              console.warn(`[useMessageHandler] Auto-clearing stuck loading state for session ${sessionId}`);
+              s.delete(sessionId);
+            }
+            return new Set(s);
+          });
+        }, 30000);
       },
       
       onStreamingEnd: (sessionId, reason) => {

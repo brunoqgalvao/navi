@@ -124,12 +124,13 @@
   import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
   import UpdateChecker from "./lib/components/UpdateChecker.svelte";
   import ConnectivityBanner from "./lib/components/ConnectivityBanner.svelte";
+  import ResourceMonitor from "./lib/components/ResourceMonitor.svelte";
   import ProjectEmptyState from "./lib/components/ProjectEmptyState.svelte";
   import ProjectLanding from "./lib/components/ProjectLanding.svelte";
   import NewProjectModal from "./lib/components/NewProjectModal.svelte";
   // Channels
   import { currentChannelId } from "./lib/features/channels";
-  import { channelsEnabled } from "./lib/stores";
+  import { channelsEnabled, resourceMonitorEnabled } from "./lib/stores";
   import ChannelView from "./lib/features/channels/components/ChannelView.svelte";
   import ProjectPermissionsModal from "./lib/components/ProjectPermissionsModal.svelte";
   import FeedbackModal from "./lib/components/FeedbackModal.svelte";
@@ -798,7 +799,7 @@
   let showEmail = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "resources">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email">("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
@@ -3059,7 +3060,7 @@ Please walk me through the setup step by step. When I have the credentials, save
    * Handle extension toolbar clicks - toggles the corresponding panel
    */
   function handleExtensionClick(mode: string) {
-    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "resources";
+    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email";
     const panelMode = mode as PanelMode;
 
     // Check if we're already showing this panel - if so, close it
@@ -4478,6 +4479,11 @@ Please walk me through the setup step by step. When I have the credentials, save
 <NotificationToast />
 <UpdateChecker />
 <ConnectivityBanner />
+
+<!-- Resource Monitor (floating button + modal) -->
+{#if $resourceMonitorEnabled}
+  <ResourceMonitor />
+{/if}
 
 <style>
 
