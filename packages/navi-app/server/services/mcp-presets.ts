@@ -349,7 +349,7 @@ export const MCP_PRESETS: MCPServerPreset[] = [
     ],
   },
 
-  // ==================== REMOTE MCP SERVERS ====================
+  // ==================== REMOTE MCP SERVERS (OAuth via MCP) ====================
   {
     id: "notion",
     name: "Notion",
@@ -371,6 +371,30 @@ export const MCP_PRESETS: MCPServerPreset[] = [
       },
     ],
   },
+  {
+    id: "linear",
+    name: "Linear",
+    description: "Create and manage Linear issues, projects, and teams (Official MCP)",
+    icon: "📐",
+    category: "popular",
+    type: "sse",
+    url: "https://mcp.linear.app/sse",
+    requiresConfig: false,
+    authType: "mcp_oauth",
+    authDescription: "OAuth starts when you first use a Linear tool in a session.",
+    setupSteps: [
+      {
+        id: "info",
+        type: "info",
+        label: "Linear Official MCP",
+        description: "This connects to Linear's official MCP server. You'll authenticate via OAuth when you first use it.",
+        storeAs: {},
+      },
+    ],
+  },
+
+  // NOTE: Google Workspace is now a built-in MCP server (see google-mcp.ts)
+  // Users connect via Settings → Integrations → Google, no manual API key setup needed
 ];
 
 /**

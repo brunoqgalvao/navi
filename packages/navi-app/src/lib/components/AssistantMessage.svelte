@@ -19,6 +19,11 @@
   import TextSelectionContextMenu from "./TextSelectionContextMenu.svelte";
   import AgentBrowserWidget from "./widgets/AgentBrowserWidget.svelte";
   import { isAgentBrowserCommand } from "$lib/utils/agent-browser-parser";
+  // Comments feature @experimental
+  import { commentsStore, showComments, createMessageThreadsStore } from "$lib/features/comments";
+  import CommentThread from "$lib/features/comments/components/CommentThread.svelte";
+  import CommentInput from "$lib/features/comments/components/CommentInput.svelte";
+  import CommentIndicator from "$lib/features/comments/components/CommentIndicator.svelte";
 
   interface Props {
     content: ContentBlock[];
@@ -35,10 +40,12 @@
     onMessageClick?: (e: MouseEvent) => void;
     onQuoteText?: (text: string) => void;
     onForkWithQuote?: (text: string) => void;
+    onAskCouncil?: (text: string) => void;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
     shellBlocksMap?: Map<string, { code: string; language: string }>;
     sessionId?: string;
+    messageId?: string;
   }
 
   let {
@@ -56,10 +63,12 @@
     onMessageClick,
     onQuoteText,
     onForkWithQuote,
+    onAskCouncil,
     renderMarkdown,
     jsonBlocksMap = new Map(),
     shellBlocksMap = new Map(),
     sessionId = '',
+    messageId = '',
   }: Props = $props();
 
   let showMenu = $state(false);
@@ -69,6 +78,17 @@
 
   // Text selection context menu state
   let selectionMenu = $state<{ x: number; y: number; text: string } | null>(null);
+
+  // Comments state @experimental
+  let commentInput = $state<{ x: number; y: number; text: string } | null>(null);
+  let expandedThreadId = $state<string | null>(null);
+
+  // Get comment threads for this message
+  const messageThreads = $derived(
+    sessionId && messageId
+      ? commentsStore.getThreadsForMessage(sessionId, messageId)
+      : []
+  );
 
   function handleContextMenu(e: MouseEvent) {
     const selection = window.getSelection();
@@ -92,6 +112,28 @@
   function handleForkWithQuote(text: string) {
     onForkWithQuote?.(text);
     selectionMenu = null;
+  }
+
+  function handleAddComment(text: string) {
+    if (!selectionMenu) return;
+    // Open comment input at the selection position
+    commentInput = {
+      x: selectionMenu.x,
+      y: selectionMenu.y,
+      text,
+    };
+    selectionMenu = null;
+  }
+
+  function handleCommentCreated(threadId: string) {
+    // Expand the newly created thread
+    expandedThreadId = threadId;
+  }
+
+  async function handleAskAI(threadId: string, question: string) {
+    // Get the message content as context and ask AI
+    const context = getCopyText();
+    await commentsStore.askAI(sessionId, threadId, question, context);
   }
 
   function toggleBlock(idx: number) {
@@ -121,6 +163,18 @@
 
   function isAgentBrowserTool(block: ToolUseBlock): boolean {
     return block.name === "Bash" && isAgentBrowserCommand(block.input?.command || "");
+  }
+
+  function isSkillRead(block: ToolUseBlock): boolean {
+    if (block.name !== "Read") return false;
+    const path = block.input?.file_path || "";
+    return path.includes("/skills/") && path.endsWith("SKILL.md");
+  }
+
+  function getSkillName(block: ToolUseBlock): string {
+    const path = block.input?.file_path || "";
+    const match = path.match(/\/skills\/([^/]+)\/SKILL\.md$/);
+    return match ? match[1] : "unknown";
   }
 
   function getToolSummary(tool: ToolUseBlock): string {
@@ -246,6 +300,18 @@
     <div class="flex-1 min-w-0 relative space-y-2" onclick={onMessageClick} oncontextmenu={handleContextMenu}>
       <!-- Hover actions -->
       <div class="absolute -top-5 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm px-1 py-0.5 z-20">
+        <!-- Comment indicator @experimental -->
+        {#if $showComments && messageThreads.length > 0}
+          <button
+            onclick={(e) => { e.stopPropagation(); expandedThreadId = expandedThreadId ? null : messageThreads[0].thread_id; }}
+            class="p-1 text-amber-500 hover:text-amber-600 rounded transition-colors"
+            title="{messageThreads.length} comment{messageThreads.length > 1 ? 's' : ''}"
+          >
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clip-rule="evenodd" />
+            </svg>
+          </button>
+        {/if}
         <CopyButton text={copyText} />
         <div class="relative">
           <button
@@ -330,6 +396,27 @@
             isError={result?.is_error}
             isRunning={!result}
           />
+        {:else if isSkillRead(tool)}
+          <!-- Skill reads get first-class rendering -->
+          <div class="flex items-center gap-2 py-1">
+            <span class="text-xs text-gray-500 dark:text-gray-400">Using skill:</span>
+            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-1 rounded-md">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              {getSkillName(tool)}
+            </span>
+            {#if !result}
+              <svg class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            {:else}
+              <svg class="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+            {/if}
+          </div>
         {:else}
           {@const expanded = expandedBlocks.has(originalIdx)}
           {@const summary = getToolSummary(tool)}
@@ -375,7 +462,7 @@
               {@const resultContent = result ? extractToolResultContent(result.content) : ''}
               <div class="pl-6 pt-1 space-y-2">
                 <ToolRenderer {tool} toolResult={result ? { content: resultContent, is_error: result.is_error } : undefined} {onPreview} {onRunInTerminal} {onSendToClaude} hideHeader={true} />
-                {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch', 'Bash'].includes(tool.name)}
+                {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch', 'Bash'].includes(tool.name) && !tool.name.startsWith('mcp__multi-session__') && !tool.name.startsWith('mcp__user-interaction__') && !tool.name.startsWith('mcp__navi-context__')}
                   <div class="pt-1">
                     <pre class="text-xs {result.is_error ? 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20' : 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{resultContent}</pre>
                   </div>
@@ -448,6 +535,22 @@
       {/if}
     {/each}
     </div>
+
+    <!-- Comment Threads (shown as floating cards) @experimental -->
+    {#if $showComments && messageThreads.length > 0}
+      <div class="absolute right-0 top-0 translate-x-full pl-4 flex flex-col gap-2 z-40">
+        {#each messageThreads as thread (thread.thread_id)}
+          {#if expandedThreadId === thread.thread_id || !expandedThreadId}
+            <CommentThread
+              {thread}
+              {sessionId}
+              onClose={() => expandedThreadId = null}
+              onAskAI={handleAskAI}
+            />
+          {/if}
+        {/each}
+      </div>
+    {/if}
   </div>
 
 <!-- Text Selection Context Menu -->
@@ -458,7 +561,23 @@
     selectedText={selectionMenu.text}
     onQuote={handleQuote}
     onForkWithQuote={handleForkWithQuote}
+    onAddComment={messageId ? handleAddComment : undefined}
+    onAskCouncil={onAskCouncil}
     onClose={() => selectionMenu = null}
+  />
+{/if}
+
+<!-- Comment Input (when adding new comment) @experimental -->
+{#if commentInput && messageId && sessionId}
+  <CommentInput
+    {messageId}
+    {sessionId}
+    selectionText={commentInput.text}
+    x={commentInput.x}
+    y={commentInput.y}
+    onClose={() => commentInput = null}
+    onCreated={handleCommentCreated}
+    onAskAI={handleAskAI}
   />
 {/if}
 

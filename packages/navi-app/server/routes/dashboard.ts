@@ -6,9 +6,12 @@
  */
 
 import { json } from "../utils/response";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname, resolve, normalize } from "path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "fs";
+import { join, dirname, resolve, normalize, basename } from "path";
 import { execSync } from "child_process";
+import { homedir } from "os";
+import { getAllCommands, type CustomCommand } from "./commands";
+import { mcpSettings } from "../services/mcp-settings";
 
 const DASHBOARD_FILE = ".claude/dashboard.md";
 
@@ -185,5 +188,248 @@ export async function handleDashboardRoutes(
     }
   }
 
+  // GET /api/dashboard/capabilities - Get project capabilities (skills, commands, hooks, agents, MCPs)
+  if (url.pathname === "/api/dashboard/capabilities" && method === "GET") {
+    const projectPath = url.searchParams.get("path");
+
+    if (!projectPath) {
+      return json({ error: "Missing path parameter" }, 400);
+    }
+
+    try {
+      const capabilities = {
+        commands: [] as Array<{ name: string; description: string; source: string }>,
+        skills: [] as Array<{ name: string; description: string; source: string }>,
+        agents: [] as Array<{ name: string; description: string; type?: string; source: string }>,
+        hooks: [] as Array<{ event: string; command: string }>,
+        mcpServers: [] as Array<{ name: string; type: string; enabled: boolean; source: string }>,
+      };
+
+      // Get commands
+      const commands = getAllCommands(projectPath);
+      capabilities.commands = commands.map(cmd => ({
+        name: cmd.name,
+        description: cmd.description,
+        source: cmd.source,
+      }));
+
+      // Get skills from project .claude/skills directory
+      const projectSkillsDir = join(projectPath, ".claude", "skills");
+      if (existsSync(projectSkillsDir)) {
+        const skillDirs = readdirSync(projectSkillsDir).filter(name => {
+          const skillPath = join(projectSkillsDir, name);
+          return statSync(skillPath).isDirectory() && existsSync(join(skillPath, "SKILL.md"));
+        });
+
+        for (const skillDir of skillDirs) {
+          const skillMdPath = join(projectSkillsDir, skillDir, "SKILL.md");
+          try {
+            const content = readFileSync(skillMdPath, "utf-8");
+            const { name, description } = parseSkillFrontmatter(content);
+            capabilities.skills.push({
+              name: name || skillDir,
+              description: description || "",
+              source: "project",
+            });
+          } catch {
+            capabilities.skills.push({
+              name: skillDir,
+              description: "",
+              source: "project",
+            });
+          }
+        }
+      }
+
+      // Also get global skills
+      const globalSkillsDir = join(homedir(), ".claude", "skills");
+      if (existsSync(globalSkillsDir)) {
+        const skillDirs = readdirSync(globalSkillsDir).filter(name => {
+          const skillPath = join(globalSkillsDir, name);
+          return statSync(skillPath).isDirectory() && existsSync(join(skillPath, "SKILL.md"));
+        });
+
+        for (const skillDir of skillDirs) {
+          // Skip if already added from project
+          if (capabilities.skills.some(s => s.name === skillDir)) continue;
+
+          const skillMdPath = join(globalSkillsDir, skillDir, "SKILL.md");
+          try {
+            const content = readFileSync(skillMdPath, "utf-8");
+            const { name, description } = parseSkillFrontmatter(content);
+            capabilities.skills.push({
+              name: name || skillDir,
+              description: description || "",
+              source: "global",
+            });
+          } catch {
+            capabilities.skills.push({
+              name: skillDir,
+              description: "",
+              source: "global",
+            });
+          }
+        }
+      }
+
+      // Get agents from project .claude/agents directory
+      const projectAgentsDir = join(projectPath, ".claude", "agents");
+      if (existsSync(projectAgentsDir)) {
+        const agentFiles = readdirSync(projectAgentsDir).filter(
+          name => name.endsWith(".md") && name !== "AGENTS.md"
+        );
+
+        for (const file of agentFiles) {
+          const agentPath = join(projectAgentsDir, file);
+          try {
+            const content = readFileSync(agentPath, "utf-8");
+            const { name, description, type } = parseAgentFrontmatter(content);
+            capabilities.agents.push({
+              name: name || basename(file, ".md"),
+              description: description || "",
+              type,
+              source: "project",
+            });
+          } catch {
+            capabilities.agents.push({
+              name: basename(file, ".md"),
+              description: "",
+              source: "project",
+            });
+          }
+        }
+      }
+
+      // Also get global agents
+      const globalAgentsDir = join(homedir(), ".claude", "agents");
+      if (existsSync(globalAgentsDir)) {
+        const agentFiles = readdirSync(globalAgentsDir).filter(
+          name => name.endsWith(".md") && name !== "AGENTS.md"
+        );
+
+        for (const file of agentFiles) {
+          // Skip if already added from project
+          const agentName = basename(file, ".md");
+          if (capabilities.agents.some(a => a.name === agentName)) continue;
+
+          const agentPath = join(globalAgentsDir, file);
+          try {
+            const content = readFileSync(agentPath, "utf-8");
+            const { name, description, type } = parseAgentFrontmatter(content);
+            capabilities.agents.push({
+              name: name || agentName,
+              description: description || "",
+              type,
+              source: "global",
+            });
+          } catch {
+            capabilities.agents.push({
+              name: agentName,
+              description: "",
+              source: "global",
+            });
+          }
+        }
+      }
+
+      // Get hooks from .claude/settings.json
+      const projectSettingsPath = join(projectPath, ".claude", "settings.json");
+      if (existsSync(projectSettingsPath)) {
+        try {
+          const settingsContent = readFileSync(projectSettingsPath, "utf-8");
+          const settings = JSON.parse(settingsContent);
+          if (settings.hooks && typeof settings.hooks === "object") {
+            for (const [event, command] of Object.entries(settings.hooks)) {
+              if (typeof command === "string") {
+                capabilities.hooks.push({ event, command });
+              }
+            }
+          }
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+
+      // Get MCP servers
+      const mcpServers = mcpSettings.getExternalServers(projectPath);
+      capabilities.mcpServers = mcpServers.map(server => ({
+        name: server.name,
+        type: server.type || "stdio",
+        enabled: server.enabled,
+        source: server.source || "unknown",
+      }));
+
+      return json(capabilities);
+    } catch (e) {
+      console.error("Error getting capabilities:", e);
+      return json({ error: "Failed to get capabilities" }, 500);
+    }
+  }
+
   return null;
+}
+
+/**
+ * Parse skill frontmatter from SKILL.md content
+ */
+function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
+  const lines = content.split("\n");
+  if (lines[0]?.trim() !== "---") return {};
+
+  let endIndex = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i]?.trim() === "---") {
+      endIndex = i;
+      break;
+    }
+  }
+
+  if (endIndex < 0) return {};
+
+  const result: { name?: string; description?: string } = {};
+  for (let i = 1; i < endIndex; i++) {
+    const line = lines[i];
+    const colonIndex = line.indexOf(":");
+    if (colonIndex > 0) {
+      const key = line.slice(0, colonIndex).trim();
+      const value = line.slice(colonIndex + 1).trim().replace(/^["']|["']$/g, "");
+      if (key === "name") result.name = value;
+      if (key === "description") result.description = value;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Parse agent frontmatter from agent .md file
+ */
+function parseAgentFrontmatter(content: string): { name?: string; description?: string; type?: string } {
+  const lines = content.split("\n");
+  if (lines[0]?.trim() !== "---") return {};
+
+  let endIndex = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i]?.trim() === "---") {
+      endIndex = i;
+      break;
+    }
+  }
+
+  if (endIndex < 0) return {};
+
+  const result: { name?: string; description?: string; type?: string } = {};
+  for (let i = 1; i < endIndex; i++) {
+    const line = lines[i];
+    const colonIndex = line.indexOf(":");
+    if (colonIndex > 0) {
+      const key = line.slice(0, colonIndex).trim();
+      const value = line.slice(colonIndex + 1).trim().replace(/^["']|["']$/g, "");
+      if (key === "name") result.name = value;
+      if (key === "description") result.description = value;
+      if (key === "type") result.type = value;
+    }
+  }
+
+  return result;
 }

@@ -532,7 +532,17 @@ export async function handleTerminalRoutes(
     // Try to get buffer from PTY server directly
     if (ptyServerConnected && ptyServerWs) {
       return new Promise((resolve) => {
+        let resolved = false;
+
+        const cleanup = () => {
+          if (!resolved) {
+            resolved = true;
+            ptyServerWs?.off("message", handler);
+          }
+        };
+
         const timeout = setTimeout(() => {
+          cleanup();
           resolve(json({ error: "Timeout waiting for PTY server" }, 504));
         }, 5000);
 
@@ -541,7 +551,7 @@ export async function handleTerminalRoutes(
             const msg = JSON.parse(data.toString());
             if (msg.type === "buffer" && msg.terminalId === terminalId) {
               clearTimeout(timeout);
-              ptyServerWs?.off("message", handler);
+              cleanup();
               // Parse the raw buffer into lines (PTY server returns 'data' not 'buffer')
               const rawBuffer = msg.data || msg.buffer || "";
               const bufferLines = rawBuffer.split("\n").slice(-lines);
@@ -593,7 +603,17 @@ export async function handleTerminalRoutes(
     // Try to get buffer from PTY server directly
     if (ptyServerConnected && ptyServerWs) {
       return new Promise((resolve) => {
+        let resolved = false;
+
+        const cleanup = () => {
+          if (!resolved) {
+            resolved = true;
+            ptyServerWs?.off("message", handler);
+          }
+        };
+
         const timeout = setTimeout(() => {
+          cleanup();
           resolve(json({ error: "Timeout waiting for PTY server" }, 504));
         }, 5000);
 
@@ -602,7 +622,7 @@ export async function handleTerminalRoutes(
             const msg = JSON.parse(data.toString());
             if (msg.type === "buffer" && msg.terminalId === terminalId) {
               clearTimeout(timeout);
-              ptyServerWs?.off("message", handler);
+              cleanup();
               // PTY server returns 'data' not 'buffer'
               const rawBuffer = msg.data || msg.buffer || "";
               const bufferLines = rawBuffer.split("\n");

@@ -140,6 +140,8 @@
   import { ExperimentalAgentsPanel, SelfHealingWidget } from "./lib/components/agents";
   import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
+  import { CouncilModal, CouncilPanel, councilStore, councilPanelOpen } from "./lib/features/council";
+  import { councilModal } from "./lib/stores/ui";
   import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
   import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
   import EscalationBanner from "./lib/features/session-hierarchy/components/EscalationBanner.svelte";
@@ -755,6 +757,15 @@
       // Forward to session hierarchy store handler
       handleSessionHierarchyWSEvent(event);
 
+      // Helper to navigate to an agent session
+      const navigateToAgent = (sessionId: string) => {
+        api.sessions.get(sessionId).then((s) => {
+          if (s) selectSession(s);
+        }).catch((err) => {
+          console.error("Failed to navigate to agent session:", err);
+        });
+      };
+
       // Show notifications for important events
       switch (event.type) {
         case "session:spawned":
@@ -762,6 +773,11 @@
             type: "info",
             title: "Agent Spawned",
             message: `${event.session.role || "Agent"}: ${event.session.task || event.session.title}`,
+            actions: [{
+              label: "View",
+              variant: "primary",
+              handler: () => navigateToAgent(event.session.id),
+            }],
           });
           break;
         case "session:escalated":
@@ -770,6 +786,11 @@
             title: "Agent Needs Help",
             message: event.escalation.summary,
             persistent: true,
+            actions: [{
+              label: "View",
+              variant: "primary",
+              handler: () => navigateToAgent(event.sessionId),
+            }],
           });
           break;
         case "session:delivered":
@@ -777,6 +798,11 @@
             type: "success",
             title: "Agent Completed",
             message: event.deliverable.summary,
+            actions: [{
+              label: "View",
+              variant: "primary",
+              handler: () => navigateToAgent(event.sessionId),
+            }],
           });
           break;
       }
@@ -869,6 +895,8 @@
         showHotkeysHelp = false;
       } else if (showSettings) {
         showSettings = false;
+      } else if ($councilPanelOpen) {
+        councilStore.closePanel();
       } else if (showPreview || showFileBrowser) {
         closeRightPanel();
       } else if (currentSessionLoading) {
@@ -880,6 +908,9 @@
     if (!isMod) return;
 
     if (e.key === 'k') {
+      // Don't hijack Cmd+K when terminal has focus (terminal uses it for command generation)
+      const isTerminalFocused = document.activeElement?.closest('.xterm');
+      if (isTerminalFocused) return;
       e.preventDefault();
       showSearchModal = true;
     } else if (e.key === 'j') {
@@ -895,6 +926,10 @@
     } else if (e.key === 'g') {
       e.preventDefault();
       toggleGitPanel();
+    } else if (e.key === 'l') {
+      // Cmd/Ctrl+L - Toggle LLM Council panel
+      e.preventDefault();
+      councilStore.togglePanel();
     } else if (e.key === '/') {
       e.preventDefault();
       inputRef?.focus();
@@ -2379,8 +2414,13 @@ Please walk me through the setup step by step. When I have the credentials, save
       messageQueue.remove(first.id);
     }
 
-    const prompt = first.text;
-    
+    // Build the prompt with file attachments (same as non-queued path)
+    let prompt = first.text;
+    if (first.attachments && first.attachments.length > 0) {
+      const fileRefs = first.attachments.map(f => `[File: ${f.path}]`).join("\n");
+      prompt = `${fileRefs}\n\n${prompt}`;
+    }
+
     sessionMessages.addMessage(sessionId, {
       id: crypto.randomUUID(),
       role: "user",
@@ -2543,11 +2583,13 @@ Please walk me through the setup step by step. When I have the credentials, save
         currentSessionId = newSessionId;
     }
     const isCurrentSessionLoading = $loadingSessions.has(currentSessionId);
-    
+
     if (isCurrentSessionLoading) {
-      messageQueue.add({ sessionId: currentSessionId, text: inputText.trim(), attachments: [] });
+      const currentAttachedFiles = get(attachedFiles);
+      messageQueue.add({ sessionId: currentSessionId, text: inputText.trim(), attachments: [...currentAttachedFiles] });
       inputText = "";
       sessionDrafts.clearDraft(currentSessionId);
+      attachedFiles.clear();
       return;
     }
 
@@ -2658,9 +2700,11 @@ Please walk me through the setup step by step. When I have the credentials, save
     const isCurrentSessionLoading = $loadingSessions.has(targetSessionId);
 
     if (isCurrentSessionLoading) {
-      messageQueue.add({ sessionId: targetSessionId, text: inputText.trim(), attachments: [] });
+      const currentAttachedFiles = get(attachedFiles);
+      messageQueue.add({ sessionId: targetSessionId, text: inputText.trim(), attachments: [...currentAttachedFiles] });
       inputText = "";
       sessionDrafts.clearDraft(targetSessionId);
+      attachedFiles.clear();
       return;
     }
 
@@ -2848,6 +2892,17 @@ Please walk me through the setup step by step. When I have the credentials, save
       case "bug":
         // Open GitHub issues
         window.open("https://github.com/anthropics/claude-code/issues", "_blank");
+        return true;
+
+      case "council":
+        // Open LLM Council panel (multi-model comparison)
+        if (args) {
+          // If args provided, start a new conversation with that prompt
+          councilStore.newConversation(args);
+          councilStore.sendMessage(args);
+        } else {
+          councilStore.openPanel();
+        }
         return true;
 
       default:
@@ -3645,6 +3700,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     onOpenHomeInNewWindow={openHomeInNewWindow}
     onOpenSessionsBoard={(projectId) => { sessionsDashboardProjectId = projectId; showSessionsDashboard = true; }}
     onOpenAgentBuilder={() => showAgentBuilder = true}
+    onGoToProjectDashboard={() => session.setSession(null)}
     agents={sidebarAgents}
     onSelectAgent={(agent) => {
       openAgent(agent as AgentDefinition);
@@ -3657,6 +3713,9 @@ Please walk me through the setup step by step. When I have the credentials, save
 
   <!-- Main Content Area -->
   <div class="flex-1 flex min-w-0 min-h-0 overflow-hidden">
+
+  <!-- Chat + Council Split Container -->
+  <div class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
 
   <!-- Chat Area -->
   <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-900 relative overflow-hidden">
@@ -3874,6 +3933,10 @@ Please walk me through the setup step by step. When I have the credentials, save
               onMessageClick={handleMessageClick}
               onQuoteText={quoteTextInChat}
               onForkWithQuote={forkWithQuote}
+              onAskCouncil={(text) => {
+                councilStore.newConversation(text);
+                councilStore.sendMessage(text);
+              }}
               onPermissionApprove={handlePermissionApprove}
               onPermissionDeny={handlePermissionDeny}
               onQuestionAnswer={handleQuestionAnswer}
@@ -4037,6 +4100,23 @@ Please walk me through the setup step by step. When I have the credentials, save
     {/if}
 
   </main>
+
+  <!-- Council Panel (Split View) -->
+  {#if $councilPanelOpen}
+    <div class="h-[40%] min-h-[200px] flex-shrink-0">
+      <CouncilPanel
+        onClose={() => councilStore.closePanel()}
+        onAdoptResponse={(text) => {
+          // Add the response text to the chat input
+          inputText = text;
+          councilStore.closePanel();
+        }}
+      />
+    </div>
+  {/if}
+
+  </div>
+  <!-- End Chat + Council Split Container -->
 
   <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context / Email) -->
   {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showEmail}
@@ -4483,6 +4563,13 @@ Please walk me through the setup step by step. When I have the credentials, save
 <NotificationToast />
 <UpdateChecker />
 <ConnectivityBanner />
+
+<!-- LLM Council Modal -->
+<CouncilModal
+  open={$councilModal.open}
+  onClose={() => councilModal.close()}
+  initialPrompt={$councilModal.initialPrompt}
+/>
 
 <!-- Resource Monitor (floating button + modal) -->
 {#if $resourceMonitorEnabled}

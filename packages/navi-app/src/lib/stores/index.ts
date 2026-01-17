@@ -87,6 +87,7 @@ export {
   resourceMonitorEnabled,
   newChatView,
   showArchivedWorkspaces,
+  chatSortOrder,
   tour,
   notifications,
   attachedFiles,
@@ -104,7 +105,7 @@ export {
 // References store
 export { textReferences, terminalReferences, chatReferences } from "./references";
 
-export type { UIScaleLevel, FileBrowserState, ProjectStatusInfo, ThemeMode } from "./ui";
+export type { UIScaleLevel, FileBrowserState, ProjectStatusInfo, ThemeMode, ChatSortOrder } from "./ui";
 
 // Cost stores
 export { costStore } from "./costs";
@@ -202,3 +203,6 @@ export {
   type PlanStep,
   type PlanModeState,
 } from "./planning";
+
+// Chat input store
+export { chatInputValue } from "./chat";

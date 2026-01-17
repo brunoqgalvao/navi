@@ -15,6 +15,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { getCredential, setCredential, type CredentialScope } from "../integrations/credentials";
 import { loadAllPlugins, type McpServerConfig as PluginMcpServerConfig } from "./plugin-loader";
+import { createMcpOAuthProvider, getMcpAuthStatus, type McpAuthStatus } from "./mcp-oauth-provider";
 
 // Types for external MCP server configurations
 export interface ExternalMcpServer {
@@ -31,6 +32,8 @@ export interface ExternalMcpServer {
   // Credential references - maps env var name to credential provider:key
   // e.g., { "GITHUB_PERSONAL_ACCESS_TOKEN": "github:pat" }
   credentialRefs?: Record<string, string>;
+  // OAuth auth provider (for SSE/HTTP servers that need OAuth)
+  authProvider?: ReturnType<typeof createMcpOAuthProvider>;
 }
 
 export interface McpServerInfo {
@@ -40,11 +43,14 @@ export interface McpServerInfo {
   toolCount?: number;
   type?: "stdio" | "sse" | "streamable-http";
   command?: string;
+  args?: string[];
   url?: string;
   source?: "builtin" | "project-mcp" | "global-mcp" | "claude-json";
   authType?: "oauth" | "mcp_oauth" | "api_key" | "none";
   authUrl?: string;
   authDescription?: string;
+  // OAuth authentication status (for SSE/HTTP servers)
+  authStatus?: McpAuthStatus;
 }
 
 interface McpSettingsData {
@@ -376,6 +382,7 @@ export const mcpSettings = {
   /**
    * Get all external MCP servers from filesystem with their enabled states
    * Merges configs from .mcp.json files and ~/.claude.json
+   * Includes OAuth authentication status for SSE/HTTP servers
    */
   getExternalServers(projectPath?: string): McpServerInfo[] {
     const servers = loadExternalMcpServers(projectPath);
@@ -386,6 +393,24 @@ export const mcpSettings = {
       if (enabledStates[server.name] !== undefined) {
         server.enabled = enabledStates[server.name];
       }
+
+      // For SSE/HTTP servers, check OAuth status
+      if ((server.type === "sse" || server.type === "streamable-http") && server.url) {
+        const url = server.url.toLowerCase();
+        const isOAuthServer =
+          url.includes("mcp.notion.com") ||
+          url.includes("mcp.linear.app") ||
+          url.includes("notion") ||
+          url.includes("linear");
+
+        if (isOAuthServer) {
+          server.authType = "mcp_oauth";
+          server.authStatus = getMcpAuthStatus(server.url);
+          server.authDescription = server.authStatus.isAuthenticated
+            ? "Authenticated"
+            : "Click Connect to authenticate";
+        }
+      }
     }
 
     return servers;
@@ -395,6 +420,7 @@ export const mcpSettings = {
    * Get external MCP server configs for passing to Claude Agent SDK
    * Only returns enabled servers with their full config
    * Resolves credential references to actual values
+   * Injects OAuth provider for SSE/HTTP servers that need authentication
    */
   getEnabledExternalServerConfigs(projectPath?: string): Record<string, ExternalMcpServerConfig> {
     const servers = this.getExternalServers(projectPath);
@@ -407,6 +433,29 @@ export const mcpSettings = {
         if (fullConfig) {
           // Resolve credential references to actual values
           const resolvedConfig = this.resolveCredentials(fullConfig, projectPath);
+
+          // For SSE/HTTP servers, inject OAuth provider if they need it
+          // Known OAuth-enabled MCP servers: Notion, Linear
+          const serverType = resolvedConfig.type || "stdio";
+          if ((serverType === "sse" || serverType === "streamable-http") && resolvedConfig.url) {
+            // Check if this is a known OAuth server or has OAuth indicators
+            const url = resolvedConfig.url.toLowerCase();
+            const isOAuthServer =
+              url.includes("mcp.notion.com") ||
+              url.includes("mcp.linear.app") ||
+              url.includes("notion") ||
+              url.includes("linear");
+
+            if (isOAuthServer) {
+              // Inject OAuth provider
+              const authProvider = createMcpOAuthProvider(resolvedConfig.url, {
+                clientName: `Navi - ${server.name}`,
+              });
+              resolvedConfig.authProvider = authProvider;
+              console.log(`[MCP Settings] Injected OAuth provider for ${server.name} (${resolvedConfig.url})`);
+            }
+          }
+
           configs[server.name] = resolvedConfig;
         }
       }

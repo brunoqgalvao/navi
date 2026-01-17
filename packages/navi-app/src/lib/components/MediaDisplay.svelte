@@ -21,6 +21,14 @@
 
   let shareStatus = $state<string | null>(null);
 
+  // Cache-busting key - increment to force refresh of all media
+  let cacheKey = $state(Date.now());
+
+  // Expose a refresh function that can be called externally or via dev tools
+  export function refreshMedia() {
+    cacheKey = Date.now();
+  }
+
   function resolveMediaSrc(src: string): string {
     if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')) {
       return src;
@@ -30,7 +38,8 @@
     if (!src.startsWith('/') && basePath) {
       fullPath = `${basePath}/${src}`;
     }
-    const resolvedUrl = `${getApiBase()}/fs/read?path=${encodeURIComponent(fullPath)}&raw=true`;
+    // Add cache-busting parameter for local files
+    const resolvedUrl = `${getApiBase()}/fs/read?path=${encodeURIComponent(fullPath)}&raw=true&_t=${cacheKey}`;
     return resolvedUrl;
   }
 
@@ -258,10 +267,13 @@
 </div>
 
 {#if lightboxOpen}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
     role="dialog"
     aria-modal="true"
+    onclick={(e) => { if (e.target === e.currentTarget) closeLightbox(); }}
+    onkeydown={(e) => { if (e.key === 'Escape') closeLightbox(); }}
   >
     <!-- Top toolbar -->
     <div class="absolute top-4 right-4 flex items-center gap-2 z-10">

@@ -4,9 +4,65 @@ A desktop application providing a rich GUI for Claude Code, built with Svelte 5,
 
 ## Be snarky fun
 
-
 VERY IMPORTANT CONTEXT:
 - we're using Navi to develop Navi -> so don't close the process/try to run it again to test - we're the process ourselves.
+
+---
+
+## Product Vision & Principles
+
+Navi is an **independent, standardizing harness** for interacting with coding agents. While currently focused on Claude Agent SDK, we secondarily support Codex and Gemini.
+
+### Core Mission
+
+**Be the best UI layer for AI coding agents** — not by reinventing the wheel, but by:
+1. Supporting and enhancing the emerging standards
+2. Providing excellent UX on top of those standards
+3. Staying local-first
+4. Enabling both ad-hoc and process-based workflows
+
+### Key Principles
+
+#### 1. Standards First
+Support the emerging agent ecosystem standards in a unified way:
+- **Plugins** = unified extensibility (skills + commands + hooks)
+- **Templates** = bundles of plugins + config for specific use cases
+- **Agents** = spawned AI workers for parallel/specialized tasks
+- **MCP** = Model Context Protocol servers for tool integration
+
+The goal: patterns proven in Navi should eventually standardize across Claude, Codex, Gemini, etc.
+
+#### 2. Rich UI on Standards
+Provide convenient harnesses and UI that abstract complexity:
+- **Workspaces & Sessions** — navigate between many agents/projects
+- **Extensions** — composable sidebar panels (Git, Terminal, Kanban, Deploy)
+- **Inline Widgets** — rich rendering in chat (diagrams, charts, interactive UI)
+- **Integrations** — OAuth flows abstracted from the user
+- **Multi-account management** — API keys, providers, credentials
+
+#### 3. Local First
+Your data stays on your machine. Cloud features are opt-in enhancements, not requirements.
+
+#### 4. Ad-hoc + Process-based
+Support both:
+- **Ad-hoc**: "help me debug this" — conversational, exploratory
+- **Process-based**: defined input → defined output → reusable. Like `/deploy` always running the same pipeline.
+
+#### 5. Native When Necessary, Plugin When Possible
+The composability litmus test: **"Could I plug this into claude code anytime?"**
+
+```
+MCP Server + Native UI wrapper = best of both worlds
+├── MCP = portable, standards-based, works in any agent
+└── Native UI = enhanced UX when running in Navi
+```
+
+Examples:
+- `askUserTool` = MCP server (portable) + native Navi UI (pretty prompts)
+- Agent orchestration = native (needs deep UI integration)
+- Deploy pipeline = plugin (reusable across tools)
+
+We have native stuff (native plugins, native MCPs, native UI). But we build on standards first, native second.
 
 ---
 
@@ -40,10 +96,12 @@ Navi has **8 distinct component categories** defined in `src/lib/core/`:
 | **Message Widgets** | Inline chat renderers (code, media, tools) | `components/widgets/` | `messageWidgetRegistry` |
 | **Dashboard Widgets** | Project landing page components | `features/dashboard/` | `dashboardWidgetRegistry` |
 | **References** | @ mentions in input (files, terminals, chats) | `core/references.ts` | `references` store |
-| **Skills** | Claude capability extensions | `.claude/skills/` | File-based |
-| **Agents** | AI personas for specialized tasks | `.claude/agents/` | File-based |
-| **Commands** | Slash commands (/review, /deploy) | `.claude/commands/` | File-based |
-| **Hooks** | Lifecycle event handlers | `.claude/settings.json` | Config-based |
+| **Plugins** | Unified extensibility (skills + commands + hooks) | `.claude/skills/`, `.claude/commands/` | File-based |
+| **Templates** | Bundles of plugins + config for use cases | `.claude/templates/` | File-based |
+| **Agents** | Spawned AI workers for parallel tasks | Runtime (multi-session) | `spawn_agent` MCP |
+| **MCP Servers** | Tool providers via Model Context Protocol | `.claude/settings.json` | Config-based |
+
+> **Note on terminology:** The `.claude/agents/` folder currently contains what we're migrating to call "templates" or "plugin bundles". Runtime spawned workers (via `spawn_agent`) are "agents".
 
 **Important: Extensions vs Global Settings Feature Toggles**
 
@@ -354,25 +412,68 @@ Review the code in the current file for:
 
 ## Hooks System
 
-Hooks run shell commands on lifecycle events. Configured in `.claude/settings.json`:
+Hooks are first-class filesystem objects (like skills and commands) that run at lifecycle events.
 
-```json
-{
-  "hooks": {
-    "pre-query": "echo 'Starting query...'",
-    "post-tool": "npm run lint --fix",
-    "on-error": "notify-send 'Error occurred'"
-  }
-}
+### Hook Locations
+
+```
+.claude/hooks/           # Project hooks (highest priority)
+~/.claude/hooks/         # User/global hooks
+plugins/{id}/hooks/      # Plugin hooks (legacy JSON format)
 ```
 
-| Event | When Triggered |
-|-------|----------------|
-| `pre-query` | Before sending to Claude |
-| `post-query` | After Claude responds |
-| `pre-tool` | Before tool execution |
-| `post-tool` | After tool execution |
-| `on-error` | On any error |
+### Hook File Format
+
+Located in `.claude/hooks/{hook-name}.md`:
+
+```yaml
+---
+name: lint-on-edit
+description: Runs ESLint after file edits
+event: PostToolUse
+matcher: "Edit|Write"     # Regex for tool names (tool events only)
+type: command             # command | prompt
+timeout: 30000
+enabled: true
+---
+
+npm run lint --fix $FILE
+```
+
+### Available Events
+
+| Event | When Triggered | Supports Matcher |
+|-------|----------------|------------------|
+| `SessionStart` | New session begins | ❌ |
+| `PreToolUse` | Before tool execution | ✅ |
+| `PostToolUse` | After tool execution | ✅ |
+| `Stop` | Session ending | ❌ |
+| `PreQuery` | Before sending to Claude | ❌ |
+| `PostQuery` | After Claude responds | ❌ |
+
+### Available Variables
+
+| Variable | Description |
+|----------|-------------|
+| `$FILE` | File path from tool input |
+| `$TOOL` | Tool name |
+| `$SESSION_ID` | Current session ID |
+| `$PROJECT_PATH` | Project root path |
+| `$TOOL_INPUT` | Tool input as JSON |
+| `$TOOL_OUTPUT` | Tool output as JSON |
+
+### Hook Types
+
+- **command**: Execute a shell command
+- **prompt**: Inject text into the conversation
+
+### API Endpoints
+
+- `GET /api/hooks?projectId=xxx` - List all hooks
+- `GET /api/hooks/events` - List available events
+- `POST /api/hooks` - Create a new hook
+- `DELETE /api/hooks/:name` - Delete a hook
+- `GET /api/hooks/template` - Generate hook template
 
 ---
 

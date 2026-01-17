@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { showComments } from "$lib/features/comments";
 
   interface Props {
     x: number;
@@ -7,10 +8,12 @@
     selectedText: string;
     onQuote: (text: string) => void;
     onForkWithQuote: (text: string) => void;
+    onAddComment?: (text: string) => void;
+    onAskCouncil?: (text: string) => void;
     onClose: () => void;
   }
 
-  let { x, y, selectedText, onQuote, onForkWithQuote, onClose }: Props = $props();
+  let { x, y, selectedText, onQuote, onForkWithQuote, onAddComment, onAskCouncil, onClose }: Props = $props();
 
   let menuRef = $state<HTMLDivElement | null>(null);
   let adjustedX = $state(0);
@@ -50,6 +53,16 @@
 
   function handleForkWithQuote() {
     onForkWithQuote(selectedText);
+    onClose();
+  }
+
+  function handleAddComment() {
+    onAddComment?.(selectedText);
+    onClose();
+  }
+
+  function handleAskCouncil() {
+    onAskCouncil?.(selectedText);
     onClose();
   }
 
@@ -100,4 +113,30 @@
     </svg>
     Fork with quote
   </button>
+
+  <!-- Add comment option (experimental) -->
+  {#if onAddComment && $showComments}
+    <button
+      onclick={handleAddComment}
+      class="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2.5 transition-colors"
+      role="menuitem"
+    >
+      <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path>
+      </svg>
+      Add comment
+    </button>
+  {/if}
+
+  <!-- Ask LLM Council option -->
+  {#if onAskCouncil}
+    <button
+      onclick={handleAskCouncil}
+      class="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2.5 transition-colors"
+      role="menuitem"
+    >
+      <span class="w-4 h-4 flex items-center justify-center text-sm">🏛️</span>
+      Ask Council
+    </button>
+  {/if}
 </div>

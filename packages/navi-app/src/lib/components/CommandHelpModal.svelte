@@ -33,6 +33,9 @@
     { name: "config", description: "Open settings and configuration", category: "settings", isBuiltIn: true },
     { name: "model", description: "Switch to a different model", argsHint: "<model>", category: "settings", isBuiltIn: true },
 
+    // Tools
+    { name: "council", description: "Ask multiple LLMs and compare responses side-by-side", argsHint: "[question]", category: "tools", isBuiltIn: true },
+
     // Feedback
     { name: "bug", description: "Report a bug or issue", category: "feedback", isBuiltIn: true },
   ];
@@ -54,6 +57,7 @@
       session: [],
       info: [],
       settings: [],
+      tools: [],
       feedback: [],
       custom: [],
     };
@@ -68,6 +72,7 @@
       { title: "Session", commands: groups.session },
       { title: "Information", commands: groups.info },
       { title: "Settings", commands: groups.settings },
+      { title: "Tools", commands: groups.tools },
       { title: "Feedback", commands: groups.feedback },
       { title: "Custom Commands", commands: groups.custom },
     ].filter(g => g.commands.length > 0);

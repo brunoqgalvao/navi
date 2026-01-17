@@ -25,6 +25,8 @@ import { handleDeployRoutes } from "./routes/deploy";
 import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
 import { handleExtensionRoutes } from "./routes/extensions";
 import { handleKanbanRoutes } from "./routes/kanban";
+// Message Comments (Google Docs-style inline annotations) @experimental
+import { handleCommentRoutes } from "./routes/comments";
 import { handleWorktreeRoutes } from "./routes/worktrees";
 // ⚠️ EXPERIMENTAL: Worktree preview - remove this import to revert (see worktree-preview.ts for full revert steps)
 import { handleWorktreePreviewRoutes } from "./routes/worktree-preview";
@@ -56,6 +58,7 @@ import { handleBackendRoutes } from "./routes/backends";
 import { handleMemoryRoutes } from "./routes/memory";
 // Proactive Hooks (cheap Haiku analysis)
 import { handleProactiveHooksRoutes } from "./routes/proactive-hooks";
+import { handleHooksRoutes } from "./routes/hooks";
 // Cloud Execution (E2B sandboxes)
 import { handleCloudExecutionRoutes } from "./routes/cloud-execution";
 // Email (AgentMail)
@@ -72,6 +75,8 @@ import { handleMcpRoutes } from "./routes/mcp";
 import { handleLoopRoutes } from "./routes/loops";
 // Resource Monitor (@experimental - disabled by default)
 import { handleResourceRoutes } from "./routes/resources";
+// LLM Council - Multi-model comparison
+import { handleCouncilRoutes } from "./routes/council";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -381,6 +386,10 @@ const server = Bun.serve({
     response = await handleResourceRoutes(url, method, req);
     if (response) return response;
 
+    // LLM Council routes (multi-model comparison)
+    response = await handleCouncilRoutes(url, method, req);
+    if (response) return response;
+
     // Dashboard routes (isolated feature)
     response = await handleDashboardRoutes(url, method, req);
     if (response) return response;
@@ -453,6 +462,10 @@ const server = Bun.serve({
     response = await handleProactiveHooksRoutes(url, method, req);
     if (response) return response;
 
+    // Hooks routes (lifecycle hooks from .claude/hooks/)
+    response = await handleHooksRoutes(url, method, req);
+    if (response) return response;
+
     // Agent routes
     response = await handleAgentRoutes(url, method, req);
     if (response) return response;
@@ -507,6 +520,10 @@ const server = Bun.serve({
 
     // Kanban routes
     response = await handleKanbanRoutes(url, method, req);
+    if (response) return response;
+
+    // Message Comments routes (Google Docs-style) @experimental
+    response = await handleCommentRoutes(url, method, req);
     if (response) return response;
 
     // Worktree routes

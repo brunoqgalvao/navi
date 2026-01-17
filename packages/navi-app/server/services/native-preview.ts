@@ -713,6 +713,9 @@ class NativePreviewService {
    *
    * SAFETY: Only kills the specific spawned process by PID.
    * Never blindly kills everything on a port - that could kill Navi itself!
+   *
+   * CRITICAL FIX: Kill the entire process GROUP (-pid) to ensure child processes
+   * (like node children spawned by npm run dev) are also terminated.
    */
   private async killPreviewProcess(preview: NativePreview): Promise<void> {
     const port = preview.port;
@@ -732,21 +735,32 @@ class NativePreviewService {
     }
 
     try {
-      // Kill ONLY the specific process we spawned - never use lsof!
+      // Kill the ENTIRE PROCESS GROUP to ensure child processes die too
+      // Since we spawn with detached: true, the process becomes a group leader
+      // Using -pid kills the entire process group
       try {
-        preview.process.kill("SIGTERM");
+        // First try to kill the process group gracefully
+        process.kill(-pid, "SIGTERM");
       } catch (e) {
-        // Process may be dead
+        // Process group may be dead, try individual process
+        try {
+          preview.process.kill("SIGTERM");
+        } catch {}
       }
 
       // Wait a moment for graceful shutdown
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // If still alive, force kill
+      // If still alive, force kill the process group
       if (!preview.process.killed && this.isProcessAlive(pid)) {
         try {
-          preview.process.kill("SIGKILL");
-        } catch {}
+          process.kill(-pid, "SIGKILL");
+        } catch {
+          // Fallback to individual process kill
+          try {
+            preview.process.kill("SIGKILL");
+          } catch {}
+        }
       }
     } catch (e) {
       console.error("[NativePreview] Error stopping preview:", e);

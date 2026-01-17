@@ -15,9 +15,10 @@
     rootPath: string;
     onSelect?: (path: string) => void;
     onPreview?: (path: string) => void;
+    onEdit?: (path: string) => void;
   }
 
-  let { rootPath, onSelect, onPreview }: Props = $props();
+  let { rootPath, onSelect, onPreview, onEdit }: Props = $props();
 
   let isDraggingOver = $state(false);
   let dragCounter = $state(0);
@@ -102,12 +103,26 @@
 
   const icons = {
     preview: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>`,
+    edit: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>`,
     folder: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>`,
     attach: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>`,
   };
 
   function attachToChat(entry: FileEntry) {
     attachedFiles.add({ path: entry.path, name: entry.name, type: entry.type });
+  }
+
+  // Check if a file is editable (code/text file)
+  function isEditable(entry: FileEntry): boolean {
+    if (entry.type !== "file") return false;
+    const ext = entry.name.split(".").pop()?.toLowerCase() || "";
+    const editableExtensions = [
+      "js", "ts", "jsx", "tsx", "svelte", "vue", "py", "rs", "go", "java", "c", "cpp", "h",
+      "css", "scss", "sass", "less", "html", "xml", "yaml", "yml", "toml", "sh", "bash", "zsh",
+      "sql", "graphql", "prisma", "json", "md", "mdx", "markdown", "txt", "env", "gitignore",
+      "dockerfile", "makefile"
+    ];
+    return editableExtensions.includes(ext) || entry.name.startsWith(".");
   }
 
   function getContextMenuItems(entry: FileEntry) {
@@ -122,6 +137,12 @@
         icon: icons.preview,
         onclick: () => onPreview?.(entry.path),
         show: entry.type === "file",
+      },
+      {
+        label: "Edit",
+        icon: icons.edit,
+        onclick: () => onEdit?.(entry.path),
+        show: isEditable(entry),
       },
       {
         label: "Reveal in Finder",

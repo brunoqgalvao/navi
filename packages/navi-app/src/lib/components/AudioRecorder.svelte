@@ -18,6 +18,7 @@
   let durationInterval: number | null = null;
   let error: string | null = $state(null);
   let stream: MediaStream | null = null;
+  let lastAudioBlob: Blob | null = null;
   let hasApiKey: boolean | null = $state(null);
   let showApiKeyModal = $state(false);
   let apiKeyInput = $state("");
@@ -119,12 +120,14 @@
 
   async function processAudio(audioBlob: Blob) {
     recordingState = "processing";
-    
+    lastAudioBlob = audioBlob;
+
     try {
       const result = await api.transcribe(audioBlob);
-      
+
       if (result.text && result.text.trim()) {
         onTranscript(result.text.trim());
+        lastAudioBlob = null; // Clear on success
         recordingState = "idle";
       } else {
         throw new Error("Empty transcription");
@@ -132,14 +135,22 @@
     } catch (e: any) {
       console.error("Transcription failed:", e);
       error = e.message || "Transcription failed";
-      
+
       const savedPath = await saveAudioBackup(audioBlob);
       if (savedPath) {
-        error = `Transcription failed. Audio saved to: ${savedPath}`;
+        // Show truncated path to keep tooltip manageable
+        const filename = savedPath.split("/").pop() || savedPath;
+        error = `Transcription failed. Audio saved as: ${filename}`;
       }
 
       recordingState = "idle";
     }
+  }
+
+  async function retryTranscription() {
+    if (!lastAudioBlob) return;
+    error = null;
+    await processAudio(lastAudioBlob);
   }
 
   async function saveAudioBackup(audioBlob: Blob): Promise<string | null> {
@@ -289,13 +300,32 @@
   </Tooltip>
 
   {#if error}
-    <div class="absolute bottom-full right-0 mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 break-words whitespace-nowrap max-w-xs">
-      {error}
-      <button onclick={() => error = null} class="ml-2 text-red-500 hover:text-red-700" title="Dismiss">
-        <svg class="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
+    <div class="absolute bottom-full right-0 mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 max-w-[280px]">
+      <div class="break-words">{error}</div>
+      <div class="flex items-center gap-2 mt-2 pt-2 border-t border-red-200">
+        {#if lastAudioBlob}
+          <button
+            onclick={retryTranscription}
+            disabled={recordingState === "processing"}
+            class="flex items-center gap-1 px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-medium transition-colors disabled:opacity-50"
+          >
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Retry
+          </button>
+        {/if}
+        <button
+          onclick={() => { error = null; lastAudioBlob = null; }}
+          class="flex items-center gap-1 px-2 py-1 text-red-500 hover:text-red-700 text-xs transition-colors ml-auto"
+          title="Dismiss"
+        >
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          Dismiss
+        </button>
+      </div>
     </div>
   {/if}
 </div>

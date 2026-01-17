@@ -3,13 +3,14 @@
    * DashboardView - Main dashboard container
    *
    * Fetches and renders the project's .claude/dashboard.md
-   * Falls back to empty state if no dashboard exists.
+   * Falls back to project capabilities if no dashboard exists.
    */
   import { onMount } from "svelte";
   import type { Dashboard, DashboardResponse } from "../types";
   import { getDashboard, createDefaultDashboard } from "../api";
   import { parseDashboard } from "../parser";
   import DashboardRenderer from "./DashboardRenderer.svelte";
+  import ProjectCapabilitiesWidget from "./widgets/ProjectCapabilitiesWidget.svelte";
 
   interface Props {
     projectPath: string;
@@ -84,22 +85,36 @@
   {:else if dashboard}
     <DashboardRenderer {dashboard} {projectPath} onRefresh={loadDashboard} />
   {:else}
-    <!-- No dashboard exists - show prompt to create one -->
-    <div class="p-6">
-      <div class="max-w-md mx-auto text-center py-12">
-        <div class="text-4xl mb-4">📊</div>
-        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-          No Dashboard Yet
+    <!-- No dashboard exists - show project capabilities -->
+    <div class="p-6 max-w-2xl mx-auto">
+      <div class="mb-6">
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-1">
+          {projectName}
+        </h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400">
+          Start chatting or use one of the commands below
+        </p>
+      </div>
+
+      <!-- Project Capabilities -->
+      <div class="mb-8">
+        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+          <span>🧰</span>
+          Available Capabilities
         </h3>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-          Create a dashboard to add quick actions, widgets, and project info.
-          You can customize it anytime by editing <code class="bg-gray-100 dark:bg-gray-800 px-1 rounded">.claude/dashboard.md</code>
+        <ProjectCapabilitiesWidget {projectPath} />
+      </div>
+
+      <!-- Option to create custom dashboard -->
+      <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+        <p class="text-xs text-gray-400 dark:text-gray-500 mb-2">
+          Want a custom dashboard? Create one with quick actions and widgets.
         </p>
         <button
           onclick={handleCreateDashboard}
-          class="px-4 py-2 bg-accent-600 text-white rounded-lg hover:bg-accent-700 transition-colors"
+          class="text-xs text-accent-600 hover:text-accent-700 dark:text-accent-400 hover:underline"
         >
-          Create Dashboard
+          Create custom dashboard →
         </button>
       </div>
     </div>

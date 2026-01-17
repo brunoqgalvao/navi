@@ -15,6 +15,13 @@ import {
   type MCPServerPreset,
 } from "../services/mcp-presets";
 import { getIntegrationsRegistry } from "../integrations/registry";
+import {
+  getMcpAuthStatus,
+  clearMcpAuth,
+  startOAuthCallbackServer,
+  createMcpOAuthProvider,
+  OAUTH_CALLBACK_PORT,
+} from "../services/mcp-oauth-provider";
 
 // Built-in MCP servers with their tool counts
 const BUILTIN_SERVERS: Record<string, { toolCount: number; description: string }> = {
@@ -379,6 +386,132 @@ export async function handleMcpRoutes(
       });
     } catch (e) {
       return error(e instanceof Error ? e.message : "Failed to add preset server", 500);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OAuth Authentication Routes for MCP Servers
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // GET /api/mcp/oauth/status - Get OAuth status for an MCP server
+  // Query params: ?url=https://mcp.notion.com/sse
+  if (path === "/api/mcp/oauth/status" && method === "GET") {
+    const serverUrl = url.searchParams.get("url");
+
+    if (!serverUrl) {
+      return error("url query parameter is required", 400);
+    }
+
+    try {
+      const status = getMcpAuthStatus(serverUrl);
+      return json(status);
+    } catch (e) {
+      return error(e instanceof Error ? e.message : "Failed to get OAuth status", 500);
+    }
+  }
+
+  // POST /api/mcp/oauth/connect - Start OAuth flow for an MCP server
+  // Body: { url: string, serverName?: string }
+  // This opens the browser for OAuth and waits for the callback
+  if (path === "/api/mcp/oauth/connect" && method === "POST") {
+    try {
+      const body = await req.json();
+      const { url: serverUrl, serverName } = body as { url: string; serverName?: string };
+
+      if (!serverUrl) {
+        return error("url is required", 400);
+      }
+
+      console.log(`[MCP OAuth] Starting OAuth flow for ${serverUrl}`);
+
+      // Check if we already have valid tokens
+      const currentStatus = getMcpAuthStatus(serverUrl);
+      if (currentStatus.isAuthenticated) {
+        return json({
+          success: true,
+          message: "Already authenticated",
+          status: currentStatus,
+        });
+      }
+
+      // The OAuth flow is a multi-step process:
+      // 1. The SDK's SSE transport will detect 401 and call redirectToAuthorization
+      // 2. This opens the browser to the OAuth provider
+      // 3. User authenticates and is redirected to our callback server
+      // 4. We receive the code and exchange it for tokens
+
+      // For now, just open the MCP server URL in the browser with a special auth trigger
+      // The actual OAuth flow happens when the SDK connects to the server
+      const { exec } = await import("child_process");
+      const openCommand = process.platform === "darwin"
+        ? "open"
+        : process.platform === "win32"
+          ? "start"
+          : "xdg-open";
+
+      // Note: The actual OAuth flow will be triggered by the SDK when connecting
+      // This endpoint just provides info about how to authenticate
+      return json({
+        success: true,
+        message: "OAuth flow will be triggered when you use this server in a session. The browser will open for authentication.",
+        instructions: [
+          "1. Start a new chat session or use an existing one",
+          "2. The server will connect and detect you're not authenticated",
+          "3. A browser window will open for you to sign in",
+          "4. After signing in, return to Navi - you'll be connected",
+        ],
+        callbackPort: OAUTH_CALLBACK_PORT,
+        serverUrl,
+      });
+    } catch (e) {
+      return error(e instanceof Error ? e.message : "Failed to start OAuth flow", 500);
+    }
+  }
+
+  // POST /api/mcp/oauth/disconnect - Clear OAuth tokens for an MCP server
+  // Body: { url: string }
+  if (path === "/api/mcp/oauth/disconnect" && method === "POST") {
+    try {
+      const body = await req.json();
+      const { url: serverUrl } = body as { url: string };
+
+      if (!serverUrl) {
+        return error("url is required", 400);
+      }
+
+      clearMcpAuth(serverUrl);
+
+      return json({
+        success: true,
+        message: "OAuth tokens cleared. You'll need to re-authenticate on next use.",
+      });
+    } catch (e) {
+      return error(e instanceof Error ? e.message : "Failed to clear OAuth tokens", 500);
+    }
+  }
+
+  // POST /api/mcp/oauth/callback - Handle OAuth callback (for manual callback handling)
+  // Body: { url: string, code: string, state?: string }
+  // This is called when the callback server receives the OAuth code
+  if (path === "/api/mcp/oauth/callback" && method === "POST") {
+    try {
+      const body = await req.json();
+      const { url: serverUrl, code, state } = body as { url: string; code: string; state?: string };
+
+      if (!serverUrl || !code) {
+        return error("url and code are required", 400);
+      }
+
+      // TODO: Exchange code for tokens using the OAuth provider
+      // For now, this is handled by the SDK's finishAuth method
+      // We might need to implement manual token exchange if needed
+
+      return json({
+        success: true,
+        message: "OAuth callback received. The SDK will complete the token exchange.",
+      });
+    } catch (e) {
+      return error(e instanceof Error ? e.message : "Failed to handle OAuth callback", 500);
     }
   }
 

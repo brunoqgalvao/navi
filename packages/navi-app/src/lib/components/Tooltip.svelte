@@ -13,10 +13,11 @@
     text: string;
     position?: "top" | "bottom" | "left" | "right";
     delay?: number;
+    disabled?: boolean;
     children: Snippet;
   }
 
-  let { text, position = "top", delay = 200, children }: Props = $props();
+  let { text, position = "top", delay = 200, disabled = false, children }: Props = $props();
 
   let visible = $state(false);
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -43,7 +44,7 @@
 >
   {@render children()}
 
-  {#if visible}
+  {#if visible && !disabled}
     <div
       class="absolute z-50 px-2 py-1 text-xs font-medium text-white bg-gray-900 dark:bg-gray-700 rounded shadow-lg whitespace-nowrap pointer-events-none
         {position === 'top' ? 'bottom-full left-1/2 -translate-x-1/2 mb-2' : ''}

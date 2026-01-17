@@ -117,7 +117,8 @@
     loadingSkills = true;
     skillsError = null;
     try {
-      await skillsApi.syncGlobal();
+      // Scan both global and project skills to auto-import any new ones
+      await skillsApi.scan($currentProject?.path);
       const skills = await skillsApi.list();
       skillLibrary.set(skills);
       showCreateExamples = skills.length === 0;

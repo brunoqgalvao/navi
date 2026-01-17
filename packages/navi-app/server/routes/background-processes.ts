@@ -11,6 +11,8 @@ import { getActiveProcesses } from "../websocket/handler";
 
 // Constants
 const MAX_OUTPUT_LINES = 200;
+const MAX_COMPLETED_PROCESSES = 50; // Maximum number of completed/failed processes to keep
+const COMPLETED_PROCESS_TTL_MS = 30 * 60 * 1000; // 30 minutes TTL for completed processes
 // Strip ANSI color codes for port detection
 const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, "");
 
@@ -37,6 +39,7 @@ export interface BackgroundProcess {
   sessionId?: string;
   projectId?: string;
   startedAt: number;
+  completedAt?: number;  // When the process finished (for TTL cleanup)
   status: BackgroundProcessStatus;
   exitCode?: number;
   output: string[];
@@ -127,6 +130,59 @@ function sanitizeProcessForApi(proc: BackgroundProcess): Omit<BackgroundProcess,
   const { process, ...rest } = proc;
   return rest;
 }
+
+/**
+ * Clean up old completed/failed/killed processes to prevent memory leaks
+ * - Removes processes older than TTL
+ * - Keeps at most MAX_COMPLETED_PROCESSES
+ */
+function cleanupCompletedProcesses() {
+  const now = Date.now();
+  const completedProcesses: { id: string; completedAt: number }[] = [];
+
+  // Collect all completed/failed/killed processes
+  for (const [id, proc] of backgroundProcesses) {
+    if (proc.status === "completed" || proc.status === "failed" || proc.status === "killed") {
+      completedProcesses.push({ id, completedAt: proc.completedAt || proc.startedAt });
+    }
+  }
+
+  // Sort by completion time (oldest first)
+  completedProcesses.sort((a, b) => a.completedAt - b.completedAt);
+
+  let removed = 0;
+
+  // Remove processes older than TTL
+  for (const { id, completedAt } of completedProcesses) {
+    if (now - completedAt > COMPLETED_PROCESS_TTL_MS) {
+      backgroundProcesses.delete(id);
+      removed++;
+      emitEvent({ type: "process_removed", processId: id });
+    }
+  }
+
+  // If still over limit, remove oldest first
+  const remainingCompleted = completedProcesses.filter(
+    ({ id }) => backgroundProcesses.has(id)
+  );
+
+  if (remainingCompleted.length > MAX_COMPLETED_PROCESSES) {
+    const toRemove = remainingCompleted.length - MAX_COMPLETED_PROCESSES;
+    for (let i = 0; i < toRemove; i++) {
+      const { id } = remainingCompleted[i];
+      backgroundProcesses.delete(id);
+      removed++;
+      emitEvent({ type: "process_removed", processId: id });
+    }
+  }
+
+  if (removed > 0) {
+    console.log(`[BackgroundProcesses] Cleaned up ${removed} old processes`);
+  }
+}
+
+// Run periodic cleanup every 5 minutes
+setInterval(cleanupCompletedProcesses, 5 * 60 * 1000);
 
 /**
  * Start a new background process
@@ -246,6 +302,7 @@ export function startBackgroundProcess(options: {
   childProcess.on("close", (code, signal) => {
     bgProcess.status = code === 0 ? "completed" : "failed";
     bgProcess.exitCode = code ?? undefined;
+    bgProcess.completedAt = Date.now();
     delete bgProcess.process;
 
     emitEvent({
@@ -254,6 +311,9 @@ export function startBackgroundProcess(options: {
       status: bgProcess.status,
       exitCode: bgProcess.exitCode,
     });
+
+    // Trigger cleanup of old completed processes
+    cleanupCompletedProcesses();
   });
 
   // Handle error

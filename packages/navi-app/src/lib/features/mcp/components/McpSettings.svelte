@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { mcpApi, type McpServer, type CreateMcpServerRequest } from "../api";
-  import { showError, showSuccess } from "$lib/errorHandler";
+  import { mcpApi, type McpServer, type CreateMcpServerRequest, type McpAuthStatus } from "../api";
+  import { showError, showSuccess, showInfo } from "$lib/errorHandler";
   import { currentProject } from "$lib/stores/projects";
   import McpPresetsBrowser from "./McpPresetsBrowser.svelte";
   import McpSetupWizard from "./McpSetupWizard.svelte";
@@ -11,6 +11,7 @@
   let loading = $state(true);
   let toggling = $state<string | null>(null);
   let deleting = $state<string | null>(null);
+  let connecting = $state<string | null>(null);
   let showBuiltinServers = $state(false);
   let showAddForm = $state(false);
   let creating = $state(false);
@@ -320,7 +321,70 @@
     }
   }
 
+  async function connectOAuth(server: McpServer) {
+    if (!server.url) {
+      showError({
+        title: "No URL available",
+        message: "This server doesn't have a URL configured.",
+      });
+      return;
+    }
+
+    connecting = server.name;
+    try {
+      const result = await mcpApi.connectOAuth(server.url, server.name);
+
+      if (result.success) {
+        showInfo("OAuth Authentication", result.message);
+
+        // Show instructions if available
+        if (result.instructions) {
+          console.log("[MCP OAuth] Instructions:", result.instructions);
+        }
+
+        // Reload servers to get updated auth status
+        await loadServers();
+      }
+    } catch (err) {
+      showError({
+        title: "OAuth connection failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      connecting = null;
+    }
+  }
+
+  async function disconnectOAuth(server: McpServer) {
+    if (!server.url) return;
+
+    if (!confirm(`Disconnect ${server.name}? You'll need to re-authenticate to use this server.`)) {
+      return;
+    }
+
+    connecting = server.name;
+    try {
+      await mcpApi.disconnectOAuth(server.url);
+      showSuccess("Disconnected", `${server.name} OAuth tokens cleared`);
+      await loadServers();
+    } catch (err) {
+      showError({
+        title: "Disconnect failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      connecting = null;
+    }
+  }
+
   function openAuth(server: McpServer) {
+    // For mcp_oauth servers, use our new OAuth flow
+    if (server.authType === "mcp_oauth" && server.url) {
+      connectOAuth(server);
+      return;
+    }
+
+    // Legacy OAuth with direct URL
     const authUrl = server.authUrl;
     if (!authUrl) {
       showError({
@@ -586,6 +650,7 @@
         {#each externalServers as server}
           {@const isToggling = toggling === server.name}
           {@const isDeleting = deleting === server.name}
+          {@const isConnecting = connecting === server.name}
           {@const sourceLabel = getSourceLabel(server.source)}
           {@const typeLabel = getTypeLabel(server.type)}
           <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 transition-all {!server.enabled ? 'opacity-60' : ''}">
@@ -608,9 +673,15 @@
                         OAuth required
                       </span>
                     {:else if server.authType === "mcp_oauth"}
-                      <span class="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full">
-                        OAuth on first use
-                      </span>
+                      {#if server.authStatus?.isAuthenticated}
+                        <span class="text-xs px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full">
+                          ✓ Connected
+                        </span>
+                      {:else}
+                        <span class="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full">
+                          Not connected
+                        </span>
+                      {/if}
                     {/if}
                   </div>
                   <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 break-all font-mono">
@@ -633,6 +704,26 @@
                   >
                     Connect
                   </button>
+                {:else if server.authType === "mcp_oauth"}
+                  {#if server.authStatus?.isAuthenticated}
+                    <button
+                      onclick={() => disconnectOAuth(server)}
+                      disabled={isConnecting}
+                      class="px-2.5 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-300 transition-colors disabled:opacity-50"
+                      title="Disconnect and clear tokens"
+                    >
+                      {isConnecting ? "..." : "Disconnect"}
+                    </button>
+                  {:else}
+                    <button
+                      onclick={() => connectOAuth(server)}
+                      disabled={isConnecting}
+                      class="px-2.5 py-1 text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
+                      title="Connect via OAuth"
+                    >
+                      {isConnecting ? "Connecting..." : "Connect"}
+                    </button>
+                  {/if}
                 {/if}
                 {#if canDelete(server)}
                   <button

@@ -15,6 +15,7 @@ import {
   type AgentStatus,
 } from "../db";
 import { sessionManager } from "../services/session-manager";
+import { cancelChildSessions } from "../websocket/handler";
 
 export async function handleSessionHierarchyRoutes(
   url: URL,
@@ -368,6 +369,25 @@ export async function handleSessionHierarchyRoutes(
     const sessionId = canSpawnMatch[1];
     const result = sessionManager.canSpawn(sessionId);
     return json(result);
+  }
+
+  // POST /api/sessions/:id/cancel-children - Cancel all child sessions (subagents)
+  const cancelChildrenMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/cancel-children$/);
+  if (cancelChildrenMatch && method === "POST") {
+    const sessionId = cancelChildrenMatch[1];
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return error("Session not found", 404);
+    }
+
+    const cancelledIds = cancelChildSessions(sessionId);
+
+    return json({
+      success: true,
+      message: `Cancelled ${cancelledIds.length} subagent(s)`,
+      cancelled: cancelledIds,
+    });
   }
 
   // Not a session hierarchy route

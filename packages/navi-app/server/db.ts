@@ -566,6 +566,32 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_channel_messages_created ON channel_messages(created_at);
   `);
 
+  // Message comments - Google Docs-style inline annotations
+  // @experimental
+  db.run(`
+    CREATE TABLE IF NOT EXISTS message_comments (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      parent_comment_id TEXT,
+      author TEXT NOT NULL,
+      content TEXT NOT NULL,
+      selection_text TEXT,
+      selection_start INTEGER,
+      selection_end INTEGER,
+      resolved INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY (parent_comment_id) REFERENCES message_comments(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_message_comments_session ON message_comments(session_id);
+    CREATE INDEX IF NOT EXISTS idx_message_comments_message ON message_comments(message_id);
+    CREATE INDEX IF NOT EXISTS idx_message_comments_thread ON message_comments(thread_id);
+    CREATE INDEX IF NOT EXISTS idx_message_comments_resolved ON message_comments(resolved);
+  `);
+
   saveDb()
   return db;
 }
@@ -2954,5 +2980,245 @@ export const channelMessages = {
     }
     stmt.free();
     return 0;
+  },
+};
+
+// ============================================================================
+// Message Comments - Google Docs-style inline annotations
+// @experimental
+// ============================================================================
+
+export interface MessageComment {
+  id: string;
+  message_id: string;
+  session_id: string;
+  thread_id: string;
+  parent_comment_id: string | null;
+  author: 'user' | 'assistant';
+  content: string;
+  selection_text: string | null;
+  selection_start: number | null;
+  selection_end: number | null;
+  resolved: number;
+  created_at: number;
+}
+
+export interface CommentThread {
+  thread_id: string;
+  message_id: string;
+  session_id: string;
+  selection_text: string | null;
+  selection_start: number | null;
+  selection_end: number | null;
+  resolved: number;
+  comments: MessageComment[];
+}
+
+export const messageComments = {
+  // Get all comments for a session
+  listBySession: (sessionId: string): MessageComment[] =>
+    queryAll<MessageComment>(
+      "SELECT * FROM message_comments WHERE session_id = ? ORDER BY created_at ASC",
+      [sessionId]
+    ),
+
+  // Get comments for a specific message
+  listByMessage: (messageId: string): MessageComment[] =>
+    queryAll<MessageComment>(
+      "SELECT * FROM message_comments WHERE message_id = ? ORDER BY created_at ASC",
+      [messageId]
+    ),
+
+  // Get a comment thread (all comments with same thread_id)
+  getThread: (threadId: string): MessageComment[] =>
+    queryAll<MessageComment>(
+      "SELECT * FROM message_comments WHERE thread_id = ? ORDER BY created_at ASC",
+      [threadId]
+    ),
+
+  // Get single comment
+  get: (id: string): MessageComment | undefined =>
+    queryOne<MessageComment>("SELECT * FROM message_comments WHERE id = ?", [id]),
+
+  // Get all threads for a session (grouped)
+  getThreadsForSession: (sessionId: string): CommentThread[] => {
+    const comments = queryAll<MessageComment>(
+      "SELECT * FROM message_comments WHERE session_id = ? ORDER BY created_at ASC",
+      [sessionId]
+    );
+
+    // Group by thread_id
+    const threadMap = new Map<string, MessageComment[]>();
+    for (const comment of comments) {
+      const existing = threadMap.get(comment.thread_id) || [];
+      existing.push(comment);
+      threadMap.set(comment.thread_id, existing);
+    }
+
+    // Convert to CommentThread objects
+    const threads: CommentThread[] = [];
+    for (const [threadId, threadComments] of threadMap) {
+      const first = threadComments[0];
+      threads.push({
+        thread_id: threadId,
+        message_id: first.message_id,
+        session_id: first.session_id,
+        selection_text: first.selection_text,
+        selection_start: first.selection_start,
+        selection_end: first.selection_end,
+        resolved: first.resolved,
+        comments: threadComments,
+      });
+    }
+
+    return threads;
+  },
+
+  // Get threads for a specific message
+  getThreadsForMessage: (messageId: string): CommentThread[] => {
+    const comments = queryAll<MessageComment>(
+      "SELECT * FROM message_comments WHERE message_id = ? ORDER BY created_at ASC",
+      [messageId]
+    );
+
+    const threadMap = new Map<string, MessageComment[]>();
+    for (const comment of comments) {
+      const existing = threadMap.get(comment.thread_id) || [];
+      existing.push(comment);
+      threadMap.set(comment.thread_id, existing);
+    }
+
+    const threads: CommentThread[] = [];
+    for (const [threadId, threadComments] of threadMap) {
+      const first = threadComments[0];
+      threads.push({
+        thread_id: threadId,
+        message_id: first.message_id,
+        session_id: first.session_id,
+        selection_text: first.selection_text,
+        selection_start: first.selection_start,
+        selection_end: first.selection_end,
+        resolved: first.resolved,
+        comments: threadComments,
+      });
+    }
+
+    return threads;
+  },
+
+  // Create a new comment (and optionally start a new thread)
+  create: (comment: Omit<MessageComment, 'created_at'>): MessageComment => {
+    const now = Date.now();
+    run(
+      `INSERT INTO message_comments
+       (id, message_id, session_id, thread_id, parent_comment_id, author, content,
+        selection_text, selection_start, selection_end, resolved, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        comment.id,
+        comment.message_id,
+        comment.session_id,
+        comment.thread_id,
+        comment.parent_comment_id,
+        comment.author,
+        comment.content,
+        comment.selection_text,
+        comment.selection_start,
+        comment.selection_end,
+        comment.resolved,
+        now,
+      ]
+    );
+    return { ...comment, created_at: now };
+  },
+
+  // Reply to a thread
+  reply: (
+    id: string,
+    threadId: string,
+    author: 'user' | 'assistant',
+    content: string
+  ): MessageComment | null => {
+    // Get the first comment in thread to copy metadata
+    const thread = messageComments.getThread(threadId);
+    if (thread.length === 0) return null;
+
+    const first = thread[0];
+    const now = Date.now();
+
+    run(
+      `INSERT INTO message_comments
+       (id, message_id, session_id, thread_id, parent_comment_id, author, content,
+        selection_text, selection_start, selection_end, resolved, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        first.message_id,
+        first.session_id,
+        threadId,
+        first.id, // Parent is the root comment
+        author,
+        content,
+        null, // Replies don't have selection
+        null,
+        null,
+        0,
+        now,
+      ]
+    );
+
+    return {
+      id,
+      message_id: first.message_id,
+      session_id: first.session_id,
+      thread_id: threadId,
+      parent_comment_id: first.id,
+      author,
+      content,
+      selection_text: null,
+      selection_start: null,
+      selection_end: null,
+      resolved: 0,
+      created_at: now,
+    };
+  },
+
+  // Resolve/unresolve a thread
+  setResolved: (threadId: string, resolved: boolean): void => {
+    run(
+      "UPDATE message_comments SET resolved = ? WHERE thread_id = ?",
+      [resolved ? 1 : 0, threadId]
+    );
+  },
+
+  // Delete a single comment
+  delete: (id: string): void => {
+    run("DELETE FROM message_comments WHERE id = ?", [id]);
+  },
+
+  // Delete an entire thread
+  deleteThread: (threadId: string): void => {
+    run("DELETE FROM message_comments WHERE thread_id = ?", [threadId]);
+  },
+
+  // Delete all comments for a message
+  deleteByMessage: (messageId: string): void => {
+    run("DELETE FROM message_comments WHERE message_id = ?", [messageId]);
+  },
+
+  // Delete all comments for a session
+  deleteBySession: (sessionId: string): void => {
+    run("DELETE FROM message_comments WHERE session_id = ?", [sessionId]);
+  },
+
+  // Count unresolved threads for a session
+  countUnresolvedThreads: (sessionId: string): number => {
+    const result = queryOne<{ count: number }>(
+      `SELECT COUNT(DISTINCT thread_id) as count
+       FROM message_comments
+       WHERE session_id = ? AND resolved = 0`,
+      [sessionId]
+    );
+    return result?.count || 0;
   },
 };

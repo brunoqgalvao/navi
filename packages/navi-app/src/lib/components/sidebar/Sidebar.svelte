@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
-  import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, attentionItems, backendModels, getBackendModelsFormatted, type BackendId, channelsEnabled } from "../../stores";
+  import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems, backendModels, getBackendModelsFormatted, type BackendId, channelsEnabled } from "../../stores";
   import { api, type Project, type Session, type WorkspaceFolder, type SearchResult } from "../../api";
   import { getApiBase } from "../../config";
   import ModelSelector from "../ModelSelector.svelte";
@@ -79,6 +79,7 @@
     onOpenHomeInNewWindow: () => void;
     onOpenSessionsBoard?: (projectId?: string) => void;
     onOpenAgentBuilder?: () => void;
+    onGoToProjectDashboard?: () => void;
     agents?: { id: string; name: string; type: "agent" | "skill"; description?: string }[];
     onSelectAgent?: (agent: { id: string; name: string; type: "agent" | "skill"; description?: string }) => void;
     titleSuggestionRef?: TitleSuggestion | null;
@@ -142,6 +143,7 @@
     onOpenHomeInNewWindow,
     onOpenSessionsBoard,
     onOpenAgentBuilder,
+    onGoToProjectDashboard,
     agents = [],
     onSelectAgent,
     titleSuggestionRef = $bindable(null),
@@ -153,6 +155,9 @@
   // Channels state
   let channelsSectionCollapsed = $state(false);
   let showCreateChannelModal = $state(false);
+
+  // Sessions dropdown for collapsed sidebar
+  let sessionsDropdownOpen = $state(false);
 
   function handleSelectChannel(channel: Channel) {
     currentChannelId.set(channel.id);
@@ -223,6 +228,7 @@
 
   let filteredSessions = $derived(() => {
     const query = sidebarSearchQuery.trim();
+    const sortOrder = $chatSortOrder;
     let result: Session[];
 
     if (!query) {
@@ -235,10 +241,18 @@
       result = sessions.filter(s => matchSet.has(s.id) && !(s as any).parent_session_id);
     }
 
-    // Sort: starred first, then by recency
+    // Sort: starred first, then by sort order preference
     return result.toSorted((a, b) => {
+      // Favorites always come first
       if (a.favorite && !b.favorite) return -1;
       if (!a.favorite && b.favorite) return 1;
+
+      // Then apply sort order
+      if (sortOrder === "recent") {
+        // Sort by most recently updated
+        return (b.updated_at || 0) - (a.updated_at || 0);
+      }
+      // Default: manual (respects backend sort_order from drag-drop reordering)
       return 0;
     });
   });
@@ -643,6 +657,7 @@
     folderMenuId = null;
     showOpenInMenu = false;
     chatsMenuOpen = false;
+    sessionsDropdownOpen = false;
   }
 </script>
 
@@ -701,6 +716,59 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"></path></svg>
             </button>
           </Tooltip>
+          <!-- Sessions dropdown -->
+          <div class="relative">
+            <Tooltip text="Sessions" position="right" disabled={sessionsDropdownOpen}>
+              <button
+                onclick={(e) => { e.stopPropagation(); sessionsDropdownOpen = !sessionsDropdownOpen; }}
+                class="w-10 h-10 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-200/50 dark:hover:bg-gray-700 rounded transition-all {sessionsDropdownOpen ? 'bg-gray-200/50 dark:bg-gray-700 text-gray-900 dark:text-gray-100' : ''}"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                </svg>
+              </button>
+            </Tooltip>
+            {#if sessionsDropdownOpen}
+              <div class="absolute left-full top-0 ml-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[220px] max-w-[280px] z-[60] max-h-[400px] overflow-y-auto">
+                <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+                  <span class="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Sessions</span>
+                </div>
+                {#if sessions.length === 0}
+                  <div class="px-3 py-4 text-center text-gray-400 dark:text-gray-500 text-sm">
+                    No sessions yet
+                  </div>
+                {:else}
+                  {#each sessions.slice(0, 15) as sess}
+                    <button
+                      onclick={(e) => { e.stopPropagation(); onSelectSession(sess); sessionsDropdownOpen = false; }}
+                      class="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2 {$session?.id === sess.id ? 'bg-gray-100 dark:bg-gray-700' : ''}"
+                    >
+                      {#if sess.starred}
+                        <svg class="w-3 h-3 text-amber-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                        </svg>
+                      {:else}
+                        <svg class="w-3 h-3 text-gray-300 dark:text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                        </svg>
+                      {/if}
+                      <span class="truncate text-sm text-gray-700 dark:text-gray-300 {$session?.id === sess.id ? 'font-medium' : ''}">{sess.title || 'Untitled'}</span>
+                    </button>
+                  {/each}
+                  {#if sessions.length > 15}
+                    <div class="px-3 py-2 border-t border-gray-100 dark:border-gray-700">
+                      <button
+                        onclick={(e) => { e.stopPropagation(); onCollapseToggle(); sessionsDropdownOpen = false; }}
+                        class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                      >
+                        View all {sessions.length} sessions →
+                      </button>
+                    </div>
+                  {/if}
+                {/if}
+              </div>
+            {/if}
+          </div>
         {/if}
       </div>
     {:else if !currentProject}
@@ -904,7 +972,7 @@
                             <svg class="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                             <span class="text-[12px] font-medium truncate {proj.archived ? 'text-gray-400' : ''}">{proj.name}</span>
                             {#if proj.archived}
-                              <span class="shrink-0 text-[9px] font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">Archived</span>
+                              <svg class="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Archived"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
                             {:else}
                               {@const statusInfo = $projectStatus.get(proj.id)}
                               {#if statusInfo}
@@ -919,6 +987,13 @@
                         </button>
                         <div class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
                           <StarButton active={!!proj.pinned} onclick={(e) => onToggleProjectPin(proj, e)} size="sm" />
+                          <button
+                            onclick={(e) => onToggleProjectArchive(proj, e)}
+                            class="p-1 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity {proj.archived ? 'text-amber-500 hover:text-amber-600' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-400'}"
+                            title={proj.archived ? 'Unarchive' : 'Archive'}
+                          >
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                          </button>
                           <div class="relative">
                             <button
                               onclick={(e) => { e.stopPropagation(); projectMenuId = projectMenuId === proj.id ? null : proj.id; }}
@@ -1007,7 +1082,7 @@
                       <svg class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                       <span class="text-[13px] font-medium truncate {proj.archived ? 'text-gray-400' : ''}">{proj.name}</span>
                       {#if proj.archived}
-                        <span class="shrink-0 text-[9px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded" title="Archived">Archived</span>
+                        <svg class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Archived"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
                       {:else}
                         {@const statusInfo = $projectStatus.get(proj.id)}
                         {#if statusInfo}
@@ -1022,6 +1097,13 @@
                   </button>
                   <div class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
                     <StarButton active={!!proj.pinned} onclick={(e) => onToggleProjectPin(proj, e)} size="sm" />
+                    <button
+                      onclick={(e) => onToggleProjectArchive(proj, e)}
+                      class="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity {proj.archived ? 'text-amber-500 hover:text-amber-600' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-400'}"
+                      title={proj.archived ? 'Unarchive' : 'Archive'}
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                    </button>
                     <div class="relative">
                       <button 
                         onclick={(e) => { e.stopPropagation(); projectMenuId = projectMenuId === proj.id ? null : proj.id; }}
@@ -1182,7 +1264,7 @@
         </button>
 
         <div class="mb-6 flex items-start gap-2 min-w-0">
-          <button onclick={() => onSelectSession(sessions[0] || {} as Session)} class="flex-1 min-w-0 px-1 text-left hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg py-2 -my-2 transition-colors group">
+          <button onclick={() => onGoToProjectDashboard?.()} class="flex-1 min-w-0 px-1 text-left hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg py-2 -my-2 transition-colors group">
             <h2 class="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate flex items-center gap-2 group-hover:text-gray-700 dark:group-hover:text-gray-300">
               <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
               <span class="truncate">{currentProject.name}</span>
@@ -1248,6 +1330,19 @@
               </button>
               {#if chatsMenuOpen}
                 <div class="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-[60]">
+                  <button
+                    onclick={(e) => { e.stopPropagation(); chatSortOrder.toggle(); chatsMenuOpen = false; }}
+                    class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      {#if $chatSortOrder === "manual"}
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                      {:else}
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 12h10"/>
+                      {/if}
+                    </svg>
+                    {$chatSortOrder === "manual" ? 'Sort: Recent' : 'Sort: Manual'}
+                  </button>
                   <button
                     onclick={(e) => { e.stopPropagation(); showArchivedWorkspaces.toggle(); chatsMenuOpen = false; }}
                     class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"

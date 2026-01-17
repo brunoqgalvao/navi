@@ -204,6 +204,28 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
     }
   }
 
+  // Write file content (for inline editing)
+  if (url.pathname === "/api/fs/write" && method === "POST") {
+    const body = await req.json();
+    const { path: filePath, content } = body;
+
+    if (!filePath) {
+      return json({ error: "Path required" }, 400);
+    }
+    if (content === undefined) {
+      return json({ error: "Content required" }, 400);
+    }
+
+    try {
+      const fs = await import("fs/promises");
+      await fs.writeFile(filePath, content, "utf-8");
+      return json({ success: true, path: filePath });
+    } catch (e: any) {
+      console.error("[fs/write] Failed:", e);
+      return json({ error: e.message || "Failed to write file" }, 500);
+    }
+  }
+
   // Apply a project template to a target directory
   if (url.pathname === "/api/fs/apply-template" && method === "POST") {
     const body = await req.json();

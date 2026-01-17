@@ -1,18 +1,25 @@
 /**
  * Hook Executor Service
  *
- * Executes hooks from Claude Code plugins at various lifecycle points:
+ * Executes hooks at various lifecycle points:
  * - SessionStart: When a new session begins
  * - PreToolUse: Before a tool is executed
  * - PostToolUse: After a tool is executed
  * - Stop: When session is ending
+ * - PreQuery: Before sending query to Claude
+ * - PostQuery: After receiving response from Claude
+ *
+ * Hook sources (in priority order):
+ * 1. Project hooks: .claude/hooks/*.md
+ * 2. User hooks: ~/.claude/hooks/*.md
+ * 3. Plugin hooks: plugins/{id}/hooks/hooks.json (legacy)
  *
  * Hooks can be of type:
  * - command: Execute a shell command
  * - prompt: Inject text into the conversation
  */
 
-import { exec, spawn } from "child_process";
+import { exec } from "child_process";
 import { promisify } from "util";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
@@ -22,6 +29,11 @@ import {
   type PluginHookConfig,
   type LoadedPlugin,
 } from "./plugin-loader";
+import {
+  loadHooks,
+  type HookDefinition,
+  type HookEvent as NewHookEvent,
+} from "./hook-loader";
 
 const execAsync = promisify(exec);
 
@@ -33,7 +45,9 @@ export type HookEvent =
   | "SessionStart"
   | "PreToolUse"
   | "PostToolUse"
-  | "Stop";
+  | "Stop"
+  | "PreQuery"
+  | "PostQuery";
 
 export interface HookContext {
   sessionId?: string;
@@ -212,13 +226,99 @@ function getEnabledPlugins(projectPath: string): LoadedPlugin[] {
 }
 
 /**
- * Execute all hooks for an event across enabled plugins
+ * Execute a filesystem-based hook (from .claude/hooks/)
+ */
+async function executeFilesystemHook(
+  hookDef: HookDefinition,
+  context: HookContext
+): Promise<HookResult> {
+  const startTime = Date.now();
+
+  try {
+    if (hookDef.type === "command") {
+      const command = substituteVariables(hookDef.command, context);
+      const cwd = context.projectPath;
+
+      const { stdout, stderr } = await execAsync(command, {
+        cwd,
+        timeout: hookDef.timeout,
+        env: {
+          ...process.env,
+          HOOK_NAME: hookDef.name,
+          HOOK_PROJECT_PATH: context.projectPath,
+          HOOK_SESSION_ID: context.sessionId || "",
+          HOOK_TOOL_NAME: context.toolName || "",
+        },
+      });
+
+      return {
+        success: true,
+        output: stdout || stderr,
+        duration: Date.now() - startTime,
+      };
+    } else if (hookDef.type === "prompt") {
+      const promptText = substituteVariables(hookDef.command, context);
+      return {
+        success: true,
+        promptInjection: promptText,
+        duration: Date.now() - startTime,
+      };
+    } else {
+      return {
+        success: false,
+        error: `Unknown hook type: ${hookDef.type}`,
+        duration: Date.now() - startTime,
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || String(err),
+      duration: Date.now() - startTime,
+    };
+  }
+}
+
+/**
+ * Execute all hooks for an event (filesystem + plugins)
  */
 export async function executeHooks(
   event: HookEvent,
   context: HookContext
 ): Promise<HookExecutionSummary[]> {
   const results: HookExecutionSummary[] = [];
+
+  // 1. Execute filesystem-based hooks first (project + user)
+  const { byEvent } = loadHooks(context.projectPath);
+  const filesystemHooks = byEvent[event as NewHookEvent] || [];
+
+  for (const hookDef of filesystemHooks) {
+    // Check matcher for tool-related events
+    if (hookDef.matcher && context.toolName) {
+      try {
+        const matcherRegex = new RegExp(hookDef.matcher);
+        if (!matcherRegex.test(context.toolName)) {
+          continue;
+        }
+      } catch (regexErr) {
+        console.error(
+          `[Hooks] Invalid regex matcher "${hookDef.matcher}" in ${hookDef.filePath}:`,
+          regexErr
+        );
+        continue;
+      }
+    }
+
+    const result = await executeFilesystemHook(hookDef, context);
+    results.push({
+      event,
+      pluginId: hookDef.scope === "project" ? "project" : "user",
+      hookType: hookDef.type,
+      result,
+    });
+  }
+
+  // 2. Execute plugin hooks (legacy JSON format)
   const enabledPlugins = getEnabledPlugins(context.projectPath);
 
   for (const plugin of enabledPlugins) {
@@ -238,7 +338,10 @@ export async function executeHooks(
           }
         } catch (regexErr) {
           // Invalid regex in hook config - log and skip this entry
-          console.error(`[Hooks] Invalid regex matcher "${entry.matcher}" in ${plugin.id}:`, regexErr);
+          console.error(
+            `[Hooks] Invalid regex matcher "${entry.matcher}" in ${plugin.id}:`,
+            regexErr
+          );
           continue;
         }
       }
@@ -334,12 +437,20 @@ export async function executeStopHooks(
 }
 
 /**
- * Check if any enabled plugins have hooks for a given event
+ * Check if any hooks exist for a given event (filesystem + plugins)
  */
 export function hasHooksForEvent(
   projectPath: string,
   event: HookEvent
 ): boolean {
+  // Check filesystem hooks
+  const { byEvent } = loadHooks(projectPath);
+  const filesystemHooks = byEvent[event as NewHookEvent] || [];
+  if (filesystemHooks.length > 0) {
+    return true;
+  }
+
+  // Check plugin hooks
   const enabledPlugins = getEnabledPlugins(projectPath);
 
   for (const plugin of enabledPlugins) {

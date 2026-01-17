@@ -137,6 +137,10 @@ const connectedClients = new Set<any>();
 // Track active cloud executions (sessionId -> executionId)
 const activeCloudExecutions = new Map<string, { executionId: string; ws: any; aborted: boolean }>();
 
+// Track active adapter sessions (sessionId -> backendId) for non-Claude backends
+// This allows us to call adapter.cancel() on abort for Codex/Gemini sessions
+const activeAdapterSessions = new Map<string, BackendId>();
+
 /**
  * Expand plugin slash commands in the prompt
  * Converts /owner/repo:commandName args to the actual command content
@@ -233,6 +237,27 @@ export function cleanupSessionState(sessionId: string) {
     }
   }
 
+  // CRITICAL FIX: Clean pending waits for this session (prevents ChildProcess handle leaks)
+  for (const [waitId, wait] of pendingWaits) {
+    if (wait.sessionId === sessionId) {
+      // Kill the wait process if still running
+      try {
+        wait.proc.kill("SIGTERM");
+      } catch {}
+      pendingWaits.delete(waitId);
+    }
+  }
+
+  // CRITICAL FIX: Cancel active adapter sessions (Codex/Gemini)
+  const adapterBackend = activeAdapterSessions.get(sessionId);
+  if (adapterBackend) {
+    try {
+      const adapter = getAdapter(adapterBackend);
+      adapter.cancel();
+    } catch {}
+    activeAdapterSessions.delete(sessionId);
+  }
+
   // Clean child session workers
   const childWorker = childSessionWorkers.get(sessionId);
   if (childWorker) {
@@ -252,6 +277,88 @@ export function cleanupSessionState(sessionId: string) {
 }
 
 /**
+ * Cancel all child sessions (subagents) under a given session.
+ * Does NOT cancel the parent session itself.
+ * @returns Array of cancelled session IDs
+ */
+export function cancelChildSessions(parentSessionId: string): string[] {
+  const descendants = sessionHierarchy.getDescendants(parentSessionId);
+  const cancelled: string[] = [];
+
+  for (const child of descendants) {
+    // Kill the child worker process if running
+    const childWorker = childSessionWorkers.get(child.id);
+    if (childWorker) {
+      try {
+        childWorker.kill("SIGTERM");
+      } catch {}
+      childSessionWorkers.delete(child.id);
+    }
+
+    // Also clean up any active processes (for non-child sessions that might be tracked here)
+    const active = activeProcesses.get(child.id);
+    if (active) {
+      try {
+        active.process.kill("SIGTERM");
+      } catch {}
+      activeProcesses.delete(child.id);
+    }
+
+    // Cancel adapter sessions
+    const adapterBackend = activeAdapterSessions.get(child.id);
+    if (adapterBackend) {
+      try {
+        const adapter = getAdapter(adapterBackend);
+        adapter.cancel();
+      } catch {}
+      activeAdapterSessions.delete(child.id);
+    }
+
+    // Clean pending waits
+    for (const [waitId, wait] of pendingWaits) {
+      if (wait.sessionId === child.id) {
+        try {
+          wait.proc.kill("SIGTERM");
+        } catch {}
+        pendingWaits.delete(waitId);
+      }
+    }
+
+    // Clean pending permissions
+    for (const [reqId, req] of pendingPermissions) {
+      if (req.sessionId === child.id) {
+        pendingPermissions.delete(reqId);
+      }
+    }
+
+    // Clean pending questions
+    for (const [reqId, req] of pendingQuestions) {
+      if (req.sessionId === child.id) {
+        pendingQuestions.delete(reqId);
+      }
+    }
+    pendingQuestionsDb.deleteBySession(child.id);
+
+    // Clean pending escalations
+    for (const [reqId, esc] of pendingEscalations) {
+      if (esc.sessionId === child.id) {
+        pendingEscalations.delete(reqId);
+      }
+    }
+
+    // Update status to 'failed' in DB (so it shows as terminated)
+    sessionHierarchy.updateAgentStatus(child.id, "failed");
+
+    // Clean stream capture
+    deleteStreamCapture(child.id);
+
+    cancelled.push(child.id);
+  }
+
+  return cancelled;
+}
+
+/**
  * Get current memory stats for debugging
  */
 export function getMemoryStats() {
@@ -259,11 +366,14 @@ export function getMemoryStats() {
     activeProcesses: activeProcesses.size,
     pendingPermissions: pendingPermissions.size,
     pendingQuestions: pendingQuestions.size,
+    pendingWaits: pendingWaits.size,
     sessionApprovedAll: sessionApprovedAll.size,
     untilDoneSessions: untilDoneSessions.size,
     pendingEscalations: pendingEscalations.size,
     childSessionWorkers: childSessionWorkers.size,
     connectedClients: connectedClients.size,
+    activeCloudExecutions: activeCloudExecutions.size,
+    activeAdapterSessions: activeAdapterSessions.size,
   };
 }
 
@@ -1437,6 +1547,11 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
   // Get the adapter
   const adapter = getAdapter(backendId);
 
+  // Track this adapter session so we can cancel it on abort
+  if (sessionId) {
+    activeAdapterSessions.set(sessionId, backendId);
+  }
+
   // Emit query_start
   safeSend(ws, {
     type: "query_start",
@@ -1483,6 +1598,11 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
       error: error.message,
       backend: backendId,
     });
+  } finally {
+    // Clean up adapter session tracking
+    if (sessionId) {
+      activeAdapterSessions.delete(sessionId);
+    }
   }
 }
 
@@ -2572,6 +2692,35 @@ export function createWebSocketHandlers() {
             cloudExecutions.cancel(cloudExec.executionId);
             activeCloudExecutions.delete(data.sessionId);
             safeSend(ws, { type: "aborted", uiSessionId: data.sessionId });
+          }
+          // CRITICAL FIX: Cancel adapter session (Codex/Gemini backends)
+          const adapterBackend = activeAdapterSessions.get(data.sessionId);
+          if (adapterBackend) {
+            try {
+              const adapter = getAdapter(adapterBackend);
+              adapter.cancel();
+            } catch {}
+            activeAdapterSessions.delete(data.sessionId);
+          }
+          // CRITICAL FIX: Clean up pendingWaits for this session (prevents memory/handle leaks)
+          for (const [waitId, wait] of pendingWaits) {
+            if (wait.sessionId === data.sessionId) {
+              try {
+                wait.proc.kill("SIGTERM");
+              } catch {}
+              pendingWaits.delete(waitId);
+            }
+          }
+          // CRITICAL FIX: Clean up pending permissions and questions on abort
+          for (const [reqId, req] of pendingPermissions) {
+            if (req.sessionId === data.sessionId) {
+              pendingPermissions.delete(reqId);
+            }
+          }
+          for (const [reqId, req] of pendingQuestions) {
+            if (req.sessionId === data.sessionId) {
+              pendingQuestions.delete(reqId);
+            }
           }
         } else if (data.type === "attach" && data.sessionId) {
           const active = activeProcesses.get(data.sessionId);

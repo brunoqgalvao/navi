@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, planMode, loopModeEnabled } from "../stores";
+  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, planMode, loopModeEnabled, chatInputValue } from "../stores";
   import { agents, type Agent } from "../stores/agents";
   import FileAttachment from "./FileAttachment.svelte";
   import ReferenceChip from "./ReferenceChip.svelte";
@@ -694,6 +694,20 @@
     }
   });
 
+  // Listen for external value injection (e.g., from clicking commands in dashboard)
+  $effect(() => {
+    const injectedValue = $chatInputValue;
+    if (injectedValue) {
+      value = injectedValue;
+      chatInputValue.set(""); // Clear the store
+      setTimeout(() => {
+        inputRef?.focus();
+        const newPos = injectedValue.length;
+        inputRef?.setSelectionRange(newPos, newPos);
+      }, 0);
+    }
+  });
+
   function selectFile(file: FileEntry) {
     const cursorPos = inputRef?.selectionStart || 0;
     const textBeforeCursor = value.slice(0, cursorPos);
@@ -1137,6 +1151,7 @@
     <textarea
       bind:this={inputRef}
       bind:value
+      data-chat-input
       onkeydown={handleKeydown}
       oninput={handleInput}
       onpaste={handlePaste}

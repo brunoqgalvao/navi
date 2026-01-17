@@ -231,6 +231,21 @@ export async function canSpawn(
   return data;
 }
 
+/**
+ * Cancel all child sessions (subagents) under this session.
+ * Does NOT cancel the parent session itself.
+ */
+export async function cancelChildren(
+  sessionId: string
+): Promise<{ success: boolean; message: string; cancelled: string[] }> {
+  const res = await fetch(`${getSessionApiBase()}/${sessionId}/cancel-children`, {
+    method: "POST",
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
 // ============================================================================
 // Context System
 // ============================================================================
@@ -374,6 +389,7 @@ export const sessionHierarchyApi = {
   getActiveSessions,
   getBlockedSessions,
   canSpawn,
+  cancelChildren,
 
   // Context
   getImmediateContext,

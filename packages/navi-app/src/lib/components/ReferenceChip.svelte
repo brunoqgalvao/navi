@@ -26,12 +26,12 @@
         return filename;
       case "csv":
         if (source.rows && source.columns) {
-          return `${filename} Row ${source.rows[0]}, ${source.columns[0]}`;
+          return `${filename} Row ${source.rows[0]}`;
         }
         return filename;
       case "xlsx":
         if (source.sheet && source.rows) {
-          return `${filename} [${source.sheet}] Row ${source.rows[0]}`;
+          return `${filename} [${source.sheet}]`;
         }
         return filename;
       case "json":
@@ -46,16 +46,25 @@
           return source.url || "Web";
         }
       default:
-        return filename || "Reference";
+        return filename || "Quote";
     }
+  }
+
+  // Build tooltip text - show the quote content
+  function getTooltipText(): string {
+    const preview = reference.truncatedText.length > 100
+      ? reference.truncatedText.slice(0, 100) + "..."
+      : reference.truncatedText;
+    return `"${preview}"`;
   }
 </script>
 
 <div
-  class="inline-flex items-center gap-1.5 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg text-xs transition-colors group max-w-[200px]"
+  class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs transition-colors group cursor-default"
+  title={getTooltipText()}
 >
   <svg
-    class="w-3 h-3 text-indigo-400 flex-shrink-0"
+    class="w-3 h-3 text-gray-400 dark:text-gray-500 flex-shrink-0"
     fill="none"
     stroke="currentColor"
     viewBox="0 0 24 24"
@@ -68,20 +77,15 @@
     ></path>
   </svg>
 
-  <div class="flex flex-col min-w-0">
-    <span class="text-indigo-700 font-medium truncate" title={reference.text}>
-      "{reference.truncatedText}"
-    </span>
-    <span class="text-[10px] text-indigo-500 truncate" title={getSourceLabel()}>
-      {getSourceLabel()}
-    </span>
-  </div>
+  <span class="text-gray-600 dark:text-gray-300 truncate max-w-[120px]">
+    {getSourceLabel()}
+  </span>
 
   {#if onRemove}
     <button
-      onclick={onRemove}
-      class="text-indigo-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-      title="Remove reference"
+      onclick={(e) => { e.stopPropagation(); onRemove?.(); }}
+      class="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 -mr-0.5"
+      title="Remove"
     >
       <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path

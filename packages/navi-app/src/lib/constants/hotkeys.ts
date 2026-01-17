@@ -10,6 +10,7 @@ export const HOTKEYS: Hotkey[] = [
   { key: "Cmd/Ctrl + D", action: "Sessions dashboard" },
   { key: "Cmd/Ctrl + P", action: "Toggle preview panel" },
   { key: "Cmd/Ctrl + B", action: "Toggle file browser" },
+  { key: "Cmd/Ctrl + L", action: "Toggle LLM Council" },
   { key: "M", action: "Toggle mic recording" },
   { key: "Cmd/Ctrl + /", action: "Focus input" },
   { key: "Cmd/Ctrl + ,", action: "Open settings" },

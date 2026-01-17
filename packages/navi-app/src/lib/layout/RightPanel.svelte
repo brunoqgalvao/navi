@@ -90,6 +90,19 @@
   let fileListCollapsed = $state(false);
   let isResizingFileList = $state(false);
 
+  // Edit mode state - when set, Preview starts in edit mode
+  let startInEditMode = $state(false);
+
+  function handleFileSelect(path: string) {
+    startInEditMode = false;
+    onFileSelect(path);
+  }
+
+  function handleFileEdit(path: string) {
+    startInEditMode = true;
+    onFileSelect(path);
+  }
+
   // Handle initial command for terminal - use $state so $effect reacts to changes
   let terminalRef = $state<{ pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null>(null);
 
@@ -187,7 +200,7 @@
           style="width: {fileListCollapsed ? '0px' : (previewSource ? `${fileListWidth}px` : '100%')}"
         >
           {#if !fileListCollapsed}
-            <FileBrowser rootPath={projectPath} onPreview={onFileSelect} />
+            <FileBrowser rootPath={projectPath} onPreview={handleFileSelect} onEdit={handleFileEdit} />
           {/if}
         </div>
 
@@ -221,7 +234,7 @@
 
           <!-- Preview area -->
           <div class="flex-1 flex flex-col overflow-hidden min-w-[200px]">
-            <Preview source={previewSource} />
+            <Preview source={previewSource} {startInEditMode} />
           </div>
         {/if}
       </div>

@@ -15,6 +15,7 @@
 
   let children = $state<HierarchySession[]>([]);
   let loading = $state(true);
+  let cancelling = $state(false);
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
   const activeChildren = $derived(children.filter(c => isActiveStatus(c.agent_status)));
@@ -28,6 +29,24 @@
       console.error("Failed to load children:", e);
     } finally {
       loading = false;
+    }
+  }
+
+  async function handleCancelAll(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (cancelling) return;
+
+    cancelling = true;
+    try {
+      const result = await sessionHierarchyApi.cancelChildren(parentSessionId);
+      console.log(`Cancelled ${result.cancelled.length} subagents`);
+      // Refresh the list
+      await loadChildren();
+    } catch (err) {
+      console.error("Failed to cancel children:", err);
+    } finally {
+      cancelling = false;
     }
   }
 
@@ -69,6 +88,20 @@
           <span class="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse"></span>
           Needs input
         </span>
+      {/if}
+      {#if activeChildren.length > 0}
+        <button
+          onclick={handleCancelAll}
+          disabled={cancelling}
+          class="ml-auto text-[10px] px-2 py-0.5 rounded bg-red-100 text-red-600 hover:bg-red-200 transition-colors disabled:opacity-50"
+          title="Stop all running subagents"
+        >
+          {#if cancelling}
+            Stopping...
+          {:else}
+            Stop All
+          {/if}
+        </button>
       {/if}
     </summary>
 

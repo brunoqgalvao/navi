@@ -389,6 +389,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ path, editor }),
       }),
+    write: (path: string, content: string) =>
+      request<{ success: boolean; path: string }>("/fs/write", {
+        method: "POST",
+        body: JSON.stringify({ path, content }),
+      }),
     applyTemplate: (templateId: string, targetPath: string) =>
       request<{ success: boolean; templateId: string; targetPath: string; skillSlugs: string[]; message: string }>("/fs/apply-template", {
         method: "POST",

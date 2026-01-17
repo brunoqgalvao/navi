@@ -1740,6 +1740,24 @@ NEVER tell the user "I'll let you know when they complete" without actually chec
       console.error(`[Worker] Failed to load integration MCPs:`, e);
     }
 
+    // Add composable integration MCP servers (new system - defineIntegration)
+    // These are built-in integrations using Navi's OAuth
+    try {
+      // Import to trigger registration, then get connected servers
+      await import("./integrations/providers");
+      const { getIntegrationMcpServers } = await import("./integrations/providers");
+      const integrationServers = getIntegrationMcpServers();
+
+      for (const [name, server] of Object.entries(integrationServers)) {
+        if (isMcpEnabled(name) && !mcpServers[name]) {
+          mcpServers[name] = server;
+          console.error(`[Worker] Added composable integration: ${name}`);
+        }
+      }
+    } catch (e) {
+      console.error(`[Worker] Failed to load composable integrations:`, e);
+    }
+
     // Enable multi-session tools if enabled (for all sessions that can spawn or are children)
     if (multiSession?.enabled && isBuiltinMcpEnabled("multi-session")) {
       mcpServers["multi-session"] = multiSessionServer;

@@ -85,3 +85,24 @@ Welcome to your project. Start chatting or customize this dashboard by editing \
 
   return saveDashboard(projectPath, defaultContent);
 }
+
+/**
+ * Project capabilities response type
+ */
+export interface ProjectCapabilities {
+  commands: Array<{ name: string; description: string; source: string }>;
+  skills: Array<{ name: string; description: string; source: string }>;
+  agents: Array<{ name: string; description: string; type?: string; source: string }>;
+  hooks: Array<{ event: string; command: string }>;
+  mcpServers: Array<{ name: string; type: string; enabled: boolean; source: string }>;
+}
+
+/**
+ * Get project capabilities (skills, commands, hooks, agents, MCPs)
+ */
+export async function getProjectCapabilities(projectPath: string): Promise<ProjectCapabilities> {
+  const res = await fetch(
+    `${getDashboardApiBase()}/capabilities?path=${encodeURIComponent(projectPath)}`
+  );
+  return res.json();
+}

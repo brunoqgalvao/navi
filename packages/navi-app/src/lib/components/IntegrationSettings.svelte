@@ -1,8 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { getServerUrl } from "../api";
   import { currentProject } from "../stores";
   import Modal from "./Modal.svelte";
+
+  // Track active OAuth polling intervals for cleanup
+  let activePollingIntervals: NodeJS.Timeout[] = [];
 
   // Props
   interface Props {
@@ -197,6 +200,9 @@
       const handleMessage = (event: MessageEvent) => {
         if (event.data?.type === "oauth-callback") {
           window.removeEventListener("message", handleMessage);
+          clearInterval(checkClosed);
+          // Remove from tracking
+          activePollingIntervals = activePollingIntervals.filter(i => i !== checkClosed);
           connectingProvider = null;
           loadData();
         }
@@ -207,9 +213,14 @@
         if (popup?.closed) {
           clearInterval(checkClosed);
           window.removeEventListener("message", handleMessage);
+          // Remove from tracking
+          activePollingIntervals = activePollingIntervals.filter(i => i !== checkClosed);
           connectingProvider = null;
         }
       }, 500);
+
+      // Track this interval for cleanup on unmount
+      activePollingIntervals.push(checkClosed);
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to start connection";
       connectingProvider = null;
@@ -519,6 +530,14 @@
   );
 
   onMount(loadData);
+
+  // Cleanup active polling intervals on component destroy
+  onDestroy(() => {
+    for (const interval of activePollingIntervals) {
+      clearInterval(interval);
+    }
+    activePollingIntervals = [];
+  });
 </script>
 
 <div class="space-y-6">

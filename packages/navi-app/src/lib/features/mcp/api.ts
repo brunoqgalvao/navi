@@ -6,6 +6,15 @@
 
 import { getApiBase } from "$lib/config";
 
+export interface McpAuthStatus {
+  hasTokens: boolean;
+  hasClientInfo: boolean;
+  isAuthenticated: boolean;
+  needsAuth: boolean;
+  tokensExpired: boolean;
+  hasRefreshToken: boolean;
+}
+
 export interface McpServer {
   name: string;
   enabled: boolean;
@@ -20,6 +29,8 @@ export interface McpServer {
   authType?: "oauth" | "mcp_oauth" | "api_key" | "none";
   authUrl?: string;
   authDescription?: string;
+  // OAuth status for SSE/HTTP servers
+  authStatus?: McpAuthStatus;
 }
 
 export interface CreateMcpServerRequest {
@@ -189,5 +200,43 @@ export const mcpApi = {
     request(`/mcp/presets/${encodeURIComponent(presetId)}/add`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OAuth APIs for MCP servers
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get OAuth status for an MCP server
+   * @param serverUrl The MCP server URL
+   */
+  getOAuthStatus: (serverUrl: string): Promise<McpAuthStatus> =>
+    request(`/mcp/oauth/status?url=${encodeURIComponent(serverUrl)}`),
+
+  /**
+   * Start OAuth connection flow for an MCP server
+   * @param serverUrl The MCP server URL
+   * @param serverName Optional display name
+   */
+  connectOAuth: (serverUrl: string, serverName?: string): Promise<{
+    success: boolean;
+    message: string;
+    instructions?: string[];
+    callbackPort?: number;
+    serverUrl?: string;
+  }> =>
+    request("/mcp/oauth/connect", {
+      method: "POST",
+      body: JSON.stringify({ url: serverUrl, serverName }),
+    }),
+
+  /**
+   * Disconnect OAuth (clear tokens) for an MCP server
+   * @param serverUrl The MCP server URL
+   */
+  disconnectOAuth: (serverUrl: string): Promise<{ success: boolean; message: string }> =>
+    request("/mcp/oauth/disconnect", {
+      method: "POST",
+      body: JSON.stringify({ url: serverUrl }),
     }),
 };

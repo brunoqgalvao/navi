@@ -17,6 +17,10 @@ const CHANNELS_ENABLED_KEY = "claude-code-ui-channels-enabled";
 const LOOP_MODE_ENABLED_KEY = "claude-code-ui-loop-mode-enabled";
 const DEPLOY_TO_CLOUD_ENABLED_KEY = "claude-code-ui-deploy-to-cloud-enabled";
 const RESOURCE_MONITOR_ENABLED_KEY = "claude-code-ui-resource-monitor-enabled";
+const CHAT_SORT_ORDER_KEY = "claude-code-ui-chat-sort-order";
+
+// Chat sort order type
+export type ChatSortOrder = "manual" | "recent";
 
 // Onboarding store
 function createOnboardingStore() {
@@ -259,6 +263,33 @@ function createShowArchivedStore() {
     set: (value: boolean) => {
       if (typeof window !== "undefined") {
         localStorage.setItem(SHOW_ARCHIVED_KEY, String(value));
+      }
+      set(value);
+    },
+  };
+}
+
+// Chat sort order store
+function createChatSortOrderStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(CHAT_SORT_ORDER_KEY) : null;
+  // Default to "manual" (respects user's drag-drop ordering), migrate legacy values
+  const initial: ChatSortOrder = (stored === "recent") ? "recent" : "manual";
+  const { subscribe, set } = writable<ChatSortOrder>(initial);
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current: ChatSortOrder = "manual";
+      subscribe(v => current = v)();
+      const newValue: ChatSortOrder = current === "manual" ? "recent" : "manual";
+      if (typeof window !== "undefined") {
+        localStorage.setItem(CHAT_SORT_ORDER_KEY, newValue);
+      }
+      set(newValue);
+    },
+    set: (value: ChatSortOrder) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(CHAT_SORT_ORDER_KEY, value);
       }
       set(value);
     },
@@ -655,6 +686,7 @@ export const deployToCloudEnabled = createDeployToCloudEnabledStore();
 export const resourceMonitorEnabled = createResourceMonitorEnabledStore();
 export const newChatView = createNewChatViewStore();
 export const showArchivedWorkspaces = createShowArchivedStore();
+export const chatSortOrder = createChatSortOrderStore();
 export const tour = createTourStore();
 export const notifications = createNotificationsStore();
 export const attachedFiles = createAttachedFilesStore();
@@ -785,3 +817,24 @@ function createFileBrowserStore() {
 }
 
 export const fileBrowserState = createFileBrowserStore();
+
+// Council modal state
+interface CouncilModalState {
+  open: boolean;
+  initialPrompt: string;
+}
+
+function createCouncilModalStore() {
+  const { subscribe, set, update } = writable<CouncilModalState>({
+    open: false,
+    initialPrompt: "",
+  });
+
+  return {
+    subscribe,
+    open: (prompt = "") => set({ open: true, initialPrompt: prompt }),
+    close: () => set({ open: false, initialPrompt: "" }),
+  };
+}
+
+export const councilModal = createCouncilModalStore();
