@@ -85,6 +85,7 @@ export {
   loopModeEnabled,
   deployToCloudEnabled,
   resourceMonitorEnabled,
+  canvasModeEnabled,
   newChatView,
   showArchivedWorkspaces,
   chatSortOrder,
@@ -159,10 +160,12 @@ export {
   claudeMdContent,
   defaultProjectsDir,
   workspaceFolders,
+  sessionFolders,
   globalPermissionSettings,
   permissionDefaults,
   resetWorkspaceState,
   type WorkspaceFolder,
+  type SessionFolder,
   type PermissionSettings,
 } from "./workspace";
 

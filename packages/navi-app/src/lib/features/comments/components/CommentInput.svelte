@@ -44,9 +44,8 @@
       if (thread) {
         onCreated?.(thread.thread_id);
 
-        // Trigger AI response
+        // Trigger AI response (store handles loading state)
         if (onAskAI) {
-          commentsStore.setThreadLoading(sessionId, thread.thread_id, true);
           onAskAI(thread.thread_id, commentInput.trim());
         }
       }

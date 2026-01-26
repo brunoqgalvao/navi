@@ -15,6 +15,18 @@ export interface WorkspaceFolder {
   updated_at: number;
 }
 
+// Session folders - group sessions within a project
+export interface SessionFolder {
+  id: string;
+  project_id: string;
+  name: string;
+  sort_order: number;
+  collapsed: number;
+  pinned?: number;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -84,10 +96,13 @@ export interface Session {
   task?: string | null;
   agent_status?: string | null;
   agent_type?: string | null;
+  session_type?: "root" | "agent" | "fork" | null;
   escalation?: string | null;
   deliverable?: string | null;
   // Multi-backend support
   backend?: BackendId | null;
+  // Folder grouping
+  folder_id?: string | null;
   created_at: number;
   updated_at: number;
   project_name?: string;
@@ -234,6 +249,39 @@ export const api = {
       }),
   },
 
+  // Session folders - group sessions within a project
+  sessionFolders: {
+    list: (projectId: string) => request<SessionFolder[]>(`/projects/${projectId}/session-folders`),
+    get: (id: string) => request<SessionFolder>(`/session-folders/${id}`),
+    create: (projectId: string, name: string) =>
+      request<SessionFolder>(`/projects/${projectId}/session-folders`, {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    update: (id: string, name: string) =>
+      request<SessionFolder>(`/session-folders/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name }),
+      }),
+    delete: (id: string) =>
+      request<{ success: boolean }>(`/session-folders/${id}`, { method: "DELETE" }),
+    toggleCollapse: (id: string, collapsed: boolean) =>
+      request<SessionFolder>(`/session-folders/${id}/collapse`, {
+        method: "POST",
+        body: JSON.stringify({ collapsed }),
+      }),
+    togglePin: (id: string, pinned: boolean) =>
+      request<SessionFolder>(`/session-folders/${id}/pin`, {
+        method: "POST",
+        body: JSON.stringify({ pinned }),
+      }),
+    reorder: (projectId: string, order: string[]) =>
+      request<{ success: boolean }>(`/projects/${projectId}/session-folders/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ order }),
+      }),
+  },
+
   sessions: {
     list: (projectId: string, includeArchived: boolean = false) =>
       request<Session[]>(`/projects/${projectId}/sessions${includeArchived ? '?includeArchived=true' : ''}`),
@@ -305,6 +353,11 @@ export const api = {
     resetTokens: (id: string) =>
       request<{ success: boolean }>(`/sessions/${id}/reset-tokens`, {
         method: "POST",
+      }),
+    setFolder: (id: string, folderId: string | null) =>
+      request<Session>(`/sessions/${id}/folder`, {
+        method: "POST",
+        body: JSON.stringify({ folderId }),
       }),
     pruneToolResults: (id: string, options?: { preserveRecentCount?: number; maxPrunedLength?: number }) =>
       request<{ success: boolean; prunedCount: number; tokensSaved: number; prunedToolUseIds: string[] }>(
@@ -739,6 +792,54 @@ export const skillsApi = {
     request<{ success: boolean; default_enabled: boolean }>(`/skills/${id}/default-enabled`, {
       method: enabled ? "POST" : "DELETE",
     }),
+};
+
+// Marketplace (skills.sh integration)
+export interface MarketplaceSkill {
+  id: string;
+  name: string;
+  description: string;
+  owner: string;
+  repo: string;
+  installs: number;
+  stars?: number;
+  version?: string;
+  category?: string;
+  author?: string;
+}
+
+export interface MarketplaceSearchResult {
+  skills: MarketplaceSkill[];
+  total: number;
+  query: string;
+}
+
+export interface MarketplaceInstallResult {
+  success: boolean;
+  source: string;
+  global: boolean;
+  output: string;
+}
+
+export const marketplaceApi = {
+  search: (query: string, limit = 50) =>
+    request<MarketplaceSearchResult>(`/marketplace/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  trending: () =>
+    request<{ skills: MarketplaceSkill[]; total: number }>("/marketplace/trending"),
+  info: (owner: string, repo: string, skill: string) =>
+    request<MarketplaceSkill>(`/marketplace/info/${owner}/${repo}/${skill}`),
+  install: (source: string, global = true) =>
+    request<MarketplaceInstallResult>("/marketplace/install", {
+      method: "POST",
+      body: JSON.stringify({ source, global }),
+    }),
+  uninstall: (name: string, global = true) =>
+    request<{ success: boolean; name: string; output: string }>("/marketplace/uninstall", {
+      method: "POST",
+      body: JSON.stringify({ name, global }),
+    }),
+  installed: () =>
+    request<{ skills: MarketplaceSkill[]; total: number }>("/marketplace/installed"),
 };
 
 export interface SkillFileInfo {

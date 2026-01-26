@@ -796,6 +796,24 @@ export async function handleSkillRoutes(url: URL, method: string, req: Request):
             updated_at: now,
           });
           results.library.added.push(fs.slug);
+
+          // Auto-enable globally if default-enabled: true is set in SKILL.md
+          if (parsed.frontmatter["default-enabled"] === true) {
+            const existingEnabled = enabledSkillsDb.get(id, "global");
+            if (!existingEnabled) {
+              enabledSkillsDb.create({
+                id: crypto.randomUUID(),
+                skill_id: id,
+                scope: "global",
+                project_id: null,
+                library_version: (parsed.frontmatter.version as string) || "1.0.0",
+                local_hash: fs.hash,
+                has_local_changes: 0,
+                enabled_at: now,
+                updated_at: now,
+              });
+            }
+          }
         } else if (fs.hash !== existing.content_hash) {
           const skillMdPath = join(fs.path, "SKILL.md");
           const content = readFileSync(skillMdPath, "utf-8");

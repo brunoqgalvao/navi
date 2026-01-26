@@ -69,7 +69,15 @@
 
     <!-- Status -->
     <div class="flex items-center gap-2 shrink-0">
-      {#if isActive}
+      {#if activity === "complete"}
+        <!-- Truly complete -->
+        <div class="w-6 h-6 rounded-full bg-cyan-100 flex items-center justify-center">
+          <svg class="w-4 h-4 text-cyan-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+          </svg>
+        </div>
+      {:else if isActive}
+        <!-- Actively receiving progress events -->
         <div class="flex items-center gap-1.5 px-2.5 py-1 bg-cyan-100 rounded-full">
           <DoodlePulse size={8} color="rgb(6 182 212)" />
           <span class="text-xs font-medium text-cyan-700">
@@ -77,10 +85,10 @@
           </span>
         </div>
       {:else}
-        <div class="w-6 h-6 rounded-full bg-cyan-100 flex items-center justify-center">
-          <svg class="w-4 h-4 text-cyan-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-          </svg>
+        <!-- Still working but no active progress events -->
+        <div class="flex items-center gap-1.5 px-2.5 py-1 bg-cyan-100/60 rounded-full">
+          <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+          <span class="text-xs font-medium text-cyan-700">working</span>
         </div>
       {/if}
     </div>
@@ -120,8 +128,8 @@
     </div>
   {/if}
 
-  <!-- Findings preview -->
-  {#if findings && !isActive}
+  <!-- Findings preview (show when complete) -->
+  {#if findings && activity === "complete"}
     <div class="px-4 py-2 border-t border-cyan-100 bg-white/40">
       <div class="text-xs text-gray-700 line-clamp-2">
         <span class="font-medium text-cyan-600">Finding:</span> {findings}

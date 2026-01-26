@@ -47,6 +47,20 @@ export {
   type FolderActionCallbacks,
 } from "./folder-actions";
 
+// Session folder actions
+export {
+  initSessionFolderActions,
+  loadSessionFolders,
+  createSessionFolder,
+  updateSessionFolder,
+  deleteSessionFolder,
+  toggleSessionFolderCollapse,
+  setSessionFolder,
+  reorderSessionFolders,
+  toggleSessionFolderPin,
+  type SessionFolderActionCallbacks,
+} from "./session-folder-actions";
+
 // Data loaders
 export {
   initDataLoaders,

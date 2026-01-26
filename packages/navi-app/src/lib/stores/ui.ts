@@ -18,6 +18,7 @@ const LOOP_MODE_ENABLED_KEY = "claude-code-ui-loop-mode-enabled";
 const DEPLOY_TO_CLOUD_ENABLED_KEY = "claude-code-ui-deploy-to-cloud-enabled";
 const RESOURCE_MONITOR_ENABLED_KEY = "claude-code-ui-resource-monitor-enabled";
 const CHAT_SORT_ORDER_KEY = "claude-code-ui-chat-sort-order";
+const CANVAS_MODE_ENABLED_KEY = "claude-code-ui-canvas-mode-enabled";
 
 // Chat sort order type
 export type ChatSortOrder = "manual" | "recent";
@@ -263,6 +264,31 @@ function createShowArchivedStore() {
     set: (value: boolean) => {
       if (typeof window !== "undefined") {
         localStorage.setItem(SHOW_ARCHIVED_KEY, String(value));
+      }
+      set(value);
+    },
+  };
+}
+
+// Canvas Mode feature store (experimental - default off)
+function createCanvasModeEnabledStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(CANVAS_MODE_ENABLED_KEY) : null;
+  const { subscribe, set } = writable(stored === "true");
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current = false;
+      subscribe(v => current = v)();
+      const newValue = !current;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(CANVAS_MODE_ENABLED_KEY, String(newValue));
+      }
+      set(newValue);
+    },
+    set: (value: boolean) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(CANVAS_MODE_ENABLED_KEY, String(value));
       }
       set(value);
     },
@@ -684,6 +710,7 @@ export const channelsEnabled = createChannelsEnabledStore();
 export const loopModeEnabled = createLoopModeEnabledStore();
 export const deployToCloudEnabled = createDeployToCloudEnabledStore();
 export const resourceMonitorEnabled = createResourceMonitorEnabledStore();
+export const canvasModeEnabled = createCanvasModeEnabledStore();
 export const newChatView = createNewChatViewStore();
 export const showArchivedWorkspaces = createShowArchivedStore();
 export const chatSortOrder = createChatSortOrderStore();

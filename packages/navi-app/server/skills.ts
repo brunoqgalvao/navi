@@ -149,8 +149,8 @@ export function parseSkillMd(content: string): SkillMdParsed {
 
     if (key === "allowed-tools") {
       frontmatter["allowed-tools"] = value.split(",").map((t) => t.trim()).filter(Boolean);
-    } else if (key === "disable-model-invocation") {
-      frontmatter["disable-model-invocation"] = value.toLowerCase() === "true";
+    } else if (key === "disable-model-invocation" || key === "default-enabled") {
+      frontmatter[key] = value.toLowerCase() === "true";
     } else {
       frontmatter[key] = value;
     }

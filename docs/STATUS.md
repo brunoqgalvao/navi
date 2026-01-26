@@ -268,15 +268,41 @@ A sophisticated system for spawning and coordinating multiple AI agents working 
 
 ---
 
+### Channel Inbox (WhatsApp, Telegram & Messaging)
+**Status:** EXPERIMENTAL - External messaging integrations via MCP
+
+Unified inbox for external messaging channels. Inspired by [Clawbot](https://github.com/clawdbot/clawdbot).
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Channel inbox routes | `routes/channel-inbox.ts` | Inbox API endpoints |
+| Channel providers service | `services/channel-providers.ts` | Provider registry & management |
+| WhatsApp sync service | `services/whatsapp-sync.ts` | WhatsApp-specific sync utilities |
+| Channel inbox feature | `features/channel-inbox/` | Frontend stores, API, types |
+| ChannelsPanel | `features/channel-inbox/components/ChannelsPanel.svelte` | Sidebar panel UI |
+| WhatsApp MCP server | `.claude/mcp-servers/navi-whatsapp/` | WhatsApp Web integration |
+| Email MCP server | `.claude/mcp-servers/navi-email/` | AgentMail integration |
+
+**Supported providers:**
+- WhatsApp (via whatsapp-web.js + MCP)
+- Email (via AgentMail + MCP)
+- Telegram (planned)
+- Slack (planned)
+- Discord (planned)
+
+**Enable:** Extensions sidebar → Channels tab (enabled by default)
+
+---
+
 ## TO REMOVE
 
-### Channels System
-**Status:** CUT - Remove
+### Old Channels System (Internal)
+**Status:** CUT - Remove (replaced by Channel Inbox)
 
 | Component | Location |
 |-----------|----------|
-| Channels routes | `routes/channels.ts` |
-| Channels feature | `features/channels/` |
+| Old channels routes | `routes/channels.ts` |
+| Old channels feature | `features/channels/` |
 
 ---
 

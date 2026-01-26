@@ -18,7 +18,17 @@
   import CopyableText from "./CopyableText.svelte";
   import TextSelectionContextMenu from "./TextSelectionContextMenu.svelte";
   import AgentBrowserWidget from "./widgets/AgentBrowserWidget.svelte";
+  import BrowserActionGroup from "./widgets/BrowserActionGroup.svelte";
+  import ToolActionGroup from "./widgets/ToolActionGroup.svelte";
   import { isAgentBrowserCommand } from "$lib/utils/agent-browser-parser";
+  import {
+    type ToolGroup,
+    type ToolGroupType,
+    getToolGroupType,
+    shouldGroupTogether,
+    TOOL_GROUP_CONFIG,
+    generateGroupSummary,
+  } from "$lib/core";
   // Comments feature @experimental
   import { commentsStore, showComments, createMessageThreadsStore } from "$lib/features/comments";
   import CommentThread from "$lib/features/comments/components/CommentThread.svelte";
@@ -82,13 +92,24 @@
   // Comments state @experimental
   let commentInput = $state<{ x: number; y: number; text: string } | null>(null);
   let expandedThreadId = $state<string | null>(null);
+  let localThreads = $state<import("$lib/features/comments").CommentThread[]>([]);
 
-  // Get comment threads for this message
-  const messageThreads = $derived(
-    sessionId && messageId
-      ? commentsStore.getThreadsForMessage(sessionId, messageId)
-      : []
-  );
+  // Subscribe to comment threads reactively
+  $effect(() => {
+    if (sessionId && messageId) {
+      // Subscribe to the store and filter for this message
+      const unsubscribe = commentsStore.subscribe((map) => {
+        const sessionThreads = map.get(sessionId) || [];
+        localThreads = sessionThreads.filter((t) => t.message_id === messageId);
+      });
+      return unsubscribe;
+    }
+    localThreads = [];
+    return undefined;
+  });
+
+  // Use local state for reactivity
+  const messageThreads = $derived(localThreads);
 
   function handleContextMenu(e: MouseEvent) {
     const selection = window.getSelection();
@@ -241,30 +262,170 @@
     originalIndex: number;
   }
 
-  function groupToolBlocks(blocks: ContentBlock[], externalResults: Map<string, ContentBlock>): (ContentBlock | GroupedBlock)[] {
-    const grouped: (ContentBlock | GroupedBlock)[] = [];
+  interface BrowserActionGroupBlock {
+    type: 'browser_group';
+    steps: Array<{
+      toolUse: ToolUseBlock;
+      toolResult?: ToolResultBlock;
+      originalIndex: number;
+    }>;
+  }
+
+  interface ToolActionGroupBlock {
+    type: 'tool_group';
+    groupType: ToolGroupType;
+    group: ToolGroup;
+  }
+
+  type GroupedItem = ContentBlock | GroupedBlock | BrowserActionGroupBlock | ToolActionGroupBlock;
+
+  function groupToolBlocks(blocks: ContentBlock[], externalResults: Map<string, ContentBlock>): GroupedItem[] {
+    const grouped: GroupedItem[] = [];
+    let currentBrowserGroup: BrowserActionGroupBlock | null = null;
+    let currentToolGroup: ToolActionGroupBlock | null = null;
+    let prevToolUse: ToolUseBlock | null = null;
+    let prevGroupType: ToolGroupType | null = null;
+
+    const flushGroups = () => {
+      if (currentBrowserGroup) {
+        grouped.push(currentBrowserGroup);
+        currentBrowserGroup = null;
+      }
+      if (currentToolGroup && currentToolGroup.group.steps.length > 0) {
+        // Only push as a group if we have multiple steps, otherwise push as individual
+        if (currentToolGroup.group.steps.length > 1) {
+          // Finalize the group
+          currentToolGroup.group.summary = generateGroupSummary(currentToolGroup.group);
+          currentToolGroup.group.label = TOOL_GROUP_CONFIG[currentToolGroup.groupType].label;
+          currentToolGroup.group.icon = TOOL_GROUP_CONFIG[currentToolGroup.groupType].icon;
+          grouped.push(currentToolGroup);
+        } else {
+          // Single tool, push as regular grouped block
+          const step = currentToolGroup.group.steps[0];
+          grouped.push({
+            toolUse: step.toolUse,
+            toolResult: step.toolResult,
+            originalIndex: step.originalIndex,
+          });
+        }
+        currentToolGroup = null;
+      }
+      prevToolUse = null;
+      prevGroupType = null;
+    };
 
     blocks.forEach((block, idx) => {
       if (block.type === "tool_use") {
         const toolUse = block as ToolUseBlock;
         const result = externalResults.get(toolUse.id) as ToolResultBlock | undefined;
-        grouped.push({
-          toolUse,
-          toolResult: result,
-          originalIndex: idx,
-        });
+        const isBrowser = toolUse.name === "Bash" && isAgentBrowserCommand(toolUse.input?.command || "");
+
+        if (isBrowser) {
+          // Flush any pending tool group before browser actions
+          if (currentToolGroup) {
+            flushGroups();
+          }
+          // Add to current browser group or start a new one
+          if (!currentBrowserGroup) {
+            currentBrowserGroup = { type: 'browser_group', steps: [] };
+          }
+          currentBrowserGroup.steps.push({
+            toolUse,
+            toolResult: result,
+            originalIndex: idx,
+          });
+        } else {
+          // Flush browser group if we have one
+          if (currentBrowserGroup) {
+            grouped.push(currentBrowserGroup);
+            currentBrowserGroup = null;
+          }
+
+          // Check if this tool can be grouped
+          const groupType = getToolGroupType(toolUse.name, toolUse.input as Record<string, unknown>);
+
+          // Skip grouping for certain tools that have special rendering
+          const skipGrouping = toolUse.name === 'Task' || toolUse.name === 'TodoWrite' ||
+            (toolUse.name === 'Read' && (toolUse.input?.file_path as string)?.includes('/skills/'));
+
+          if (skipGrouping) {
+            flushGroups();
+            grouped.push({
+              toolUse,
+              toolResult: result,
+              originalIndex: idx,
+            });
+          } else if (groupType && prevToolUse && prevGroupType &&
+                     shouldGroupTogether(prevToolUse, toolUse, prevGroupType, groupType)) {
+            // Continue current group
+            currentToolGroup!.group.steps.push({
+              toolUse,
+              toolResult: result,
+              originalIndex: idx,
+            });
+          } else {
+            // Start a new group (flush previous first)
+            flushGroups();
+
+            if (groupType) {
+              currentToolGroup = {
+                type: 'tool_group',
+                groupType,
+                group: {
+                  type: groupType,
+                  steps: [{
+                    toolUse,
+                    toolResult: result,
+                    originalIndex: idx,
+                  }],
+                  summary: '',
+                  icon: TOOL_GROUP_CONFIG[groupType].icon,
+                  label: TOOL_GROUP_CONFIG[groupType].label,
+                },
+              };
+              prevToolUse = toolUse;
+              prevGroupType = groupType;
+            } else {
+              // Non-groupable tool
+              grouped.push({
+                toolUse,
+                toolResult: result,
+                originalIndex: idx,
+              });
+            }
+          }
+
+          // Update prev tracking for groupable tools
+          if (groupType && !skipGrouping) {
+            prevToolUse = toolUse;
+            prevGroupType = groupType;
+          }
+        }
       } else if (block.type === "tool_result") {
         // Skip tool_result blocks in the content array - they're handled via externalResults
       } else {
+        // Non-tool content, flush all groups
+        flushGroups();
         grouped.push(block);
       }
     });
 
+    // Flush any remaining groups
+    flushGroups();
+
     return grouped;
   }
 
-  function isGroupedBlock(item: ContentBlock | GroupedBlock): item is GroupedBlock {
-    return 'toolUse' in item && 'originalIndex' in item;
+  function isGroupedBlock(item: GroupedItem): item is GroupedBlock {
+    return 'toolUse' in item && 'originalIndex' in item && !('type' in item);
+  }
+
+  function isBrowserGroupBlock(item: GroupedItem): item is BrowserActionGroupBlock {
+    return 'type' in item && (item as any).type === 'browser_group';
+  }
+
+  function isToolActionGroupBlock(item: GroupedItem): item is ToolActionGroupBlock {
+    return 'type' in item && (item as any).type === 'tool_group';
   }
 
   /**
@@ -363,7 +524,25 @@
       </div>
 
     {#each groupedContent as item, idx (idx)}
-      {#if isGroupedBlock(item)}
+      {#if isBrowserGroupBlock(item)}
+        <!-- Browser action group - multiple consecutive browser commands -->
+        <BrowserActionGroup
+          steps={item.steps.map(step => ({
+            command: step.toolUse.input?.command || "",
+            output: step.toolResult ? extractToolResultContent(step.toolResult.content) : "",
+            isError: step.toolResult?.is_error,
+            isRunning: !step.toolResult
+          }))}
+        />
+      {:else if isToolActionGroupBlock(item)}
+        <!-- Tool action group - search, file ops, web research, etc. -->
+        <ToolActionGroup
+          group={item.group}
+          {onPreview}
+          {onRunInTerminal}
+          {onSendToClaude}
+        />
+      {:else if isGroupedBlock(item)}
         {@const tool = item.toolUse}
         {@const result = item.toolResult}
         {@const originalIdx = item.originalIndex}
@@ -378,6 +557,7 @@
             prompt={taskPrompt}
             updates={getSubagentForTool(tool.id)}
             isActive={activeSubagents.has(tool.id)}
+            hasResult={!!result}
             elapsedTime={activeSubagents.get(tool.id)?.elapsed}
             onExpand={() => openSubagentModal = { toolUseId: tool.id, description: taskDescription, subagentType: taskSubagentType }}
           />
@@ -387,14 +567,6 @@
             todos={tool.input?.todos || []}
             {expanded}
             onToggle={() => toggleBlock(originalIdx)}
-          />
-        {:else if isAgentBrowserTool(tool)}
-          {@const resultContent = result ? extractToolResultContent(result.content) : ''}
-          <AgentBrowserWidget
-            command={tool.input?.command || ""}
-            output={resultContent}
-            isError={result?.is_error}
-            isRunning={!result}
           />
         {:else if isSkillRead(tool)}
           <!-- Skill reads get first-class rendering -->
@@ -536,22 +708,21 @@
     {/each}
     </div>
 
-    <!-- Comment Threads (shown as floating cards) @experimental -->
-    {#if $showComments && messageThreads.length > 0}
-      <div class="absolute right-0 top-0 translate-x-full pl-4 flex flex-col gap-2 z-40">
-        {#each messageThreads as thread (thread.thread_id)}
-          {#if expandedThreadId === thread.thread_id || !expandedThreadId}
-            <CommentThread
-              {thread}
-              {sessionId}
-              onClose={() => expandedThreadId = null}
-              onAskAI={handleAskAI}
-            />
-          {/if}
-        {/each}
-      </div>
-    {/if}
   </div>
+
+  <!-- Comment Threads (shown inline below message) @experimental -->
+  {#if $showComments && messageThreads.length > 0}
+    <div class="mt-3 ml-4 flex flex-col gap-2 max-w-sm">
+      {#each messageThreads as thread (thread.thread_id)}
+        <CommentThread
+          {thread}
+          {sessionId}
+          onClose={() => {}}
+          onAskAI={handleAskAI}
+        />
+      {/each}
+    </div>
+  {/if}
 
 <!-- Text Selection Context Menu -->
 {#if selectionMenu}

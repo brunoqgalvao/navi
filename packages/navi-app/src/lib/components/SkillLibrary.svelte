@@ -5,6 +5,7 @@
   import SkillCard from "./SkillCard.svelte";
   import SkillEditor from "./SkillEditor.svelte";
   import SkillImport from "./SkillImport.svelte";
+  import SkillMarketplace from "./SkillMarketplace.svelte";
 
   interface Props {
     projectId?: string | null;
@@ -24,6 +25,7 @@
   let creatingExamples = $state(false);
   let scanning = $state(false);
   let showImport = $state(false);
+  let showMarketplace = $state(false);
 
   let categories = $derived(() => {
     const cats = new Set<string>();
@@ -252,6 +254,16 @@
         </svg>
       </button>
       <button
+        onclick={() => (showMarketplace = true)}
+        class="flex items-center gap-2 px-4 py-2 text-sm font-medium text-violet-600 border border-violet-300 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors"
+        title="Browse skills.sh marketplace"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+        Browse
+      </button>
+      <button
         onclick={() => (showImport = true)}
         class="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
       >
@@ -380,4 +392,9 @@
 <SkillImport
   open={showImport}
   onClose={() => (showImport = false)}
+/>
+
+<SkillMarketplace
+  open={showMarketplace}
+  onClose={() => (showMarketplace = false)}
 />

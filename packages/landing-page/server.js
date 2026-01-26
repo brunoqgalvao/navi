@@ -166,8 +166,18 @@ app.get('/api/subscribers/export', async (req, res) => {
   }
 });
 
+// Feedback endpoint - CORS preflight
+app.options('/api/feedback', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.sendStatus(204);
+});
+
 // Feedback endpoint
 app.post('/api/feedback', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
   const { type, title, description, email, systemInfo } = req.body;
 
   if (!title || !description) {

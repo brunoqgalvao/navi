@@ -1,5 +1,5 @@
 import { json } from "../utils/response";
-import { projects, sessions, messages, searchIndex, pendingQuestions, type Message } from "../db";
+import { projects, sessions, messages, searchIndex, pendingQuestions, sessionHierarchy, sessionFolders, type Message } from "../db";
 import { enableUntilDone, disableUntilDone, getUntilDoneSessions, cleanupSessionState, skipSessionWait, getActiveWaits } from "../websocket/handler";
 import { nativePreviewService } from "../services/native-preview";
 import { sessionManager } from "../services/session-manager";
@@ -187,6 +187,9 @@ export async function handleSessionRoutes(
 
     // Copy backend from source session
     sessions.create(newSessionId, sourceSession.project_id, title, now, now, sourceSession.backend);
+
+    // Set parent relationship for forked session (makes it a child of source session)
+    sessionHierarchy.setForkParent(newSessionId, sourceSessionId);
 
     // Copy model from source session if it exists
     if (sourceSession.model) {
@@ -863,6 +866,83 @@ ${transcript}`;
       console.error("Failed to generate session summary:", e);
       return json({ error: e instanceof Error ? e.message : "Failed to generate summary" }, 500);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SESSION FOLDERS - Group sessions within a project
+  // ═══════════════════════════════════════════════════════════════
+
+  // List session folders for a project
+  const sessionFoldersListMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/session-folders$/);
+  if (sessionFoldersListMatch) {
+    const projectId = sessionFoldersListMatch[1];
+    if (method === "GET") {
+      return json(sessionFolders.listByProject(projectId));
+    }
+    if (method === "POST") {
+      const body = await req.json();
+      const id = crypto.randomUUID();
+      const folders = sessionFolders.listByProject(projectId);
+      const maxOrder = folders.length > 0 ? Math.max(...folders.map(f => f.sort_order)) + 1 : 0;
+      sessionFolders.create(id, projectId, body.name, maxOrder);
+      return json(sessionFolders.get(id), 201);
+    }
+  }
+
+  // Single session folder operations
+  const sessionFolderMatch = url.pathname.match(/^\/api\/session-folders\/([^/]+)$/);
+  if (sessionFolderMatch) {
+    const id = sessionFolderMatch[1];
+    if (method === "GET") {
+      const folder = sessionFolders.get(id);
+      return folder ? json(folder) : json({ error: "Not found" }, 404);
+    }
+    if (method === "PUT") {
+      const body = await req.json();
+      sessionFolders.update(id, body.name);
+      return json(sessionFolders.get(id));
+    }
+    if (method === "DELETE") {
+      sessionFolders.delete(id);
+      return json({ success: true });
+    }
+  }
+
+  // Toggle collapse
+  const sessionFolderCollapseMatch = url.pathname.match(/^\/api\/session-folders\/([^/]+)\/collapse$/);
+  if (sessionFolderCollapseMatch && method === "POST") {
+    const id = sessionFolderCollapseMatch[1];
+    const body = await req.json();
+    sessionFolders.toggleCollapsed(id, body.collapsed);
+    return json(sessionFolders.get(id));
+  }
+
+  // Toggle pin
+  const sessionFolderPinMatch = url.pathname.match(/^\/api\/session-folders\/([^/]+)\/pin$/);
+  if (sessionFolderPinMatch && method === "POST") {
+    const id = sessionFolderPinMatch[1];
+    const body = await req.json();
+    sessionFolders.togglePin(id, body.pinned);
+    return json(sessionFolders.get(id));
+  }
+
+  // Reorder folders
+  const sessionFoldersReorderMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/session-folders\/reorder$/);
+  if (sessionFoldersReorderMatch && method === "POST") {
+    const body = await req.json();
+    for (let i = 0; i < body.order.length; i++) {
+      sessionFolders.updateOrder(body.order[i], i);
+    }
+    return json({ success: true });
+  }
+
+  // Set session folder
+  const sessionSetFolderMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/folder$/);
+  if (sessionSetFolderMatch && method === "POST") {
+    const sessionId = sessionSetFolderMatch[1];
+    const body = await req.json();
+    sessions.setFolder(sessionId, body.folderId);
+    return json(sessions.get(sessionId));
   }
 
   return null;

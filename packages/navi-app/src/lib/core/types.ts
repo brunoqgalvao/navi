@@ -42,6 +42,7 @@ export type ExtensionId =
   | "preview"
   | "context"         // Session context visibility
   | "email"           // Navi's email inbox
+  | "channels"        // WhatsApp, Telegram & messaging integrations
   | "browser-preview"; // Browser-use live preview
 
 /**
@@ -58,6 +59,7 @@ export type PanelMode =
   | "preview-unified"
   | "context"         // Context sidebar view
   | "email"           // Email inbox view
+  | "channels"        // WhatsApp, Telegram & messaging inbox
   | "browser-preview"; // Browser-use preview
 
 // =============================================================================
@@ -369,6 +371,20 @@ export interface SubagentDisplayInfo {
   /** Progress (0-100) if determinable */
   progress?: number;
 }
+
+// =============================================================================
+// 10. TOOL GROUPS (Collapsible Tool Activity)
+// =============================================================================
+
+/**
+ * Tool Groups render consecutive related tool calls as a single collapsible unit.
+ * Instead of showing 5 separate Grep calls, show "🔍 Searching in code (5 files)".
+ *
+ * This is a core UX abstraction - making Claude's tool activity human-readable.
+ *
+ * Types and implementation are in ./tool-groups.ts
+ * Examples: SearchGroup (Grep+Glob), FileEditGroup (Write+Edit), BrowserGroup, WebGroup
+ */
 
 // =============================================================================
 // TYPE GUARDS

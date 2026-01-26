@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
   import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems, backendModels, getBackendModelsFormatted, type BackendId, channelsEnabled } from "../../stores";
-  import { api, type Project, type Session, type WorkspaceFolder, type SearchResult } from "../../api";
+  import { api, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult } from "../../api";
   import { getApiBase } from "../../config";
   import ModelSelector from "../ModelSelector.svelte";
   import BackendSelector from "../BackendSelector.svelte";
@@ -19,6 +19,7 @@
   import ChannelList from "../../features/channels/components/ChannelList.svelte";
   import CreateChannelModal from "../../features/channels/components/CreateChannelModal.svelte";
   import Tooltip from "../Tooltip.svelte";
+  import SessionChildren from "./SessionChildren.svelte";
 
   interface Props {
     projects: Project[];
@@ -74,6 +75,14 @@
     onFolderReorder: (order: string[]) => void;
     onToggleFolderPin: (folder: WorkspaceFolder, e: Event) => void;
     onNewProjectInFolder: (folderId: string) => void;
+    // Session folder callbacks
+    sessionFolders?: SessionFolder[];
+    onSessionFolderCreate?: (name: string) => Promise<SessionFolder>;
+    onSessionFolderUpdate?: (id: string, name: string) => void;
+    onSessionFolderDelete?: (id: string) => void;
+    onSessionFolderToggleCollapse?: (id: string, collapsed: boolean) => void;
+    onSessionSetFolder?: (sessionId: string, folderId: string | null) => void;
+    onSessionFolderReorder?: (order: string[]) => void;
     onOpenProjectInNewWindow: (project: Project) => void;
     onOpenSessionInNewWindow: (session: Session) => void;
     onOpenHomeInNewWindow: () => void;
@@ -138,6 +147,14 @@
     onFolderReorder,
     onToggleFolderPin,
     onNewProjectInFolder,
+    // Session folder props
+    sessionFolders = [],
+    onSessionFolderCreate,
+    onSessionFolderUpdate,
+    onSessionFolderDelete,
+    onSessionFolderToggleCollapse,
+    onSessionSetFolder,
+    onSessionFolderReorder,
     onOpenProjectInNewWindow,
     onOpenSessionInNewWindow,
     onOpenHomeInNewWindow,
@@ -148,6 +165,11 @@
     onSelectAgent,
     titleSuggestionRef = $bindable(null),
   }: Props = $props();
+
+  // Debug session folders
+  $effect(() => {
+    console.log("[Sidebar] sessionFolders updated:", sessionFolders.length, sessionFolders);
+  });
 
   // Agent section collapsed state
   let agentsSectionCollapsed = $state(true);
@@ -178,7 +200,7 @@
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Map of session IDs to their match info from search results
-  let searchMatchInfo = $derived(() => {
+  let searchMatchInfo = $derived.by(() => {
     const map = new Map<string, { matchType: 'title' | 'content'; preview?: string }>();
     for (const result of searchResults) {
       if (result.entity_type === 'session') {
@@ -226,7 +248,7 @@
     doSearch(sidebarSearchQuery);
   });
 
-  let filteredSessions = $derived(() => {
+  let filteredSessions = $derived.by(() => {
     const query = sidebarSearchQuery.trim();
     const sortOrder = $chatSortOrder;
     let result: Session[];
@@ -236,7 +258,7 @@
       result = sessions.filter(s => !(s as any).parent_session_id);
     } else {
       // Search active - filter to sessions that appear in search results
-      const matchingSessionIds = searchMatchInfo().keys();
+      const matchingSessionIds = searchMatchInfo.keys();
       const matchSet = new Set(matchingSessionIds);
       result = sessions.filter(s => matchSet.has(s.id) && !(s as any).parent_session_id);
     }
@@ -261,6 +283,23 @@
   let runningChats = $derived($attentionItems.runningSessions.map(item => item.session));
   let needsInputChats = $derived($attentionItems.needsInput.map(item => item.session));
 
+  // Build map of parent session -> children (forks + agents)
+  let childrenByParent = $derived.by(() => {
+    const map = new Map<string, Session[]>();
+    for (const s of sessions) {
+      if (s.parent_session_id) {
+        const existing = map.get(s.parent_session_id) || [];
+        existing.push(s);
+        map.set(s.parent_session_id, existing);
+      }
+    }
+    // Sort children by created_at
+    for (const [parentId, children] of map) {
+      map.set(parentId, children.sort((a, b) => a.created_at - b.created_at));
+    }
+    return map;
+  });
+
   let draggedProjectId = $state<string | null>(null);
   let draggedProjectFolderId = $state<string | null>(null);
   let dragOverProjectId = $state<string | null>(null);
@@ -279,6 +318,15 @@
   let editingFolderId = $state<string | null>(null);
   let editingFolderName = $state("");
   let showOpenInMenu = $state(false);
+
+  // Session folder state
+  let showNewSessionFolderInput = $state(false);
+  let newSessionFolderName = $state("");
+  let editingSessionFolderId = $state<string | null>(null);
+  let editingSessionFolderName = $state("");
+  let sessionFolderMenuId = $state<string | null>(null);
+  let draggedSessionFolderId = $state<string | null>(null);
+  let dragOverSessionFolderId = $state<string | null>(null);
 
   async function openInFinder() {
     if (!currentProject) return;
@@ -527,6 +575,9 @@
     dragOverSessionId = null;
     draggedFolderId = null;
     dragOverFolderForReorder = null;
+    // Session folder drag state
+    draggedSessionFolderId = null;
+    dragOverSessionFolderId = null;
   }
 
   // Folder drag for reordering
@@ -614,6 +665,71 @@
     return projects.filter(p => (p.folder_id || null) === folderId);
   }
 
+  // Session folder helpers
+  function getSessionsInFolder(folderId: string | null): Session[] {
+    return filteredSessions.filter(s => (s.folder_id || null) === folderId);
+  }
+
+  async function createSessionFolder() {
+    if (!newSessionFolderName.trim() || !onSessionFolderCreate) return;
+    await onSessionFolderCreate(newSessionFolderName.trim());
+    newSessionFolderName = "";
+    showNewSessionFolderInput = false;
+  }
+
+  function startEditSessionFolder(folder: SessionFolder, e: Event) {
+    e.stopPropagation();
+    editingSessionFolderId = folder.id;
+    editingSessionFolderName = folder.name;
+    sessionFolderMenuId = null;
+  }
+
+  async function saveEditingSessionFolder() {
+    if (!editingSessionFolderId || !editingSessionFolderName.trim() || !onSessionFolderUpdate) return;
+    onSessionFolderUpdate(editingSessionFolderId, editingSessionFolderName.trim());
+    editingSessionFolderId = null;
+    editingSessionFolderName = "";
+  }
+
+  function handleSessionFolderDragStart(e: DragEvent, folder: SessionFolder) {
+    draggedSessionFolderId = folder.id;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", folder.id);
+      e.dataTransfer.setData("type", "session-folder");
+    }
+    document.body.classList.add('dragging-active');
+  }
+
+  function handleSessionFolderDragOver(e: DragEvent, folderId: string) {
+    e.preventDefault();
+    // Handle session being dragged into folder
+    if (draggedSessionId) {
+      dragOverSessionFolderId = folderId;
+    }
+  }
+
+  function handleSessionFolderDragLeave(e: DragEvent) {
+    const relatedTarget = e.relatedTarget as HTMLElement;
+    if (!relatedTarget || !e.currentTarget || !(e.currentTarget as HTMLElement).contains(relatedTarget)) {
+      dragOverSessionFolderId = null;
+    }
+  }
+
+  function handleSessionDropOnFolder(e: DragEvent, folderId: string | null) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (draggedSessionId && onSessionSetFolder) {
+      onSessionSetFolder(draggedSessionId, folderId);
+    }
+    resetDragState();
+  }
+
+  function handleSessionFolderDragEnd() {
+    document.body.classList.remove('dragging-active');
+    resetDragState();
+  }
+
   // Aggregate project statuses for all folders (bubble up counts) - reactive derived state
   const folderStatusMap = $derived.by(() => {
     const map = new Map<string, { attentionCount: number; runningCount: number }>();
@@ -655,6 +771,7 @@
     sessionMenuId = null;
     projectMenuId = null;
     folderMenuId = null;
+    sessionFolderMenuId = null;
     showOpenInMenu = false;
     chatsMenuOpen = false;
     sessionsDropdownOpen = false;
@@ -1358,6 +1475,16 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4l3 3m0 0l3-3m-3 3V9"></path></svg>
                     Archive all non-starred
                   </button>
+                  {#if onSessionFolderCreate}
+                    <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+                    <button
+                      onclick={(e) => { e.stopPropagation(); showNewSessionFolderInput = true; chatsMenuOpen = false; }}
+                      class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
+                      New Folder
+                    </button>
+                  {/if}
                 </div>
               {/if}
             </div>
@@ -1395,17 +1522,146 @@
           </div>
         </div>
 
+        <!-- New session folder input -->
+        {#if showNewSessionFolderInput}
+          <div class="mb-2 px-1">
+            <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-md p-1.5">
+              <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+              </svg>
+              <input
+                type="text"
+                bind:value={newSessionFolderName}
+                placeholder="Folder name..."
+                class="flex-1 text-xs bg-transparent border-none outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400"
+                onkeydown={(e) => { if (e.key === 'Enter') createSessionFolder(); if (e.key === 'Escape') showNewSessionFolderInput = false; }}
+              />
+              <button onclick={createSessionFolder} class="p-0.5 text-emerald-600 hover:text-emerald-700">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+              </button>
+              <button onclick={() => showNewSessionFolderInput = false} class="p-0.5 text-gray-400 hover:text-gray-600">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+          </div>
+        {/if}
+
         <div class="flex-1 overflow-y-auto space-y-0.5 sidebar-scroll pr-1">
           {#if sessions.length === 0}
             <div class="text-xs text-gray-400 dark:text-gray-500 italic text-center py-8">No chats yet</div>
-          {:else if filteredSessions().length === 0}
+          {:else if filteredSessions.length === 0}
             <div class="text-xs text-gray-400 dark:text-gray-500 italic text-center py-4">No matching chats</div>
           {:else}
-            {#each filteredSessions() as sess (sess.id)}
+            <!-- Session folders -->
+            {#each sessionFolders as folder (folder.id)}
+              {@const folderSessions = getSessionsInFolder(folder.id)}
+              {@const isCollapsed = folder.collapsed === 1}
+              {@const isDropTarget = dragOverSessionFolderId === folder.id}
+              <div class="mb-1">
+                <!-- Folder header -->
+                <div
+                  class="group flex items-center gap-1 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer {isDropTarget ? 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-300 dark:ring-blue-600' : ''}"
+                  onclick={() => onSessionFolderToggleCollapse?.(folder.id, !isCollapsed)}
+                  ondragover={(e) => handleSessionFolderDragOver(e, folder.id)}
+                  ondragleave={handleSessionFolderDragLeave}
+                  ondrop={(e) => handleSessionDropOnFolder(e, folder.id)}
+                  role="button"
+                  tabindex="0"
+                >
+                  <svg class="w-3.5 h-3.5 text-gray-400 transition-transform {isCollapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                  <svg class="w-4 h-4 text-amber-500" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                  </svg>
+                  {#if editingSessionFolderId === folder.id}
+                    <input
+                      type="text"
+                      bind:value={editingSessionFolderName}
+                      class="flex-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5"
+                      onclick={(e) => e.stopPropagation()}
+                      onkeydown={(e) => { if (e.key === 'Enter') saveEditingSessionFolder(); if (e.key === 'Escape') { editingSessionFolderId = null; } }}
+                      onblur={saveEditingSessionFolder}
+                    />
+                  {:else}
+                    <span class="flex-1 text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{folder.name}</span>
+                  {/if}
+                  <span class="text-[10px] text-gray-400">{folderSessions.length}</span>
+                  <!-- Folder menu -->
+                  <div class="relative">
+                    <button
+                      onclick={(e) => { e.stopPropagation(); sessionFolderMenuId = sessionFolderMenuId === folder.id ? null : folder.id; }}
+                      class="p-0.5 text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
+                    </button>
+                    {#if sessionFolderMenuId === folder.id}
+                      <div class="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[120px] z-[60]">
+                        <button onclick={(e) => startEditSessionFolder(folder, e)} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                          Rename
+                        </button>
+                        <button onclick={(e) => { e.stopPropagation(); onSessionFolderDelete?.(folder.id); sessionFolderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 flex items-center gap-2">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          Delete
+                        </button>
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+                <!-- Folder sessions -->
+                {#if !isCollapsed && folderSessions.length > 0}
+                  <div class="ml-3 mt-0.5 border-l border-gray-200 dark:border-gray-700 pl-2">
+                    {#each folderSessions as sess (sess.id)}
+                      {@const isDropTarget = dragOverSessionId === sess.id && !sess.pinned}
+                      {@const isDragged = draggedSessionId === sess.id}
+                      {@const sessionStatusValue = $sessionStatus.get(sess.id)?.status}
+                      {@const hasActiveStatus = sessionStatusValue && sessionStatusValue !== "idle"}
+                      {@const sessChildren = childrenByParent.get(sess.id) || []}
+                      <div
+                        data-session-item={sess.id}
+                        class="group relative {isDropTarget ? 'drop-indicator-line' : ''} {isDragged ? 'drag-source' : ''}"
+                        role="listitem"
+                        draggable={!sess.pinned}
+                        ondragstart={(e) => !sess.pinned && handleSessionDragStart(e, sess)}
+                        ondragover={(e) => !sess.pinned && handleSessionDragOver(e, sess.id)}
+                        ondragleave={handleSessionDragLeave}
+                        ondrop={(e) => !sess.pinned && handleSessionDrop(e, sess)}
+                        ondragend={handleSessionDragEnd}
+                      >
+                        <button
+                          onclick={(e: MouseEvent) => {
+                            if (e.metaKey || e.ctrlKey) {
+                              onOpenSessionInNewWindow(sess);
+                            } else {
+                              onSelectSession(sess);
+                            }
+                          }}
+                          class={`w-full text-left px-2 py-1.5 rounded-md text-[12px] ${sess.pinned ? '' : 'cursor-grab active:cursor-grabbing'} ${$session.sessionId === sess.id ? 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 shadow-sm text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                        >
+                          <div class="truncate pr-8 flex items-center gap-1">
+                            <StarButton active={!!sess.favorite} onclick={(e) => onToggleSessionFavorite(sess, e)} size="sm" showOnHover={false} />
+                            <span class="truncate {sess.archived ? 'text-gray-400' : ''}">{sess.title || 'Untitled'}</span>
+                          </div>
+                        </button>
+                        {#if sessChildren.length > 0}
+                          <SessionChildren children={sessChildren} parentId={sess.id} {onSelectSession} />
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+
+            <!-- Ungrouped sessions (no folder) -->
+            {@const ungroupedSessions = getSessionsInFolder(null)}
+            {#each ungroupedSessions as sess (sess.id)}
               {@const isDropTarget = dragOverSessionId === sess.id && !sess.pinned}
               {@const isDragged = draggedSessionId === sess.id}
               {@const sessionStatusValue = $sessionStatus.get(sess.id)?.status}
               {@const hasActiveStatus = sessionStatusValue && sessionStatusValue !== "idle"}
+              {@const sessChildren = childrenByParent.get(sess.id) || []}
               <div
                 animate:flip={{ duration: 200 }}
                 data-session-item={sess.id}
@@ -1454,8 +1710,8 @@
                   </div>
                   <div class="text-[10px] opacity-60 mt-0.5 flex items-center gap-1.5 flex-wrap">
                     <RelativeTime timestamp={sess.updated_at} />
-                    {#if sidebarSearchQuery.trim() && searchMatchInfo().get(sess.id)?.matchType === 'content'}
-                      {@const matchInfo = searchMatchInfo().get(sess.id)}
+                    {#if sidebarSearchQuery.trim() && searchMatchInfo.get(sess.id)?.matchType === 'content'}
+                      {@const matchInfo = searchMatchInfo.get(sess.id)}
                       <span class="inline-flex items-center gap-0.5 px-1 py-0.5 bg-amber-50 text-amber-600 rounded text-[9px] font-medium" title={matchInfo?.preview || 'Matched in message content'}>
                         <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
@@ -1521,6 +1777,35 @@
                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                           {sess.marked_for_review ? 'Clear review mark' : 'Mark for review'}
                         </button>
+                        {#if onSessionSetFolder && sessionFolders.length > 0}
+                          <div class="relative group/move">
+                            <button class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 justify-between">
+                              <span class="flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                                Move to folder
+                              </span>
+                              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            </button>
+                            <div class="absolute left-full top-0 ml-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[140px] hidden group-hover/move:block z-[70]">
+                              {#if sess.folder_id}
+                                <button onclick={(e) => { e.stopPropagation(); onSessionSetFolder(sess.id, null); sessionMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                                  <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                                  No folder
+                                </button>
+                                <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+                              {/if}
+                              {#each sessionFolders as folder}
+                                <button onclick={(e) => { e.stopPropagation(); onSessionSetFolder(sess.id, folder.id); sessionMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 {sess.folder_id === folder.id ? 'bg-gray-50 dark:bg-gray-700' : ''}">
+                                  <svg class="w-4 h-4 text-amber-500" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                                  <span class="truncate">{folder.name}</span>
+                                  {#if sess.folder_id === folder.id}
+                                    <svg class="w-3 h-3 text-emerald-500 ml-auto shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                  {/if}
+                                </button>
+                              {/each}
+                            </div>
+                          </div>
+                        {/if}
                         <button onclick={(e) => { onDeleteSession(e, sess.id); sessionMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                           Delete
@@ -1530,6 +1815,14 @@
                   </div>
                 </div>
 
+                <!-- Child sessions (forks + agents) -->
+                {#if sessChildren.length > 0}
+                  <SessionChildren
+                    children={sessChildren}
+                    parentId={sess.id}
+                    {onSelectSession}
+                  />
+                {/if}
               </div>
             {/each}
           {/if}

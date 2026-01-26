@@ -71,7 +71,12 @@ export type SessionEvent =
   | { type: "delivered"; sessionId: string; deliverable: Deliverable }
   | { type: "archived"; sessionId: string }
   | { type: "decision_logged"; decision: SessionDecision }
-  | { type: "artifact_created"; artifact: SessionArtifact };
+  | { type: "artifact_created"; artifact: SessionArtifact }
+  // Context Negotiation events
+  | { type: "draft_submitted"; sessionId: string; parentId: string; draftId: string; summary: string }
+  | { type: "clarification_requested"; sessionId: string; parentId: string; clarificationId: string; question: string }
+  | { type: "clarification_responded"; sessionId: string; clarificationId: string; response: string }
+  | { type: "draft_accepted"; sessionId: string; parentId: string };
 
 type SessionEventHandler = (event: SessionEvent) => void | Promise<void>;
 
@@ -176,7 +181,8 @@ class SessionManager {
     // Update runtime tracking
     const runtime = this.runtimeSessions.get(sessionId);
     if (runtime) {
-      runtime.isActive = ["working", "waiting", "blocked"].includes(status);
+      // Include new negotiation statuses as active
+      runtime.isActive = ["working", "waiting", "blocked", "pending_review", "clarification_requested"].includes(status);
     }
   }
 

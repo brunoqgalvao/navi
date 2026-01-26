@@ -252,6 +252,7 @@ const gitExt = extensionRegistry.getByPanelMode("git");
 | `processes` | processes | ⚙️ | Background process manager |
 | `kanban` | kanban | 📋 | Task board |
 | `agents` | agents | 🤖 | Agent hierarchy viewer |
+| `channels` | channels | 💬 | WhatsApp, Telegram & messaging inbox |
 
 #### Creating a New Extension
 

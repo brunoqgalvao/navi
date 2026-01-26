@@ -18,11 +18,12 @@
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
   import PreviewPanel from "../components/PreviewPanel.svelte";
   import EmailPanel from "../features/email/EmailPanel.svelte";
+  import { ChannelsPanel } from "../features/channel-inbox/components";
   import { ContextPanel } from "../features/context";
   import AuthGate from "../components/AuthGate.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "channels";
 
   interface Props {
     mode: PanelMode;
@@ -312,6 +313,11 @@
             <EmailPanel />
           {/snippet}
         </AuthGate>
+      </div>
+    {:else if mode === "channels"}
+      <!-- Channels panel - WhatsApp, Telegram & messaging integrations -->
+      <div class="flex-1 flex flex-col w-full overflow-hidden">
+        <ChannelsPanel />
       </div>
     {/if}
   </div>

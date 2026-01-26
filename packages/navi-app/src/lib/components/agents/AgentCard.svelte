@@ -26,6 +26,7 @@
     prompt?: string;
     updates: ChatMessage[];
     isActive: boolean;
+    hasResult?: boolean;
     elapsedTime?: number;
     onExpand?: () => void;
   }
@@ -37,9 +38,15 @@
     prompt = "",
     updates,
     isActive,
+    hasResult = false,
     elapsedTime,
     onExpand,
   }: Props = $props();
+
+  // An agent is only truly complete when it has returned a result
+  // isActive tracks real-time progress events, but those stop when parent query ends
+  // hasResult indicates the Task tool actually returned output
+  const isComplete = $derived(hasResult);
 
   // Extract tool calls from updates
   function getToolCalls(): ToolUseBlock[] {
@@ -58,7 +65,7 @@
 
   // Reactive computed values
   const tools = $derived(getToolCalls());
-  const displayInfo = $derived(extractDisplayInfo(subagentType, prompt, tools, !isActive));
+  const displayInfo = $derived(extractDisplayInfo(subagentType, prompt, tools, isComplete));
   const inferredType = $derived(displayInfo.type);
   const config = $derived(getSubagentConfig(inferredType));
 
@@ -164,7 +171,15 @@
           <span class="text-[10px] text-gray-400">{tools.length} tools</span>
         {/if}
 
-        {#if isActive}
+        {#if isComplete}
+          <!-- Truly complete - has tool result -->
+          <div class="w-6 h-6 rounded-full bg-{config.color}-100 flex items-center justify-center">
+            <svg class="w-4 h-4 {config.accentColor}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+        {:else if isActive}
+          <!-- Actively receiving progress events -->
           <div class="flex items-center gap-1.5 px-2.5 py-1 bg-{config.color}-100 rounded-full">
             <DoodlePulse size={8} />
             <span class="text-xs font-medium {config.accentColor}">
@@ -172,10 +187,10 @@
             </span>
           </div>
         {:else}
-          <div class="w-6 h-6 rounded-full bg-{config.color}-100 flex items-center justify-center">
-            <svg class="w-4 h-4 {config.accentColor}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-            </svg>
+          <!-- Still working but no active progress events (parent query ended) -->
+          <div class="flex items-center gap-1.5 px-2.5 py-1 bg-{config.color}-100/60 rounded-full">
+            <span class="w-2 h-2 rounded-full bg-{config.color}-400 animate-pulse"></span>
+            <span class="text-xs font-medium {config.accentColor}">working</span>
           </div>
         {/if}
       </div>

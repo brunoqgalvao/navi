@@ -1072,6 +1072,7 @@
     flex: 1;
     position: relative;
     overflow: hidden;
+    min-height: 0; /* Allow flex child to shrink below content size */
   }
 
   .terminal-container {
@@ -1080,6 +1081,7 @@
     padding: 8px;
     box-sizing: border-box;
     background: #1a1b26;
+    overflow: hidden; /* Ensure xterm handles its own scrolling */
   }
 
   .terminal-container.hidden {

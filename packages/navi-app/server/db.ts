@@ -67,7 +67,6 @@ export async function initDb() {
 
     -- Performance indexes for common queries
     CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at);
-    CREATE INDEX IF NOT EXISTS idx_sessions_favorite ON sessions(favorite);
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
   `);
 
@@ -114,6 +113,9 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN favorite INTEGER DEFAULT 0");
   } catch {}
   try {
+    db.run("CREATE INDEX IF NOT EXISTS idx_sessions_favorite ON sessions(favorite)");
+  } catch {}
+  try {
     db.run("ALTER TABLE projects ADD COLUMN archived INTEGER DEFAULT 0");
   } catch {}
   try {
@@ -121,9 +123,6 @@ export async function initDb() {
   } catch {}
   try {
     db.run("ALTER TABLE sessions ADD COLUMN marked_for_review INTEGER DEFAULT 0");
-  } catch {}
-  try {
-    db.run("ALTER TABLE workspace_folders ADD COLUMN pinned INTEGER DEFAULT 0");
   } catch {}
   try {
     db.run("ALTER TABLE messages ADD COLUMN parent_tool_use_id TEXT");
@@ -200,6 +199,10 @@ export async function initDb() {
   try {
     db.run("ALTER TABLE sessions ADD COLUMN agent_type TEXT");
   } catch {}
+  // Session type: 'root' (top-level), 'agent' (spawned by parent), 'fork' (forked from parent)
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT 'root'");
+  } catch {}
 
   // Backlog feature - sessions can be added to backlog for later
   try {
@@ -232,6 +235,44 @@ export async function initDb() {
   } catch {}
   try {
     db.run("ALTER TABLE projects ADD COLUMN default_backend TEXT DEFAULT 'claude'");
+  } catch {}
+
+  // Conversation phase tracking (inferred by cheap LLM)
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN conversation_phase TEXT DEFAULT 'idle'");
+  } catch {}
+
+  // Context negotiation - draft deliverables and clarification loop
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN draft_deliverable TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN draft_revision INTEGER DEFAULT 0");
+  } catch {}
+
+  // Clarification requests table for orchestrator ↔ sub-agent negotiation
+  db.run(`
+    CREATE TABLE IF NOT EXISTS clarification_requests (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      parent_session_id TEXT NOT NULL,
+      draft_id TEXT NOT NULL,
+      question TEXT NOT NULL,
+      context TEXT,
+      response TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      responded_at INTEGER
+    )
+  `);
+  try {
+    db.run("CREATE INDEX idx_clarifications_session ON clarification_requests(session_id)");
+  } catch {}
+  try {
+    db.run("CREATE INDEX idx_clarifications_parent ON clarification_requests(parent_session_id)");
+  } catch {}
+  try {
+    db.run("CREATE INDEX idx_clarifications_draft ON clarification_requests(draft_id)");
   } catch {}
 
   // Indexes for multi-session queries
@@ -324,11 +365,17 @@ export async function initDb() {
       name TEXT NOT NULL,
       sort_order INTEGER DEFAULT 0,
       collapsed INTEGER DEFAULT 1,
+      pinned INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_workspace_folders_order ON workspace_folders(sort_order);
   `);
+
+  // Migration: add pinned column to workspace_folders (for existing databases)
+  try {
+    db.run("ALTER TABLE workspace_folders ADD COLUMN pinned INTEGER DEFAULT 0");
+  } catch {}
 
   try {
     db.run("ALTER TABLE projects ADD COLUMN folder_id TEXT");
@@ -503,6 +550,28 @@ export async function initDb() {
     db.run("ALTER TABLE cloud_executions ADD COLUMN e2b_cost_usd REAL");
   } catch {}
 
+  // Session folders - per-project folder organization for sessions
+  db.run(`
+    CREATE TABLE IF NOT EXISTS session_folders (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      collapsed INTEGER DEFAULT 0,
+      pinned INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_folders_project ON session_folders(project_id);
+    CREATE INDEX IF NOT EXISTS idx_session_folders_order ON session_folders(sort_order);
+  `);
+
+  // Add folder_id to sessions for folder grouping
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN folder_id TEXT REFERENCES session_folders(id)");
+  } catch {}
+
   // Channels - cross-workspace spaces for agent collaboration
   db.run(`
     CREATE TABLE IF NOT EXISTS channels (
@@ -644,7 +713,7 @@ export interface Project {
 }
 
 // Agent status for multi-session hierarchy
-export type AgentStatus = 'working' | 'waiting' | 'blocked' | 'delivered' | 'failed' | 'archived';
+export type AgentStatus = 'working' | 'waiting' | 'blocked' | 'pending_review' | 'clarification_requested' | 'delivered' | 'failed' | 'archived';
 
 // Escalation types
 export type EscalationType = 'question' | 'decision_needed' | 'blocker' | 'permission';
@@ -662,6 +731,27 @@ export interface Deliverable {
   summary: string;
   content: any;
   artifacts?: SessionArtifact[];
+}
+
+// Draft deliverable - submitted for review but not yet accepted
+export interface DraftDeliverable extends Deliverable {
+  draft_id: string;
+  submitted_at: number;
+  revision_number: number;  // Starts at 1, increments with each revision
+}
+
+// Clarification request from orchestrator to sub-agent
+export interface ClarificationRequest {
+  id: string;
+  session_id: string;          // The sub-agent session
+  parent_session_id: string;   // The orchestrator
+  draft_id: string;            // Which draft this relates to
+  question: string;            // The follow-up question
+  context?: string;            // Additional context for the question
+  response?: string;           // The sub-agent's response (filled later)
+  status: 'pending' | 'responded';
+  created_at: number;
+  responded_at?: number;
 }
 
 export interface Session {
@@ -698,6 +788,8 @@ export interface Session {
   agent_status: AgentStatus;
   agent_type: string | null;  // 'browser' | 'coding' | 'research' | etc. for native UI
   deliverable: string | null;  // JSON string of Deliverable
+  draft_deliverable: string | null;  // JSON string of DraftDeliverable (pending review)
+  draft_revision: number;  // Current revision number of draft
   escalation: string | null;   // JSON string of Escalation
   delivered_at: number | null;
   archived_at: number | null;
@@ -813,6 +905,41 @@ export const workspaceFolders = {
     run("UPDATE workspace_folders SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
 };
 
+// Session folders - per-project folder organization for sessions
+export interface SessionFolder {
+  id: string;
+  project_id: string;
+  name: string;
+  sort_order: number;
+  collapsed: number;
+  pinned: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export const sessionFolders = {
+  listByProject: (projectId: string) =>
+    queryAll<SessionFolder>("SELECT * FROM session_folders WHERE project_id = ? ORDER BY pinned DESC, sort_order ASC", [projectId]),
+  get: (id: string) => queryOne<SessionFolder>("SELECT * FROM session_folders WHERE id = ?", [id]),
+  create: (id: string, projectId: string, name: string, sortOrder: number = 0) => {
+    const now = Date.now();
+    run("INSERT INTO session_folders (id, project_id, name, sort_order, collapsed, pinned, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 0, ?, ?)",
+        [id, projectId, name, sortOrder, now, now]);
+  },
+  update: (id: string, name: string) =>
+    run("UPDATE session_folders SET name = ?, updated_at = ? WHERE id = ?", [name, Date.now(), id]),
+  delete: (id: string) => {
+    run("UPDATE sessions SET folder_id = NULL WHERE folder_id = ?", [id]);
+    run("DELETE FROM session_folders WHERE id = ?", [id]);
+  },
+  updateOrder: (id: string, sortOrder: number) =>
+    run("UPDATE session_folders SET sort_order = ? WHERE id = ?", [sortOrder, id]),
+  toggleCollapsed: (id: string, collapsed: boolean) =>
+    run("UPDATE session_folders SET collapsed = ? WHERE id = ?", [collapsed ? 1 : 0, id]),
+  togglePin: (id: string, pinned: boolean) =>
+    run("UPDATE session_folders SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
+};
+
 export const projects = {
   list: (includeArchived: boolean = false) => queryAll<ProjectWithStats>(`
     SELECT p.*, 
@@ -884,17 +1011,20 @@ export interface SessionSidebar {
   task: string | null;
   agent_status: string | null;
   agent_type: string | null;
+  session_type: string | null;
   escalation: string | null;
   deliverable: string | null;
   // Backend selection (claude, codex, gemini)
   backend: string | null;
+  // Folder grouping
+  folder_id: string | null;
 }
 
 // Columns used for sidebar display (avoids SELECT * overhead with large JSON columns)
 const SIDEBAR_COLUMNS = `id, project_id, title, claude_session_id, model, total_cost_usd,
   input_tokens, output_tokens, pinned, favorite, archived, sort_order,
   created_at, updated_at, worktree_path, worktree_branch, auto_accept_all, marked_for_review,
-  parent_session_id, root_session_id, depth, role, task, agent_status, agent_type, escalation, deliverable, backend`;
+  parent_session_id, root_session_id, depth, role, task, agent_status, agent_type, session_type, escalation, deliverable, backend, folder_id`;
 
 export const sessions = {
   // Optimized query for sidebar - excludes heavy columns like deliverable, escalation, context_excerpt
@@ -932,6 +1062,8 @@ export const sessions = {
     run("UPDATE sessions SET model = ? WHERE id = ?", [model, id]),
   updateBackend: (backend: string, id: string) =>
     run("UPDATE sessions SET backend = ? WHERE id = ?", [backend, id]),
+  updateConversationPhase: (phase: string, id: string) =>
+    run("UPDATE sessions SET conversation_phase = ? WHERE id = ?", [phase, id]),
   updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, inputTokens: number, outputTokens: number, updated_at: number, id: string) =>
     run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
         [claude_session_id, model, cost, turns, inputTokens, outputTokens, updated_at, id]),
@@ -970,6 +1102,8 @@ export const sessions = {
     run("UPDATE sessions SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
   setMarkedForReview: (id: string, markedForReview: boolean) =>
     run("UPDATE sessions SET marked_for_review = ?, updated_at = ? WHERE id = ?", [markedForReview ? 1 : 0, Date.now(), id]),
+  setFolder: (id: string, folderId: string | null) =>
+    run("UPDATE sessions SET folder_id = ?, updated_at = ? WHERE id = ?", [folderId, Date.now(), id]),
 
   // Until Done (Ralph loop) mode methods
   setUntilDoneMode: (id: string, enabled: boolean, maxIterations: number = 10) =>
@@ -2281,9 +2415,9 @@ export const sessionHierarchy = {
     run(
       `INSERT INTO sessions (
         id, project_id, title, model, backend,
-        parent_session_id, root_session_id, depth, role, task, agent_status, agent_type,
+        parent_session_id, root_session_id, depth, role, task, agent_status, agent_type, session_type,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, 'agent', ?, ?)`,
       [
         config.id,
         parent.project_id,
@@ -2343,6 +2477,29 @@ export const sessionHierarchy = {
       "UPDATE sessions SET agent_status = 'working', escalation = NULL, updated_at = ? WHERE id = ?",
       [Date.now(), sessionId]
     );
+  },
+
+  // Set parent relationship for forked sessions
+  setForkParent: (sessionId: string, parentSessionId: string) => {
+    const parent = sessions.get(parentSessionId);
+    if (!parent) return false;
+
+    const now = Date.now();
+    const rootSessionId = parent.root_session_id || parent.id;
+    const parentDepth = parent.depth ?? 0;
+    const newDepth = parentDepth + 1;
+
+    run(
+      `UPDATE sessions SET
+        parent_session_id = ?,
+        root_session_id = ?,
+        depth = ?,
+        session_type = 'fork',
+        updated_at = ?
+      WHERE id = ?`,
+      [parentSessionId, rootSessionId, newDepth, now, sessionId]
+    );
+    return true;
   },
 
   // Set deliverable
@@ -2534,6 +2691,147 @@ export const sessionArtifacts = {
 
   deleteByRoot: (rootSessionId: string) =>
     run("DELETE FROM session_artifacts WHERE root_session_id = ?", [rootSessionId]),
+};
+
+// ============================================================================
+// Clarification Requests (Context Negotiation between Orchestrator ↔ Sub-Agent)
+// ============================================================================
+
+export const clarificationRequests = {
+  // Get all clarification requests for a sub-agent session
+  listBySession: (sessionId: string): ClarificationRequest[] =>
+    queryAll<ClarificationRequest>(
+      "SELECT * FROM clarification_requests WHERE session_id = ? ORDER BY created_at DESC",
+      [sessionId]
+    ),
+
+  // Get all clarification requests sent by an orchestrator
+  listByParent: (parentSessionId: string): ClarificationRequest[] =>
+    queryAll<ClarificationRequest>(
+      "SELECT * FROM clarification_requests WHERE parent_session_id = ? ORDER BY created_at DESC",
+      [parentSessionId]
+    ),
+
+  // Get pending clarification requests for a sub-agent (ones they need to respond to)
+  getPending: (sessionId: string): ClarificationRequest[] =>
+    queryAll<ClarificationRequest>(
+      "SELECT * FROM clarification_requests WHERE session_id = ? AND status = 'pending' ORDER BY created_at ASC",
+      [sessionId]
+    ),
+
+  // Get a specific clarification request
+  get: (id: string): ClarificationRequest | undefined =>
+    queryOne<ClarificationRequest>("SELECT * FROM clarification_requests WHERE id = ?", [id]),
+
+  // Create a new clarification request (orchestrator asking sub-agent)
+  create: (request: ClarificationRequest) => {
+    run(
+      `INSERT INTO clarification_requests (id, session_id, parent_session_id, draft_id, question, context, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        request.id,
+        request.session_id,
+        request.parent_session_id,
+        request.draft_id,
+        request.question,
+        request.context || null,
+        request.status,
+        request.created_at,
+      ]
+    );
+  },
+
+  // Sub-agent responds to a clarification request
+  respond: (id: string, response: string) => {
+    const now = Date.now();
+    run(
+      "UPDATE clarification_requests SET response = ?, status = 'responded', responded_at = ? WHERE id = ?",
+      [response, now, id]
+    );
+  },
+
+  // Delete clarification requests for a session
+  deleteBySession: (sessionId: string) =>
+    run("DELETE FROM clarification_requests WHERE session_id = ?", [sessionId]),
+
+  // Delete all clarification requests involving a parent session
+  deleteByParent: (parentSessionId: string) =>
+    run("DELETE FROM clarification_requests WHERE parent_session_id = ?", [parentSessionId]),
+};
+
+// Helper methods for draft deliverables on sessionHierarchy
+export const draftDeliverables = {
+  // Submit a draft deliverable (sub-agent submits for review)
+  submitDraft: (sessionId: string, draft: DraftDeliverable) => {
+    const now = Date.now();
+    run(
+      `UPDATE sessions SET
+        draft_deliverable = ?,
+        draft_revision = ?,
+        agent_status = 'pending_review',
+        updated_at = ?
+       WHERE id = ?`,
+      [JSON.stringify(draft), draft.revision_number, now, sessionId]
+    );
+  },
+
+  // Get the current draft for a session
+  getDraft: (sessionId: string): DraftDeliverable | null => {
+    const session = sessions.get(sessionId);
+    if (!session?.draft_deliverable) return null;
+    try {
+      return JSON.parse(session.draft_deliverable);
+    } catch {
+      return null;
+    }
+  },
+
+  // Request clarification on a draft (orchestrator → sub-agent)
+  requestClarification: (
+    sessionId: string,
+    parentSessionId: string,
+    draftId: string,
+    question: string,
+    context?: string
+  ): ClarificationRequest => {
+    const request: ClarificationRequest = {
+      id: crypto.randomUUID(),
+      session_id: sessionId,
+      parent_session_id: parentSessionId,
+      draft_id: draftId,
+      question,
+      context,
+      status: 'pending',
+      created_at: Date.now(),
+    };
+    clarificationRequests.create(request);
+
+    // Update sub-agent status to indicate clarification needed
+    run(
+      "UPDATE sessions SET agent_status = 'clarification_requested', updated_at = ? WHERE id = ?",
+      [Date.now(), sessionId]
+    );
+
+    return request;
+  },
+
+  // Accept a draft deliverable (orchestrator accepts, session archives)
+  acceptDraft: (sessionId: string) => {
+    const session = sessions.get(sessionId);
+    if (!session?.draft_deliverable) return false;
+
+    const draft = JSON.parse(session.draft_deliverable) as DraftDeliverable;
+    const deliverable: Deliverable = {
+      type: draft.type,
+      summary: draft.summary,
+      content: draft.content,
+      artifacts: draft.artifacts,
+    };
+
+    // Move draft to final deliverable
+    sessionHierarchy.setDeliverable(sessionId, deliverable);
+    return true;
+  },
 };
 
 // ============================================================================

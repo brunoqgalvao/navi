@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb } from "../db";
+import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb, clarificationRequests, draftDeliverables, type DraftDeliverable } from "../db";
 import { executeInCloud, type CloudExecutionStage } from "../services/e2b-executor";
 import { sessionManager, type SessionEvent } from "../services/session-manager";
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
@@ -25,6 +25,8 @@ import {
   getPromptInjections,
   hasHooksForEvent,
 } from "../services/hook-executor";
+import { runQueryHooks } from "../services/query-hooks";
+import { initPhaseTracker, setPhaseUpdateBroadcast, type ConversationPhase } from "../services/phase-tracker";
 import { readFileSync } from "fs";
 import { homedir } from "os";
 // Infinite Loop Mode (Ralph Wiggum bot)
@@ -592,6 +594,16 @@ export function broadcastToClients(payload: unknown) {
   }
 }
 
+// Initialize phase tracker with broadcast function
+setPhaseUpdateBroadcast((sessionId: string, phase: ConversationPhase) => {
+  broadcastToClients({
+    type: "phase_update",
+    sessionId,
+    phase,
+  });
+});
+initPhaseTracker();
+
 function sendToSession(sessionId: string | undefined, payload: unknown) {
   if (!sessionId) {
     console.warn("[sendToSession] No sessionId provided, dropping message");
@@ -744,6 +756,48 @@ function broadcastSessionHierarchyEvent(event: SessionEvent) {
       wsEvent = {
         type: "session:artifact_created",
         artifact: event.artifact,
+      };
+      break;
+
+    // Context Negotiation events
+    case "draft_submitted":
+      wsEvent = {
+        type: "session:draft_submitted",
+        sessionId: event.sessionId,
+        parentId: event.parentId,
+        draftId: event.draftId,
+        summary: event.summary,
+      };
+      // Play notification sound for draft submissions
+      broadcastToClients({ type: "play_sound", sound: "notification" });
+      break;
+
+    case "clarification_requested":
+      wsEvent = {
+        type: "session:clarification_requested",
+        sessionId: event.sessionId,
+        parentId: event.parentId,
+        clarificationId: event.clarificationId,
+        question: event.question,
+      };
+      // Play notification sound for clarification requests
+      broadcastToClients({ type: "play_sound", sound: "notification" });
+      break;
+
+    case "clarification_responded":
+      wsEvent = {
+        type: "session:clarification_responded",
+        sessionId: event.sessionId,
+        clarificationId: event.clarificationId,
+        response: event.response,
+      };
+      break;
+
+    case "draft_accepted":
+      wsEvent = {
+        type: "session:draft_accepted",
+        sessionId: event.sessionId,
+        parentId: event.parentId,
       };
       break;
 
@@ -938,6 +992,16 @@ function startChildSessionQuery(
           handleMultiSessionDeliver(childProc, childSessionId, msg);
         } else if (msg.type === "multi_session_log_decision") {
           handleMultiSessionLogDecision(childProc, childSessionId, msg);
+        }
+        // Context Negotiation tools
+        else if (msg.type === "multi_session_submit_draft") {
+          handleMultiSessionSubmitDraft(childProc, childSessionId, msg);
+        } else if (msg.type === "multi_session_request_clarification") {
+          handleMultiSessionRequestClarification(childProc, childSessionId, msg);
+        } else if (msg.type === "multi_session_respond_to_clarification") {
+          handleMultiSessionRespondToClarification(childProc, childSessionId, msg);
+        } else if (msg.type === "multi_session_accept_deliverable") {
+          handleMultiSessionAcceptDeliverable(childProc, childSessionId, msg);
         }
       } catch (e) {
         console.error(`[MultiSession] Error parsing child worker output:`, e);
@@ -1341,6 +1405,421 @@ function handleMultiSessionLogDecision(proc: ChildProcess, sessionId: string | u
   } catch (error) {
     sendWorkerResponse(proc, "multi_session_decision_response", msg.requestId, {
       success: false,
+    });
+  }
+}
+
+// ============================================================================
+// Context Negotiation Handler Functions
+// ============================================================================
+
+/**
+ * Handle submit_draft request from worker (child submitting draft to parent)
+ */
+function handleMultiSessionSubmitDraft(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) {
+    sendWorkerResponse(proc, "multi_session_submit_draft_response", msg.requestId, {
+      success: false,
+      error: "No session ID",
+    });
+    return;
+  }
+
+  try {
+    const childSession = sessions.get(sessionId);
+    if (!childSession) {
+      sendWorkerResponse(proc, "multi_session_submit_draft_response", msg.requestId, {
+        success: false,
+        error: "Session not found",
+      });
+      return;
+    }
+
+    if (!childSession.parent_session_id) {
+      sendWorkerResponse(proc, "multi_session_submit_draft_response", msg.requestId, {
+        success: false,
+        error: "Only child agents can submit drafts",
+      });
+      return;
+    }
+
+    // Get current revision number and increment
+    const currentRevision = childSession.draft_revision || 0;
+    const newRevision = currentRevision + 1;
+
+    const draft: DraftDeliverable = {
+      draft_id: crypto.randomUUID(),
+      type: msg.deliverableType,
+      summary: msg.summary,
+      content: msg.content,
+      artifacts: msg.artifacts,
+      submitted_at: Date.now(),
+      revision_number: newRevision,
+    };
+
+    draftDeliverables.submitDraft(sessionId, draft);
+
+    sendWorkerResponse(proc, "multi_session_submit_draft_response", msg.requestId, {
+      success: true,
+      draft_id: draft.draft_id,
+      revision: newRevision,
+    });
+
+    // Notify parent session that a draft is ready for review
+    const parentProc = activeProcesses.get(childSession.parent_session_id)?.process;
+    if (parentProc?.stdin) {
+      const draftNotification = JSON.stringify({
+        type: "child_draft_submitted",
+        childSessionId: sessionId,
+        childRole: childSession.role || "agent",
+        draftId: draft.draft_id,
+        summary: msg.summary,
+        revision: newRevision,
+      });
+      parentProc.stdin.write(draftNotification + "\n");
+    }
+
+    // Create a synthetic message in parent's conversation
+    const parentMsgId = crypto.randomUUID();
+    const now = Date.now();
+    const syntheticContent = [
+      {
+        type: "text",
+        text: `**Child Agent (${childSession.role || "agent"}) submitted draft for review:**\n\n**Summary:** ${msg.summary}\n\nRevision #${newRevision}\n\n---\n\nUse \`request_clarification\` to ask follow-up questions, or \`accept_deliverable\` to finalize.\n\n**Draft content:**\n${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}`,
+      },
+    ];
+
+    messages.upsert(
+      parentMsgId,
+      childSession.parent_session_id,
+      "assistant",
+      JSON.stringify(syntheticContent),
+      now,
+      null,
+      1 // synthetic
+    );
+
+    // Broadcast to UI
+    broadcastToClients({
+      type: "assistant",
+      uiSessionId: childSession.parent_session_id,
+      content: syntheticContent,
+      uuid: parentMsgId,
+      timestamp: now,
+      isSynthetic: true,
+      fromChildSession: sessionId,
+      isDraftForReview: true,
+    });
+
+  } catch (error) {
+    sendWorkerResponse(proc, "multi_session_submit_draft_response", msg.requestId, {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+/**
+ * Handle request_clarification from worker (parent asking child for more info)
+ */
+function handleMultiSessionRequestClarification(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) {
+    sendWorkerResponse(proc, "multi_session_request_clarification_response", msg.requestId, {
+      success: false,
+      error: "No session ID",
+    });
+    return;
+  }
+
+  try {
+    const childSession = sessions.get(msg.childSessionId);
+    if (!childSession) {
+      sendWorkerResponse(proc, "multi_session_request_clarification_response", msg.requestId, {
+        success: false,
+        error: "Child session not found",
+      });
+      return;
+    }
+
+    if (childSession.parent_session_id !== sessionId) {
+      sendWorkerResponse(proc, "multi_session_request_clarification_response", msg.requestId, {
+        success: false,
+        error: "You can only request clarification from your own child agents",
+      });
+      return;
+    }
+
+    // Get child's draft
+    const draft = draftDeliverables.getDraft(msg.childSessionId);
+    if (!draft) {
+      sendWorkerResponse(proc, "multi_session_request_clarification_response", msg.requestId, {
+        success: false,
+        error: "Child has no pending draft",
+      });
+      return;
+    }
+
+    // Create clarification request
+    const request = draftDeliverables.requestClarification(
+      msg.childSessionId,
+      sessionId,
+      draft.draft_id,
+      msg.question,
+      msg.context
+    );
+
+    sendWorkerResponse(proc, "multi_session_request_clarification_response", msg.requestId, {
+      success: true,
+      clarification_id: request.id,
+    });
+
+    // Inject clarification request into child session
+    const childProc = childSessionWorkers.get(msg.childSessionId);
+    if (childProc?.stdin) {
+      const clarificationMessage = JSON.stringify({
+        type: "clarification_requested",
+        clarification_id: request.id,
+        question: msg.question,
+        context: msg.context,
+        from_parent: true,
+      });
+      childProc.stdin.write(clarificationMessage + "\n");
+    }
+
+    // Create synthetic message in child's conversation showing the question
+    const childMsgId = crypto.randomUUID();
+    const now = Date.now();
+    const syntheticContent = [
+      {
+        type: "text",
+        text: `**Your parent has a follow-up question:**\n\n${msg.question}${msg.context ? `\n\n**Context:** ${msg.context}` : ""}\n\n---\n\nUse \`respond_to_clarification\` with clarification_id: "${request.id}" to answer.`,
+      },
+    ];
+
+    messages.upsert(
+      childMsgId,
+      msg.childSessionId,
+      "user",
+      JSON.stringify(syntheticContent),
+      now,
+      null,
+      1 // synthetic
+    );
+
+    broadcastToClients({
+      type: "user",
+      uiSessionId: msg.childSessionId,
+      content: syntheticContent,
+      uuid: childMsgId,
+      timestamp: now,
+      isSynthetic: true,
+      isClarificationRequest: true,
+    });
+
+  } catch (error) {
+    sendWorkerResponse(proc, "multi_session_request_clarification_response", msg.requestId, {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+/**
+ * Handle respond_to_clarification from worker (child answering parent's question)
+ */
+function handleMultiSessionRespondToClarification(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) {
+    sendWorkerResponse(proc, "multi_session_respond_to_clarification_response", msg.requestId, {
+      success: false,
+      error: "No session ID",
+    });
+    return;
+  }
+
+  try {
+    const request = clarificationRequests.get(msg.clarification_id);
+    if (!request) {
+      sendWorkerResponse(proc, "multi_session_respond_to_clarification_response", msg.requestId, {
+        success: false,
+        error: "Clarification request not found",
+      });
+      return;
+    }
+
+    if (request.session_id !== sessionId) {
+      sendWorkerResponse(proc, "multi_session_respond_to_clarification_response", msg.requestId, {
+        success: false,
+        error: "This clarification request is not for you",
+      });
+      return;
+    }
+
+    // Record the response
+    clarificationRequests.respond(msg.clarification_id, msg.response);
+
+    // Update session status back to pending_review
+    sessionManager.updateStatus(sessionId, "pending_review");
+
+    sendWorkerResponse(proc, "multi_session_respond_to_clarification_response", msg.requestId, {
+      success: true,
+    });
+
+    // Inject response into parent session
+    const parentProc = activeProcesses.get(request.parent_session_id)?.process;
+    if (parentProc?.stdin) {
+      const responseMessage = JSON.stringify({
+        type: "clarification_response_received",
+        clarification_id: msg.clarification_id,
+        childSessionId: sessionId,
+        childRole: sessions.get(sessionId)?.role || "agent",
+        question: request.question,
+        response: msg.response,
+      });
+      parentProc.stdin.write(responseMessage + "\n");
+    }
+
+    // Create synthetic message in parent's conversation
+    const childSession = sessions.get(sessionId);
+    const parentMsgId = crypto.randomUUID();
+    const now = Date.now();
+    const syntheticContent = [
+      {
+        type: "text",
+        text: `**Child Agent (${childSession?.role || "agent"}) responded to your question:**\n\n**Q:** ${request.question}\n\n**A:** ${msg.response}\n\n---\n\nYou can \`request_clarification\` again, or \`accept_deliverable\` to finalize.`,
+      },
+    ];
+
+    messages.upsert(
+      parentMsgId,
+      request.parent_session_id,
+      "assistant",
+      JSON.stringify(syntheticContent),
+      now,
+      null,
+      1 // synthetic
+    );
+
+    broadcastToClients({
+      type: "assistant",
+      uiSessionId: request.parent_session_id,
+      content: syntheticContent,
+      uuid: parentMsgId,
+      timestamp: now,
+      isSynthetic: true,
+      fromChildSession: sessionId,
+      isClarificationResponse: true,
+    });
+
+  } catch (error) {
+    sendWorkerResponse(proc, "multi_session_respond_to_clarification_response", msg.requestId, {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+/**
+ * Handle accept_deliverable from worker (parent accepting child's draft)
+ */
+function handleMultiSessionAcceptDeliverable(proc: ChildProcess, sessionId: string | undefined, msg: any) {
+  if (!sessionId) {
+    sendWorkerResponse(proc, "multi_session_accept_deliverable_response", msg.requestId, {
+      success: false,
+      error: "No session ID",
+    });
+    return;
+  }
+
+  try {
+    const childSession = sessions.get(msg.childSessionId);
+    if (!childSession) {
+      sendWorkerResponse(proc, "multi_session_accept_deliverable_response", msg.requestId, {
+        success: false,
+        error: "Child session not found",
+      });
+      return;
+    }
+
+    if (childSession.parent_session_id !== sessionId) {
+      sendWorkerResponse(proc, "multi_session_accept_deliverable_response", msg.requestId, {
+        success: false,
+        error: "You can only accept deliverables from your own child agents",
+      });
+      return;
+    }
+
+    // Get the draft
+    const draft = draftDeliverables.getDraft(msg.childSessionId);
+    if (!draft) {
+      sendWorkerResponse(proc, "multi_session_accept_deliverable_response", msg.requestId, {
+        success: false,
+        error: "Child has no pending draft to accept",
+      });
+      return;
+    }
+
+    // Accept the draft (converts to final deliverable and archives)
+    const accepted = draftDeliverables.acceptDraft(msg.childSessionId);
+    if (!accepted) {
+      sendWorkerResponse(proc, "multi_session_accept_deliverable_response", msg.requestId, {
+        success: false,
+        error: "Failed to accept draft",
+      });
+      return;
+    }
+
+    sendWorkerResponse(proc, "multi_session_accept_deliverable_response", msg.requestId, {
+      success: true,
+      summary: draft.summary,
+      content: draft.content,
+      artifacts: draft.artifacts,
+    });
+
+    // Notify child session that their draft was accepted
+    const childProc = childSessionWorkers.get(msg.childSessionId);
+    if (childProc?.stdin) {
+      const acceptMessage = JSON.stringify({
+        type: "draft_accepted",
+        feedback: msg.feedback,
+      });
+      childProc.stdin.write(acceptMessage + "\n");
+    }
+
+    // Create synthetic message in parent's conversation confirming acceptance
+    const parentMsgId = crypto.randomUUID();
+    const now = Date.now();
+    const syntheticContent = [
+      {
+        type: "text",
+        text: `**Accepted deliverable from ${childSession.role || "agent"}:**\n\n${draft.summary}\n\n---\n\n${typeof draft.content === 'string' ? draft.content : JSON.stringify(draft.content, null, 2)}`,
+      },
+    ];
+
+    messages.upsert(
+      parentMsgId,
+      sessionId,
+      "assistant",
+      JSON.stringify(syntheticContent),
+      now,
+      null,
+      1 // synthetic
+    );
+
+    broadcastToClients({
+      type: "assistant",
+      uiSessionId: sessionId,
+      content: syntheticContent,
+      uuid: parentMsgId,
+      timestamp: now,
+      isSynthetic: true,
+      fromChildSession: msg.childSessionId,
+      isAcceptedDeliverable: true,
+    });
+
+  } catch (error) {
+    sendWorkerResponse(proc, "multi_session_accept_deliverable_response", msg.requestId, {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
     });
   }
 }
@@ -1912,6 +2391,19 @@ The user will explicitly approve the plan before any execution begins.
     workerEnv.NAVI_CLAUDE_CODE_PATH = resolvedClaudeCodePath;
   }
   logBunSpawnDiagnostics(sessionId, bunPath, workerPath, workerCwd, resolvedClaudeCodePath);
+
+  // Run query hooks (fire-and-forget) - e.g., phase tracking
+  if (sessionId) {
+    const sessionMessages = messages.listBySession(sessionId);
+    runQueryHooks({
+      sessionId,
+      projectId: projectId || undefined,
+      event: "start",
+      messages: sessionMessages,
+      projectPath: workingDirectory,
+    });
+  }
+
   const child = spawn(bunPath, ["run", "--env-file=/dev/null", workerPath, inputJson], {
     cwd: workerCwd,
     stdio: ["pipe", "pipe", "pipe"],
@@ -2378,6 +2870,16 @@ The user will explicitly approve the plan before any execution begins.
                 console.error("[Hooks] Stop error:", err);
               });
             }
+
+            // Run query hooks on complete (fire-and-forget) - e.g., phase tracking
+            const freshMessages = messages.listBySession(sessionId);
+            runQueryHooks({
+              sessionId,
+              projectId: projectId || undefined,
+              event: "complete",
+              messages: freshMessages,
+              projectPath: workingDirectory,
+            });
           }
         } else if (msg.type === "error") {
           sendToSession(sessionId, {
@@ -2388,10 +2890,19 @@ The user will explicitly approve the plan before any execution begins.
           if (sessionId) {
             // Update kanban card to blocked on error
             setKanbanCardBlocked(sessionId, `Error: ${msg.error}`);
-          }
-          if (sessionId) {
             activeProcesses.delete(sessionId);
             deleteStreamCapture(sessionId);
+
+            // Run query hooks on error (fire-and-forget) - e.g., phase tracking
+            const errorMessages = messages.listBySession(sessionId);
+            runQueryHooks({
+              sessionId,
+              projectId: projectId || undefined,
+              event: "error",
+              messages: errorMessages,
+              projectPath: workingDirectory,
+              error: msg.error,
+            });
           }
         }
       } catch (e) {
@@ -2678,31 +3189,38 @@ export function createWebSocketHandlers() {
             handleQueryWithProcess(ws, data);
           }
         } else if (data.type === "abort" && data.sessionId) {
+          console.log(`[Abort] Abort requested for session ${data.sessionId}`);
+          let abortedSomething = false;
+
           // Handle local process abort
           const active = activeProcesses.get(data.sessionId);
           if (active) {
+            console.log(`[Abort] Killing local process for ${data.sessionId}`);
             active.process.kill("SIGTERM");
             activeProcesses.delete(data.sessionId);
-            safeSend(ws, { type: "aborted", uiSessionId: data.sessionId });
+            abortedSomething = true;
           }
           // Handle cloud execution abort
           const cloudExec = activeCloudExecutions.get(data.sessionId);
           if (cloudExec) {
+            console.log(`[Abort] Cancelling cloud execution for ${data.sessionId}`);
             cloudExec.aborted = true;
             cloudExecutions.cancel(cloudExec.executionId);
             activeCloudExecutions.delete(data.sessionId);
-            safeSend(ws, { type: "aborted", uiSessionId: data.sessionId });
+            abortedSomething = true;
           }
-          // CRITICAL FIX: Cancel adapter session (Codex/Gemini backends)
+          // Cancel adapter session (Codex/Gemini backends)
           const adapterBackend = activeAdapterSessions.get(data.sessionId);
           if (adapterBackend) {
+            console.log(`[Abort] Cancelling adapter session (${adapterBackend}) for ${data.sessionId}`);
             try {
               const adapter = getAdapter(adapterBackend);
               adapter.cancel();
             } catch {}
             activeAdapterSessions.delete(data.sessionId);
+            abortedSomething = true;
           }
-          // CRITICAL FIX: Clean up pendingWaits for this session (prevents memory/handle leaks)
+          // Clean up pendingWaits for this session (prevents memory/handle leaks)
           for (const [waitId, wait] of pendingWaits) {
             if (wait.sessionId === data.sessionId) {
               try {
@@ -2711,7 +3229,7 @@ export function createWebSocketHandlers() {
               pendingWaits.delete(waitId);
             }
           }
-          // CRITICAL FIX: Clean up pending permissions and questions on abort
+          // Clean up pending permissions and questions on abort
           for (const [reqId, req] of pendingPermissions) {
             if (req.sessionId === data.sessionId) {
               pendingPermissions.delete(reqId);
@@ -2722,6 +3240,11 @@ export function createWebSocketHandlers() {
               pendingQuestions.delete(reqId);
             }
           }
+
+          // ALWAYS send aborted message to clear loading state on frontend
+          // This ensures the UI stops showing loading even if nothing was found to abort
+          console.log(`[Abort] Sending aborted message for ${data.sessionId} (found something: ${abortedSomething})`);
+          safeSend(ws, { type: "aborted", uiSessionId: data.sessionId });
         } else if (data.type === "attach" && data.sessionId) {
           const active = activeProcesses.get(data.sessionId);
           if (active) {

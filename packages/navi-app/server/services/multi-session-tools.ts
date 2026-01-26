@@ -10,7 +10,14 @@
  */
 
 import { sessionManager, type SpawnConfig, type ContextQuery } from "./session-manager";
-import { sessions, type EscalationType } from "../db";
+import {
+  sessions,
+  clarificationRequests,
+  draftDeliverables,
+  type EscalationType,
+  type DraftDeliverable,
+  type ClarificationRequest,
+} from "../db";
 import { getAgentDefinition, inferAgentTypeFromRole, type AgentType } from "../agent-types";
 
 // Tool definitions that will be added to agent sessions
@@ -249,12 +256,165 @@ The deliverable will be sent to your parent, who will incorporate it into their 
       required: ["type", "summary", "content"],
     },
   },
+
+  // ============================================================================
+  // Context Negotiation Tools - For iterative refinement between orchestrator ↔ sub-agent
+  // ============================================================================
+
+  {
+    name: "submit_draft",
+    description: `Submit your work as a DRAFT for your parent to review.
+Unlike 'deliver', this does NOT archive your session. Your parent will evaluate your draft
+and may ask follow-up questions before accepting it.
+
+Use this when:
+- Your task is complex and may need clarification
+- You want feedback before final delivery
+- The parent explicitly requested iterative review
+
+After submitting, wait for parent's response:
+- If they request clarification, you'll receive a message with their question
+- If they accept, your session completes normally
+- You can revise and resubmit if needed`,
+    parameters: {
+      type: "object",
+      properties: {
+        type: {
+          type: "string",
+          enum: ["code", "research", "decision", "artifact", "error"],
+          description: "Type of deliverable",
+        },
+        summary: {
+          type: "string",
+          description: "Brief summary of what you accomplished",
+        },
+        content: {
+          type: "string",
+          description: "The actual deliverable content",
+        },
+        artifacts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "File path" },
+              description: { type: "string", description: "What this file does" },
+            },
+            required: ["path"],
+          },
+          description: "List of files created/modified",
+        },
+      },
+      required: ["type", "summary", "content"],
+    },
+  },
+  {
+    name: "request_clarification",
+    description: `Ask a child agent for more information about their draft deliverable.
+Use this when you receive a draft from a child agent and need more detail.
+
+This is part of the Context Negotiation protocol:
+1. Child submits draft via submit_draft
+2. YOU evaluate the draft and decide: accept OR request_clarification
+3. If you request clarification, the child will respond
+4. Loop until satisfied, then call accept_deliverable
+
+Good clarifying questions:
+- "What edge cases did you consider for X?"
+- "Can you explain why you chose approach Y?"
+- "I don't see Z in your summary - did you look into that?"
+- "The context mentions A, but I don't see how your solution handles it"`,
+    parameters: {
+      type: "object",
+      properties: {
+        child_session_id: {
+          type: "string",
+          description: "The session ID of the child agent to query",
+        },
+        question: {
+          type: "string",
+          description: "Your follow-up question for the child agent",
+        },
+        context: {
+          type: "string",
+          description: "Optional: additional context to help the child understand your question",
+        },
+      },
+      required: ["child_session_id", "question"],
+    },
+  },
+  {
+    name: "respond_to_clarification",
+    description: `Respond to a clarification request from your parent.
+Use this when your parent has asked a follow-up question about your draft.
+
+After responding:
+- Your parent may accept your deliverable
+- Or ask more questions
+- You can also revise your draft via submit_draft if the question reveals you missed something`,
+    parameters: {
+      type: "object",
+      properties: {
+        clarification_id: {
+          type: "string",
+          description: "The ID of the clarification request you're responding to",
+        },
+        response: {
+          type: "string",
+          description: "Your answer to the parent's question",
+        },
+      },
+      required: ["clarification_id", "response"],
+    },
+  },
+  {
+    name: "accept_deliverable",
+    description: `Accept a child agent's draft and finalize their work.
+Use this after reviewing a child's draft (and any clarification responses) when satisfied.
+
+This:
+1. Converts the draft to a final deliverable
+2. Archives the child session
+3. You receive their finalized content
+
+Only use after thorough evaluation. If you have ANY doubts, use request_clarification first.`,
+    parameters: {
+      type: "object",
+      properties: {
+        child_session_id: {
+          type: "string",
+          description: "The session ID of the child agent whose draft you're accepting",
+        },
+        feedback: {
+          type: "string",
+          description: "Optional: final feedback for the child (logged but not sent)",
+        },
+      },
+      required: ["child_session_id"],
+    },
+  },
+  {
+    name: "check_pending_clarifications",
+    description: `Check if you have any pending clarification requests from your parent.
+Use this to see if your parent needs more information about your draft.
+
+Returns any unanswered clarification requests you need to respond to.`,
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 // Tool execution handlers
 export interface ToolExecutionContext {
   sessionId: string;
   onSpawn?: (childSession: any) => Promise<void>;
+  onDraftSubmitted?: (sessionId: string, parentId: string, draftId: string, summary: string) => Promise<void>;
+  onClarificationRequested?: (sessionId: string, parentId: string, clarificationId: string, question: string) => Promise<void>;
+  onClarificationResponded?: (sessionId: string, clarificationId: string, response: string) => Promise<void>;
+  onDraftAccepted?: (sessionId: string, parentId: string) => Promise<void>;
 }
 
 export async function executeMultiSessionTool(
@@ -412,6 +572,250 @@ export async function executeMultiSessionTool(
         };
       }
 
+      // ========================================================================
+      // Context Negotiation Tools
+      // ========================================================================
+
+      case "submit_draft": {
+        const { type, summary, content, artifacts } = params;
+        const session = sessions.get(sessionId);
+
+        if (!session) {
+          return { success: false, error: "Session not found" };
+        }
+
+        if (!session.parent_session_id) {
+          return {
+            success: false,
+            error: "Only child agents can submit drafts. Use 'deliver' instead.",
+          };
+        }
+
+        // Get current revision number and increment
+        const currentRevision = session.draft_revision || 0;
+        const newRevision = currentRevision + 1;
+
+        const draft: DraftDeliverable = {
+          draft_id: crypto.randomUUID(),
+          type,
+          summary,
+          content,
+          artifacts,
+          submitted_at: Date.now(),
+          revision_number: newRevision,
+        };
+
+        // Log artifacts
+        if (artifacts && Array.isArray(artifacts)) {
+          for (const artifact of artifacts) {
+            sessionManager.logArtifact(
+              sessionId,
+              artifact.path,
+              undefined,
+              artifact.description,
+              type
+            );
+          }
+        }
+
+        draftDeliverables.submitDraft(sessionId, draft);
+
+        // Emit draft submitted event
+        if (context.onDraftSubmitted) {
+          await context.onDraftSubmitted(sessionId, session.parent_session_id!, draft.draft_id, summary);
+        }
+
+        return {
+          success: true,
+          result: {
+            message: "Draft submitted for parent review",
+            draft_id: draft.draft_id,
+            revision: newRevision,
+            summary,
+            note: "Wait for parent's response. They may accept or request clarification.",
+          },
+        };
+      }
+
+      case "request_clarification": {
+        const { child_session_id, question, context: clarificationContext } = params;
+
+        // Verify this is a valid child session
+        const childSession = sessions.get(child_session_id);
+        if (!childSession) {
+          return { success: false, error: "Child session not found" };
+        }
+
+        if (childSession.parent_session_id !== sessionId) {
+          return {
+            success: false,
+            error: "You can only request clarification from your own child agents",
+          };
+        }
+
+        // Check if child has a pending draft
+        const draft = draftDeliverables.getDraft(child_session_id);
+        if (!draft) {
+          return {
+            success: false,
+            error: "Child has no pending draft. They must submit_draft first.",
+          };
+        }
+
+        // Create clarification request
+        const request = draftDeliverables.requestClarification(
+          child_session_id,
+          sessionId,
+          draft.draft_id,
+          question,
+          clarificationContext
+        );
+
+        // Emit clarification requested event
+        if (context.onClarificationRequested) {
+          await context.onClarificationRequested(child_session_id, sessionId, request.id, question);
+        }
+
+        return {
+          success: true,
+          result: {
+            message: "Clarification request sent to child agent",
+            clarification_id: request.id,
+            question,
+            child_role: childSession.role,
+            note: "The child agent will receive your question and respond.",
+          },
+        };
+      }
+
+      case "respond_to_clarification": {
+        const { clarification_id, response } = params;
+
+        const request = clarificationRequests.get(clarification_id);
+        if (!request) {
+          return { success: false, error: "Clarification request not found" };
+        }
+
+        if (request.session_id !== sessionId) {
+          return {
+            success: false,
+            error: "This clarification request is not for you",
+          };
+        }
+
+        if (request.status === "responded") {
+          return {
+            success: false,
+            error: "This clarification has already been responded to",
+          };
+        }
+
+        // Record the response
+        clarificationRequests.respond(clarification_id, response);
+
+        // Update session status back to pending_review
+        sessionManager.updateStatus(sessionId, "pending_review");
+
+        // Emit clarification responded event
+        if (context.onClarificationResponded) {
+          await context.onClarificationResponded(sessionId, clarification_id, response);
+        }
+
+        return {
+          success: true,
+          result: {
+            message: "Response sent to parent",
+            clarification_id,
+            note: "Your parent will review your response. They may accept your draft or ask more questions.",
+          },
+        };
+      }
+
+      case "accept_deliverable": {
+        const { child_session_id, feedback } = params;
+
+        const childSession = sessions.get(child_session_id);
+        if (!childSession) {
+          return { success: false, error: "Child session not found" };
+        }
+
+        if (childSession.parent_session_id !== sessionId) {
+          return {
+            success: false,
+            error: "You can only accept deliverables from your own child agents",
+          };
+        }
+
+        // Check if child has a draft
+        const draft = draftDeliverables.getDraft(child_session_id);
+        if (!draft) {
+          return {
+            success: false,
+            error: "Child has no pending draft to accept",
+          };
+        }
+
+        // Accept the draft (converts to final deliverable and archives)
+        const accepted = draftDeliverables.acceptDraft(child_session_id);
+        if (!accepted) {
+          return { success: false, error: "Failed to accept draft" };
+        }
+
+        // Log feedback as a decision if provided
+        if (feedback) {
+          sessionManager.logDecision(
+            sessionId,
+            `Accepted deliverable from ${childSession.role}: ${feedback}`,
+            "deliverable_feedback"
+          );
+        }
+
+        // Emit draft accepted event
+        if (context.onDraftAccepted) {
+          await context.onDraftAccepted(child_session_id, sessionId);
+        }
+
+        return {
+          success: true,
+          result: {
+            message: "Deliverable accepted",
+            child_role: childSession.role,
+            summary: draft.summary,
+            content: draft.content,
+            artifacts: draft.artifacts,
+            note: "Child session is now complete. Their work has been finalized.",
+          },
+        };
+      }
+
+      case "check_pending_clarifications": {
+        const pending = clarificationRequests.getPending(sessionId);
+
+        if (pending.length === 0) {
+          return {
+            success: true,
+            result: {
+              message: "No pending clarification requests",
+              pending: [],
+            },
+          };
+        }
+
+        return {
+          success: true,
+          result: {
+            message: `You have ${pending.length} pending clarification request(s)`,
+            pending: pending.map((p) => ({
+              clarification_id: p.id,
+              question: p.question,
+              context: p.context,
+              asked_at: new Date(p.created_at).toISOString(),
+            })),
+            note: "Use respond_to_clarification to answer each question.",
+          },
+        };
+      }
+
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
     }
@@ -470,15 +874,31 @@ You have access to these tools for coordinating with other agents:
 - **get_context**: Query parent, siblings, or project-wide decisions/artifacts
 - **log_decision**: Record important decisions for other agents to see
 - **escalate**: Request help when blocked (last resort)
-- **deliver**: Complete your task and return results to parent
+- **deliver**: Complete your task and return results to parent (immediate, no review)
+- **submit_draft**: Submit your work for parent review (recommended for complex tasks)
+- **check_pending_clarifications**: See if parent has asked follow-up questions
+- **respond_to_clarification**: Answer parent's follow-up questions
+
+## Context Negotiation Protocol
+For complex research or multi-step tasks, use **submit_draft** instead of **deliver**:
+1. Complete your work and call **submit_draft** with your findings
+2. Your parent will evaluate your draft and may ask follow-up questions
+3. Use **check_pending_clarifications** to see if you have questions to answer
+4. Use **respond_to_clarification** to answer each question
+5. Your parent may ask more questions or accept your deliverable
+6. This loop continues until your parent is satisfied
+
+**Why use drafts?** Your parent has semantic context you don't have. They know WHY they assigned the task.
+A single-pass summary often misses details that matter to them. The negotiation loop ensures they get what they actually need.
 
 ## Agent Guidelines
 1. Focus on YOUR specific task. Don't duplicate work siblings are doing.
 2. Use get_context to coordinate with siblings if needed.
 3. Log important decisions so others can see them.
 4. Only escalate if you truly cannot proceed.
-5. **Call deliver when your task is COMPLETE** - this is required to signal completion.
+5. For complex tasks, use **submit_draft** instead of **deliver** to enable feedback.
 6. Be efficient - don't spawn agents for trivial work.
+7. When answering clarifications, go back to the source if needed - don't guess.
   `.trim();
 }
 

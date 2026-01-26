@@ -7,6 +7,17 @@
     "notion": {
       "type": "sse",
       "url": "https://mcp.notion.com/sse"
+    },
+    "navi-email": {
+      "command": "bun",
+      "args": ["run", ".claude/mcp-servers/navi-email/index.ts"],
+      "env": {
+        "AGENTMAIL_API_KEY": "${AGENTMAIL_API_KEY}"
+      }
+    },
+    "navi-whatsapp": {
+      "command": "bun",
+      "args": ["run", ".claude/mcp-servers/navi-whatsapp/index.ts"]
     }
   }
 }

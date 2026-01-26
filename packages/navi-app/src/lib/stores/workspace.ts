@@ -55,6 +55,24 @@ export interface WorkspaceFolder {
 export const workspaceFolders = writable<WorkspaceFolder[]>([]);
 
 // =============================================================================
+// SESSION FOLDERS
+// =============================================================================
+
+export interface SessionFolder {
+  id: string;
+  project_id: string;
+  name: string;
+  sort_order: number;
+  collapsed: number;
+  pinned?: number;
+  created_at: number;
+  updated_at: number;
+}
+
+/** Folders for organizing sessions within a project */
+export const sessionFolders = writable<SessionFolder[]>([]);
+
+// =============================================================================
 // PERMISSIONS STATE
 // =============================================================================
 
@@ -87,4 +105,5 @@ export function resetWorkspaceState(): void {
   projectContextError.set(null);
   claudeMdContent.set(null);
   workspaceFolders.set([]);
+  sessionFolders.set([]);
 }

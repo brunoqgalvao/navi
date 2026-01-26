@@ -19,7 +19,8 @@
 
   let flatResults = $derived(() => {
     const { projects, sessions, messages } = groupedResults();
-    return [...projects, ...sessions, ...messages];
+    // Order: projects first, messages second, sessions last
+    return [...projects, ...messages, ...sessions];
   });
 
   function handleKeydown(e: KeyboardEvent) {
@@ -196,35 +197,6 @@
             {/each}
           {/if}
 
-          {#if grouped.sessions.length > 0}
-            <div class="px-4 py-2 bg-gray-50 border-b border-gray-100">
-              <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Chats</span>
-            </div>
-            {#each grouped.sessions as result}
-              {@const globalIdx = getGlobalIndex(result)}
-              <button
-                class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3 border-b border-gray-100 transition-colors {selectedIndex === globalIdx ? 'bg-blue-50' : ''}"
-                onclick={() => selectResult(result)}
-                onmouseenter={() => selectedIndex = globalIdx}
-              >
-                <span class="text-lg mt-0.5">💬</span>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="text-gray-900 font-medium truncate">
-                      {@html highlightMatch(result.session_title || "Untitled", searchQuery)}
-                    </span>
-                    <span class="text-xs text-gray-400">{formatTime(result.updated_at)}</span>
-                  </div>
-                  {#if result.project_name}
-                    <span class="text-xs text-gray-400 mt-0.5 inline-block">
-                      {@html highlightMatch(result.project_name, searchQuery)}
-                    </span>
-                  {/if}
-                </div>
-              </button>
-            {/each}
-          {/if}
-
           {#if grouped.messages.length > 0}
             <div class="px-4 py-2 bg-gray-50 border-b border-gray-100">
               <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Messages</span>
@@ -249,6 +221,35 @@
                   {/if}
                   {#if result.project_name}
                     <span class="text-xs text-gray-400 mt-0.5 inline-block">{result.project_name}</span>
+                  {/if}
+                </div>
+              </button>
+            {/each}
+          {/if}
+
+          {#if grouped.sessions.length > 0}
+            <div class="px-4 py-2 bg-gray-50 border-b border-gray-100">
+              <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Chats</span>
+            </div>
+            {#each grouped.sessions as result}
+              {@const globalIdx = getGlobalIndex(result)}
+              <button
+                class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3 border-b border-gray-100 transition-colors {selectedIndex === globalIdx ? 'bg-blue-50' : ''}"
+                onclick={() => selectResult(result)}
+                onmouseenter={() => selectedIndex = globalIdx}
+              >
+                <span class="text-lg mt-0.5">💬</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-900 font-medium truncate">
+                      {@html highlightMatch(result.session_title || "Untitled", searchQuery)}
+                    </span>
+                    <span class="text-xs text-gray-400">{formatTime(result.updated_at)}</span>
+                  </div>
+                  {#if result.project_name}
+                    <span class="text-xs text-gray-400 mt-0.5 inline-block">
+                      {@html highlightMatch(result.project_name, searchQuery)}
+                    </span>
                   {/if}
                 </div>
               </button>

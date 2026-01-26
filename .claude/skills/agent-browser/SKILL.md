@@ -1,6 +1,6 @@
 ---
 name: agent-browser
-description: Fast CLI browser automation using Vercel's agent-browser. Use when you need quick browser automation with accessibility tree snapshots, @ref element targeting, semantic locators, multi-session parallel browsing, console/network monitoring, or GIF recording. Full feature parity with Claude Code Chrome extension.
+description: Fast CLI browser automation with accessibility tree snapshots, @ref element targeting, GIF recording, and authenticated sessions via --auth flag. Use agent-browser-navi for auth features.
 tools: Bash
 ---
 
@@ -8,32 +8,96 @@ tools: Bash
 
 A blazing-fast Rust CLI for browser automation, optimized for AI agents. Features accessibility tree snapshots with `@ref` element references for precise targeting.
 
-**Full feature parity with Claude Code Chrome extension** - console logs, network monitoring, tab management, GIF recording, and more.
+> **⚠️ IMPORTANT**: After taking a screenshot, ALWAYS display it with a `media` code block:
+> ````
+> ```media
+> src: /path/to/screenshot.png
+> caption: Description
+> ```
+> ````
+> This makes the image visible inline in Navi's chat.
+
+**Two versions available:**
+- `agent-browser` - Vanilla from Vercel (npm)
+- `agent-browser-navi` - Extended fork with **GIF recording** and **authenticated sessions**
 
 ## When to Use This vs Other Browser Skills
 
 | Skill | Best For |
 |-------|----------|
-| **agent-browser** | Fast CLI commands, @ref targeting, parallel sessions, console/network debugging, GIF recording |
+| **agent-browser-navi** | Authenticated sessions (--auth), GIF recording, @ref targeting |
+| **agent-browser** | Fast CLI commands, no auth needed |
 | **playwright** | Complex multi-step JS flows, custom test scripts |
-| **browser-agent** | User's Chrome with autofill (passwords/cards) - for authenticated sessions |
+| **browser-agent** | User's actual Chrome via CDP |
 
 ## Installation
 
 ```bash
-# Install globally
+# Vanilla version (no auth/GIF features)
 npm install -g agent-browser
-
-# Install browser (Chromium)
 agent-browser install
 
-# For GIF recording, ensure ffmpeg is installed
-brew install ffmpeg  # macOS
+# Extended version with auth + GIF (recommended)
+npm install -g ~/Documents/dev-bruno/agent-browser-navi
+agent-browser-navi install
 ```
 
 Verify installation:
 ```bash
-agent-browser --version
+agent-browser-navi --help
+```
+
+---
+
+## Authenticated Sessions (agent-browser-navi only)
+
+Use `--auth` to browse with a persistent profile that saves your logins:
+
+```bash
+# First time: Log into your services manually
+agent-browser-navi --auth open https://accounts.google.com
+# A browser window opens - log in manually, then close when done
+
+# After that: Always use --auth to access authenticated services
+agent-browser-navi --auth open https://calendar.google.com
+agent-browser-navi --auth open https://mail.google.com
+agent-browser-navi --auth open https://github.com
+```
+
+**How it works:**
+- Profile stored at `~/.agent-browser-navi/profile`
+- Persists across browser restarts
+- Stealth mode (no "automated browser" detection)
+- Log in once, use forever
+
+**Important:** Always use `--auth` flag to access your authenticated sessions. Without it, you get a fresh anonymous browser.
+
+```bash
+# Close authenticated browser when done
+agent-browser-navi close
+
+# Next time, just use --auth again
+agent-browser-navi --auth open https://calendar.google.com
+```
+
+---
+
+## GIF Recording (agent-browser-navi only)
+
+Record browser interactions as animated GIFs:
+
+```bash
+# Open a page first
+agent-browser-navi open https://example.com
+
+# Record for 5 seconds
+agent-browser-navi gif /tmp/demo.gif 5
+
+# Record with custom fps (default: 10)
+agent-browser-navi gif /tmp/demo.gif 10 --fps 15
+
+# Record with custom width (default: 800)
+agent-browser-navi gif /tmp/demo.gif 5 --width 1024
 ```
 
 ---
@@ -68,7 +132,7 @@ agent-browser --version
 | Screenshot | `agent-browser screenshot /tmp/shot.png` |
 | Full page | `agent-browser screenshot /tmp/full.png --full` |
 | PDF | `agent-browser pdf /tmp/page.pdf` |
-| Record GIF | `bash ~/.claude/skills/agent-browser/scripts/record-gif.sh <duration> <output>` |
+| Record GIF | `agent-browser-navi gif /tmp/demo.gif 5` |
 | **Tabs** | |
 | List tabs | `agent-browser tab list` |
 | New tab | `agent-browser tab new [url]` |
@@ -225,40 +289,6 @@ agent-browser tab close
 
 # Close specific tab
 agent-browser tab close 1
-```
-
----
-
-## GIF Recording
-
-Record browser interactions as animated GIFs:
-
-```bash
-# Record for 5 seconds
-bash ~/.claude/skills/agent-browser/scripts/record-gif.sh 5 /tmp/demo.gif
-
-# Record for 10 seconds at higher quality
-bash ~/.claude/skills/agent-browser/scripts/record-gif.sh 10 /tmp/demo.gif 15
-```
-
-The script captures screenshots at regular intervals and assembles them into a GIF using ffmpeg.
-
-### Manual GIF Recording
-
-For more control:
-
-```bash
-# 1. Start your actions
-agent-browser open https://example.com
-
-# 2. Take screenshots during interaction
-for i in {1..20}; do
-  agent-browser screenshot /tmp/frame-$i.png
-  sleep 0.2
-done
-
-# 3. Assemble into GIF
-ffmpeg -framerate 5 -i /tmp/frame-%d.png -vf "scale=800:-1" /tmp/demo.gif
 ```
 
 ---
@@ -683,30 +713,40 @@ agent-browser open https://example.com --headed
 
 ---
 
-## Using User's Chrome Profile
+## Displaying Screenshots in Navi
 
-To use the user's Chrome with saved passwords/sessions:
+**CRITICAL**: After taking a screenshot, you MUST display it to the user using a `media` code block:
 
 ```bash
-# macOS
-agent-browser open https://example.com \
-  --executable-path "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# Take the screenshot
+agent-browser screenshot /tmp/my-screenshot.png
 ```
 
-Note: For full autofill support with saved passwords/cards, use the `browser-agent` skill instead.
+Then immediately output:
+
+````markdown
+```media
+src: /tmp/my-screenshot.png
+caption: Screenshot of the page
+```
+````
+
+This renders the image inline in the chat. **Always do this after every screenshot command!**
 
 ---
 
 ## Tips
 
-1. **Always snapshot first** to get @ref values for the current page state
-2. **Use `--json`** for machine-parseable output
-3. **Use `-i` (interactive)** snapshot for cleaner output
-4. **Multi-session** for parallel tasks that don't interfere
-5. **Semantic locators** are more stable than CSS selectors
-6. **@ref values change** when the page updates - re-snapshot after navigation
-7. **Check console/errors** when something isn't working
-8. **Use traces** for complex debugging sessions
+1. **Use `--auth` for authenticated services** (Google, GitHub, etc.)
+2. **Always snapshot first** to get @ref values for the current page state
+3. **Use `--json`** for machine-parseable output
+4. **Use `-i` (interactive)** snapshot for cleaner output
+5. **Multi-session** for parallel tasks that don't interfere
+6. **Semantic locators** are more stable than CSS selectors
+7. **@ref values change** when the page updates - re-snapshot after navigation
+8. **Check console/errors** when something isn't working
+9. **Use traces** for complex debugging sessions
+10. **Always display screenshots** with a `media` code block after taking them!
 
 ## Troubleshooting
 

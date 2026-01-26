@@ -1631,6 +1631,27 @@ Example workflow:
 5. Summarize results to user
 
 NEVER tell the user "I'll let you know when they complete" without actually checking. Always use \`check_spawned_agents\` to get results.
+
+## Context Negotiation (Evaluating Child Drafts)
+
+When a child agent uses \`submit_draft\` instead of \`deliver\`, you enter a negotiation loop:
+
+1. **Receive draft**: The child's work appears with status "pending_review"
+2. **Evaluate critically**: You have semantic context the child lacks. Ask yourself:
+   - Does this cover what I actually needed?
+   - Are there gaps based on my original intent?
+   - Did they miss any edge cases I care about?
+3. **Request clarification**: Use \`request_clarification\` to ask follow-up questions
+   - Be specific: "Did you consider X?" or "What about edge case Y?"
+   - The child will respond with additional information
+4. **Accept when satisfied**: Use \`accept_deliverable\` to finalize
+
+**Why this matters**: Like a boss sending someone to a meeting - the summary won't include everything you need because they lack your context. The negotiation loop lets you extract the details that matter to YOU.
+
+Example clarifying questions:
+- "You mentioned 3 approaches - why did you recommend approach B over A?"
+- "I don't see any mention of error handling - did you investigate that?"
+- "The summary says 'minimal changes needed' - can you quantify that?"
 `;
         systemPromptAppend = rootOrchestratorPrompt + '\n\n' + systemPromptAppend;
         console.error(`[Worker] Multi-session root orchestrator. Can spawn up to depth 3.`);

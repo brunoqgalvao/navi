@@ -6,7 +6,7 @@
  *
  * ## Architecture Overview
  *
- * Navi has 8 distinct component categories:
+ * Navi has 10 distinct component categories:
  *
  * 1. **Extensions** - Sidebar panels (Files, Git, Terminal, Preview, etc.)
  * 2. **Message Widgets** - Inline renderers in chat (code blocks, media, tools)
@@ -16,10 +16,12 @@
  * 6. **Agents** - AI personas (.claude/agents/)
  * 7. **Commands** - Slash commands (.claude/commands/)
  * 8. **Hooks** - Lifecycle event handlers
+ * 9. **Subagents** - Task tool agent rendering configs
+ * 10. **Tool Groups** - Collapsible tool activity rendering (Search, FileOps, Browser, etc.)
  *
  * Each category has:
  * - Type definitions in `types.ts`
- * - A registry in `registries.ts` (for extensible components)
+ * - A registry in `registries.ts` or dedicated file (for extensible components)
  * - Factory functions for creating instances
  *
  * @example
@@ -29,14 +31,19 @@
  *   type Extension,
  *   type Reference,
  *   type MessageWidget,
+ *   type ToolGroup,
  *
  *   // Registries
  *   extensionRegistry,
  *   messageWidgetRegistry,
+ *   toolGroupRegistry,
  *
  *   // Factories
  *   createFileReference,
  *   createTerminalReference,
+ *
+ *   // Grouping
+ *   groupToolBlocks,
  *
  *   // Stores
  *   references,
@@ -207,3 +214,34 @@ export {
   // User agent parsing
   parseUserAgentFrontmatter,
 } from "./agent-types";
+
+// =============================================================================
+// TOOL GROUPS (Collapsible Tool Activity)
+// =============================================================================
+
+export type {
+  ToolGroupType,
+  ToolStep,
+  ToolGroup,
+  ToolGroupConfig,
+  GroupedContentItem,
+} from "./tool-groups";
+
+export {
+  // Config
+  TOOL_GROUP_CONFIG,
+
+  // Grouping logic
+  getToolGroupType,
+  shouldGroupTogether,
+  generateGroupSummary,
+  getGroupStats,
+  groupToolBlocks,
+
+  // Type guards
+  isToolGroup,
+  isSingleTool,
+
+  // Helpers
+  extractToolResultText,
+} from "./tool-groups";

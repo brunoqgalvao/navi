@@ -146,10 +146,11 @@
   import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
   import EscalationBanner from "./lib/features/session-hierarchy/components/EscalationBanner.svelte";
   import { SessionsBoard, type BoardSession } from "./lib/features/sessions-board";
+  import { CanvasView } from "./lib/features/canvas-mode";
   import { fetchCommands, type CustomCommand } from "./lib/features/commands";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
-  import type { PermissionSettings, WorkspaceFolder } from "./lib/api";
+  import type { PermissionSettings, WorkspaceFolder, SessionFolder } from "./lib/api";
   import { TOUR_STEPS, HOTKEYS } from "./lib/constants";
   import { WorkspaceHome } from "./lib/pages";
   import { RightPanel } from "./lib/layout";
@@ -157,6 +158,7 @@
     initProjectActions,
     initSessionActions,
     initFolderActions,
+    initSessionFolderActions,
     loadProjects as loadProjectsAction,
     loadProjectCost,
     loadClaudeMd,
@@ -172,6 +174,13 @@
     setProjectFolder as setProjectFolderAction,
     reorderFolders as reorderFoldersAction,
     toggleFolderPin as toggleFolderPinAction,
+    loadSessionFolders as loadSessionFoldersAction,
+    createSessionFolder as createSessionFolderAction,
+    updateSessionFolder as updateSessionFolderAction,
+    deleteSessionFolder as deleteSessionFolderAction,
+    toggleSessionFolderCollapse as toggleSessionFolderCollapseAction,
+    setSessionFolder as setSessionFolderAction,
+    reorderSessionFolders as reorderSessionFoldersAction,
     initDataLoaders,
     loadConfig as loadConfigAction,
     loadModels as loadModelsAction,
@@ -290,6 +299,7 @@
   // Track if current project is a git repo (for worktree feature)
   let currentProjectIsGitRepo = $state(false);
   let workspaceFolders = $state<WorkspaceFolder[]>([]);
+  let sessionFolders = $state<SessionFolder[]>([]);
 
   // Chat reference lookup for cross-chat linking
   let chatLookup = $derived(() => {
@@ -331,6 +341,7 @@
   let showAgentBuilder = $state(false);
   let showSessionsDashboard = $state(false);
   let sessionsDashboardProjectId = $state<string | undefined>(undefined);
+  let showCanvasMode = $state(false);
   let showExperimentalAgents = $state(false);
 
   // Derived agents list for sidebar (combine agents + skills from stores)
@@ -963,6 +974,10 @@
       } else if (e.key === 'F' || e.key === 'f') {
         e.preventDefault();
         spawnQuickAgent('healer-agent');
+      } else if (e.key === 'C' || e.key === 'c') {
+        // Canvas Mode toggle (Cmd/Ctrl + Shift + C)
+        e.preventDefault();
+        showCanvasMode = !showCanvasMode;
       }
     }
   }
@@ -1142,6 +1157,13 @@
     getSidebarProjects: () => sidebarProjects,
   });
 
+  initSessionFolderActions({
+    setSessionFolders: (f) => { sessionFolders = f; },
+    getSessionFolders: () => sessionFolders,
+    setSidebarSessions: (s) => { sidebarSessions = s; },
+    getSidebarSessions: () => sidebarSessions,
+  });
+
   initDataLoaders({
     setDefaultProjectsDir: (dir) => { defaultProjectsDir = dir; },
     setGlobalPermissionSettings: (settings) => { globalPermissionSettings = settings; },
@@ -1260,6 +1282,9 @@
             const sessionsList = await api.sessions.list(project.id, $showArchivedWorkspaces);
             sidebarSessions = sessionsList;
 
+            // Load session folders for this project
+            loadSessionFoldersAction(project.id).catch(e => console.error("Failed to load session folders:", e));
+
             // Load project context and files
             indexProjectFiles(project.path);
             loadProjectContext(project);
@@ -1286,6 +1311,7 @@
             api.sessions.list(initialRoute.projectId).then(sessions => {
               sidebarSessions = sessions;
             }).catch(e => console.error("Failed to load sessions from URL:", e));
+            loadSessionFoldersAction(initialRoute.projectId).catch(e => console.error("Failed to load session folders:", e));
           }
         }
       };
@@ -1305,6 +1331,7 @@
           api.sessions.list(route.projectId).then(sessions => {
             sidebarSessions = sessions;
           }).catch(e => console.error("Failed to load sessions:", e));
+          loadSessionFoldersAction(route.projectId).catch(e => console.error("Failed to load session folders:", e));
         }
       }
     });
@@ -1548,6 +1575,13 @@ Please walk me through the setup step by step. When I have the credentials, save
       sidebarSessions = sessionsList;
     } catch (e) {
       console.error("Failed to load sessions:", e);
+    }
+
+    // Load session folders for this project
+    try {
+      await loadSessionFoldersAction(project.id);
+    } catch (e) {
+      console.error("Failed to load session folders:", e);
     }
 
     // Check if project is a git repo
@@ -3534,7 +3568,7 @@ Please walk me through the setup step by step. When I have the credentials, save
 
     try {
       // Create a fork from the current point
-      const forkedSession = await api.sessions.fork($session.sessionId);
+      const forkedSession = await api.sessions.fork($session.sessionId, {});
       sidebarSessions = [forkedSession, ...sidebarSessions];
       await selectSession(forkedSession);
 
@@ -3686,7 +3720,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     onStartResizing={startResizingLeft}
     isResizing={isResizingLeft}
     onCollapseToggle={() => sidebarCollapsed = !sidebarCollapsed}
-    onBackToWorkspaces={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; }}
+    onBackToWorkspaces={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; sessionFolders = []; }}
     onFolderCreate={createFolder}
     onFolderUpdate={updateFolder}
     onFolderDelete={deleteFolder}
@@ -3695,6 +3729,13 @@ Please walk me through the setup step by step. When I have the credentials, save
     onFolderReorder={reorderFolders}
     onToggleFolderPin={toggleFolderPin}
     onNewProjectInFolder={(folderId) => { newProjectTargetFolderId = folderId; showNewProjectModal = true; }}
+    sessionFolders={sessionFolders}
+    onSessionFolderCreate={async (name) => createSessionFolderAction($session.projectId!, name)}
+    onSessionFolderUpdate={updateSessionFolderAction}
+    onSessionFolderDelete={deleteSessionFolderAction}
+    onSessionFolderToggleCollapse={toggleSessionFolderCollapseAction}
+    onSessionSetFolder={setSessionFolderAction}
+    onSessionFolderReorder={(order) => reorderSessionFoldersAction($session.projectId!, order)}
     onOpenProjectInNewWindow={openProjectInNewWindow}
     onOpenSessionInNewWindow={openSessionInNewWindow}
     onOpenHomeInNewWindow={openHomeInNewWindow}
@@ -4283,6 +4324,23 @@ Please walk me through the setup step by step. When I have the credentials, save
         }}
       />
     </div>
+  {/if}
+
+  {#if showCanvasMode}
+    <CanvasView
+      onClose={() => showCanvasMode = false}
+      onSessionSelect={(sessionId, projectId) => {
+        showCanvasMode = false;
+        goToSessionById(projectId, sessionId);
+      }}
+      onProjectSelect={(projectId) => {
+        showCanvasMode = false;
+        const project = sidebarProjects.find(p => p.id === projectId);
+        if (project) {
+          goToProject(project);
+        }
+      }}
+    />
   {/if}
   <FeedbackModal
     open={showFeedbackModal}

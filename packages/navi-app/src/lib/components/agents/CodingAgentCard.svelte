@@ -103,7 +103,15 @@
       {/if}
 
       <!-- Status indicator -->
-      {#if isActive}
+      {#if activity === "complete"}
+        <!-- Truly complete -->
+        <div class="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
+          <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+          </svg>
+        </div>
+      {:else if isActive}
+        <!-- Actively receiving progress events -->
         <div class="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-100 rounded-full">
           <DoodlePulse size={8} color="rgb(16 185 129)" />
           <span class="text-xs font-medium text-emerald-700">
@@ -111,10 +119,10 @@
           </span>
         </div>
       {:else}
-        <div class="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
-          <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-          </svg>
+        <!-- Still working but no active progress events -->
+        <div class="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-100/60 rounded-full">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="text-xs font-medium text-emerald-700">working</span>
         </div>
       {/if}
     </div>
@@ -143,8 +151,8 @@
     </div>
   {/if}
 
-  <!-- File changes mini-list -->
-  {#if fileChanges.length > 0 && !isActive}
+  <!-- File changes mini-list (show when complete) -->
+  {#if fileChanges.length > 0 && activity === "complete"}
     <div class="px-4 py-2 border-t border-emerald-100 bg-white/40 space-y-1">
       {#each fileChanges.slice(0, 3) as change}
         <div class="flex items-center gap-2 text-xs">
@@ -165,7 +173,7 @@
   {/if}
 
   <!-- Summary when complete -->
-  {#if !isActive && uniqueFiles > 0}
+  {#if activity === "complete" && uniqueFiles > 0}
     <div class="px-4 py-2 border-t border-emerald-100 bg-emerald-50/50">
       <div class="flex items-center gap-3 text-xs">
         <span class="text-gray-600">

@@ -15,6 +15,7 @@ import { handleProjectRoutes } from "./routes/projects";
 import { handleSessionRoutes } from "./routes/sessions";
 import { handleMessageRoutes } from "./routes/messages";
 import { handleSkillRoutes } from "./routes/skills";
+import { handleMarketplaceRoutes } from "./routes/marketplace";
 import { handleAgentRoutes } from "./routes/agents";
 import { handleAgentBuilderRoutes } from "./routes/agent-builder";
 import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal";
@@ -67,6 +68,8 @@ import { handleEmailRoutes } from "./routes/email";
 import { handleBrowserRoutes } from "./routes/browser";
 // Channels (cross-workspace agent collaboration)
 import { handleChannelRoutes } from "./routes/channels";
+// Channel Inbox (WhatsApp, Telegram, Email integrations)
+import { handleChannelInboxRoutes } from "./routes/channel-inbox";
 // Plugin Management
 import { handlePluginRoutes } from "./routes/plugins";
 // MCP Server Settings
@@ -77,6 +80,8 @@ import { handleLoopRoutes } from "./routes/loops";
 import { handleResourceRoutes } from "./routes/resources";
 // LLM Council - Multi-model comparison
 import { handleCouncilRoutes } from "./routes/council";
+// Cron Scheduler - Scheduled tasks
+import { handleCronRoutes } from "./routes/cron";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -98,6 +103,9 @@ await initDb();
 // Initialize integrations table (must be after initDb)
 import { initIntegrationsTable } from "./integrations/db";
 initIntegrationsTable();
+
+// Initialize cron scheduler (must be after DB init)
+import { cronScheduler } from "./services/cron-scheduler";
 
 // Install global error handler for PTY crashes
 installPtyErrorHandler();
@@ -390,6 +398,10 @@ const server = Bun.serve({
     response = await handleCouncilRoutes(url, method, req);
     if (response) return response;
 
+    // Cron scheduler routes
+    response = await handleCronRoutes(url, method, req);
+    if (response) return response;
+
     // Dashboard routes (isolated feature)
     response = await handleDashboardRoutes(url, method, req);
     if (response) return response;
@@ -454,6 +466,10 @@ const server = Bun.serve({
     response = await handleSkillRoutes(url, method, req);
     if (response) return response;
 
+    // Marketplace routes (skills.sh integration)
+    response = await handleMarketplaceRoutes(url, method, req);
+    if (response) return response;
+
     // Memory routes (project memory for proactive hooks)
     response = await handleMemoryRoutes(url, method, req);
     if (response) return response;
@@ -508,6 +524,10 @@ const server = Bun.serve({
 
     // Channels routes (cross-workspace agent collaboration)
     response = await handleChannelRoutes(url, method, req);
+    if (response) return response;
+
+    // Channel Inbox routes (WhatsApp, Telegram, Email)
+    response = await handleChannelInboxRoutes(url, method, req);
     if (response) return response;
 
     // Background process routes
@@ -593,6 +613,9 @@ addProcessEventListener((event: ProcessEvent) => {
 // Initialize experimental features WebSocket broadcasting
 initExperimentalWebSocket(broadcastToClients);
 
+// Initialize cron scheduler with WebSocket broadcast
+cronScheduler.init(broadcastToClients);
+
 // Cleanup PTY server on exit
 function cleanupPtyServer() {
   if (ptyServerProcess) {
@@ -613,4 +636,5 @@ process.on("SIGTERM", () => {
 
 process.on("exit", () => {
   cleanupPtyServer();
+  cronScheduler.shutdown();
 });
