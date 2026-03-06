@@ -12,7 +12,7 @@
   let { diff, loading, selectedCommit, selectedFile }: Props = $props();
 </script>
 
-<div class="h-full overflow-y-auto bg-gray-50">
+<div class="h-full overflow-y-auto bg-gray-50 dark:bg-gray-900/50">
   {#if loading}
     <div class="flex items-center justify-center py-8">
       <svg class="w-5 h-5 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -23,22 +23,22 @@
   {:else if diff}
     <div class="p-3">
       {#if selectedCommit}
-        <div class="mb-3 p-3 bg-white border border-gray-200 rounded-lg">
-          <p class="font-medium text-gray-900 text-sm">{selectedCommit.message}</p>
-          <p class="text-gray-500 text-xs mt-1">
+        <div class="mb-3 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+          <p class="font-medium text-gray-900 dark:text-gray-100 text-sm">{selectedCommit.message}</p>
+          <p class="text-gray-500 dark:text-gray-400 text-xs mt-1">
             {selectedCommit.author} · {selectedCommit.date}
           </p>
         </div>
       {/if}
       {#if selectedFile}
-        <div class="mb-3 p-2 bg-white border border-gray-200 rounded">
-          <p class="text-xs font-mono text-gray-600 truncate" title={selectedFile}>{selectedFile}</p>
+        <div class="mb-3 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded">
+          <p class="text-xs font-mono text-gray-600 dark:text-gray-300 truncate" title={selectedFile}>{selectedFile}</p>
         </div>
       {/if}
       <GitUnifiedDiff {diff} />
     </div>
   {:else}
-    <div class="flex items-center justify-center h-full text-sm text-gray-400">
+    <div class="flex items-center justify-center h-full text-sm text-gray-400 dark:text-gray-500">
       Select a file or commit to view diff
     </div>
   {/if}

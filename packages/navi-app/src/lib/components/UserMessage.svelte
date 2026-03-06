@@ -150,7 +150,7 @@
 
 <svelte:window onclick={() => showMenu = false} />
 
-<div class="flex flex-col items-end gap-1 group relative" style="width:100%">
+<div class="flex flex-col items-end gap-1 group/msg relative" style="width:100%">
   {#if isEditing}
     <div class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-2xl rounded-tr-sm p-3 max-w-[85%]">
       <textarea
@@ -192,7 +192,7 @@
       {/if}
     </div>
     
-    <div class="absolute -top-8 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm px-1 py-0.5">
+    <div class="absolute -top-8 right-0 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm px-1 py-0.5">
       <CopyButton text={content} />
       <div class="relative">
         <button

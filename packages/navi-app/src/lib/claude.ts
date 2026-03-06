@@ -33,7 +33,27 @@ export interface ImageBlock {
   };
 }
 
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock | ImageBlock;
+export interface SubagentEventBlock {
+  type: "subagent_event";
+  eventType: "deliverable" | "draft_submitted" | "clarification_response" | "accepted_deliverable";
+  childSessionId: string;
+  childRole: string;
+  summary?: string;
+  content?: string;
+  deliverableType?: string;
+  question?: string;
+  response?: string;
+  revision?: number;
+  artifacts?: Array<{ path: string; description?: string }>;
+}
+
+export type ContentBlock =
+  | TextBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | ThinkingBlock
+  | ImageBlock
+  | SubagentEventBlock;
 
 export type SystemSubtype = "init" | "compact_boundary" | "status" | "hook_response" | "success" | "error";
 
@@ -283,6 +303,8 @@ export interface SessionSpawnedMessage {
     role: string | null;
     task: string | null;
     agent_status: string;
+    agent_type?: string | null;
+    session_type?: "root" | "agent" | "fork" | null;
     depth: number;
     parent_session_id: string | null;
     root_session_id: string | null;
@@ -360,6 +382,35 @@ export interface SessionArtifactCreatedMessage {
   };
 }
 
+export interface SessionDraftSubmittedMessage {
+  type: "session:draft_submitted";
+  sessionId: string;
+  parentId: string;
+  draftId: string;
+  summary: string;
+}
+
+export interface SessionClarificationRequestedMessage {
+  type: "session:clarification_requested";
+  sessionId: string;
+  parentId: string;
+  clarificationId: string;
+  question: string;
+}
+
+export interface SessionClarificationRespondedMessage {
+  type: "session:clarification_responded";
+  sessionId: string;
+  clarificationId: string;
+  response: string;
+}
+
+export interface SessionDraftAcceptedMessage {
+  type: "session:draft_accepted";
+  sessionId: string;
+  parentId: string;
+}
+
 export type SessionHierarchyMessage =
   | SessionSpawnedMessage
   | SessionStatusChangedMessage
@@ -368,7 +419,11 @@ export type SessionHierarchyMessage =
   | SessionDeliveredMessage
   | SessionArchivedMessage
   | SessionDecisionLoggedMessage
-  | SessionArtifactCreatedMessage;
+  | SessionArtifactCreatedMessage
+  | SessionDraftSubmittedMessage
+  | SessionClarificationRequestedMessage
+  | SessionClarificationRespondedMessage
+  | SessionDraftAcceptedMessage;
 
 // Cloud execution message types
 export interface CloudExecutionStartedMessage {
@@ -415,6 +470,31 @@ export interface CloudErrorMessage {
   error: string;
 }
 
+export interface BackgroundProcessEventMessage {
+  type: "background_process_event";
+  processId: string;
+  data?: string;
+  status?: "running" | "completed" | "failed" | "killed" | "starting" | "paused";
+  exitCode?: number;
+  port?: number;
+  process?: {
+    id: string;
+    type: "bash" | "task" | "dev_server" | "container_preview";
+    command: string;
+    cwd: string;
+    pid?: number;
+    sessionId?: string;
+    projectId?: string;
+    startedAt: number;
+    status: "running" | "completed" | "failed" | "killed" | "starting" | "paused";
+    exitCode?: number;
+    output: string[];
+    outputSize: number;
+    ports: number[];
+    label?: string;
+  };
+}
+
 export type ClaudeMessage =
   | SystemMessage
   | AssistantMessage
@@ -434,11 +514,14 @@ export type ClaudeMessage =
   | CloudOutputMessage
   | CloudResultMessage
   | CloudErrorMessage
+  | BackgroundProcessEventMessage
   | { type: "connected" }
   | { type: "aborted"; sessionId?: string; uiSessionId?: string }
   | { type: "ui_command"; command: string; payload: Record<string, unknown> }
   | { type: "until_done_continue"; uiSessionId?: string; iteration: number; maxIterations: number; totalCost: number; reason: string }
   | { type: "until_done_complete"; uiSessionId?: string; totalIterations: number; totalCost: number; reason: string }
+  | { type: "until_done_verifying"; uiSessionId?: string; iteration: number; message: string }
+  | { type: "until_done_context_reset"; uiSessionId?: string; iteration: number; contextPercent: number; message: string }
   | { type: "play_sound"; sound: string }
   // Wait/Pause events
   | { type: "session:wait_start"; requestId: string; sessionId: string; seconds: number; endTime: number; reason: string }

@@ -615,6 +615,7 @@ export const compactingSessionsStore = writable<Set<string>>(new Set());
 // Session events store (for debug/timeline view)
 function createSessionEventsStore() {
   const { subscribe, set, update } = writable<Map<string, SDKEvent[]>>(new Map());
+  const MAX_EVENTS_PER_SESSION = 1000;
 
   return {
     subscribe,
@@ -622,7 +623,10 @@ function createSessionEventsStore() {
     addEvent: (sessionId: string, event: SDKEvent) =>
       update((map) => {
         const events = map.get(sessionId) || [];
-        map.set(sessionId, [...events, event]);
+        const nextEvents = events.length >= MAX_EVENTS_PER_SESSION
+          ? [...events.slice(-(MAX_EVENTS_PER_SESSION - 1)), event]
+          : [...events, event];
+        map.set(sessionId, nextEvents);
         return new Map(map);
       }),
     updateEvent: (sessionId: string, eventId: string, updates: Partial<SDKEvent>) =>
@@ -637,7 +641,7 @@ function createSessionEventsStore() {
       }),
     setEvents: (sessionId: string, events: SDKEvent[]) =>
       update((map) => {
-        map.set(sessionId, events);
+        map.set(sessionId, events.slice(-MAX_EVENTS_PER_SESSION));
         return new Map(map);
       }),
     clearSession: (sessionId: string) =>

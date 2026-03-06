@@ -132,9 +132,23 @@ interface ActiveProcess {
 const activeProcesses = new Map<string, ActiveProcess>();
 const pendingPermissions = new Map<string, { sessionId: string; payload: any }>();
 const pendingQuestions = new Map<string, { sessionId: string; payload: any }>();
+const pendingRequestProcesses = new Map<string, ChildProcess>();
 const pendingWaits = new Map<string, { sessionId: string; proc: ChildProcess; endTime: number; reason: string }>();
 const sessionApprovedAll = new Set<string>();
 const connectedClients = new Set<any>();
+
+function clearPendingPermission(requestId: string) {
+  pendingPermissions.delete(requestId);
+  pendingRequestProcesses.delete(requestId);
+}
+
+function clearPendingQuestion(requestId: string, clearFromDb: boolean = false) {
+  pendingQuestions.delete(requestId);
+  pendingRequestProcesses.delete(requestId);
+  if (clearFromDb) {
+    pendingQuestionsDb.deleteByRequestId(requestId);
+  }
+}
 
 // Track active cloud executions (sessionId -> executionId)
 const activeCloudExecutions = new Map<string, { executionId: string; ws: any; aborted: boolean }>();
@@ -220,14 +234,14 @@ export function cleanupSessionState(sessionId: string) {
   // Clean pending permissions for this session
   for (const [reqId, req] of pendingPermissions) {
     if (req.sessionId === sessionId) {
-      pendingPermissions.delete(reqId);
+      clearPendingPermission(reqId);
     }
   }
 
   // Clean pending questions for this session (memory + database)
   for (const [reqId, req] of pendingQuestions) {
     if (req.sessionId === sessionId) {
-      pendingQuestions.delete(reqId);
+      clearPendingQuestion(reqId);
     }
   }
   pendingQuestionsDb.deleteBySession(sessionId);
@@ -329,14 +343,14 @@ export function cancelChildSessions(parentSessionId: string): string[] {
     // Clean pending permissions
     for (const [reqId, req] of pendingPermissions) {
       if (req.sessionId === child.id) {
-        pendingPermissions.delete(reqId);
+        clearPendingPermission(reqId);
       }
     }
 
     // Clean pending questions
     for (const [reqId, req] of pendingQuestions) {
       if (req.sessionId === child.id) {
-        pendingQuestions.delete(reqId);
+        clearPendingQuestion(reqId);
       }
     }
     pendingQuestionsDb.deleteBySession(child.id);
@@ -368,6 +382,7 @@ export function getMemoryStats() {
     activeProcesses: activeProcesses.size,
     pendingPermissions: pendingPermissions.size,
     pendingQuestions: pendingQuestions.size,
+    pendingRequestProcesses: pendingRequestProcesses.size,
     pendingWaits: pendingWaits.size,
     sessionApprovedAll: sessionApprovedAll.size,
     untilDoneSessions: untilDoneSessions.size,
@@ -824,6 +839,50 @@ const pendingEscalations = new Map<string, {
 
 // Active child session workers (for multi-session)
 const childSessionWorkers = new Map<string, ChildProcess>();
+
+/**
+ * Clean state associated with a specific worker process.
+ * This prevents stale request/process references from leaking when a worker exits
+ * after a newer worker for the same session has already started.
+ */
+function cleanupProcessScopedState(proc: ChildProcess, sessionId?: string) {
+  for (const [requestId, requestProc] of pendingRequestProcesses) {
+    if (requestProc !== proc) continue;
+
+    if (pendingPermissions.has(requestId)) {
+      clearPendingPermission(requestId);
+      continue;
+    }
+
+    if (pendingQuestions.has(requestId)) {
+      clearPendingQuestion(requestId, true);
+    } else {
+      pendingRequestProcesses.delete(requestId);
+    }
+  }
+
+  for (const [waitId, wait] of pendingWaits) {
+    if (wait.proc === proc) {
+      pendingWaits.delete(waitId);
+    }
+  }
+
+  for (const [requestId, escalation] of pendingEscalations) {
+    if (escalation.proc === proc) {
+      pendingEscalations.delete(requestId);
+    }
+  }
+
+  if (!sessionId) {
+    return;
+  }
+
+  const active = activeProcesses.get(sessionId);
+  if (active?.process === proc) {
+    activeProcesses.delete(sessionId);
+    deleteStreamCapture(sessionId);
+  }
+}
 
 /**
  * Start a child session's query in the background
@@ -1344,10 +1403,19 @@ function handleMultiSessionDeliver(proc: ChildProcess, sessionId: string | undef
       // Always create a synthetic message in the parent's conversation and broadcast to UI
       const parentMsgId = crypto.randomUUID();
       const now = Date.now();
+      const deliverableText = typeof msg.content === "string"
+        ? msg.content
+        : JSON.stringify(msg.content, null, 2);
       const syntheticContent = [
         {
-          type: "text",
-          text: `**Child Agent (${childSession.role || "agent"}) completed:**\n\n${msg.summary}\n\n---\n\n${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}`,
+          type: "subagent_event",
+          eventType: "deliverable",
+          childSessionId: sessionId,
+          childRole: childSession.role || "agent",
+          summary: msg.summary,
+          content: deliverableText,
+          deliverableType: msg.deliverableType,
+          artifacts: msg.artifacts || [],
         },
       ];
 
@@ -1482,10 +1550,20 @@ function handleMultiSessionSubmitDraft(proc: ChildProcess, sessionId: string | u
     // Create a synthetic message in parent's conversation
     const parentMsgId = crypto.randomUUID();
     const now = Date.now();
+    const draftText = typeof msg.content === "string"
+      ? msg.content
+      : JSON.stringify(msg.content, null, 2);
     const syntheticContent = [
       {
-        type: "text",
-        text: `**Child Agent (${childSession.role || "agent"}) submitted draft for review:**\n\n**Summary:** ${msg.summary}\n\nRevision #${newRevision}\n\n---\n\nUse \`request_clarification\` to ask follow-up questions, or \`accept_deliverable\` to finalize.\n\n**Draft content:**\n${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}`,
+        type: "subagent_event",
+        eventType: "draft_submitted",
+        childSessionId: sessionId,
+        childRole: childSession.role || "agent",
+        summary: msg.summary,
+        content: draftText,
+        deliverableType: msg.deliverableType,
+        revision: newRevision,
+        artifacts: msg.artifacts || [],
       },
     ];
 
@@ -1684,8 +1762,12 @@ function handleMultiSessionRespondToClarification(proc: ChildProcess, sessionId:
     const now = Date.now();
     const syntheticContent = [
       {
-        type: "text",
-        text: `**Child Agent (${childSession?.role || "agent"}) responded to your question:**\n\n**Q:** ${request.question}\n\n**A:** ${msg.response}\n\n---\n\nYou can \`request_clarification\` again, or \`accept_deliverable\` to finalize.`,
+        type: "subagent_event",
+        eventType: "clarification_response",
+        childSessionId: sessionId,
+        childRole: childSession?.role || "agent",
+        question: request.question,
+        response: msg.response,
       },
     ];
 
@@ -1788,10 +1870,19 @@ function handleMultiSessionAcceptDeliverable(proc: ChildProcess, sessionId: stri
     // Create synthetic message in parent's conversation confirming acceptance
     const parentMsgId = crypto.randomUUID();
     const now = Date.now();
+    const acceptedText = typeof draft.content === "string"
+      ? draft.content
+      : JSON.stringify(draft.content, null, 2);
     const syntheticContent = [
       {
-        type: "text",
-        text: `**Accepted deliverable from ${childSession.role || "agent"}:**\n\n${draft.summary}\n\n---\n\n${typeof draft.content === 'string' ? draft.content : JSON.stringify(draft.content, null, 2)}`,
+        type: "subagent_event",
+        eventType: "accepted_deliverable",
+        childSessionId: msg.childSessionId,
+        childRole: childSession.role || "agent",
+        summary: draft.summary,
+        content: acceptedText,
+        deliverableType: draft.type,
+        artifacts: draft.artifacts || [],
       },
     ];
 
@@ -2007,6 +2098,20 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
   const workingDirectory = project?.path || process.cwd();
+  const needsAutoTitle = session?.title === "New Chat" || session?.title === "New conversation";
+
+  const hasTextBlock = (content: unknown): boolean => {
+    if (!Array.isArray(content)) return false;
+    return content.some(
+      (block: any) =>
+        block?.type === "text" &&
+        typeof block.text === "string" &&
+        block.text.trim().length > 0
+    );
+  };
+
+  let lastAssistantContent: any[] = [];
+  let lastAssistantTextContent: any[] = [];
 
   // Save user message
   if (sessionId && prompt) {
@@ -2047,6 +2152,20 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
       model,
       permissionMode: isAutoApprove ? "auto" : "confirm",
     })) {
+      if (event.type === "assistant" && hasMessageContent(event.content)) {
+        lastAssistantContent = event.content;
+        if (hasTextBlock(event.content)) {
+          lastAssistantTextContent = event.content;
+        }
+      }
+
+      if (event.type === "complete" && hasMessageContent(event.lastAssistantContent)) {
+        lastAssistantContent = event.lastAssistantContent;
+        if (hasTextBlock(event.lastAssistantContent)) {
+          lastAssistantTextContent = event.lastAssistantContent;
+        }
+      }
+
       // Convert normalized events to UI format
       const uiEvent = convertNormalizedEventToUI(event, sessionId);
       if (uiEvent) {
@@ -2058,6 +2177,23 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
           const now = Date.now();
           messages.create(msgId, sessionId, "assistant", JSON.stringify(event.content), now);
           sessions.updateClaudeSession(null, model || null, 0, 1, 0, 0, now, sessionId);
+        }
+      }
+    }
+
+    if (sessionId) {
+      const finalAssistantContent =
+        lastAssistantTextContent.length > 0 ? lastAssistantTextContent : lastAssistantContent;
+      if (finalAssistantContent.length > 0) {
+        searchIndex.indexMessage(
+          crypto.randomUUID(),
+          sessionId,
+          JSON.stringify(finalAssistantContent),
+          Date.now()
+        );
+
+        if (needsAutoTitle && prompt) {
+          generateChatTitle(prompt, finalAssistantContent, sessionId);
         }
       }
     }
@@ -2203,6 +2339,29 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
     return;
   }
 
+  // Prevent overlapping worker processes for the same session.
+  // If a previous worker is still alive, terminate and detach it before spawning a new one.
+  if (sessionId) {
+    const existing = activeProcesses.get(sessionId);
+    if (existing) {
+      try {
+        existing.process.kill("SIGTERM");
+      } catch {}
+
+      // Force-kill if process did not exit after SIGTERM.
+      const forceKillTimer = setTimeout(() => {
+        if (existing.process.exitCode === null && existing.process.signalCode === null) {
+          try {
+            existing.process.kill("SIGKILL");
+          } catch {}
+        }
+      }, 2000);
+      forceKillTimer.unref?.();
+
+      cleanupProcessScopedState(existing.process, sessionId);
+    }
+  }
+
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
 
@@ -2327,8 +2486,13 @@ The user will explicitly approve the plan before any execution begins.
     };
   }
 
-  // Don't resume if the worktree was just cleared - the old Claude session was tied to the worktree cwd
-  const effectiveResumeId = worktreeWasCleared ? undefined : (claudeSessionId || session?.claude_session_id);
+  // Don't resume if the worktree was just cleared - the old Claude session was tied to the worktree cwd.
+  // For persisted sessions, trust the DB value over the client payload to avoid stale resume IDs.
+  const effectiveResumeId = worktreeWasCleared
+    ? undefined
+    : session
+      ? (session.claude_session_id || undefined)
+      : (claudeSessionId || undefined);
 
   // Get enabled skills for this project (global + project-specific)
   const enabledSkillSlugs = projectId ? getEnabledSkillSlugs(projectId) : undefined;
@@ -2482,6 +2646,7 @@ The user will explicitly approve the plan before any execution begins.
           };
           if (sessionId) {
             pendingPermissions.set(msg.requestId, { sessionId, payload });
+            pendingRequestProcesses.set(msg.requestId, child);
             // Update kanban card to blocked (waiting for permission)
             setKanbanCardBlocked(sessionId, `Needs permission: ${msg.toolName}`);
           }
@@ -2496,6 +2661,7 @@ The user will explicitly approve the plan before any execution begins.
           if (sessionId) {
             // Store in memory for websocket routing
             pendingQuestions.set(msg.requestId, { sessionId, payload });
+            pendingRequestProcesses.set(msg.requestId, child);
             // Persist to database so it survives page reloads
             pendingQuestionsDb.create(
               crypto.randomUUID(),
@@ -2691,8 +2857,7 @@ The user will explicitly approve the plan before any execution begins.
                       startIteration(loopState.loopId);
 
                       // Clean up current process tracking
-                      activeProcesses.delete(sessionId);
-                      deleteStreamCapture(sessionId);
+                      cleanupProcessScopedState(child, sessionId);
 
                       // Determine continuation prompt
                       let continuationPrompt: string;
@@ -2760,8 +2925,7 @@ The user will explicitly approve the plan before any execution begins.
 
                       // On verifier error, continue without verification
                       untilDoneState.iteration++;
-                      activeProcesses.delete(sessionId);
-                      deleteStreamCapture(sessionId);
+                      cleanupProcessScopedState(child, sessionId);
 
                       sendToSession(sessionId, {
                         type: "until_done_continue",
@@ -2810,8 +2974,7 @@ The user will explicitly approve the plan before any execution begins.
                 });
 
                 // Clean up current process tracking
-                activeProcesses.delete(sessionId);
-                deleteStreamCapture(sessionId);
+                cleanupProcessScopedState(child, sessionId);
 
                 // Re-invoke with continuation prompt after a short delay
                 setTimeout(() => {
@@ -2848,12 +3011,11 @@ The user will explicitly approve the plan before any execution begins.
           if (sessionId) {
             // Update kanban card to waiting_review (agent completed, needs user review)
             setKanbanCardReview(sessionId, "Ready for review");
-            activeProcesses.delete(sessionId);
-            deleteStreamCapture(sessionId);
+            cleanupProcessScopedState(child, sessionId);
             // Clear any pending questions for this session (memory + database)
             for (const [reqId, req] of pendingQuestions) {
               if (req.sessionId === sessionId) {
-                pendingQuestions.delete(reqId);
+                clearPendingQuestion(reqId);
               }
             }
             pendingQuestionsDb.deleteBySession(sessionId);
@@ -2890,8 +3052,7 @@ The user will explicitly approve the plan before any execution begins.
           if (sessionId) {
             // Update kanban card to blocked on error
             setKanbanCardBlocked(sessionId, `Error: ${msg.error}`);
-            activeProcesses.delete(sessionId);
-            deleteStreamCapture(sessionId);
+            cleanupProcessScopedState(child, sessionId);
 
             // Run query hooks on error (fire-and-forget) - e.g., phase tracking
             const errorMessages = messages.listBySession(sessionId);
@@ -2924,8 +3085,7 @@ The user will explicitly approve the plan before any execution begins.
       error: error.message,
     });
     if (sessionId) {
-      activeProcesses.delete(sessionId);
-      deleteStreamCapture(sessionId);
+      cleanupProcessScopedState(child, sessionId);
     }
   });
 
@@ -2939,8 +3099,7 @@ The user will explicitly approve the plan before any execution begins.
       } catch {}
     }
     if (sessionId) {
-      activeProcesses.delete(sessionId);
-      deleteStreamCapture(sessionId);
+      cleanupProcessScopedState(child, sessionId);
     }
   });
 }
@@ -3232,12 +3391,19 @@ export function createWebSocketHandlers() {
           // Clean up pending permissions and questions on abort
           for (const [reqId, req] of pendingPermissions) {
             if (req.sessionId === data.sessionId) {
-              pendingPermissions.delete(reqId);
+              clearPendingPermission(reqId);
             }
           }
           for (const [reqId, req] of pendingQuestions) {
             if (req.sessionId === data.sessionId) {
-              pendingQuestions.delete(reqId);
+              clearPendingQuestion(reqId);
+            }
+          }
+          pendingQuestionsDb.deleteBySession(data.sessionId);
+
+          for (const [reqId, esc] of pendingEscalations) {
+            if (esc.sessionId === data.sessionId) {
+              pendingEscalations.delete(reqId);
             }
           }
 
@@ -3281,39 +3447,72 @@ export function createWebSocketHandlers() {
               sessionApprovedAll.add(pending.sessionId);
               sessions.setAutoAcceptAll(pending.sessionId, true);
             }
-            const active = activeProcesses.get(pending.sessionId);
-            if (active && active.process.stdin) {
-              const response = JSON.stringify({
-                type: "permission_response",
-                requestId: data.permissionRequestId,
-                approved: data.approved,
-                approveAll: data.approveAll,
-              });
-              active.process.stdin.write(response + "\n");
-              // Resume kanban card execution when user responds
-              if (data.approved && pending.sessionId) {
-                setKanbanCardExecuting(pending.sessionId, "Permission granted");
+            const response = JSON.stringify({
+              type: "permission_response",
+              requestId: data.permissionRequestId,
+              approved: data.approved,
+              approveAll: data.approveAll,
+            });
+
+            const requestProc = pendingRequestProcesses.get(data.permissionRequestId);
+            let responseSent = false;
+            if (requestProc?.stdin && requestProc.exitCode === null && requestProc.signalCode === null) {
+              try {
+                requestProc.stdin.write(response + "\n");
+                responseSent = true;
+              } catch {}
+            }
+
+            if (!responseSent) {
+              const active = activeProcesses.get(pending.sessionId);
+              if (active?.process.stdin) {
+                try {
+                  active.process.stdin.write(response + "\n");
+                  responseSent = true;
+                } catch {}
               }
             }
-            pendingPermissions.delete(data.permissionRequestId);
+
+            if (responseSent && data.approved && pending.sessionId) {
+              setKanbanCardExecuting(pending.sessionId, "Permission granted");
+            }
+
+            clearPendingPermission(data.permissionRequestId);
           }
         } else if (data.type === "question_response" && data.questionRequestId) {
           const pending = pendingQuestions.get(data.questionRequestId);
           if (pending) {
-            const active = activeProcesses.get(pending.sessionId);
-            if (active && active.process.stdin) {
-              const response = JSON.stringify({
-                type: "question_response",
-                requestId: data.questionRequestId,
-                answers: data.answers,
-              });
-              active.process.stdin.write(response + "\n");
-              // Resume kanban card execution when user responds
+            const response = JSON.stringify({
+              type: "question_response",
+              requestId: data.questionRequestId,
+              answers: data.answers,
+            });
+
+            const requestProc = pendingRequestProcesses.get(data.questionRequestId);
+            let responseSent = false;
+            if (requestProc?.stdin && requestProc.exitCode === null && requestProc.signalCode === null) {
+              try {
+                requestProc.stdin.write(response + "\n");
+                responseSent = true;
+              } catch {}
+            }
+
+            if (!responseSent) {
+              const active = activeProcesses.get(pending.sessionId);
+              if (active?.process.stdin) {
+                try {
+                  active.process.stdin.write(response + "\n");
+                  responseSent = true;
+                } catch {}
+              }
+            }
+
+            if (responseSent) {
               setKanbanCardExecuting(pending.sessionId, "User responded");
             }
+
             // Remove from memory and database
-            pendingQuestions.delete(data.questionRequestId);
-            pendingQuestionsDb.deleteByRequestId(data.questionRequestId);
+            clearPendingQuestion(data.questionRequestId, true);
           }
         } else if (data.type.startsWith("terminal_") || data.type.startsWith("exec_")) {
           // Route terminal/exec messages to handler

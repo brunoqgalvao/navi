@@ -208,6 +208,44 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
     return json({ created: true, exists: true, path: claudeMdPath });
   }
 
+  // Auto-compact setting (writes to ~/.claude/settings.json for the SDK to pick up)
+  if (url.pathname === "/api/config/auto-compact") {
+    const { homedir } = await import("os");
+    const { join } = await import("path");
+    const fs = await import("fs/promises");
+    const settingsPath = join(homedir(), ".claude", "settings.json");
+
+    if (method === "GET") {
+      try {
+        const content = await fs.readFile(settingsPath, "utf-8");
+        const settings = JSON.parse(content);
+        // Default to true if not explicitly set
+        return json({ enabled: settings.autoCompactEnabled !== false });
+      } catch {
+        return json({ enabled: true });
+      }
+    }
+
+    if (method === "POST") {
+      const body = await req.json();
+      const enabled = body.enabled !== false;
+
+      let settings: Record<string, any> = {};
+      try {
+        const content = await fs.readFile(settingsPath, "utf-8");
+        settings = JSON.parse(content);
+      } catch {}
+
+      settings.autoCompactEnabled = enabled;
+
+      const dir = join(homedir(), ".claude");
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+
+      return json({ success: true, enabled });
+    }
+  }
+
   if (url.pathname === "/api/models") {
     const authResult = resolveNaviClaudeAuth();
     logModelsDiagnostics("start", {

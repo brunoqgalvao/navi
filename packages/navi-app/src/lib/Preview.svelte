@@ -256,7 +256,7 @@
           setTimeout(() => {
             const lineElements = previewElement.querySelectorAll('.hljs-ln-line');
             if (lineElements[lineNumber - 1]) {
-              (lineElements[lineNumber - 1] as HTMLElement).style.backgroundColor = '#fef3c7';
+              (lineElements[lineNumber - 1] as HTMLElement).style.backgroundColor = 'rgba(250, 204, 21, 0.15)';
               setTimeout(() => {
                 (lineElements[lineNumber - 1] as HTMLElement).style.backgroundColor = '';
               }, 2000);
@@ -1490,7 +1490,7 @@
               <JsonTreeViewer value={jsonData} maxHeight="100%" showButtons={true} />
             {:else}
               <div class="text-red-500 text-sm mb-4">Invalid JSON</div>
-              <pre class="p-4 text-sm font-mono leading-relaxed bg-gray-50 rounded-lg"><code class="hljs">{@html highlightCode(content, "json")}</code></pre>
+              <pre class="p-4 text-sm font-mono leading-relaxed bg-[#0d1117] text-[#e6edf3] rounded-lg"><code class="hljs">{@html highlightCode(content, "json")}</code></pre>
             {/if}
           {/if}
         </div>
@@ -1506,8 +1506,8 @@
           />
         </div>
       {:else}
-        <div class="preview-content h-full overflow-auto">
-          <pre class="p-4 text-sm font-mono leading-relaxed"><code class="hljs">{@html highlightCode(content, source.split(".").pop() || "")}</code></pre>
+        <div class="preview-content h-full overflow-auto bg-[#0d1117]">
+          <pre class="p-4 text-sm font-mono leading-relaxed bg-[#0d1117] text-[#e6edf3]"><code class="hljs">{@html highlightCode(content, source.split(".").pop() || "")}</code></pre>
         </div>
       {/if}
     {/if}
@@ -1582,7 +1582,7 @@
                 <JsonTreeViewer value={jsonData} maxHeight="100%" showButtons={true} />
               {:else}
                 <div class="text-red-500 text-sm mb-4">Invalid JSON</div>
-                <pre class="p-4 text-sm font-mono leading-relaxed bg-gray-50 rounded-lg"><code class="hljs">{@html highlightCode(content, "json")}</code></pre>
+                <pre class="p-4 text-sm font-mono leading-relaxed bg-[#0d1117] text-[#e6edf3] rounded-lg"><code class="hljs">{@html highlightCode(content, "json")}</code></pre>
               {/if}
             {/if}
           </div>
@@ -1624,7 +1624,7 @@
           </div>
         {:else if (detectedType === "code" || detectedType === "file") && !isEditMode}
           <div class="max-w-6xl mx-auto p-6">
-            <pre class="p-6 text-sm font-mono leading-relaxed bg-gray-50 rounded-lg border border-gray-200"><code class="hljs">{@html highlightCode(content, source.split(".").pop() || "")}</code></pre>
+            <pre class="p-6 text-sm font-mono leading-relaxed bg-[#0d1117] text-[#e6edf3] rounded-lg border border-gray-700/50"><code class="hljs">{@html highlightCode(content, source.split(".").pop() || "")}</code></pre>
           </div>
         {:else}
           <div class="p-8 text-center text-gray-500">

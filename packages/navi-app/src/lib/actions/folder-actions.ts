@@ -9,6 +9,14 @@ export interface FolderActionCallbacks {
 
 let callbacks: FolderActionCallbacks | null = null;
 
+function sortFoldersForDisplay(folders: WorkspaceFolder[]): WorkspaceFolder[] {
+  return [...folders].sort((a, b) => {
+    if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+    if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
+    return (a.created_at || 0) - (b.created_at || 0);
+  });
+}
+
 export function initFolderActions(cb: FolderActionCallbacks) {
   callbacks = cb;
 }
@@ -24,10 +32,10 @@ export async function loadFolders(): Promise<WorkspaceFolder[]> {
   }
 }
 
-export async function createFolder(name: string): Promise<WorkspaceFolder> {
-  const folder = await api.folders.create(name);
+export async function createFolder(name: string, parentId: string | null = null): Promise<WorkspaceFolder> {
+  const folder = await api.folders.create(name, parentId);
   const folders = callbacks?.getWorkspaceFolders() || [];
-  callbacks?.setWorkspaceFolders([...folders, folder]);
+  callbacks?.setWorkspaceFolders(sortFoldersForDisplay([...folders, folder]));
   return folder;
 }
 
@@ -41,12 +49,20 @@ export function updateFolder(id: string, name: string): void {
 }
 
 export async function deleteFolder(id: string): Promise<void> {
-  await api.folders.delete(id);
   const folders = callbacks?.getWorkspaceFolders() || [];
-  callbacks?.setWorkspaceFolders(folders.filter(f => f.id !== id));
-  // Clear folder_id from projects that were in this folder
+  const deletedFolder = folders.find((folder) => folder.id === id);
+  const parentId = deletedFolder?.parent_id ?? null;
+  await api.folders.delete(id);
+  callbacks?.setWorkspaceFolders(
+    sortFoldersForDisplay(
+      folders
+        .filter((folder) => folder.id !== id)
+        .map((folder) => (folder.parent_id === id ? { ...folder, parent_id: parentId } : folder))
+    )
+  );
+  // Bubble projects up to the deleted folder's parent, matching server behavior.
   const projects = callbacks?.getSidebarProjects() || [];
-  callbacks?.setSidebarProjects(projects.map(p => p.folder_id === id ? { ...p, folder_id: null } : p));
+  callbacks?.setSidebarProjects(projects.map((project) => (project.folder_id === id ? { ...project, folder_id: parentId } : project)));
 }
 
 export function toggleFolderCollapse(id: string, collapsed: boolean): void {
@@ -71,8 +87,39 @@ export function reorderFolders(order: string[]): void {
   const orderMap = new Map(order.map((id, idx) => [id, idx]));
   const folders = callbacks?.getWorkspaceFolders() || [];
   const previousFolders = folders;
-  callbacks?.setWorkspaceFolders([...folders].sort((a, b) => (orderMap.get(a.id) || 0) - (orderMap.get(b.id) || 0)));
+  callbacks?.setWorkspaceFolders(
+    sortFoldersForDisplay(
+      folders.map((folder) =>
+        orderMap.has(folder.id)
+          ? { ...folder, sort_order: orderMap.get(folder.id) ?? folder.sort_order }
+          : folder
+      )
+    )
+  );
   api.folders.reorder(order).catch(() => {
+    callbacks?.setWorkspaceFolders(previousFolders);
+  });
+}
+
+export function moveFolder(id: string, parentId: string | null): void {
+  const folders = callbacks?.getWorkspaceFolders() || [];
+  const previousFolders = folders;
+  const siblingSortOrders = folders
+    .filter((folder) => folder.id !== id && (folder.parent_id || null) === parentId)
+    .map((folder) => folder.sort_order || 0);
+  const nextSortOrder = siblingSortOrders.length > 0 ? Math.max(...siblingSortOrders) + 1 : 0;
+
+  callbacks?.setWorkspaceFolders(
+    sortFoldersForDisplay(
+      folders.map((folder) =>
+        folder.id === id
+          ? { ...folder, parent_id: parentId, sort_order: nextSortOrder }
+          : folder
+      )
+    )
+  );
+
+  api.folders.move(id, parentId).catch(() => {
     callbacks?.setWorkspaceFolders(previousFolders);
   });
 }
@@ -81,13 +128,9 @@ export function toggleFolderPin(folder: WorkspaceFolder): void {
   const newPinned = !folder.pinned;
   const folders = callbacks?.getWorkspaceFolders() || [];
   const previousFolders = folders;
-  callbacks?.setWorkspaceFolders(
+  callbacks?.setWorkspaceFolders(sortFoldersForDisplay(
     folders.map(f => f.id === folder.id ? { ...f, pinned: newPinned ? 1 : 0 } : f)
-      .sort((a, b) => {
-        if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
-        return (a.sort_order || 0) - (b.sort_order || 0);
-      })
-  );
+  ));
   api.folders.togglePin(folder.id, newPinned).catch(() => {
     callbacks?.setWorkspaceFolders(previousFolders);
   });

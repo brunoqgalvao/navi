@@ -162,6 +162,9 @@ export async function handleFilesystemRoutes(url: URL, method: string, req: Requ
         code: `code "${filePath}"`,
         cursor: `cursor "${filePath}"`,
         zed: `zed "${filePath}"`,
+        codex: process.platform === "darwin"
+          ? `open -a "Codex" "${filePath}"`
+          : `codex "${filePath}"`,
         terminal: process.platform === "darwin"
           ? `open -a Terminal "${filePath}"`
           : process.platform === "win32"

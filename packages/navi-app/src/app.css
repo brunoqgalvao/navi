@@ -252,12 +252,12 @@ pre.hljs {
   margin: 1rem 0;
   border-radius: 0.5rem;
   overflow: hidden;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgba(55, 65, 81, 0.5);
 }
 
 .interactive-code-block .code-header {
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  background: #1e1e2e;
+  border-bottom: 1px solid rgba(55, 65, 81, 0.5);
   padding: 0.625rem 1rem;
   display: flex;
   align-items: center;
@@ -381,6 +381,21 @@ pre.hljs {
   border-radius: 1px;
 }
 
+.drop-indicator-line-after {
+  position: relative;
+}
+
+.drop-indicator-line-after::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  background: #6366f1;
+  border-radius: 1px;
+}
+
 /* Prevent text selection during drag */
 .dragging-active {
   user-select: none;
@@ -447,5 +462,9 @@ pre.hljs {
 
 /* Dark mode drop indicator */
 .dark .drop-indicator-line::before {
+  background: #818cf8;
+}
+
+.dark .drop-indicator-line-after::before {
   background: #818cf8;
 }

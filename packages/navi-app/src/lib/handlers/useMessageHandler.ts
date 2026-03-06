@@ -1,8 +1,17 @@
 import type { ClaudeMessage, SystemMessage, AssistantMessage, UserMessage } from "../claude";
 import { createMessageHandler, type MessageHandlerConfig } from "./messageHandler";
-import type { UICommand, CompactMetadata, AskUserQuestionData, UntilDoneContinueData, UntilDoneCompleteData } from "./types";
+import type {
+  UICommand,
+  CompactMetadata,
+  AskUserQuestionData,
+  UntilDoneContinueData,
+  UntilDoneCompleteData,
+  UntilDoneVerifyingData,
+  UntilDoneContextResetData,
+} from "./types";
 import type { SessionHierarchyEvent } from "../features/session-hierarchy/types";
 import type { ActiveWait } from "../stores/types";
+import { get } from "svelte/store";
 import {
   sessionMessages,
   loadingSessions,
@@ -11,6 +20,7 @@ import {
   sessionDebugInfo,
   sessionEvents,
   activeWaits,
+  debugMode,
   type SDKEvent,
   type SDKEventType,
 } from "../stores";
@@ -34,6 +44,8 @@ export interface UseMessageHandlerOptions {
   // Until Done (Ralph loop) mode callbacks
   onUntilDoneContinue?: (sessionId: string, data: UntilDoneContinueData) => void;
   onUntilDoneComplete?: (sessionId: string, data: UntilDoneCompleteData) => void;
+  onUntilDoneVerifying?: (sessionId: string, data: UntilDoneVerifyingData) => void;
+  onUntilDoneContextReset?: (sessionId: string, data: UntilDoneContextResetData) => void;
   // Session Hierarchy (Multi-Agent) callbacks
   onSessionHierarchyEvent?: (event: SessionHierarchyEvent) => void;
   // Wait/Pause callbacks
@@ -130,6 +142,8 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     onContextOverflow,
     onUntilDoneContinue,
     onUntilDoneComplete,
+    onUntilDoneVerifying,
+    onUntilDoneContextReset,
     onSessionHierarchyEvent,
     onWaitStart,
     onWaitEnd,
@@ -234,7 +248,7 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
 
       onAskUserQuestion: (data) => {
         const projectId = getProjectId();
-        const sessionId = getCurrentSessionId();
+        const sessionId = data.sessionId || getCurrentSessionId();
         if (projectId && sessionId) {
           sessionStatus.setAwaitingInput(sessionId, projectId);
         }
@@ -274,6 +288,14 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
         onUntilDoneComplete?.(sessionId, data);
       },
 
+      onUntilDoneVerifying: (sessionId, data) => {
+        onUntilDoneVerifying?.(sessionId, data);
+      },
+
+      onUntilDoneContextReset: (sessionId, data) => {
+        onUntilDoneContextReset?.(sessionId, data);
+      },
+
       onSessionHierarchyEvent: (event) => {
         onSessionHierarchyEvent?.(event);
       },
@@ -306,7 +328,7 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
   function handleMessage(msg: ClaudeMessage) {
     const uiSessionId = getUiSessionId(msg);
 
-    if (uiSessionId) {
+    if (uiSessionId && get(debugMode)) {
       logEvent(uiSessionId, msg);
     }
 

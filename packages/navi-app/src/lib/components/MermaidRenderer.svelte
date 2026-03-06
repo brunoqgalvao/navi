@@ -125,11 +125,13 @@
         const jsonData = jsonBlocksMap.get(blockId);
         if (jsonData !== undefined) {
           parts.push({ type: 'json', content: '', jsonId: blockId, jsonData });
+          jsonBlocksMap.delete(blockId);
         }
       } else if (blockType === 'shell') {
         const shellData = shellBlocksMap.get(blockId);
         if (shellData !== undefined) {
           parts.push({ type: 'shell', content: '', shellId: blockId, shellData });
+          shellBlocksMap.delete(blockId);
         }
       }
       lastIndex = match.index + match[0].length;

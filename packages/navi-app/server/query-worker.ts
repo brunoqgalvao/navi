@@ -1415,7 +1415,7 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
 
 let sessionApprovedAll = false;
 
-async function runQuery(input: WorkerInput) {
+async function runQuery(input: WorkerInput): Promise<boolean> {
   const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs } = input;
 
   // Debug: Log multiSession state
@@ -1860,12 +1860,15 @@ Example clarifying questions:
       } : null,
     });
 
+    return true;
+
   } catch (error) {
     send({
       type: "error",
       sessionId,
       error: error instanceof Error ? error.message : "Unknown error",
     });
+    return false;
   }
 }
 
@@ -1948,7 +1951,16 @@ rl.on("line", (line) => {
 const input: WorkerInput = JSON.parse(process.argv[2] || "{}");
 
 if (input.prompt) {
-  runQuery(input);
+  runQuery(input)
+    .then((success) => {
+      rl.close();
+      process.exit(success ? 0 : 1);
+    })
+    .catch((error) => {
+      console.error(`[Worker] Fatal error:`, error);
+      rl.close();
+      process.exit(1);
+    });
 } else {
   console.error("No input provided");
   process.exit(1);

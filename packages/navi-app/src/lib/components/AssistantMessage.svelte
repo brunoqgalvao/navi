@@ -1,9 +1,8 @@
 <script lang="ts">
-  import type { ContentBlock, TextBlock, ToolUseBlock, ThinkingBlock, ToolResultBlock } from "../claude";
+  import type { ContentBlock, TextBlock, ToolUseBlock, ThinkingBlock, ToolResultBlock, SubagentEventBlock } from "../claude";
   import type { ChatMessage } from "../stores";
   import MermaidRenderer from "./MermaidRenderer.svelte";
   import ToolRenderer from "./ToolRenderer.svelte";
-  import SubagentBlock from "./SubagentBlock.svelte";
   import { AgentCard } from "./agents";
   import SubagentModal from "./SubagentModal.svelte";
   import MediaDisplay from "./MediaDisplay.svelte";
@@ -20,6 +19,7 @@
   import AgentBrowserWidget from "./widgets/AgentBrowserWidget.svelte";
   import BrowserActionGroup from "./widgets/BrowserActionGroup.svelte";
   import ToolActionGroup from "./widgets/ToolActionGroup.svelte";
+  import SubagentInteractionCard from "./SubagentInteractionCard.svelte";
   import { isAgentBrowserCommand } from "$lib/utils/agent-browser-parser";
   import {
     type ToolGroup,
@@ -51,6 +51,7 @@
     onQuoteText?: (text: string) => void;
     onForkWithQuote?: (text: string) => void;
     onAskCouncil?: (text: string) => void;
+    onOpenSubagentSession?: (sessionId: string) => void;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
     shellBlocksMap?: Map<string, { code: string; language: string }>;
@@ -74,6 +75,7 @@
     onQuoteText,
     onForkWithQuote,
     onAskCouncil,
+    onOpenSubagentSession,
     renderMarkdown,
     jsonBlocksMap = new Map(),
     shellBlocksMap = new Map(),
@@ -455,12 +457,12 @@
 <svelte:window onclick={() => showMenu = false} />
 
 <!-- Single view - text always visible, tools individually collapsible -->
-  <div class="w-full relative group">
+  <div class="w-full relative group/msg">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="flex-1 min-w-0 relative space-y-2" onclick={onMessageClick} oncontextmenu={handleContextMenu}>
       <!-- Hover actions -->
-      <div class="absolute -top-5 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm px-1 py-0.5 z-20">
+      <div class="absolute -top-5 right-0 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm px-1 py-0.5 z-20">
         <!-- Comment indicator @experimental -->
         {#if $showComments && messageThreads.length > 0}
           <button
@@ -558,6 +560,7 @@
             updates={getSubagentForTool(tool.id)}
             isActive={activeSubagents.has(tool.id)}
             hasResult={!!result}
+            resultPreview={result ? extractToolResultContent(result.content) : ""}
             elapsedTime={activeSubagents.get(tool.id)?.elapsed}
             onExpand={() => openSubagentModal = { toolUseId: tool.id, description: taskDescription, subagentType: taskSubagentType }}
           />
@@ -643,6 +646,12 @@
             {/if}
           </div>
         {/if}
+      {:else if item.type === "subagent_event"}
+        <SubagentInteractionCard
+          block={item as SubagentEventBlock}
+          onOpenSession={onOpenSubagentSession}
+        />
+
       {:else if item.type === "text"}
         {@const text = (item as TextBlock).text}
         {@const rendered = renderTextContent(text)}

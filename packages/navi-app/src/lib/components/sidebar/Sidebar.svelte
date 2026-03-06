@@ -67,9 +67,10 @@
     isResizing?: boolean;
     onCollapseToggle: () => void;
     onBackToWorkspaces: () => void;
-    onFolderCreate: (name: string) => Promise<WorkspaceFolder>;
+    onFolderCreate: (name: string, parentId?: string | null) => Promise<WorkspaceFolder>;
     onFolderUpdate: (id: string, name: string) => void;
     onFolderDelete: (id: string) => void;
+    onFolderMove: (id: string, parentId: string | null) => void;
     onFolderToggleCollapse: (id: string, collapsed: boolean) => void;
     onProjectSetFolder: (projectId: string, folderId: string | null) => void;
     onFolderReorder: (order: string[]) => void;
@@ -142,6 +143,7 @@
     onFolderCreate,
     onFolderUpdate,
     onFolderDelete,
+    onFolderMove,
     onFolderToggleCollapse,
     onProjectSetFolder,
     onFolderReorder,
@@ -165,6 +167,10 @@
     onSelectAgent,
     titleSuggestionRef = $bindable(null),
   }: Props = $props();
+
+  type WorkspaceListItem =
+    | { kind: "folder"; folder: WorkspaceFolder; depth: number }
+    | { kind: "project"; project: Project; depth: number };
 
   // Debug session folders
   $effect(() => {
@@ -300,6 +306,66 @@
     return map;
   });
 
+  function sortFoldersForTree(a: WorkspaceFolder, b: WorkspaceFolder): number {
+    if ((b.pinned || 0) !== (a.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+    if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
+    return (a.created_at || 0) - (b.created_at || 0);
+  }
+
+  let folderMap = $derived.by(() => new Map(folders.map((folder) => [folder.id, folder])));
+
+  let foldersByParent = $derived.by(() => {
+    const map = new Map<string | null, WorkspaceFolder[]>();
+    for (const folder of folders) {
+      const parentId = folder.parent_id || null;
+      const existing = map.get(parentId) || [];
+      existing.push(folder);
+      map.set(parentId, existing);
+    }
+
+    for (const siblingFolders of map.values()) {
+      siblingFolders.sort(sortFoldersForTree);
+    }
+
+    return map;
+  });
+
+  let projectsByFolder = $derived.by(() => {
+    const map = new Map<string | null, Project[]>();
+    for (const project of projects) {
+      const folderId = project.folder_id || null;
+      const existing = map.get(folderId) || [];
+      existing.push(project);
+      map.set(folderId, existing);
+    }
+    return map;
+  });
+
+  let workspaceItems = $derived.by(() => {
+    const items: WorkspaceListItem[] = [];
+
+    const visit = (parentId: string | null, depth: number) => {
+      for (const folder of foldersByParent.get(parentId) || []) {
+        items.push({ kind: "folder", folder, depth });
+        if (folder.collapsed) continue;
+
+        visit(folder.id, depth + 1);
+
+        for (const project of projectsByFolder.get(folder.id) || []) {
+          items.push({ kind: "project", project, depth: depth + 1 });
+        }
+      }
+    };
+
+    visit(null, 0);
+
+    for (const project of projectsByFolder.get(null) || []) {
+      items.push({ kind: "project", project, depth: 0 });
+    }
+
+    return items;
+  });
+
   let draggedProjectId = $state<string | null>(null);
   let draggedProjectFolderId = $state<string | null>(null);
   let dragOverProjectId = $state<string | null>(null);
@@ -315,6 +381,7 @@
 
   let showNewFolderInput = $state(false);
   let newFolderName = $state("");
+  let newFolderParentId = $state<string | null>(null);
   let editingFolderId = $state<string | null>(null);
   let editingFolderName = $state("");
   let showOpenInMenu = $state(false);
@@ -384,6 +451,20 @@
     showOpenInMenu = false;
   }
 
+  async function openInCodex() {
+    if (!currentProject) return;
+    try {
+      await fetch(`${getApiBase()}/fs/open-editor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: currentProject.path, editor: "codex" })
+      });
+    } catch (e) {
+      console.error("Failed to open in Codex:", e);
+    }
+    showOpenInMenu = false;
+  }
+
   async function copyPath() {
     if (!currentProject) return;
     try {
@@ -417,11 +498,75 @@
     }
   }
 
-  function handleFolderDragOver(e: DragEvent, folderId: string) {
-    e.preventDefault();
-    if (draggedProjectId) {
-      dragOverFolderId = folderId;
+  function isFolderDescendant(folderId: string, possibleAncestorId: string): boolean {
+    let currentParentId = folderMap.get(folderId)?.parent_id ?? null;
+
+    while (currentParentId) {
+      if (currentParentId === possibleAncestorId) {
+        return true;
+      }
+      currentParentId = folderMap.get(currentParentId)?.parent_id ?? null;
     }
+
+    return false;
+  }
+
+  function getFolderDropIntent(
+    e: DragEvent,
+    targetFolder: WorkspaceFolder
+  ): "project" | "nest" | "reorder-before" | "reorder-after" | null {
+    if (draggedProjectId) {
+      return "project";
+    }
+
+    if (!draggedFolderId || draggedFolderId === targetFolder.id) {
+      return null;
+    }
+
+    if (isFolderDescendant(targetFolder.id, draggedFolderId)) {
+      return null;
+    }
+
+    const draggedFolder = folderMap.get(draggedFolderId);
+    if (!draggedFolder) {
+      return null;
+    }
+
+    const sameParent = (draggedFolder.parent_id || null) === (targetFolder.parent_id || null);
+    if (!sameParent) {
+      return "nest";
+    }
+
+    const currentTarget = e.currentTarget as HTMLElement | null;
+    if (!currentTarget) {
+      return "nest";
+    }
+
+    const rect = currentTarget.getBoundingClientRect();
+    const offsetY = e.clientY - rect.top;
+    const topThreshold = rect.height * 0.28;
+    const bottomThreshold = rect.height * 0.72;
+
+    if (offsetY <= topThreshold) {
+      return "reorder-before";
+    }
+
+    if (offsetY >= bottomThreshold) {
+      return "reorder-after";
+    }
+
+    return "nest";
+  }
+
+  function handleFolderDragOver(e: DragEvent, targetFolder: WorkspaceFolder) {
+    e.preventDefault();
+
+    const intent = getFolderDropIntent(e, targetFolder);
+    dragOverFolderId = intent === "project" || intent === "nest" ? targetFolder.id : null;
+    dragOverFolderForReorder =
+      intent === "reorder-before" || intent === "reorder-after" ? targetFolder.id : null;
+    dragOverFolderReorderPosition =
+      intent === "reorder-after" ? "after" : intent === "reorder-before" ? "before" : null;
   }
 
   function handleProjectDragLeave(e: DragEvent) {
@@ -435,6 +580,8 @@
     const relatedTarget = e.relatedTarget as HTMLElement;
     if (!relatedTarget || !e.currentTarget || !(e.currentTarget as HTMLElement).contains(relatedTarget)) {
       dragOverFolderId = null;
+      dragOverFolderForReorder = null;
+      dragOverFolderReorderPosition = null;
     }
   }
 
@@ -442,6 +589,14 @@
     e.preventDefault();
     if (draggedProjectId && draggedProjectFolderId !== null) {
       isDraggingToRoot = true;
+      return;
+    }
+
+    if (draggedFolderId) {
+      const draggedFolder = folderMap.get(draggedFolderId);
+      if (draggedFolder?.parent_id) {
+        isDraggingToRoot = true;
+      }
     }
   }
 
@@ -457,6 +612,11 @@
     e.stopPropagation();
     if (draggedProjectId && draggedProjectFolderId !== null) {
       onProjectSetFolder(draggedProjectId, null);
+    } else if (draggedFolderId) {
+      const draggedFolder = folderMap.get(draggedFolderId);
+      if (draggedFolder?.parent_id) {
+        onFolderMove(draggedFolderId, null);
+      }
     }
     resetDragState();
   }
@@ -500,13 +660,58 @@
     resetDragState();
   }
 
-  async function handleFolderDrop(e: DragEvent, folderId: string | null) {
+  async function handleFolderDrop(e: DragEvent, targetFolder: WorkspaceFolder) {
     e.preventDefault();
-    // Only handle project drops - folder reorder is handled by handleFolderReorderDrop
     if (draggedProjectId) {
-      onProjectSetFolder(draggedProjectId, folderId);
+      onProjectSetFolder(draggedProjectId, targetFolder.id);
       resetDragState();
+      return;
     }
+
+    if (!draggedFolderId) {
+      resetDragState();
+      return;
+    }
+
+    const draggedFolder = folderMap.get(draggedFolderId);
+    const intent = getFolderDropIntent(e, targetFolder);
+
+    if (!draggedFolder || !intent) {
+      resetDragState();
+      return;
+    }
+
+    if (intent === "nest") {
+      if ((draggedFolder.parent_id || null) !== targetFolder.id) {
+        if (targetFolder.collapsed) {
+          onFolderToggleCollapse(targetFolder.id, false);
+        }
+        onFolderMove(draggedFolderId, targetFolder.id);
+      }
+      resetDragState();
+      return;
+    }
+
+    const siblingParentId = targetFolder.parent_id || null;
+    if ((draggedFolder.parent_id || null) !== siblingParentId) {
+      resetDragState();
+      return;
+    }
+
+    const siblingOrder = [...(foldersByParent.get(siblingParentId) || [])]
+      .filter((folder) => folder.id !== draggedFolderId)
+      .map((folder) => folder.id);
+    const targetIndex = siblingOrder.findIndex((folderId) => folderId === targetFolder.id);
+
+    if (targetIndex === -1) {
+      resetDragState();
+      return;
+    }
+
+    const insertIndex = intent === "reorder-after" ? targetIndex + 1 : targetIndex;
+    siblingOrder.splice(insertIndex, 0, draggedFolderId);
+    onFolderReorder(siblingOrder);
+    resetDragState();
   }
 
   function handleProjectDragEnd() {
@@ -575,6 +780,7 @@
     dragOverSessionId = null;
     draggedFolderId = null;
     dragOverFolderForReorder = null;
+    dragOverFolderReorderPosition = null;
     // Session folder drag state
     draggedSessionFolderId = null;
     dragOverSessionFolderId = null;
@@ -582,6 +788,7 @@
 
   // Folder drag for reordering
   let dragOverFolderForReorder = $state<string | null>(null);
+  let dragOverFolderReorderPosition = $state<"before" | "after" | null>(null);
 
   function handleFolderDragStart(e: DragEvent, folder: WorkspaceFolder) {
     if (folder.pinned) return;
@@ -598,43 +805,6 @@
     document.body.classList.add('dragging-active');
   }
 
-  function handleFolderReorderDragOver(e: DragEvent, targetFolderId: string) {
-    e.preventDefault();
-    if (draggedFolderId && draggedFolderId !== targetFolderId) {
-      dragOverFolderForReorder = targetFolderId;
-    }
-  }
-
-  function handleFolderReorderDragLeave(e: DragEvent) {
-    const relatedTarget = e.relatedTarget as HTMLElement;
-    if (!relatedTarget || !e.currentTarget || !(e.currentTarget as HTMLElement).contains(relatedTarget)) {
-      dragOverFolderForReorder = null;
-    }
-  }
-
-  function handleFolderReorderDrop(e: DragEvent, targetFolder: WorkspaceFolder) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!draggedFolderId || draggedFolderId === targetFolder.id) {
-      resetDragState();
-      return;
-    }
-
-    const draggedIndex = folders.findIndex(f => f.id === draggedFolderId);
-    const targetIndex = folders.findIndex(f => f.id === targetFolder.id);
-
-    if (draggedIndex === -1 || targetIndex === -1) {
-      resetDragState();
-      return;
-    }
-
-    const newFolders = [...folders];
-    const [removed] = newFolders.splice(draggedIndex, 1);
-    newFolders.splice(targetIndex, 0, removed);
-    onFolderReorder(newFolders.map(f => f.id));
-    resetDragState();
-  }
-
   function handleFolderDragEnd() {
     document.body.classList.remove('dragging-active');
     resetDragState();
@@ -642,8 +812,15 @@
 
   async function createFolder() {
     if (!newFolderName.trim()) return;
-    await onFolderCreate(newFolderName.trim());
+    if (newFolderParentId) {
+      const parentFolder = folderMap.get(newFolderParentId);
+      if (parentFolder?.collapsed) {
+        onFolderToggleCollapse(parentFolder.id, false);
+      }
+    }
+    await onFolderCreate(newFolderName.trim(), newFolderParentId);
     newFolderName = "";
+    newFolderParentId = null;
     showNewFolderInput = false;
   }
 
@@ -661,8 +838,56 @@
     folderMenuId = null;
   }
 
-  function getProjectsInFolder(folderId: string | null): Project[] {
-    return projects.filter(p => (p.folder_id || null) === folderId);
+  function startCreateSubfolder(folder: WorkspaceFolder, e: Event) {
+    e.stopPropagation();
+    showNewFolderInput = true;
+    newFolderParentId = folder.id;
+    newFolderName = "";
+    folderMenuId = null;
+    if (folder.collapsed) {
+      onFolderToggleCollapse(folder.id, false);
+    }
+  }
+
+  function moveFolderToParent(folder: WorkspaceFolder, parentId: string | null, e: Event) {
+    e.stopPropagation();
+    if ((folder.parent_id || null) === parentId) {
+      folderMenuId = null;
+      return;
+    }
+
+    if (parentId) {
+      const parentFolder = folderMap.get(parentId);
+      if (parentFolder?.collapsed) {
+        onFolderToggleCollapse(parentId, false);
+      }
+    }
+
+    onFolderMove(folder.id, parentId);
+    folderMenuId = null;
+  }
+
+  function getAvailableFolderParents(folder: WorkspaceFolder): Array<{ id: string; label: string; depth: number }> {
+    const options: Array<{ id: string; label: string; depth: number }> = [];
+
+    const visit = (parentId: string | null, names: string[] = []) => {
+      for (const candidate of foldersByParent.get(parentId) || []) {
+        if (candidate.id === folder.id) continue;
+
+        const nextNames = [...names, candidate.name];
+        options.push({
+          id: candidate.id,
+          label: nextNames.join(" / "),
+          depth: nextNames.length - 1,
+        });
+
+        visit(candidate.id, nextNames);
+      }
+    };
+
+    visit(null);
+
+    return options.filter((option) => option.id !== (folder.parent_id || null));
   }
 
   // Session folder helpers
@@ -734,12 +959,11 @@
   const folderStatusMap = $derived.by(() => {
     const map = new Map<string, { attentionCount: number; runningCount: number }>();
 
-    for (const folder of folders) {
-      const folderProjects = projects.filter(p => p.folder_id === folder.id);
+    const collectCounts = (folderId: string): { attentionCount: number; runningCount: number } => {
       let attentionCount = 0;
       let runningCount = 0;
 
-      for (const proj of folderProjects) {
+      for (const proj of projectsByFolder.get(folderId) || []) {
         if (proj.archived) continue;
         const status = $projectStatus.get(proj.id);
         if (status) {
@@ -748,7 +972,18 @@
         }
       }
 
-      map.set(folder.id, { attentionCount, runningCount });
+      for (const childFolder of foldersByParent.get(folderId) || []) {
+        const childCounts = collectCounts(childFolder.id);
+        attentionCount += childCounts.attentionCount;
+        runningCount += childCounts.runningCount;
+      }
+
+      map.set(folderId, { attentionCount, runningCount });
+      return { attentionCount, runningCount };
+    };
+
+    for (const folder of foldersByParent.get(null) || []) {
+      collectCounts(folder.id);
     }
 
     return map;
@@ -858,9 +1093,9 @@
                   {#each sessions.slice(0, 15) as sess}
                     <button
                       onclick={(e) => { e.stopPropagation(); onSelectSession(sess); sessionsDropdownOpen = false; }}
-                      class="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2 {$session?.id === sess.id ? 'bg-gray-100 dark:bg-gray-700' : ''}"
+                      class="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2 {$session.sessionId === sess.id ? 'bg-gray-100 dark:bg-gray-700' : ''}"
                     >
-                      {#if sess.starred}
+                      {#if sess.favorite}
                         <svg class="w-3 h-3 text-amber-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
                         </svg>
@@ -869,7 +1104,7 @@
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
                         </svg>
                       {/if}
-                      <span class="truncate text-sm text-gray-700 dark:text-gray-300 {$session?.id === sess.id ? 'font-medium' : ''}">{sess.title || 'Untitled'}</span>
+                      <span class="truncate text-sm text-gray-700 dark:text-gray-300 {$session.sessionId === sess.id ? 'font-medium' : ''}">{sess.title || 'Untitled'}</span>
                     </button>
                   {/each}
                   {#if sessions.length > 15}
@@ -956,7 +1191,7 @@
             >
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
             </button>
-            <button onclick={() => showNewFolderInput = true} class="text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 px-1.5 py-0.5 rounded transition-colors" title="New folder">
+            <button onclick={() => { showNewFolderInput = true; newFolderParentId = null; newFolderName = ""; }} class="text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 px-1.5 py-0.5 rounded transition-colors" title="New folder">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
             </button>
             <button onclick={onNewProjectModal} class="text-[10px] font-medium bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded transition-colors border border-gray-200 dark:border-gray-600" data-tour="new-workspace">
@@ -967,18 +1202,23 @@
 
         {#if showNewFolderInput}
           <div class="mb-2 px-2">
+            {#if newFolderParentId}
+              <div class="mb-1 text-[10px] font-medium text-gray-500 dark:text-gray-400">
+                New subfolder in {folderMap.get(newFolderParentId)?.name || "folder"}
+              </div>
+            {/if}
             <div class="flex items-center gap-1">
               <input
                 type="text"
                 bind:value={newFolderName}
-                placeholder="Folder name..."
+                placeholder={newFolderParentId ? "Subfolder name..." : "Folder name..."}
                 class="flex-1 text-xs px-2 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-gray-400 dark:focus:ring-gray-500 text-gray-900 dark:text-gray-100"
                 onkeydown={(e) => e.key === 'Enter' && createFolder()}
               />
               <button onclick={createFolder} class="p-1 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
               </button>
-              <button onclick={() => { showNewFolderInput = false; newFolderName = ""; }} class="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400">
+              <button onclick={() => { showNewFolderInput = false; newFolderName = ""; newFolderParentId = null; }} class="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
               </button>
             </div>
@@ -989,192 +1229,108 @@
           <div class="text-xs text-gray-400 dark:text-gray-500 italic text-center py-4">No workspaces yet</div>
         {:else}
           <div class="space-y-1">
-            {#each folders as folder (folder.id)}
-              {@const folderPinned = !!folder.pinned}
-              {@const isDragOverForReorder = dragOverFolderForReorder === folder.id}
-              {@const isDragging = draggedFolderId === folder.id}
-              {@const isFolderDropTarget = dragOverFolderId === folder.id}
-              <div
-                animate:flip={{ duration: 200 }}
-                class="group relative {isDragOverForReorder ? 'drop-indicator-line' : ''} {isDragging ? 'drag-source' : ''}"
-                draggable={!folderPinned}
-                ondragstart={(e) => handleFolderDragStart(e, folder)}
-                ondragend={handleFolderDragEnd}
-              >
+            {#each workspaceItems as item (item.kind === 'folder' ? `folder-${item.folder.id}` : `project-${item.project.id}`)}
+              {#if item.kind === "folder"}
+                {@const folder = item.folder}
+                {@const folderPinned = !!folder.pinned}
+                {@const isDragOverForReorder = dragOverFolderForReorder === folder.id}
+                {@const isDragging = draggedFolderId === folder.id}
+                {@const isFolderDropTarget = dragOverFolderId === folder.id}
+                {@const reorderIndicatorClass = dragOverFolderReorderPosition === "after" ? "drop-indicator-line-after" : "drop-indicator-line"}
+                {@const availableFolderParents = getAvailableFolderParents(folder)}
                 <div
-                  class="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer {isFolderDropTarget ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''} {!folderPinned ? 'cursor-grab active:cursor-grabbing' : ''}"
-                  ondragover={(e) => { handleFolderDragOver(e, folder.id); handleFolderReorderDragOver(e, folder.id); }}
-                  ondragleave={(e) => { handleFolderDragLeave(e); handleFolderReorderDragLeave(e); }}
-                  ondrop={(e) => { handleFolderDrop(e, folder.id); handleFolderReorderDrop(e, folder); }}
-                  onclick={() => editingFolderId !== folder.id && onFolderToggleCollapse(folder.id, !folder.collapsed)}
-                  oncontextmenu={(e) => { e.preventDefault(); folderMenuId = folder.id; }}
+                  class="group relative {isDragOverForReorder ? reorderIndicatorClass : ''} {isDragging ? 'drag-source' : ''}"
+                  draggable={!folderPinned}
+                  ondragstart={(e) => handleFolderDragStart(e, folder)}
+                  ondragend={handleFolderDragEnd}
                 >
-                  <div class="p-0.5 text-gray-400 dark:text-gray-500">
-                    <svg class="w-3 h-3 transition-transform {folder.collapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                  </div>
-                  {#if editingFolderId === folder.id}
-                    <input
-                      type="text"
-                      bind:value={editingFolderName}
-                      class="flex-1 text-xs px-1 py-0.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none text-gray-900 dark:text-gray-100"
-                      onkeydown={(e) => e.key === 'Enter' && saveEditingFolder()}
-                      onblur={saveEditingFolder}
-                      onclick={(e) => e.stopPropagation()}
-                    />
-                  {:else}
-                    <span class="flex-1 text-[12px] font-medium text-gray-600 dark:text-gray-400 truncate">{folder.name}</span>
-                  {/if}
-                  {#if folderStatusMap.get(folder.id)?.attentionCount || folderStatusMap.get(folder.id)?.runningCount}
-                    <WorkspaceCountBadge
-                      attentionCount={folderStatusMap.get(folder.id)?.attentionCount ?? 0}
-                      runningCount={folderStatusMap.get(folder.id)?.runningCount ?? 0}
-                      size="sm"
-                    />
-                  {/if}
-                  <StarButton active={folderPinned} onclick={(e) => onToggleFolderPin(folder, e)} size="sm" />
-                  <div class="relative">
-                    <button
-                      onclick={(e) => { e.stopPropagation(); folderMenuId = folderMenuId === folder.id ? null : folder.id; }}
-                      class="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
-                    </button>
-                    {#if folderMenuId === folder.id}
-                      <div class="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[140px] z-50">
-                        <button onclick={(e) => { e.stopPropagation(); onNewProjectInFolder(folder.id); folderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"></path></svg>
-                          New Workspace
-                        </button>
-                        <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
-                        <button onclick={(e) => startEditFolder(folder, e)} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                          Rename
-                        </button>
-                        <button onclick={(e) => { e.stopPropagation(); onFolderDelete(folder.id); folderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
-                          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                          Delete
-                        </button>
-                      </div>
+                  <div
+                    style={`margin-left: ${item.depth * 16}px;`}
+                    class="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer {isFolderDropTarget ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''} {!folderPinned ? 'cursor-grab active:cursor-grabbing' : ''}"
+                    ondragover={(e) => handleFolderDragOver(e, folder)}
+                    ondragleave={handleFolderDragLeave}
+                    ondrop={(e) => handleFolderDrop(e, folder)}
+                    onclick={() => editingFolderId !== folder.id && onFolderToggleCollapse(folder.id, !folder.collapsed)}
+                    oncontextmenu={(e) => { e.preventDefault(); folderMenuId = folder.id; }}
+                  >
+                    <div class="p-0.5 text-gray-400 dark:text-gray-500">
+                      <svg class="w-3 h-3 transition-transform {folder.collapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    </div>
+                    {#if editingFolderId === folder.id}
+                      <input
+                        type="text"
+                        bind:value={editingFolderName}
+                        class="flex-1 text-xs px-1 py-0.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none text-gray-900 dark:text-gray-100"
+                        onkeydown={(e) => e.key === 'Enter' && saveEditingFolder()}
+                        onblur={saveEditingFolder}
+                        onclick={(e) => e.stopPropagation()}
+                      />
+                    {:else}
+                      <span class="flex-1 text-[12px] font-medium text-gray-600 dark:text-gray-400 truncate">{folder.name}</span>
                     {/if}
-                  </div>
-                </div>
-                {#if !folder.collapsed}
-                  <div class="ml-4 space-y-0.5">
-                    {#each getProjectsInFolder(folder.id) as proj (proj.id)}
-                      {@const isDropTarget = dragOverProjectId === proj.id && !proj.pinned}
-                      {@const isDragged = draggedProjectId === proj.id}
-                      <div
-                        animate:flip={{ duration: 200 }}
-                        class="group/proj relative {isDropTarget ? 'drop-indicator-line' : ''} {isDragged ? 'drag-source' : ''}"
-                        role="listitem"
-                        draggable={!proj.pinned}
-                        ondragstart={(e) => !proj.pinned && handleProjectDragStart(e, proj)}
-                        ondragover={(e) => !proj.pinned && handleProjectDragOver(e, proj.id)}
-                        ondragleave={(e) => handleProjectDragLeave(e)}
-                        ondrop={(e) => !proj.pinned && handleProjectDrop(e, proj)}
-                        ondragend={handleProjectDragEnd}
+                    {#if folderStatusMap.get(folder.id)?.attentionCount || folderStatusMap.get(folder.id)?.runningCount}
+                      <WorkspaceCountBadge
+                        attentionCount={folderStatusMap.get(folder.id)?.attentionCount ?? 0}
+                        runningCount={folderStatusMap.get(folder.id)?.runningCount ?? 0}
+                        size="sm"
+                      />
+                    {/if}
+                    <StarButton active={folderPinned} onclick={(e) => onToggleFolderPin(folder, e)} size="sm" />
+                    <div class="relative">
+                      <button
+                        onclick={(e) => { e.stopPropagation(); folderMenuId = folderMenuId === folder.id ? null : folder.id; }}
+                        class="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 rounded opacity-0 group-hover:opacity-100 transition-opacity"
                       >
-                        <button
-                          onclick={(e: MouseEvent) => {
-                            if (e.metaKey || e.ctrlKey) {
-                              onOpenProjectInNewWindow(proj);
-                            } else {
-                              onSelectProject(proj);
-                            }
-                          }}
-                          oncontextmenu={(e) => { e.preventDefault(); projectMenuId = proj.id; }}
-                          class="w-full text-left px-2.5 py-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100 sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
-                        >
-                          <div class="flex items-center gap-2">
-                            <svg class="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                            <span class="text-[12px] font-medium truncate {proj.archived ? 'text-gray-400' : ''}">{proj.name}</span>
-                            {#if proj.archived}
-                              <svg class="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Archived"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
-                            {:else}
-                              {@const statusInfo = $projectStatus.get(proj.id)}
-                              {#if statusInfo}
-                                <WorkspaceCountBadge
-                                  attentionCount={statusInfo.attentionCount}
-                                  runningCount={statusInfo.runningCount}
-                                  size="sm"
-                                />
-                              {/if}
-                            {/if}
-                          </div>
-                        </button>
-                        <div class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
-                          <StarButton active={!!proj.pinned} onclick={(e) => onToggleProjectPin(proj, e)} size="sm" />
-                          <button
-                            onclick={(e) => onToggleProjectArchive(proj, e)}
-                            class="p-1 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity {proj.archived ? 'text-amber-500 hover:text-amber-600' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-400'}"
-                            title={proj.archived ? 'Unarchive' : 'Archive'}
-                          >
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
+                      </button>
+                      {#if folderMenuId === folder.id}
+                        <div class="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[190px] max-h-[320px] overflow-y-auto z-50">
+                          <button onclick={(e) => { e.stopPropagation(); onNewProjectInFolder(folder.id); folderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"></path></svg>
+                            New Workspace
                           </button>
-                          <div class="relative">
-                            <button
-                              onclick={(e) => { e.stopPropagation(); projectMenuId = projectMenuId === proj.id ? null : proj.id; }}
-                              class="p-1 text-gray-400 hover:text-gray-600 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity"
-                            >
-                              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
+                          <button onclick={(e) => startCreateSubfolder(folder, e)} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2zm6 6h6"></path></svg>
+                            New Subfolder
+                          </button>
+                          <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+                          <button onclick={(e) => startEditFolder(folder, e)} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                            Rename
+                          </button>
+                          {#if folder.parent_id}
+                            <button onclick={(e) => moveFolderToParent(folder, null, e)} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 12h16m-8-8l-8 8 8 8"></path></svg>
+                              Move to Top Level
                             </button>
-                            {#if projectMenuId === proj.id}
-                              <div class="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[160px] z-50">
-                                <button onclick={(e) => { onEditProject(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                                  Rename
-                                </button>
-                                <button onclick={(e) => { e.stopPropagation(); onProjectPermissions(proj); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                                  Permissions
-                                </button>
-                                <button onclick={(e) => { e.stopPropagation(); onOpenProjectInNewWindow(proj); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-                                  Open in New Window
-                                </button>
-                                <button onclick={(e) => { e.stopPropagation(); onOpenSessionsBoard?.(proj.id); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path></svg>
-                                  Sessions Board
-                                </button>
-                                <button onclick={(e) => { onToggleProjectArchive(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
-                                  {proj.archived ? 'Unarchive' : 'Archive'}
-                                </button>
-                                <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
-                                <button onclick={(e) => { onDeleteProject(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
-                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                  Delete
-                                </button>
-                              </div>
-                            {/if}
-                          </div>
+                          {/if}
+                          {#if availableFolderParents.length > 0}
+                            <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+                            <div class="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                              Move To
+                            </div>
+                            {#each availableFolderParents as option}
+                              <button onclick={(e) => moveFolderToParent(folder, option.id, e)} class="w-full py-1.5 pr-3 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2" style={`padding-left: ${12 + option.depth * 14}px;`}>
+                                <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                                <span class="truncate">{option.label}</span>
+                              </button>
+                            {/each}
+                          {/if}
+                          <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+                          <button onclick={(e) => { e.stopPropagation(); onFolderDelete(folder.id); folderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            Delete
+                          </button>
                         </div>
-                      </div>
-                    {/each}
+                      {/if}
+                    </div>
                   </div>
-                {/if}
-              </div>
-            {/each}
-
-            {#if draggedProjectId && draggedProjectFolderId !== null}
-              <div
-                class="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700 {isDraggingToRoot ? 'bg-indigo-50 dark:bg-indigo-900/30 rounded-lg' : ''}"
-                ondragover={handleRootDragOver}
-                ondragleave={handleRootDragLeave}
-                ondrop={handleRootDrop}
-              >
-                <div class="text-[10px] text-gray-400 dark:text-gray-500 text-center py-2 {isDraggingToRoot ? 'text-indigo-600 dark:text-indigo-400 font-medium' : ''}">
-                  Drop here to remove from folder
                 </div>
-              </div>
-            {/if}
-
-            <div class="{folders.length > 0 ? 'mt-2 pt-2 border-t border-gray-100 dark:border-gray-700' : ''}">
-              {#each getProjectsInFolder(null) as proj (proj.id)}
+              {:else}
+                {@const proj = item.project}
                 {@const isDropTarget = dragOverProjectId === proj.id && !proj.pinned}
                 {@const isDragged = draggedProjectId === proj.id}
                 <div
-                  animate:flip={{ duration: 200 }}
                   class="group relative {isDropTarget ? 'drop-indicator-line' : ''} {isDragged ? 'drag-source' : ''}"
                   role="listitem"
                   draggable={!proj.pinned}
@@ -1193,13 +1349,14 @@
                       }
                     }}
                     oncontextmenu={(e) => { e.preventDefault(); projectMenuId = proj.id; }}
-                    class="w-full text-left px-2.5 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100 sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
+                    class="w-full text-left pr-12 py-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100 sidebar-item-glow {proj.pinned ? '' : 'cursor-grab active:cursor-grabbing'}"
+                    style={`padding-left: ${12 + item.depth * 16}px;`}
                   >
                     <div class="flex items-center gap-2">
                       <svg class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                      <span class="text-[13px] font-medium truncate {proj.archived ? 'text-gray-400' : ''}">{proj.name}</span>
+                      <span class="text-[12px] font-medium truncate {proj.archived ? 'text-gray-400' : ''}">{proj.name}</span>
                       {#if proj.archived}
-                        <svg class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Archived"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                        <svg class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
                       {:else}
                         {@const statusInfo = $projectStatus.get(proj.id)}
                         {#if statusInfo}
@@ -1222,7 +1379,7 @@
                       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
                     </button>
                     <div class="relative">
-                      <button 
+                      <button
                         onclick={(e) => { e.stopPropagation(); projectMenuId = projectMenuId === proj.id ? null : proj.id; }}
                         class="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 rounded opacity-0 group-hover:opacity-100 transition-opacity"
                         data-tour="project-menu"
@@ -1261,8 +1418,21 @@
                     </div>
                   </div>
                 </div>
-              {/each}
-            </div>
+              {/if}
+            {/each}
+
+            {#if (draggedProjectId && draggedProjectFolderId !== null) || (draggedFolderId && folderMap.get(draggedFolderId)?.parent_id)}
+              <div
+                class="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700 {isDraggingToRoot ? 'bg-indigo-50 dark:bg-indigo-900/30 rounded-lg' : ''}"
+                ondragover={handleRootDragOver}
+                ondragleave={handleRootDragLeave}
+                ondrop={handleRootDrop}
+              >
+                <div class="text-[10px] text-gray-400 dark:text-gray-500 text-center py-2 {isDraggingToRoot ? 'text-indigo-600 dark:text-indigo-400 font-medium' : ''}">
+                  Drop here to move to top level
+                </div>
+              </div>
+            {/if}
           </div>
         {/if}
 
@@ -1413,6 +1583,10 @@
                 <button onclick={openInCursor} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                   Cursor
+                </button>
+                <button onclick={openInCodex} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                  <span class="w-4 h-4 rounded bg-green-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">X</span>
+                  Codex
                 </button>
                 <div class="border-t border-gray-100 my-1"></div>
                 <button onclick={copyPath} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">

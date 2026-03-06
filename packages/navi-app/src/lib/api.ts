@@ -8,6 +8,7 @@ const getPtyBaseUrl = () => getPtyApiUrl();
 export interface WorkspaceFolder {
   id: string;
   name: string;
+  parent_id: string | null;
   sort_order: number;
   collapsed: number;
   pinned?: number;
@@ -220,15 +221,20 @@ export const api = {
   folders: {
     list: () => request<WorkspaceFolder[]>("/folders"),
     get: (id: string) => request<WorkspaceFolder>(`/folders/${id}`),
-    create: (name: string) =>
+    create: (name: string, parentId: string | null = null) =>
       request<WorkspaceFolder>("/folders", {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, parentId }),
       }),
     update: (id: string, name: string) =>
       request<WorkspaceFolder>(`/folders/${id}`, {
         method: "PUT",
         body: JSON.stringify({ name }),
+      }),
+    move: (id: string, parentId: string | null) =>
+      request<WorkspaceFolder>(`/folders/${id}/move`, {
+        method: "POST",
+        body: JSON.stringify({ parentId }),
       }),
     delete: (id: string) =>
       request<{ success: boolean }>(`/folders/${id}`, { method: "DELETE" }),

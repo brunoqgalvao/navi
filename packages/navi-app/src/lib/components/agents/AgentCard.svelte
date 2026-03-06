@@ -27,6 +27,7 @@
     updates: ChatMessage[];
     isActive: boolean;
     hasResult?: boolean;
+    resultPreview?: string;
     elapsedTime?: number;
     onExpand?: () => void;
   }
@@ -39,6 +40,7 @@
     updates,
     isActive,
     hasResult = false,
+    resultPreview = "",
     elapsedTime,
     onExpand,
   }: Props = $props();
@@ -111,6 +113,7 @@
     {description}
     currentUrl={displayInfo.currentUrl}
     {visitedUrls}
+    findings={resultPreview}
     {isActive}
     {elapsedTime}
     activity={displayInfo.activity}
@@ -197,7 +200,13 @@
     </button>
 
     <!-- Activity summary -->
-    {#if displayInfo.currentCommand}
+    {#if isComplete && resultPreview}
+      <div class="px-4 py-2 border-t border-{config.color}-100 bg-white/40">
+        <div class="text-xs text-gray-700 truncate">
+          <span class="font-medium {config.accentColor}">Result:</span> {resultPreview}
+        </div>
+      </div>
+    {:else if displayInfo.currentCommand}
       <div class="px-4 py-2 border-t border-{config.color}-100 bg-white/40">
         <div class="flex items-center gap-2">
           <svg class="w-3.5 h-3.5 {config.accentColor} shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

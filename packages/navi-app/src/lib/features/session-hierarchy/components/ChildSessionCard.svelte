@@ -16,6 +16,8 @@
   const deliverable = $derived(parseDeliverable(session.deliverable));
   const isWorking = $derived(session.agent_status === "working");
   const isBlocked = $derived(session.agent_status === "blocked");
+  const isPendingReview = $derived(session.agent_status === "pending_review");
+  const isClarificationRequested = $derived(session.agent_status === "clarification_requested");
   const isDelivered = $derived(session.agent_status === "delivered");
   const isWaiting = $derived(session.agent_status === "waiting" || session.isWaitingForInput);
 
@@ -39,7 +41,7 @@
 </script>
 
 <div
-  class="child-session-card border rounded-lg overflow-hidden cursor-pointer {isWaiting ? 'border-yellow-300 bg-yellow-50' : isBlocked ? 'border-orange-300 bg-orange-50' : isDelivered ? 'border-green-300 bg-green-50' : agentDef ? `border-${agentDef.color}-200 bg-${agentDef.color}-50/30` : 'border-gray-200 bg-white'}"
+  class="child-session-card border rounded-lg overflow-hidden cursor-pointer {isWaiting ? 'border-yellow-300 bg-yellow-50' : isBlocked ? 'border-orange-300 bg-orange-50' : isPendingReview ? 'border-blue-300 bg-blue-50' : isClarificationRequested ? 'border-indigo-300 bg-indigo-50' : isDelivered ? 'border-green-300 bg-green-50' : agentDef ? `border-${agentDef.color}-200 bg-${agentDef.color}-50/30` : 'border-gray-200 bg-white'}"
   onclick={onSelect}
   onkeydown={(e) => e.key === 'Enter' && onSelect?.()}
   role="button"
@@ -72,6 +74,16 @@
           <span class="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 shrink-0">
             <span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>
             Needs Input
+          </span>
+        {:else if isPendingReview}
+          <span class="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 shrink-0">
+            <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+            Needs Review
+          </span>
+        {:else if isClarificationRequested}
+          <span class="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0">
+            <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+            Clarification
           </span>
         {:else if agentDef}
           <AgentStatusBadge status={session.agent_status} pulse={isWorking} size="sm" />
@@ -125,6 +137,30 @@
       <div class="flex items-center gap-2 text-xs text-yellow-700">
         <span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>
         Waiting for user input...
+      </div>
+    </div>
+  {:else if isPendingReview}
+    <div class="border-t border-blue-200 px-3 py-2 bg-blue-100/50">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-medium text-blue-700">Draft submitted and waiting for review</span>
+        <button
+          onclick={(e) => { e.stopPropagation(); onSelect?.(); }}
+          class="ml-auto text-[10px] px-2 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 shrink-0"
+        >
+          Review
+        </button>
+      </div>
+    </div>
+  {:else if isClarificationRequested}
+    <div class="border-t border-indigo-200 px-3 py-2 bg-indigo-100/50">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-medium text-indigo-700">Clarification requested</span>
+        <button
+          onclick={(e) => { e.stopPropagation(); onSelect?.(); }}
+          class="ml-auto text-[10px] px-2 py-0.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 shrink-0"
+        >
+          Open
+        </button>
       </div>
     </div>
   <!-- Inline status info (always visible) -->

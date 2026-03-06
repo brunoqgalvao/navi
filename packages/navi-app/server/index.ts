@@ -143,13 +143,17 @@ async function loadAndMigrateEnvKeys() {
       process.env.AUTO_TITLE = autoTitleMatch[1].trim();
     }
 
-    // Migrate Anthropic key to database
+    // Migrate Anthropic key to database.
+    // Do not override an explicit auth preference (e.g. users who already chose OAuth/Max).
     const anthropicMatch = content.match(/ANTHROPIC_API_KEY=(.+)/);
     if (anthropicMatch && !globalSettings.get("anthropicApiKey")) {
       const key = anthropicMatch[1].trim();
       if (key.startsWith("sk-ant-")) {
         globalSettings.set("anthropicApiKey", key);
-        globalSettings.set("preferredAuth", "api_key");
+        const preferredAuth = globalSettings.get("preferredAuth");
+        if (!preferredAuth) {
+          globalSettings.set("preferredAuth", "api_key");
+        }
       }
     }
   } catch {}

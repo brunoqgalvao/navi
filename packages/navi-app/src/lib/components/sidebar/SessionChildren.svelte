@@ -13,9 +13,9 @@
 
   let { children, onSelectSession, parentId }: Props = $props();
 
-  // Separate forks from agents (only show sessions with proper session_type)
+  // Separate forks from agents. Treat legacy/null session_type as agent.
   const forks = $derived(children.filter(c => c.session_type === "fork"));
-  const agents = $derived(children.filter(c => c.session_type === "agent"));
+  const agents = $derived(children.filter(c => c.session_type !== "fork"));
 
   // Combined list of displayable children (only forks + agents, not 'root' typed sessions)
   const displayableChildren = $derived([...forks, ...agents]);
@@ -101,6 +101,10 @@
               <span class="text-[9px] text-emerald-500">✓</span>
             {:else if child.agent_status === "blocked"}
               <span class="text-[9px] text-orange-500">!</span>
+            {:else if child.agent_status === "pending_review"}
+              <span class="text-[9px] text-blue-500">📝</span>
+            {:else if child.agent_status === "clarification_requested"}
+              <span class="text-[9px] text-indigo-500">💬</span>
             {:else}
               <span class="text-[9px] text-gray-400">
                 <RelativeTime timestamp={child.updated_at} />

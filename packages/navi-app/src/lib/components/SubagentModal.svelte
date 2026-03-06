@@ -131,8 +131,48 @@
     return toolIconPaths[name] || "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z";
   }
 
+  function extractToolResultContent(content: unknown): string {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      return content
+        .filter((item: any) => item?.type === "text" && typeof item?.text === "string")
+        .map((item: any) => item.text)
+        .join("\n");
+    }
+    if (content && typeof content === "object" && "text" in content) {
+      return String((content as any).text);
+    }
+    return "";
+  }
+
+  // Tool results that do not map to visible assistant tool_use blocks.
+  // This commonly contains the final Task result returned to the parent.
+  function getStandaloneToolResults(): ToolResultBlock[] {
+    const usedToolIds = new Set<string>();
+    for (const msg of assistantMessages) {
+      for (const tool of getToolCalls(msg)) {
+        usedToolIds.add(tool.id);
+      }
+    }
+
+    const results: ToolResultBlock[] = [];
+    for (const msg of messages) {
+      if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
+      for (const block of msg.content as ContentBlock[]) {
+        if (block.type !== "tool_result") continue;
+        const resultBlock = block as ToolResultBlock;
+        if (!usedToolIds.has(resultBlock.tool_use_id)) {
+          results.push(resultBlock);
+        }
+      }
+    }
+    return results;
+  }
+
   const toolResults = $derived(getToolResults());
   const assistantMessages = $derived(getAssistantMessages());
+  const standaloneToolResults = $derived(getStandaloneToolResults());
+  const totalActivityItems = $derived(assistantMessages.length + standaloneToolResults.length);
 </script>
 
 <Modal {open} {onClose} title="" size="full">
@@ -170,7 +210,7 @@
 
   <!-- Chat-like message display -->
   <div class="space-y-4 max-w-3xl mx-auto">
-    {#if assistantMessages.length === 0}
+    {#if assistantMessages.length === 0 && standaloneToolResults.length === 0}
       <div class="flex flex-col items-center justify-center py-16 text-gray-400">
         {#if isActive}
           <WorkingIndicator variant="dots" size="sm" color="indigo" label="Subagent is working..." />
@@ -276,7 +316,7 @@
                 <div class="px-3 pb-3 pt-1 border-t border-gray-100 space-y-2">
                   <ToolRenderer
                     {tool}
-                    toolResult={result ? { content: String(result.content || ''), is_error: result.is_error } : undefined}
+                    toolResult={result ? { content: extractToolResultContent(result.content), is_error: result.is_error } : undefined}
                     {onPreview}
                     hideHeader={true}
                   />
@@ -292,6 +332,21 @@
         </div>
       {/each}
 
+      {#if standaloneToolResults.length > 0}
+        <div class="rounded-lg border border-teal-200 bg-teal-50/40 p-3">
+          <div class="flex items-center gap-2 text-xs font-medium text-teal-700 mb-2">
+            <span>📬</span>
+            <span>Returned to parent</span>
+          </div>
+          <div class="space-y-2">
+            {#each standaloneToolResults as result, idx (result.tool_use_id + '-' + idx)}
+              {@const resultContent = extractToolResultContent(result.content)}
+              <pre class="text-xs {result.is_error ? 'text-red-700 bg-red-50 border-red-100' : 'text-gray-700 bg-white border-teal-100'} border rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{resultContent || String(result.content || "")}</pre>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
       {#if isActive}
         <div class="py-4">
           <WorkingIndicator variant="dots" size="xs" color="indigo" label="Working..." />
@@ -302,7 +357,7 @@
 
   {#snippet footer()}
     <div class="flex items-center justify-between w-full text-xs text-gray-400">
-      <span>{assistantMessages.length} message{assistantMessages.length !== 1 ? 's' : ''} from subagent</span>
+      <span>{totalActivityItems} update{totalActivityItems !== 1 ? 's' : ''} from subagent</span>
       <span>Press ESC to close</span>
     </div>
   {/snippet}

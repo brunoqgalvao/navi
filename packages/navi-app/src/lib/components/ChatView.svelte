@@ -13,10 +13,8 @@
   import type { ContentBlock } from "../claude";
   import BackgroundProcessBadge from "./BackgroundProcessBadge.svelte";
   import EmptyStateWelcome from "./EmptyStateWelcome.svelte";
-  import SessionBreadcrumbs from "../features/session-hierarchy/components/SessionBreadcrumbs.svelte";
-  import EscalationBanner from "../features/session-hierarchy/components/EscalationBanner.svelte";
-  import ChildSessionsPanel from "../features/session-hierarchy/components/ChildSessionsPanel.svelte";
   import ChildSessionCard from "../features/session-hierarchy/components/ChildSessionCard.svelte";
+  import AgentsKanbanView from "../features/session-hierarchy/components/AgentsKanbanView.svelte";
   import { sessionHierarchyApi, parseEscalation, type Escalation, type HierarchySession, isActiveStatus } from "../features/session-hierarchy";
   import { loadMoreMessages } from "../actions/session-actions";
   import WaitCountdown from "./widgets/WaitCountdown.svelte";
@@ -80,6 +78,9 @@
     // Session hierarchy (multi-agent)
     sessionHierarchy?: {
       hasParent: boolean;
+      sessionType?: "root" | "agent" | "fork";
+      isAgentChild?: boolean;
+      isForkChild?: boolean;
       isBlocked: boolean;
       escalation?: Escalation | null;
       role?: string | null;
@@ -136,6 +137,7 @@
   let loadingMessagesSet = $state<Set<string>>(new Set());
   let childSessions = $state<HierarchySession[]>([]);
   let childSessionsRefreshInterval: ReturnType<typeof setInterval> | null = null;
+  let showAgentsBoard = $state(false);
 
   // Store unsubscribe functions to prevent memory leaks
   const unsubMessages = sessionMessages.subscribe(v => messagesMap = v);
@@ -145,7 +147,7 @@
 
   // Load child sessions for inline display
   async function loadChildSessions() {
-    if (!sessionId || sessionHierarchy?.hasParent) return;
+    if (!sessionId || sessionHierarchy?.isAgentChild) return;
     try {
       childSessions = await sessionHierarchyApi.getChildren(sessionId);
     } catch (e) {
@@ -164,7 +166,7 @@
 
   // Load child sessions on mount and refresh periodically
   $effect(() => {
-    if (sessionId && (!sessionHierarchy || !sessionHierarchy.hasParent)) {
+    if (sessionId && (!sessionHierarchy || !sessionHierarchy.isAgentChild)) {
       loadChildSessions();
       // Clear any existing interval first
       if (childSessionsRefreshInterval) clearInterval(childSessionsRefreshInterval);
@@ -172,7 +174,7 @@
       childSessionsRefreshInterval = setInterval(loadChildSessions, 3000);
     }
 
-    // Cleanup when sessionId changes or hasParent changes
+    // Cleanup when sessionId or hierarchy status changes
     return () => {
       if (childSessionsRefreshInterval) {
         clearInterval(childSessionsRefreshInterval);
@@ -196,9 +198,25 @@
     }
   });
 
-  // Split children into active (show inline) and completed (show in panel at bottom)
-  const activeChildSessions = $derived(childSessions.filter(c => isActiveStatus(c.agent_status)));
-  const completedChildSessions = $derived(childSessions.filter(c => !isActiveStatus(c.agent_status)));
+  // Split child sessions by type to avoid mixing forks and delegated agents
+  const agentChildSessions = $derived(childSessions.filter(c => c.session_type !== "fork"));
+  const forkChildSessions = $derived(childSessions.filter(c => c.session_type === "fork"));
+  const activeChildSessions = $derived(agentChildSessions.filter(c => isActiveStatus(c.agent_status)));
+  const completedChildSessions = $derived(agentChildSessions.filter(c => !isActiveStatus(c.agent_status)));
+  const attentionAgentCount = $derived(
+    agentChildSessions.filter(c =>
+      c.agent_status === "blocked" ||
+      c.agent_status === "pending_review" ||
+      c.agent_status === "clarification_requested" ||
+      !!c.isWaitingForInput
+    ).length
+  );
+
+  $effect(() => {
+    if (attentionAgentCount > 0) {
+      showAgentsBoard = true;
+    }
+  });
 
   // Handle loading more messages
   async function handleLoadMore() {
@@ -283,10 +301,12 @@
     }));
 
     // Convert active child sessions to timeline items
-    const childItems: TimelineItem[] = activeChildSessions.map(c => ({
-      type: "child" as const,
-      data: c,
-    }));
+    const childItems: TimelineItem[] = showAgentsBoard
+      ? []
+      : activeChildSessions.map(c => ({
+          type: "child" as const,
+          data: c,
+        }));
 
     // Merge and sort by timestamp
     items.push(...messageItems, ...childItems);
@@ -303,6 +323,15 @@
     return items;
   }
 
+  function openHierarchySessionById(targetSessionId: string) {
+    const found = childSessions.find(s => s.id === targetSessionId);
+    if (found) {
+      onSelectHierarchySession?.(found);
+    } else if (targetSessionId) {
+      onSelectHierarchySession?.({ id: targetSessionId });
+    }
+  }
+
   const mixedTimeline = $derived(getMixedTimeline());
 
 </script>
@@ -316,6 +345,40 @@
     <div class="flex justify-center">
       <BackgroundProcessBadge {sessionId} onClick={onOpenProcesses} />
     </div>
+
+    {#if (!sessionHierarchy || !sessionHierarchy.isAgentChild) && agentChildSessions.length > 0}
+      <div class="my-2">
+        <button
+          onclick={() => showAgentsBoard = !showAgentsBoard}
+          class="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+        >
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-200">Agents View</span>
+          <div class="flex items-center gap-2">
+            {#if attentionAgentCount > 0}
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">
+                {attentionAgentCount} attention
+              </span>
+            {/if}
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+              {agentChildSessions.length} total
+            </span>
+            <svg class="w-4 h-4 text-gray-400 transition-transform {showAgentsBoard ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </button>
+
+        {#if showAgentsBoard && sessionId}
+          <div class="mt-2">
+            <AgentsKanbanView
+              parentSessionId={sessionId}
+              onSelectSession={(child) => onSelectHierarchySession?.(child)}
+              onResolveEscalation={(childSessionId) => openHierarchySessionById(childSessionId)}
+            />
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- Load more older messages button -->
     {#if pagination?.hasMore}
@@ -418,6 +481,7 @@
               {onQuoteText}
               {onForkWithQuote}
               {onAskCouncil}
+              onOpenSubagentSession={openHierarchySessionById}
               {renderMarkdown}
               {jsonBlocksMap}
               {shellBlocksMap}
@@ -466,7 +530,7 @@
     {/if}
 
     <!-- Completed child sessions panel - show at bottom for completed agents only -->
-    {#if completedChildSessions.length > 0}
+    {#if !showAgentsBoard && completedChildSessions.length > 0}
       <details class="completed-children-panel my-4 group" open={false}>
         <summary class="flex items-center gap-2 mb-2 cursor-pointer select-none list-none">
           <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-90" fill="currentColor" viewBox="0 0 20 20">
@@ -482,6 +546,34 @@
               session={child}
               onSelect={() => onSelectHierarchySession?.(child)}
             />
+          {/each}
+        </div>
+      </details>
+    {/if}
+
+    {#if !showAgentsBoard && forkChildSessions.length > 0}
+      <details class="fork-children-panel my-4 group" open={false}>
+        <summary class="flex items-center gap-2 mb-2 cursor-pointer select-none list-none">
+          <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-90" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+          </svg>
+          <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">
+            {forkChildSessions.length} Fork{forkChildSessions.length > 1 ? 's' : ''}
+          </span>
+        </summary>
+        <div class="space-y-1 mt-2 border-l-2 border-gray-200 pl-3">
+          {#each forkChildSessions as fork (fork.id)}
+            <button
+              onclick={() => onSelectHierarchySession?.(fork)}
+              class="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              <svg class="w-3.5 h-3.5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <span class="text-sm text-gray-700 dark:text-gray-300 truncate flex-1">
+                {fork.title || "Forked Session"}
+              </span>
+            </button>
           {/each}
         </div>
       </details>

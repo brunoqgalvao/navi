@@ -19,6 +19,7 @@ const DEPLOY_TO_CLOUD_ENABLED_KEY = "claude-code-ui-deploy-to-cloud-enabled";
 const RESOURCE_MONITOR_ENABLED_KEY = "claude-code-ui-resource-monitor-enabled";
 const CHAT_SORT_ORDER_KEY = "claude-code-ui-chat-sort-order";
 const CANVAS_MODE_ENABLED_KEY = "claude-code-ui-canvas-mode-enabled";
+const AUTO_COMPACT_ENABLED_KEY = "claude-code-ui-auto-compact-enabled";
 
 // Chat sort order type
 export type ChatSortOrder = "manual" | "recent";
@@ -291,6 +292,61 @@ function createCanvasModeEnabledStore() {
         localStorage.setItem(CANVAS_MODE_ENABLED_KEY, String(value));
       }
       set(value);
+    },
+  };
+}
+
+// Auto-compact feature store (default ON - syncs with ~/.claude/settings.json via backend)
+function createAutoCompactEnabledStore() {
+  // Default to true (matches Claude Code's default)
+  const stored = typeof window !== "undefined" ? localStorage.getItem(AUTO_COMPACT_ENABLED_KEY) : null;
+  const { subscribe, set } = writable(stored !== null ? stored !== "false" : true);
+
+  const syncToBackend = async (enabled: boolean) => {
+    try {
+      const { getServerUrl } = await import("../config");
+      await fetch(`${getServerUrl()}/api/config/auto-compact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+    } catch (e) {
+      console.error("Failed to sync auto-compact setting:", e);
+    }
+  };
+
+  // Load initial state from backend on first access
+  if (typeof window !== "undefined") {
+    import("../config").then(({ getServerUrl }) => {
+      fetch(`${getServerUrl()}/api/config/auto-compact`)
+        .then(r => r.json())
+        .then(data => {
+          const enabled = data.enabled !== false;
+          localStorage.setItem(AUTO_COMPACT_ENABLED_KEY, String(enabled));
+          set(enabled);
+        })
+        .catch(() => {}); // Silently fail, use localStorage default
+    });
+  }
+
+  return {
+    subscribe,
+    toggle: () => {
+      let current = true;
+      subscribe(v => current = v)();
+      const newValue = !current;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(AUTO_COMPACT_ENABLED_KEY, String(newValue));
+      }
+      set(newValue);
+      syncToBackend(newValue);
+    },
+    set: (value: boolean) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(AUTO_COMPACT_ENABLED_KEY, String(value));
+      }
+      set(value);
+      syncToBackend(value);
     },
   };
 }
@@ -711,6 +767,7 @@ export const loopModeEnabled = createLoopModeEnabledStore();
 export const deployToCloudEnabled = createDeployToCloudEnabledStore();
 export const resourceMonitorEnabled = createResourceMonitorEnabledStore();
 export const canvasModeEnabled = createCanvasModeEnabledStore();
+export const autoCompactEnabled = createAutoCompactEnabledStore();
 export const newChatView = createNewChatViewStore();
 export const showArchivedWorkspaces = createShowArchivedStore();
 export const chatSortOrder = createChatSortOrderStore();

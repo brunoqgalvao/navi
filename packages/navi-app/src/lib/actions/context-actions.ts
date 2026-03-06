@@ -6,7 +6,7 @@
  */
 
 import { get } from "svelte/store";
-import { sessionMessages, sessionHistoryContext, notifications } from "../stores";
+import { sessionMessages, sessionHistoryContext, notifications, currentSession } from "../stores";
 import type { ChatMessage } from "../stores/types";
 import type { ContentBlock, ToolResultBlock } from "../claude";
 import { api } from "../api";
@@ -96,9 +96,9 @@ function markToolResultsAsPruned(sessionId: string, prunedToolUseIds: string[]):
  * - Prunes older tool results to short summaries
  * - Marks affected messages in the UI as pruned (for visual indicator)
  */
-export async function pruneToolResults(sessionId: string): Promise<{ success: boolean; prunedCount: number; tokensSaved: number }> {
+export async function pruneToolResults(sessionId: string): Promise<{ success: boolean; prunedCount: number; tokensSaved: number; sessionReset: boolean }> {
   if (!sessionId) {
-    return { success: false, prunedCount: 0, tokensSaved: 0 };
+    return { success: false, prunedCount: 0, tokensSaved: 0, sessionReset: false };
   }
 
   try {
@@ -114,7 +114,22 @@ export async function pruneToolResults(sessionId: string): Promise<{ success: bo
         title: "Nothing to prune",
         message: "No large tool results found or no Claude session exists",
       });
-      return { success: false, prunedCount: 0, tokensSaved: 0 };
+      return { success: false, prunedCount: 0, tokensSaved: 0, sessionReset: false };
+    }
+
+    // Reset the Claude SDK session so the next run starts with fresh context.
+    // This makes prune behavior deterministic for context recovery.
+    let sessionReset = false;
+    try {
+      const resetResult = await api.sessions.resetContext(sessionId);
+      sessionReset = !!resetResult.sessionReset;
+
+      const activeSession = get(currentSession);
+      if (sessionReset && activeSession.sessionId === sessionId) {
+        currentSession.clearClaudeSession();
+      }
+    } catch (resetError) {
+      console.error("Prune succeeded but reset-context failed:", resetError);
     }
 
     // Mark the affected messages in the UI
@@ -131,13 +146,16 @@ export async function pruneToolResults(sessionId: string): Promise<{ success: bo
     notifications.add({
       type: "success",
       title: "Tool results pruned",
-      message: `Pruned ${result.prunedCount} tool outputs, saved ~${Math.round(result.tokensSaved / 1000)}k tokens`,
+      message: sessionReset
+        ? `Pruned ${result.prunedCount} tool outputs, saved ~${Math.round(result.tokensSaved / 1000)}k tokens, and reset Claude context`
+        : `Pruned ${result.prunedCount} tool outputs, saved ~${Math.round(result.tokensSaved / 1000)}k tokens`,
     });
 
     return {
       success: true,
       prunedCount: result.prunedCount,
       tokensSaved: result.tokensSaved,
+      sessionReset,
     };
   } catch (e) {
     console.error("Failed to prune tool results:", e);
@@ -156,7 +174,7 @@ export async function pruneToolResults(sessionId: string): Promise<{ success: bo
       title: "Prune failed",
       message: userMessage,
     });
-    return { success: false, prunedCount: 0, tokensSaved: 0 };
+    return { success: false, prunedCount: 0, tokensSaved: 0, sessionReset: false };
   }
 }
 

@@ -121,6 +121,8 @@ export async function handleSessionHierarchyRoutes(
         "working",
         "waiting",
         "blocked",
+        "pending_review",
+        "clarification_requested",
         "delivered",
         "failed",
         "archived",

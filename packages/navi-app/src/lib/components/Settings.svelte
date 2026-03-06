@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, costsApi, containerPreviewApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project, type ContainerPreview } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
+  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
@@ -1258,6 +1258,31 @@
                   {#if autoTitleEnabled}
                     <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
                       Uses {hasOpenAIKey ? "GPT-4o-mini" : hasAnthropicKey ? "Claude Haiku" : "your API"} for title generation (~$0.0001 per title)
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Auto-compact</h5>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Automatically compact context when approaching the limit</p>
+                    </div>
+                    <button
+                      onclick={() => autoCompactEnabled.toggle()}
+                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$autoCompactEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
+                    >
+                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$autoCompactEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+                    </button>
+                  </div>
+
+                  {#if $autoCompactEnabled}
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                      When context usage gets high, Claude will automatically summarize the conversation to free up space. This persists to your Claude settings.
+                    </p>
+                  {:else}
+                    <p class="text-sm text-amber-600 dark:text-amber-400 mt-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
+                      With auto-compact disabled, long conversations will hit the context limit and require manual compaction.
                     </p>
                   {/if}
                 </div>

@@ -111,11 +111,13 @@ function getSystemStats(): SystemResourceStats {
 
 function getProcessStats(): ProcessResourceStats[] {
   const stats: ProcessResourceStats[] = [];
+  const trackedPids = new Set<number>();
 
   // Active query processes (Claude Agent SDK workers)
   const activeProcesses = getActiveProcesses();
   for (const [sessionId, active] of activeProcesses.entries()) {
     if (active.process.pid) {
+      trackedPids.add(active.process.pid);
       stats.push({
         id: sessionId,
         pid: active.process.pid,
@@ -131,6 +133,7 @@ function getProcessStats(): ProcessResourceStats[] {
   const bgProcesses = getBackgroundProcesses();
   for (const proc of bgProcesses) {
     if (proc.pid) {
+      trackedPids.add(proc.pid);
       stats.push({
         id: proc.id,
         pid: proc.pid,
@@ -140,6 +143,44 @@ function getProcessStats(): ProcessResourceStats[] {
         cpu: getProcessCpu(proc.pid),
       });
     }
+  }
+
+  // Detect orphaned query workers (same parent process, but not in activeProcesses map)
+  // This makes leaked workers visible in Resource Monitor.
+  try {
+    const output = execSync("ps -axo pid=,ppid=,rss=,%cpu=,command=", {
+      encoding: "utf-8",
+      timeout: 1000,
+    });
+
+    const lines = output.split("\n");
+    for (const line of lines) {
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+([\d.]+)\s+(.*)$/);
+      if (!match) continue;
+
+      const pid = parseInt(match[1], 10);
+      const ppid = parseInt(match[2], 10);
+      const rssKb = parseInt(match[3], 10);
+      const cpu = parseFloat(match[4]);
+      const command = match[5] || "";
+
+      if (
+        ppid === process.pid &&
+        command.includes("query-worker.ts") &&
+        !trackedPids.has(pid)
+      ) {
+        stats.push({
+          id: `orphan-${pid}`,
+          pid,
+          type: "query-orphan",
+          name: "Claude Agent (orphan)",
+          memory: Number.isNaN(rssKb) ? undefined : rssKb * 1024,
+          cpu: Number.isNaN(cpu) ? undefined : cpu,
+        });
+      }
+    }
+  } catch {
+    // Best-effort orphan detection
   }
 
   return stats;

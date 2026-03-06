@@ -39,36 +39,83 @@ export function formatContent(content: ContentBlock[] | string): string {
     .join(" ");
 }
 
+const localUrlPattern = /(https?:\/\/localhost[:\d]*[^\s<"']*|https?:\/\/127\.0\.0\.1[:\d]*[^\s<"']*|https?:\/\/0\.0\.0\.0[:\d]*[^\s<"']*|(?<![\/\w])localhost:\d+[^\s<"']*|(?<![\/\w])127\.0\.0\.1:\d+[^\s<"']*|(?<![\/\w])0\.0\.0\.0:\d+[^\s<"']*)/g;
+
+function splitTrailingUrlPunctuation(url: string): { coreUrl: string; trailing: string } {
+  let coreUrl = url;
+  let trailing = "";
+
+  const moveLastCharToTrailing = () => {
+    const lastChar = coreUrl.slice(-1);
+    if (!lastChar) return;
+    coreUrl = coreUrl.slice(0, -1);
+    trailing = `${lastChar}${trailing}`;
+  };
+
+  while (coreUrl && /[.,!?;:]/.test(coreUrl.slice(-1))) {
+    moveLastCharToTrailing();
+  }
+
+  while (coreUrl) {
+    const lastChar = coreUrl.slice(-1);
+    const openingChar = lastChar === ")" ? "(" : lastChar === "]" ? "[" : lastChar === "}" ? "{" : "";
+    if (!openingChar) break;
+
+    const openingCount = (coreUrl.match(new RegExp(`\\${openingChar}`, "g")) || []).length;
+    const closingCount = (coreUrl.match(new RegExp(`\\${lastChar}`, "g")) || []).length;
+
+    if (closingCount <= openingCount) break;
+    moveLastCharToTrailing();
+  }
+
+  return { coreUrl, trailing };
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 export function linkifyUrls(html: string, escapeHtmlFn: typeof escapeHtml = escapeHtml): string {
   // Split HTML into tags and text content to avoid matching URLs inside attributes
   const parts = html.split(/(<[^>]+>)/);
 
-  const urlPattern = /(https?:\/\/localhost[:\d]*[^\s<"']*|https?:\/\/127\.0\.0\.1[:\d]*[^\s<"']*|(?<![\/\w])localhost:\d+[^\s<"']*|(?<![\/\w])127\.0\.0\.1:\d+[^\s<"']*)/g;
-
   let insideAnchor = false;
+  let insideCode = false;
+  let insidePre = false;
 
   return parts.map(part => {
-    // Track if we're inside an <a> tag
-    if (part.match(/^<a[\s>]/i)) {
-      insideAnchor = true;
-    } else if (part.match(/^<\/a>/i)) {
-      insideAnchor = false;
-    }
-
     // If this part is an HTML tag (starts with <), don't process it
     if (part.startsWith('<')) {
+      const tagMatch = part.match(/^<\s*(\/)?\s*([a-z0-9]+)/i);
+      if (tagMatch) {
+        const isClosing = Boolean(tagMatch[1]);
+        const tagName = tagMatch[2].toLowerCase();
+
+        if (tagName === "a") insideAnchor = !isClosing;
+        if (tagName === "code") insideCode = !isClosing;
+        if (tagName === "pre") insidePre = !isClosing;
+      }
       return part;
     }
 
-    // Don't linkify URLs that are already inside anchor tags (as link text)
-    if (insideAnchor) {
+    // Don't linkify URLs that are already inside anchor, code, or pre tags.
+    if (insideAnchor || insideCode || insidePre) {
       return part;
     }
 
     // Only linkify URLs in text content outside of anchor tags
-    return part.replace(urlPattern, (url) => {
-      const fullUrl = url.startsWith("http") ? url : `http://${url}`;
-      return `<a href="#" class="preview-link" data-url="${escapeHtmlFn(fullUrl)}">${url}</a>`;
+    return part.replace(localUrlPattern, (matchedUrl) => {
+      const { coreUrl, trailing } = splitTrailingUrlPunctuation(matchedUrl);
+      if (!coreUrl) return matchedUrl;
+
+      const decodedUrl = decodeHtmlEntities(coreUrl);
+      const fullUrl = decodedUrl.startsWith("http") ? decodedUrl : `http://${decodedUrl}`;
+      return `<a href="#" class="preview-link" data-url="${escapeHtmlFn(fullUrl)}">${coreUrl}</a>${trailing}`;
     });
   }).join('');
 }
@@ -176,14 +223,14 @@ export function renderMarkdownWithLinks(
   projectFileIndex: Map<string, string>
 ): string {
   const html = marked.parse(content) as string;
-  return linkifyUrls(
-    linkifyFilenames(
+  return linkifyFilenames(
+    linkifyUrls(
       linkifyFileLineReferences(
         linkifyCodePaths(html, projectPath, projectFileIndex),
         projectPath,
         projectFileIndex
-      ),
-      projectFileIndex
-    )
+      )
+    ),
+    projectFileIndex
   );
 }

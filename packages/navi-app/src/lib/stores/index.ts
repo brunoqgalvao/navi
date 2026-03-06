@@ -86,6 +86,7 @@ export {
   deployToCloudEnabled,
   resourceMonitorEnabled,
   canvasModeEnabled,
+  autoCompactEnabled,
   newChatView,
   showArchivedWorkspaces,
   chatSortOrder,

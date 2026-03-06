@@ -40,6 +40,7 @@ export {
   createFolder,
   updateFolder,
   deleteFolder,
+  moveFolder,
   toggleFolderCollapse,
   setProjectFolder,
   reorderFolders,

@@ -32,6 +32,8 @@
     working: "bg-green-500",
     waiting: "bg-yellow-500",
     blocked: "bg-orange-500",
+    pending_review: "bg-blue-500",
+    clarification_requested: "bg-indigo-500",
     delivered: "bg-blue-500",
     failed: "bg-red-500",
     archived: "bg-gray-400",
@@ -41,12 +43,16 @@
     working: "Working",
     waiting: "Waiting",
     blocked: "Blocked",
+    pending_review: "Pending Review",
+    clarification_requested: "Clarification",
     delivered: "Done",
     failed: "Failed",
     archived: "Archived",
   };
 
-  const shouldPulse = $derived(pulse && (status === "working" || status === "blocked"));
+  const shouldPulse = $derived(
+    pulse && (status === "working" || status === "blocked" || status === "clarification_requested")
+  );
 </script>
 
 <span

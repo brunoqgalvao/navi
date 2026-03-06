@@ -447,7 +447,11 @@ export function createMessageHandler(config: MessageHandlerConfig) {
       case "session:delivered":
       case "session:archived":
       case "session:decision_logged":
-      case "session:artifact_created": {
+      case "session:artifact_created":
+      case "session:draft_submitted":
+      case "session:clarification_requested":
+      case "session:clarification_responded":
+      case "session:draft_accepted": {
         // Forward to session hierarchy handler
         callbacks.onSessionHierarchyEvent?.(msg as any);
         break;

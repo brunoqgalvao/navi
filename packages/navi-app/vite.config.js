@@ -4,6 +4,16 @@ import path from "path";
 import { readFileSync } from "fs";
 
 const host = process.env.TAURI_DEV_HOST;
+const configuredAllowedHosts = (process.env.VITE_ALLOWED_HOSTS || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const allowedHosts = Array.from(
+  new Set([
+    ...configuredAllowedHosts,
+    ...(host && host !== "0.0.0.0" ? [host] : []),
+  ]),
+);
 
 // Check if running in Navi preview container
 const isPreviewMode = process.env.NAVI_PREVIEW === "true";
@@ -32,6 +42,7 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: host || false,
+    allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,
     // HMR configuration - always use explicit config to ensure WebSocket connects to correct port
     // This is critical when viewing through a proxy (like native preview on port 3001)
     hmr: host

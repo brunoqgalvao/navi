@@ -30,8 +30,12 @@
     if (url.startsWith("//")) {
       url = "https:" + url;
     }
-    const isExternal = url.startsWith("http://") || url.startsWith("https://");
-    const isLocalhost = url.includes("localhost") || url.match(/:\d+/);
+    if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0):\d+/i.test(url)) {
+      url = `http://${url}`;
+    }
+
+    const isExternal = /^https?:\/\//i.test(url);
+    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(url);
     if (isExternal) {
       try {
         const domain = new URL(url).hostname;
@@ -170,6 +174,7 @@
     createFolder as createFolderAction,
     updateFolder as updateFolderAction,
     deleteFolder as deleteFolderAction,
+    moveFolder as moveFolderAction,
     toggleFolderCollapse as toggleFolderCollapseAction,
     setProjectFolder as setProjectFolderAction,
     reorderFolders as reorderFoldersAction,
@@ -286,10 +291,17 @@
     if (!currentSessionData) return null;
     const sess = currentSessionData as any;
     const hasParent = !!sess.parent_session_id;
+    const inferredType = sess.session_type || (hasParent ? "agent" : "root");
+    const sessionType = inferredType as "root" | "agent" | "fork";
+    const isAgentChild = hasParent && sessionType === "agent";
+    const isForkChild = hasParent && sessionType === "fork";
     const isBlocked = sess.agent_status === "blocked";
     const escalation = isBlocked ? parseEscalation(sess.escalation) : null;
     return {
       hasParent,
+      sessionType,
+      isAgentChild,
+      isForkChild,
       isBlocked,
       escalation,
       role: sess.role || null,
@@ -811,6 +823,54 @@
             message: event.deliverable.summary,
             actions: [{
               label: "View",
+              variant: "primary",
+              handler: () => navigateToAgent(event.sessionId),
+            }],
+          });
+          break;
+        case "session:draft_submitted":
+          notifications.add({
+            type: "warning",
+            title: "Draft Needs Review",
+            message: event.summary,
+            actions: [{
+              label: "Open Agent",
+              variant: "primary",
+              handler: () => navigateToAgent(event.sessionId),
+            }],
+          });
+          break;
+        case "session:clarification_requested":
+          notifications.add({
+            type: "warning",
+            title: "Clarification Needed",
+            message: event.question,
+            actions: [{
+              label: "Open Agent",
+              variant: "primary",
+              handler: () => navigateToAgent(event.sessionId),
+            }],
+          });
+          break;
+        case "session:clarification_responded":
+          notifications.add({
+            type: "info",
+            title: "Clarification Response",
+            message: event.response,
+            actions: [{
+              label: "Open Agent",
+              variant: "primary",
+              handler: () => navigateToAgent(event.sessionId),
+            }],
+          });
+          break;
+        case "session:draft_accepted":
+          notifications.add({
+            type: "success",
+            title: "Draft Accepted",
+            message: "Child deliverable accepted and finalized.",
+            actions: [{
+              label: "Open Agent",
               variant: "primary",
               handler: () => navigateToAgent(event.sessionId),
             }],
@@ -1414,6 +1474,16 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
   }
 
+  function isSessionBusy(sessionId: string): boolean {
+    if (get(loadingSessions).has(sessionId)) return true;
+    const status = get(sessionStatus).get(sessionId)?.status;
+    return status === "running" || status === "permission" || status === "awaiting_input";
+  }
+
+  function canProcessQueuedMessages(sessionId: string): boolean {
+    return !isSessionBusy(sessionId);
+  }
+
   $effect(() => {
     attachSession($session.sessionId, $isConnected);
   });
@@ -1424,7 +1494,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const connected = $isConnected;
     const queue = $messageQueue;
 
-    if (sessionId && connected && queue.length > 0) {
+    if (sessionId && connected && queue.length > 0 && canProcessQueuedMessages(sessionId)) {
       // Check if there are queued messages for this session
       const sessionQueue = queue.filter(m => m.sessionId === sessionId);
       if (sessionQueue.length > 0) {
@@ -1479,6 +1549,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   const createFolder = createFolderAction;
   const updateFolder = updateFolderAction;
   const deleteFolder = deleteFolderAction;
+  const moveFolder = moveFolderAction;
   const toggleFolderCollapse = toggleFolderCollapseAction;
   const setProjectFolder = setProjectFolderAction;
   const reorderFolders = reorderFoldersAction;
@@ -2440,6 +2511,8 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   function processMessageQueue(sessionId: string) {
+    if (!canProcessQueuedMessages(sessionId)) return;
+
     const queue = $messageQueue.filter(m => m.sessionId === sessionId);
     if (queue.length === 0) return;
 
@@ -2577,6 +2650,21 @@ Please walk me through the setup step by step. When I have the credentials, save
     });
   }
 
+  function resolveHistoryContextForQuery(sessionId: string, backend: BackendId): string | undefined {
+    const historyCtx = $sessionHistoryContext.get(sessionId);
+
+    // "pruned" is a UI marker, not actual prompt context.
+    if (historyCtx && historyCtx !== "pruned") {
+      return historyCtx;
+    }
+
+    if (backend !== "claude") {
+      return buildHistoryContextFromMessages(sessionId);
+    }
+
+    return undefined;
+  }
+
   // Send a command/message programmatically (e.g., /compact)
   async function sendCommand(command: string) {
     if (!command.trim() || !$isConnected) return;
@@ -2616,9 +2704,9 @@ Please walk me through the setup step by step. When I have the credentials, save
         if (!newSessionId) return;
         currentSessionId = newSessionId;
     }
-    const isCurrentSessionLoading = $loadingSessions.has(currentSessionId);
+    const isCurrentSessionBusy = isSessionBusy(currentSessionId);
 
-    if (isCurrentSessionLoading) {
+    if (isCurrentSessionBusy) {
       const currentAttachedFiles = get(attachedFiles);
       messageQueue.add({ sessionId: currentSessionId, text: inputText.trim(), attachments: [...currentAttachedFiles] });
       inputText = "";
@@ -2691,10 +2779,7 @@ Please walk me through the setup step by step. When I have the credentials, save
 
     // For non-Claude backends, build history context from messages if not already provided
     // Claude maintains its own session state via claudeSessionId, but Gemini/Codex need the full context
-    let historyCtx = $sessionHistoryContext.get(currentSessionId);
-    if (!historyCtx && backend !== "claude") {
-      historyCtx = buildHistoryContextFromMessages(currentSessionId);
-    }
+    const historyCtx = resolveHistoryContextForQuery(currentSessionId, backend);
 
     client.query({
       prompt: promptWithoutAgent,
@@ -2731,9 +2816,9 @@ Please walk me through the setup step by step. When I have the credentials, save
       return;
     }
 
-    const isCurrentSessionLoading = $loadingSessions.has(targetSessionId);
+    const isCurrentSessionBusy = isSessionBusy(targetSessionId);
 
-    if (isCurrentSessionLoading) {
+    if (isCurrentSessionBusy) {
       const currentAttachedFiles = get(attachedFiles);
       messageQueue.add({ sessionId: targetSessionId, text: inputText.trim(), attachments: [...currentAttachedFiles] });
       inputText = "";
@@ -2792,10 +2877,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const backend = sessionBackendStore.get(targetSessionId, get(sessionBackendStore)) || get(defaultBackend);
 
     // For non-Claude backends, build history context from messages
-    let historyCtx = $sessionHistoryContext.get(targetSessionId);
-    if (!historyCtx && backend !== "claude") {
-      historyCtx = buildHistoryContextFromMessages(targetSessionId);
-    }
+    const historyCtx = resolveHistoryContextForQuery(targetSessionId, backend);
 
     client.query({
       prompt: messageContent,
@@ -2821,6 +2903,10 @@ Please walk me through the setup step by step. When I have the credentials, save
   async function sendMessageWithContent(targetSessionId: string, messageContent: string) {
     if (!messageContent.trim() || !$isConnected) return;
     if (!$session.projectId) return;
+    if (isSessionBusy(targetSessionId)) {
+      messageQueue.add({ sessionId: targetSessionId, text: messageContent, attachments: [] });
+      return;
+    }
 
     sessionMessages.addMessage(targetSessionId, {
       id: crypto.randomUUID(),
@@ -2836,10 +2922,7 @@ Please walk me through the setup step by step. When I have the credentials, save
 
     // Check sessionHistoryContext first (for forked sessions, rollback, etc.)
     // For non-Claude backends, fall back to building history from messages
-    let historyCtx = $sessionHistoryContext.get(targetSessionId);
-    if (!historyCtx && backend !== "claude") {
-      historyCtx = buildHistoryContextFromMessages(targetSessionId);
-    }
+    const historyCtx = resolveHistoryContextForQuery(targetSessionId, backend);
 
     client.query({
       prompt: messageContent,
@@ -3198,15 +3281,15 @@ Please walk me through the setup step by step. When I have the credentials, save
     const html = marked.parse(content) as string;
     const projectPath = currentProject?.path;
     return linkifyChatReferences(
-      linkifyUrls(
-        linkifyFilenames(
+      linkifyFilenames(
+        linkifyUrls(
           linkifyFileLineReferences(
             linkifyCodePaths(html, projectPath, projectFileIndex),
             projectPath,
             projectFileIndex
-          ),
-          projectFileIndex
-        )
+          )
+        ),
+        projectFileIndex
       ),
       chatLookup()
     );
@@ -3724,6 +3807,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     onFolderCreate={createFolder}
     onFolderUpdate={updateFolder}
     onFolderDelete={deleteFolder}
+    onFolderMove={moveFolder}
     onFolderToggleCollapse={toggleFolderCollapse}
     onProjectSetFolder={setProjectFolder}
     onFolderReorder={reorderFolders}
@@ -3917,7 +4001,7 @@ Please walk me through the setup step by step. When I have the credentials, save
               </div>
             {/if}
 
-            <!-- Subagent sticky header - stays visible when scrolling in child agent sessions -->
+            <!-- Child session sticky header (forks + agents). Escalation controls only for agents. -->
             {#if currentSessionHierarchy()?.hasParent && $session.sessionId}
               <div class="sticky top-0 z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
                 <div class="max-w-3xl mx-auto w-full px-4 py-2">
@@ -3932,11 +4016,11 @@ Please walk me through the setup step by step. When I have the credentials, save
                 </div>
 
                 <!-- Escalation banner - show when this child session is blocked -->
-                {#if currentSessionHierarchy()?.isBlocked && currentSessionHierarchy()?.escalation}
+                {#if currentSessionHierarchy()?.isAgentChild && currentSessionHierarchy()?.isBlocked && currentSessionHierarchy()?.escalation}
                   <div class="max-w-3xl mx-auto w-full px-4 py-2">
                     <EscalationBanner
                       sessionId={$session.sessionId}
-                      escalation={currentSessionHierarchy()?.escalation ?? null}
+                      escalation={currentSessionHierarchy()?.escalation!}
                       sessionTitle={currentSessionData?.title || ''}
                       sessionRole={currentSessionHierarchy()?.role || undefined}
                       onResolved={async () => {

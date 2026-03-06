@@ -9,9 +9,13 @@ export type AgentStatus =
   | "working"
   | "waiting"
   | "blocked"
+  | "pending_review"
+  | "clarification_requested"
   | "delivered"
   | "failed"
   | "archived";
+
+export type SessionType = "root" | "agent" | "fork";
 
 // Escalation types
 export type EscalationType =
@@ -82,7 +86,10 @@ export interface HierarchySession {
   task: string | null;
   agent_status: AgentStatus;
   agent_type: string | null; // 'browser' | 'coding' | 'runner' | etc. for native UI
+  session_type: SessionType | null;
   deliverable: string | null; // JSON string
+  draft_deliverable?: string | null; // JSON string
+  draft_revision?: number | null;
   escalation: string | null; // JSON string
   delivered_at: number | null;
   archived_at: number | null;
@@ -178,6 +185,35 @@ export interface SessionArtifactCreatedEvent {
   artifact: SessionArtifact;
 }
 
+export interface SessionDraftSubmittedEvent {
+  type: "session:draft_submitted";
+  sessionId: string;
+  parentId: string;
+  draftId: string;
+  summary: string;
+}
+
+export interface SessionClarificationRequestedEvent {
+  type: "session:clarification_requested";
+  sessionId: string;
+  parentId: string;
+  clarificationId: string;
+  question: string;
+}
+
+export interface SessionClarificationRespondedEvent {
+  type: "session:clarification_responded";
+  sessionId: string;
+  clarificationId: string;
+  response: string;
+}
+
+export interface SessionDraftAcceptedEvent {
+  type: "session:draft_accepted";
+  sessionId: string;
+  parentId: string;
+}
+
 export type SessionHierarchyEvent =
   | SessionSpawnedEvent
   | SessionStatusChangedEvent
@@ -186,7 +222,11 @@ export type SessionHierarchyEvent =
   | SessionDeliveredEvent
   | SessionArchivedEvent
   | SessionDecisionLoggedEvent
-  | SessionArtifactCreatedEvent;
+  | SessionArtifactCreatedEvent
+  | SessionDraftSubmittedEvent
+  | SessionClarificationRequestedEvent
+  | SessionClarificationRespondedEvent
+  | SessionDraftAcceptedEvent;
 
 // Parse helpers
 export function parseDeliverable(json: string | null): Deliverable | null {
@@ -209,7 +249,7 @@ export function parseEscalation(json: string | null): Escalation | null {
 
 // Status helpers
 export function isActiveStatus(status: AgentStatus): boolean {
-  return ["working", "waiting", "blocked"].includes(status);
+  return ["working", "waiting", "blocked", "pending_review", "clarification_requested"].includes(status);
 }
 
 export function isCompletedStatus(status: AgentStatus): boolean {
@@ -224,6 +264,10 @@ export function getStatusIcon(status: AgentStatus): string {
       return "○"; // hollow dot
     case "blocked":
       return "⚠"; // warning
+    case "pending_review":
+      return "📝"; // draft waiting review
+    case "clarification_requested":
+      return "💬"; // waiting clarification
     case "delivered":
       return "✓"; // checkmark
     case "failed":
@@ -243,6 +287,10 @@ export function getStatusColor(status: AgentStatus): string {
       return "text-yellow-500";
     case "blocked":
       return "text-orange-500";
+    case "pending_review":
+      return "text-blue-500";
+    case "clarification_requested":
+      return "text-indigo-500";
     case "delivered":
       return "text-blue-500";
     case "failed":

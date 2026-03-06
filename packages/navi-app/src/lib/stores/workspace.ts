@@ -44,6 +44,7 @@ export const defaultProjectsDir = writable<string>("");
 export interface WorkspaceFolder {
   id: string;
   name: string;
+  parent_id: string | null;
   sort_order: number;
   collapsed: number;
   pinned?: number;

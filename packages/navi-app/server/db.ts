@@ -363,6 +363,7 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS workspace_folders (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      parent_id TEXT REFERENCES workspace_folders(id),
       sort_order INTEGER DEFAULT 0,
       collapsed INTEGER DEFAULT 1,
       pinned INTEGER DEFAULT 0,
@@ -375,6 +376,12 @@ export async function initDb() {
   // Migration: add pinned column to workspace_folders (for existing databases)
   try {
     db.run("ALTER TABLE workspace_folders ADD COLUMN pinned INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE workspace_folders ADD COLUMN parent_id TEXT");
+  } catch {}
+  try {
+    db.run("CREATE INDEX IF NOT EXISTS idx_workspace_folders_parent ON workspace_folders(parent_id)");
   } catch {}
 
   try {
@@ -876,6 +883,7 @@ export interface ProjectWithStats extends Project {
 export interface WorkspaceFolder {
   id: string;
   name: string;
+  parent_id: string | null;
   sort_order: number;
   collapsed: number;
   pinned: number;
@@ -884,21 +892,37 @@ export interface WorkspaceFolder {
 }
 
 export const workspaceFolders = {
-  list: () => queryAll<WorkspaceFolder>("SELECT * FROM workspace_folders ORDER BY pinned DESC, sort_order ASC"),
+  list: () => queryAll<WorkspaceFolder>("SELECT * FROM workspace_folders ORDER BY pinned DESC, sort_order ASC, created_at ASC"),
+  listByParent: (parentId: string | null) =>
+    parentId === null
+      ? queryAll<WorkspaceFolder>("SELECT * FROM workspace_folders WHERE parent_id IS NULL ORDER BY pinned DESC, sort_order ASC, created_at ASC")
+      : queryAll<WorkspaceFolder>("SELECT * FROM workspace_folders WHERE parent_id = ? ORDER BY pinned DESC, sort_order ASC, created_at ASC", [parentId]),
   get: (id: string) => queryOne<WorkspaceFolder>("SELECT * FROM workspace_folders WHERE id = ?", [id]),
-  create: (id: string, name: string, sortOrder: number = 0) => {
+  create: (id: string, name: string, sortOrder: number = 0, parentId: string | null = null) => {
     const now = Date.now();
-    run("INSERT INTO workspace_folders (id, name, sort_order, collapsed, pinned, created_at, updated_at) VALUES (?, ?, ?, 0, 0, ?, ?)",
-        [id, name, sortOrder, now, now]);
+    run("INSERT INTO workspace_folders (id, name, parent_id, sort_order, collapsed, pinned, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 0, ?, ?)",
+        [id, name, parentId, sortOrder, now, now]);
   },
-  update: (id: string, name: string) =>
-    run("UPDATE workspace_folders SET name = ?, updated_at = ? WHERE id = ?", [name, Date.now(), id]),
+  update: (id: string, updates: { name?: string; parentId?: string | null }) => {
+    const existing = queryOne<WorkspaceFolder>("SELECT * FROM workspace_folders WHERE id = ?", [id]);
+    if (!existing) return;
+
+    const name = updates.name ?? existing.name;
+    const parentId = updates.parentId === undefined ? existing.parent_id : updates.parentId;
+
+    run("UPDATE workspace_folders SET name = ?, parent_id = ?, updated_at = ? WHERE id = ?", [name, parentId, Date.now(), id]);
+  },
   delete: (id: string) => {
-    run("UPDATE projects SET folder_id = NULL WHERE folder_id = ?", [id]);
+    const folder = queryOne<WorkspaceFolder>("SELECT * FROM workspace_folders WHERE id = ?", [id]);
+    const parentId = folder?.parent_id ?? null;
+    run("UPDATE projects SET folder_id = ? WHERE folder_id = ?", [parentId, id]);
+    run("UPDATE workspace_folders SET parent_id = ?, updated_at = ? WHERE parent_id = ?", [parentId, Date.now(), id]);
     run("DELETE FROM workspace_folders WHERE id = ?", [id]);
   },
   updateOrder: (id: string, sortOrder: number) =>
     run("UPDATE workspace_folders SET sort_order = ? WHERE id = ?", [sortOrder, id]),
+  move: (id: string, parentId: string | null, sortOrder: number) =>
+    run("UPDATE workspace_folders SET parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?", [parentId, sortOrder, Date.now(), id]),
   toggleCollapsed: (id: string, collapsed: boolean) =>
     run("UPDATE workspace_folders SET collapsed = ? WHERE id = ?", [collapsed ? 1 : 0, id]),
   togglePin: (id: string, pinned: boolean) =>
@@ -2400,7 +2424,7 @@ export const sessionHierarchy = {
     const activeCount = queryOne<{ count: number }>(
       `SELECT COUNT(*) as count FROM sessions
        WHERE (root_session_id = ? OR id = ?)
-       AND agent_status IN ('working', 'waiting', 'blocked')`,
+       AND agent_status IN ('working', 'waiting', 'blocked', 'pending_review', 'clarification_requested')`,
       [rootId, rootId]
     );
     if (activeCount && activeCount.count >= MAX_CONCURRENT_SESSIONS) {
@@ -2551,7 +2575,7 @@ export const sessionHierarchy = {
     queryAll<Session>(
       `SELECT * FROM sessions
        WHERE (root_session_id = ? OR id = ?)
-       AND agent_status IN ('working', 'waiting', 'blocked')
+       AND agent_status IN ('working', 'waiting', 'blocked', 'pending_review', 'clarification_requested')
        ORDER BY depth ASC, created_at ASC`,
       [rootSessionId, rootSessionId]
     ),
@@ -2571,7 +2595,7 @@ export const sessionHierarchy = {
     const result = queryOne<{ count: number }>(
       `SELECT COUNT(*) as count FROM sessions
        WHERE (root_session_id = ? OR id = ?)
-       AND agent_status IN ('working', 'waiting', 'blocked')`,
+       AND agent_status IN ('working', 'waiting', 'blocked', 'pending_review', 'clarification_requested')`,
       [rootSessionId, rootSessionId]
     );
     return result?.count || 0;
