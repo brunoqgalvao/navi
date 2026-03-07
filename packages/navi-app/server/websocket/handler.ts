@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb, clarificationRequests, draftDeliverables, type DraftDeliverable } from "../db";
+import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb, clarificationRequests, draftDeliverables, workflowRuns, type DraftDeliverable } from "../db";
 import { executeInCloud, type CloudExecutionStage } from "../services/e2b-executor";
 import { sessionManager, type SessionEvent } from "../services/session-manager";
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
@@ -624,6 +624,19 @@ function sendToSession(sessionId: string | undefined, payload: unknown) {
     console.warn("[sendToSession] No sessionId provided, dropping message");
     return;
   }
+  const messageType = typeof payload === "object" && payload !== null && "type" in payload
+    ? (payload as { type?: string }).type
+    : undefined;
+  if (messageType === "done") {
+    workflowRuns.completeBySession(sessionId, "success");
+  } else if (messageType === "error") {
+    workflowRuns.completeBySession(sessionId, "failed", {
+      error:
+        typeof payload === "object" && payload !== null && "error" in payload
+          ? String((payload as { error?: unknown }).error ?? "Unknown workflow error")
+          : "Unknown workflow error",
+    });
+  }
   const active = activeProcesses.get(sessionId);
   if (active?.ws) {
     safeSend(active.ws, payload);
@@ -1141,6 +1154,15 @@ async function startChildSessionWithAdapter(
       model: config.model,
       permissionMode: "auto", // Auto-accept for child sessions
     })) {
+      if (event.type === "backend_session") {
+        sessions.updateBackendSessionState(
+          event.backendSessionId,
+          event.metadata ? JSON.stringify(event.metadata) : null,
+          Date.now(),
+          childSessionId
+        );
+      }
+
       // Broadcast events
       const uiEvent = convertNormalizedEventToUI(event, childSessionId);
       if (uiEvent) {
@@ -2099,6 +2121,11 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
   const project = projectId ? projects.get(projectId) : null;
   const workingDirectory = project?.path || process.cwd();
   const needsAutoTitle = session?.title === "New Chat" || session?.title === "New conversation";
+  const adapter = getAdapter(backendId);
+  const resumeId =
+    adapter.supportsResume && session?.backend_session_id
+      ? session.backend_session_id
+      : undefined;
 
   const hasTextBlock = (content: unknown): boolean => {
     if (!Array.isArray(content)) return false;
@@ -2128,9 +2155,6 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
     session?.auto_accept_all === 1 ||
     project?.auto_accept_all === 1;
 
-  // Get the adapter
-  const adapter = getAdapter(backendId);
-
   // Track this adapter session so we can cancel it on abort
   if (sessionId) {
     activeAdapterSessions.set(sessionId, backendId);
@@ -2146,12 +2170,26 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
   try {
     // Run query through adapter
     for await (const event of adapter.query({
-      prompt: historyContext ? `${historyContext}\n\nUser's new message:\n${prompt}` : prompt || "",
+      prompt: resumeId
+        ? prompt || ""
+        : historyContext
+          ? `${historyContext}\n\nUser's new message:\n${prompt}`
+          : prompt || "",
       cwd: workingDirectory,
       sessionId: sessionId || crypto.randomUUID(),
       model,
+      resume: resumeId,
       permissionMode: isAutoApprove ? "auto" : "confirm",
     })) {
+      if (event.type === "backend_session" && sessionId) {
+        sessions.updateBackendSessionState(
+          event.backendSessionId,
+          event.metadata ? JSON.stringify(event.metadata) : null,
+          Date.now(),
+          sessionId
+        );
+      }
+
       if (event.type === "assistant" && hasMessageContent(event.content)) {
         lastAssistantContent = event.content;
         if (hasTextBlock(event.content)) {
@@ -2313,6 +2351,9 @@ function convertNormalizedEventToUI(event: NormalizedEvent, sessionId?: string):
         uuid,
         timestamp,
       };
+
+    case "backend_session":
+      return null;
 
     default:
       return null;

@@ -103,6 +103,13 @@ export interface ToolProgressEvent {
   elapsedTimeSeconds?: number;
 }
 
+export interface BackendSessionEvent {
+  type: 'backend_session';
+  backendId: BackendId;
+  backendSessionId: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface PermissionRequestEvent {
   type: 'permission_request';
   requestId: string;
@@ -148,6 +155,7 @@ export type NormalizedEvent =
   | AssistantMessageEvent
   | UserMessageEvent
   | ToolProgressEvent
+  | BackendSessionEvent
   | PermissionRequestEvent
   | ResultEvent
   | ErrorEvent

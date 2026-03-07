@@ -1,5 +1,5 @@
 import { json } from "../utils/response";
-import { projects, sessions, messages, searchIndex, pendingQuestions, sessionHierarchy, sessionFolders, type Message } from "../db";
+import { projects, sessions, messages, searchIndex, pendingQuestions, sessionHierarchy, sessionFolders, workflows, workflowRuns, type Message } from "../db";
 import { enableUntilDone, disableUntilDone, getUntilDoneSessions, cleanupSessionState, skipSessionWait, getActiveWaits } from "../websocket/handler";
 import { nativePreviewService } from "../services/native-preview";
 import { sessionManager } from "../services/session-manager";
@@ -377,13 +377,26 @@ export async function handleSessionRoutes(
       return json(sessions.get(id));
     }
     if (method === "DELETE") {
+      const workflow = workflows.getByRootSession(id);
       // Clean up server-side state (WebSocket maps, active processes, etc.) before deleting
       cleanupSessionState(id);
       // Stop any running preview for this session
       await nativePreviewService.stopForSession(id);
       // Clean up session manager runtime state
       sessionManager.cleanup(id);
+      if (workflow) {
+        const descendants = sessionHierarchy.getDescendants(id);
+        for (const descendant of descendants) {
+          cleanupSessionState(descendant.id);
+          messages.deleteBySession(descendant.id);
+          searchIndex.removeSession(descendant.id);
+          sessions.delete(descendant.id);
+        }
+        workflowRuns.deleteByWorkflow(workflow.id);
+        workflows.delete(workflow.id);
+      }
       searchIndex.removeSession(id);
+      messages.deleteBySession(id);
       sessions.delete(id);
       return json({ success: true });
     }
@@ -450,8 +463,8 @@ export async function handleSessionRoutes(
     if (!session) {
       return json({ error: "Session not found" }, 404);
     }
-    // Clear claude_session_id so next query starts fresh
-    sessions.updateClaudeSession(null, session.model, 0, 0, 0, 0, Date.now(), id);
+    // Clear backend-specific session state so the next query starts fresh.
+    sessions.clearBackendSessionState(id);
     return json({ success: true, sessionReset: true });
   }
 

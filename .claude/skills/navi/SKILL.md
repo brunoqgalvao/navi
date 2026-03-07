@@ -7,6 +7,8 @@ description: Control the Navi GUI from Claude Code. Create/fork chats, manage pr
 
 Control the Navi GUI directly from Claude Code. This skill lets you manage sessions, projects, folders, open previews, and configure settings programmatically.
 
+If the task is specifically about Navi workflows, workflow schedules, workflow runs, or workflow history, prefer the dedicated `navi-workflows` skill first and use this general Navi skill as supporting reference.
+
 ## API Base
 
 **Dynamic URL Discovery**: The API base URL varies depending on how Navi is running:

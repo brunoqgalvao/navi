@@ -82,6 +82,7 @@ import { handleResourceRoutes } from "./routes/resources";
 import { handleCouncilRoutes } from "./routes/council";
 // Cron Scheduler - Scheduled tasks
 import { handleCronRoutes } from "./routes/cron";
+import { handleWorkflowRoutes } from "./routes/workflows";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -106,6 +107,7 @@ initIntegrationsTable();
 
 // Initialize cron scheduler (must be after DB init)
 import { cronScheduler } from "./services/cron-scheduler";
+import { workflowScheduler } from "./services/workflow-scheduler";
 
 // Install global error handler for PTY crashes
 installPtyErrorHandler();
@@ -406,6 +408,10 @@ const server = Bun.serve({
     response = await handleCronRoutes(url, method, req);
     if (response) return response;
 
+    // Workflow routes
+    response = await handleWorkflowRoutes(url, method, req);
+    if (response) return response;
+
     // Dashboard routes (isolated feature)
     response = await handleDashboardRoutes(url, method, req);
     if (response) return response;
@@ -619,6 +625,7 @@ initExperimentalWebSocket(broadcastToClients);
 
 // Initialize cron scheduler with WebSocket broadcast
 cronScheduler.init(broadcastToClients);
+workflowScheduler.init(broadcastToClients);
 
 // Cleanup PTY server on exit
 function cleanupPtyServer() {
@@ -641,4 +648,5 @@ process.on("SIGTERM", () => {
 process.on("exit", () => {
   cleanupPtyServer();
   cronScheduler.shutdown();
+  workflowScheduler.shutdown();
 });

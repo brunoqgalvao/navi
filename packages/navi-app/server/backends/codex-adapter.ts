@@ -123,7 +123,12 @@ export class CodexAdapter implements BackendAdapter {
 
     // Resume support
     if (options.resume) {
-      args.push("resume", "--last");
+      args.push("resume");
+      if (options.resume === "last") {
+        args.push("--last");
+      } else {
+        args.push(options.resume);
+      }
     } else {
       // Add the prompt as the last argument
       args.push(options.prompt);
@@ -154,7 +159,7 @@ export class CodexAdapter implements BackendAdapter {
     const child = this.childProcess;
 
     // For resume, pipe the prompt to stdin
-    if (options.resume && child.stdin) {
+    if (options.resume && options.prompt && child.stdin) {
       child.stdin.write(options.prompt);
       child.stdin.end();
     }
@@ -288,9 +293,14 @@ export class CodexAdapter implements BackendAdapter {
     switch (eventType) {
       case "thread.started":
         return {
-          type: "system",
-          subtype: "status",
-          status: "Thread started",
+          type: "backend_session",
+          backendId: "codex",
+          backendSessionId: event.thread_id,
+          metadata: event.thread_id
+            ? {
+                thread_id: event.thread_id,
+              }
+            : undefined,
         };
 
       case "turn.started":

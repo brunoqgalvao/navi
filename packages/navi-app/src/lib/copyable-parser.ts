@@ -9,7 +9,7 @@ export interface ParsedCopyable {
   processedContent: string;
 }
 
-const COPYABLE_BLOCK_REGEX = /```copyable\n([\s\S]*?)```/g;
+const COPYABLE_BLOCK_REGEX = /```copyable\r?\n([\s\S]*?)```/g;
 
 let copyableIdCounter = 0;
 
@@ -44,8 +44,8 @@ function parseCopyableBlockContent(content: string): CopyableItem | null {
     // If we've seen text: marker, collect all lines
     if (inText) {
       textLines.push(line);
-    } else if (trimmed && !trimmed.includes(':')) {
-      // Bare text without text: marker - treat as simple content
+    } else if (trimmed) {
+      // Any non-empty line that isn't recognized metadata is copyable content.
       textLines.push(line);
     }
   }

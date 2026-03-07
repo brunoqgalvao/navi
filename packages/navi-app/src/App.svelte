@@ -5,7 +5,7 @@
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
   import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, auth, planMode, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId } from "./lib/stores";
   import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
-  import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill } from "./lib/api";
+  import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill, type Workflow, type WorkflowGate, type WorkflowSchedule } from "./lib/api";
   import { mcpApi, type McpServer } from "./lib/features/mcp";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree, startNewChat } from "./lib/actions";
@@ -281,6 +281,7 @@
 
   let sidebarProjects = $state<Project[]>([]);
   let sidebarSessions = $state<Session[]>([]);
+  let workflowsForProject = $state<Workflow[]>([]);
   let recentChats = $state<Session[]>([]);
 
   // Get current session data from sidebar sessions for worktree info
@@ -626,6 +627,7 @@
         api.sessions.list($session.projectId, $showArchivedWorkspaces).then(list => {
           sidebarSessions = list;
         });
+        loadWorkflows($session.projectId);
       }
       // Trigger tour after first message
       if (reason === "done" && sessionId === $session.sessionId && !$tour.completedTours.includes("chat")) {
@@ -1554,6 +1556,82 @@ Please walk me through the setup step by step. When I have the credentials, save
   const setProjectFolder = setProjectFolderAction;
   const reorderFolders = reorderFoldersAction;
 
+  async function loadWorkflows(projectId: string) {
+    try {
+      workflowsForProject = await api.workflows.list(projectId);
+    } catch (e) {
+      console.error("Failed to load workflows:", e);
+      workflowsForProject = [];
+    }
+  }
+
+  async function createWorkflow(data: {
+    name: string;
+    prompt: string;
+    schedule: WorkflowSchedule;
+    gate?: WorkflowGate;
+    enabled?: boolean;
+    collapsed?: boolean;
+    learningNotes?: string | null;
+    feedbackNotes?: string | null;
+  }) {
+    if (!$session.projectId) {
+      throw new Error("No project selected");
+    }
+    const workflow = await api.workflows.create($session.projectId, data);
+    workflowsForProject = [workflow, ...workflowsForProject];
+    sidebarSessions = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+    return workflow;
+  }
+
+  async function updateWorkflow(
+    workflowId: string,
+    data: {
+      name?: string;
+      prompt?: string;
+      schedule?: WorkflowSchedule;
+      gate?: WorkflowGate;
+      enabled?: boolean;
+      collapsed?: boolean;
+      learningNotes?: string | null;
+      feedbackNotes?: string | null;
+    }
+  ) {
+    const workflow = await api.workflows.update(workflowId, data);
+    workflowsForProject = workflowsForProject.map((item) => (item.id === workflowId ? workflow : item));
+    if ($session.projectId) {
+      sidebarSessions = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+    }
+    return workflow;
+  }
+
+  async function deleteWorkflow(workflowId: string) {
+    const workflow = workflowsForProject.find((item) => item.id === workflowId);
+    await api.workflows.delete(workflowId);
+    workflowsForProject = workflowsForProject.filter((item) => item.id !== workflowId);
+    if ($session.projectId) {
+      sidebarSessions = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+    }
+    if (workflow && $session.sessionId === workflow.rootSessionId) {
+      session.setSession(null);
+    }
+  }
+
+  async function runWorkflow(workflowId: string) {
+    await api.workflows.run(workflowId);
+    if ($session.projectId) {
+      sidebarSessions = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+      loadWorkflows($session.projectId);
+    }
+  }
+
+  function selectWorkflowRoot(workflow: Workflow) {
+    const rootSession = sidebarSessions.find((sess) => sess.id === workflow.rootSessionId);
+    if (rootSession) {
+      selectSession(rootSession);
+    }
+  }
+
   async function toggleFolderPin(folder: WorkspaceFolder, e: Event) {
     e.stopPropagation();
     await toggleFolderPinAction(folder);
@@ -1567,6 +1645,15 @@ Please walk me through the setup step by step. When I have the credentials, save
       api.sessions.list($session.projectId, $showArchivedWorkspaces).then(list => {
         sidebarSessions = list;
       });
+    }
+  });
+
+  $effect(() => {
+    const projectId = $session.projectId;
+    if (projectId) {
+      loadWorkflows(projectId);
+    } else {
+      workflowsForProject = [];
     }
   });
 
@@ -2065,6 +2152,17 @@ Please walk me through the setup step by step. When I have the credentials, save
 
   async function deleteSession(e: Event, id: string) {
     e.stopPropagation();
+    const workflow = workflowsForProject.find((item) => item.rootSessionId === id);
+    if (workflow) {
+      if (!confirm(`Delete workflow "${workflow.name}" and all of its run history?`)) return;
+      try {
+        await deleteWorkflow(workflow.id);
+      } catch (err) {
+        console.error("Failed to delete workflow:", err);
+      }
+      return;
+    }
+
     if (!confirm("Delete this chat?")) return;
 
     try {
@@ -3729,6 +3827,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   <Sidebar
     projects={sidebarProjects}
     sessions={sidebarSessions}
+    workflows={workflowsForProject}
     {recentChats}
     {currentProject}
     {currentMessages}
@@ -3803,7 +3902,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     onStartResizing={startResizingLeft}
     isResizing={isResizingLeft}
     onCollapseToggle={() => sidebarCollapsed = !sidebarCollapsed}
-    onBackToWorkspaces={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; sessionFolders = []; }}
+    onBackToWorkspaces={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; sessionFolders = []; workflowsForProject = []; }}
     onFolderCreate={createFolder}
     onFolderUpdate={updateFolder}
     onFolderDelete={deleteFolder}
@@ -3820,6 +3919,11 @@ Please walk me through the setup step by step. When I have the credentials, save
     onSessionFolderToggleCollapse={toggleSessionFolderCollapseAction}
     onSessionSetFolder={setSessionFolderAction}
     onSessionFolderReorder={(order) => reorderSessionFoldersAction($session.projectId!, order)}
+    onWorkflowCreate={createWorkflow}
+    onWorkflowUpdate={updateWorkflow}
+    onWorkflowDelete={deleteWorkflow}
+    onWorkflowRun={runWorkflow}
+    onWorkflowSelect={selectWorkflowRoot}
     onOpenProjectInNewWindow={openProjectInNewWindow}
     onOpenSessionInNewWindow={openSessionInNewWindow}
     onOpenHomeInNewWindow={openHomeInNewWindow}
@@ -3889,10 +3993,10 @@ Please walk me through the setup step by step. When I have the credentials, save
     {:else if !currentProject}
       <WorkspaceHome
         projects={sidebarProjects}
+        {recentChats}
         onSelectProject={selectProject}
-        onTogglePin={toggleProjectPin}
+        onSelectSession={goToChat}
         onNewProject={() => showNewProjectModal = true}
-        {relativeTime}
       />
     {:else}
 

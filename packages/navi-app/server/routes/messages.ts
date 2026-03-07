@@ -82,7 +82,7 @@ export async function handleMessageRoutes(url: URL, method: string, req: Request
 
         const sess = sessions.get(msg.session_id);
         if (sess) {
-          sessions.updateClaudeSession(null, sess.model, 0, 0, 0, 0, Date.now(), msg.session_id);
+          sessions.clearBackendSessionState(msg.session_id);
         }
 
         const allMsgs = messages.listBySession(msg.session_id);
@@ -127,16 +127,7 @@ export async function handleMessageRoutes(url: URL, method: string, req: Request
 
     sessions.resetTokenCounts(sessionId, 0, 0);
 
-    sessions.updateClaudeSession(
-      null,
-      session.model,
-      0,
-      0,
-      0,
-      0,
-      Date.now(),
-      sessionId
-    );
+    sessions.clearBackendSessionState(sessionId);
 
     const remainingMsgs = messages.listBySession(sessionId);
 

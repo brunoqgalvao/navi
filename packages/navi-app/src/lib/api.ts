@@ -28,6 +28,51 @@ export interface SessionFolder {
   updated_at: number;
 }
 
+export type WorkflowSchedule =
+  | { kind: "at"; time: string | number }
+  | { kind: "every"; interval: number }
+  | { kind: "cron"; expression: string; timezone?: string };
+
+export type WorkflowGate =
+  | { kind: "none" }
+  | { kind: "command"; command: string; cwd?: string };
+
+export interface Workflow {
+  id: string;
+  projectId: string;
+  rootSessionId: string;
+  name: string;
+  prompt: string;
+  schedule: WorkflowSchedule;
+  gate: WorkflowGate;
+  enabled: boolean;
+  collapsed: boolean;
+  learningNotes: string | null;
+  feedbackNotes: string | null;
+  model: string | null;
+  backend: BackendId | null;
+  runCount: number;
+  lastRunAt: number | null;
+  nextRunAt: number | null;
+  lastError: string | null;
+  lastSkipReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflow_id: string;
+  session_id: string | null;
+  status: "running" | "success" | "failed" | "skipped";
+  trigger_source: "manual" | "scheduled";
+  started_at: number;
+  completed_at: number | null;
+  skipped_reason: string | null;
+  error: string | null;
+  session?: Session | null;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -65,11 +110,34 @@ export interface BackendInfo {
   supportsResume?: boolean;
 }
 
+export interface BackendHealthIssue {
+  level: "warning" | "error";
+  code: string;
+  message: string;
+  path?: string;
+}
+
+export interface CodexHealthInfo {
+  backend: "codex";
+  installed: boolean;
+  version?: string;
+  path?: string;
+  authMode: "chatgpt" | "api_key" | "not_logged_in" | "unknown";
+  config: {
+    model?: string;
+    reasoningEffort?: string;
+  };
+  issues: BackendHealthIssue[];
+  checkedAt: string;
+}
+
 export interface Session {
   id: string;
   project_id: string;
   title: string;
   claude_session_id: string | null;
+  backend_session_id?: string | null;
+  backend_session_metadata?: string | null;
   model: string | null;
   total_cost_usd: number;
   total_turns: number;
@@ -286,6 +354,55 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ order }),
       }),
+  },
+
+  workflows: {
+    list: (projectId: string) => request<Workflow[]>(`/projects/${projectId}/workflows`),
+    get: (id: string) => request<Workflow>(`/workflows/${id}`),
+    create: (
+      projectId: string,
+      data: {
+        name: string;
+        prompt: string;
+        schedule: WorkflowSchedule;
+        gate?: WorkflowGate;
+        enabled?: boolean;
+        collapsed?: boolean;
+        learningNotes?: string | null;
+        feedbackNotes?: string | null;
+        model?: string | null;
+        backend?: BackendId | null;
+      }
+    ) =>
+      request<Workflow>(`/projects/${projectId}/workflows`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: string,
+      data: {
+        name?: string;
+        prompt?: string;
+        schedule?: WorkflowSchedule;
+        gate?: WorkflowGate;
+        enabled?: boolean;
+        collapsed?: boolean;
+        learningNotes?: string | null;
+        feedbackNotes?: string | null;
+        model?: string | null;
+        backend?: BackendId | null;
+      }
+    ) =>
+      request<Workflow>(`/workflows/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<{ success: boolean; workflowId: string }>(`/workflows/${id}`, { method: "DELETE" }),
+    run: (id: string) =>
+      request<{ success: boolean; workflowId: string }>(`/workflows/${id}/run`, { method: "POST" }),
+    runs: (id: string, limit: number = 25) =>
+      request<{ workflowId: string; runs: WorkflowRun[] }>(`/workflows/${id}/runs?limit=${limit}`),
   },
 
   sessions: {
@@ -1782,4 +1899,7 @@ export const backendsApi = {
   /** Get models for a specific backend */
   getModels: (id: BackendId) =>
     request<{ models: string[]; default: string }>(`/backends/${id}/models`),
+
+  /** Get local runtime diagnostics for Codex */
+  getCodexHealth: () => request<CodexHealthInfo>("/backends/codex/health"),
 };

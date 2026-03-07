@@ -13,12 +13,13 @@
 
   let { children, onSelectSession, parentId }: Props = $props();
 
-  // Separate forks from agents. Treat legacy/null session_type as agent.
+  // Separate forks from workflow runs and regular agents.
   const forks = $derived(children.filter(c => c.session_type === "fork"));
-  const agents = $derived(children.filter(c => c.session_type !== "fork"));
+  const workflowRuns = $derived(children.filter(c => c.agent_type === "workflow-run"));
+  const agents = $derived(children.filter(c => c.session_type !== "fork" && c.agent_type !== "workflow-run"));
 
   // Combined list of displayable children (only forks + agents, not 'root' typed sessions)
-  const displayableChildren = $derived([...forks, ...agents]);
+  const displayableChildren = $derived([...forks, ...workflowRuns, ...agents]);
 
   // Track expanded state
   let expanded = $state(false);
@@ -39,7 +40,7 @@
   });
 </script>
 
-{#if forks.length > 0 || agents.length > 0}
+{#if forks.length > 0 || workflowRuns.length > 0 || agents.length > 0}
   <div class="ml-4 mt-0.5">
     <button
       onclick={() => expanded = !expanded}
@@ -53,10 +54,18 @@
         <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
       </svg>
       <span>
-        {#if forks.length > 0 && agents.length > 0}
+        {#if workflowRuns.length > 0 && forks.length === 0 && agents.length === 0}
+          {workflowRuns.length} run{workflowRuns.length !== 1 ? 's' : ''}
+        {:else if forks.length > 0 && agents.length > 0}
           {forks.length} fork{forks.length !== 1 ? 's' : ''}, {agents.length} agent{agents.length !== 1 ? 's' : ''}
+        {:else if workflowRuns.length > 0 && agents.length > 0}
+          {workflowRuns.length} run{workflowRuns.length !== 1 ? 's' : ''}, {agents.length} agent{agents.length !== 1 ? 's' : ''}
+        {:else if forks.length > 0 && workflowRuns.length > 0}
+          {forks.length} fork{forks.length !== 1 ? 's' : ''}, {workflowRuns.length} run{workflowRuns.length !== 1 ? 's' : ''}
         {:else if forks.length > 0}
           {forks.length} fork{forks.length !== 1 ? 's' : ''}
+        {:else if workflowRuns.length > 0}
+          {workflowRuns.length} run{workflowRuns.length !== 1 ? 's' : ''}
         {:else}
           {agents.length} agent{agents.length !== 1 ? 's' : ''}
         {/if}
@@ -79,6 +88,10 @@
             {#if child.session_type === "fork"}
               <svg class="w-3 h-3 shrink-0 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            {:else if child.agent_type === "workflow-run"}
+              <svg class="w-3 h-3 shrink-0 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3M12 3a9 9 0 100 18 9 9 0 000-18z" />
               </svg>
             {:else}
               <svg class="w-3 h-3 shrink-0 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

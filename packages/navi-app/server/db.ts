@@ -43,6 +43,8 @@ export async function initDb() {
       project_id TEXT NOT NULL,
       title TEXT NOT NULL,
       claude_session_id TEXT,
+      backend_session_id TEXT,
+      backend_session_metadata TEXT,
       model TEXT,
       total_cost_usd REAL DEFAULT 0,
       total_turns INTEGER DEFAULT 0,
@@ -235,6 +237,12 @@ export async function initDb() {
   } catch {}
   try {
     db.run("ALTER TABLE projects ADD COLUMN default_backend TEXT DEFAULT 'claude'");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN backend_session_id TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN backend_session_metadata TEXT");
   } catch {}
 
   // Conversation phase tracking (inferred by cheap LLM)
@@ -579,6 +587,55 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN folder_id TEXT REFERENCES session_folders(id)");
   } catch {}
 
+  // Workflows - workspace-owned automation definitions with session-backed run history
+  db.run(`
+    CREATE TABLE IF NOT EXISTS workflows (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      root_session_id TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      schedule_json TEXT NOT NULL,
+      gate_json TEXT NOT NULL DEFAULT '{"kind":"none"}',
+      enabled INTEGER DEFAULT 1,
+      collapsed INTEGER DEFAULT 1,
+      learning_notes TEXT,
+      feedback_notes TEXT,
+      model TEXT,
+      backend TEXT,
+      run_count INTEGER DEFAULT 0,
+      last_run_at INTEGER,
+      next_run_at INTEGER,
+      last_error TEXT,
+      last_skip_reason TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (root_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);
+    CREATE INDEX IF NOT EXISTS idx_workflows_next_run ON workflows(next_run_at);
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      id TEXT PRIMARY KEY,
+      workflow_id TEXT NOT NULL,
+      session_id TEXT,
+      status TEXT NOT NULL,
+      trigger_source TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      skipped_reason TEXT,
+      error TEXT,
+      FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_workflow_runs_session ON workflow_runs(session_id);
+    CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+  `);
+
   // Channels - cross-workspace spaces for agent collaboration
   db.run(`
     CREATE TABLE IF NOT EXISTS channels (
@@ -766,6 +823,8 @@ export interface Session {
   project_id: string;
   title: string;
   claude_session_id: string | null;
+  backend_session_id: string | null;
+  backend_session_metadata: string | null;
   model: string | null;
   total_cost_usd: number;
   total_turns: number;
@@ -964,6 +1023,227 @@ export const sessionFolders = {
     run("UPDATE session_folders SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
 };
 
+export interface Workflow {
+  id: string;
+  project_id: string;
+  root_session_id: string;
+  name: string;
+  prompt: string;
+  schedule_json: string;
+  gate_json: string;
+  enabled: number;
+  collapsed: number;
+  learning_notes: string | null;
+  feedback_notes: string | null;
+  model: string | null;
+  backend: "claude" | "codex" | "gemini" | null;
+  run_count: number;
+  last_run_at: number | null;
+  next_run_at: number | null;
+  last_error: string | null;
+  last_skip_reason: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflow_id: string;
+  session_id: string | null;
+  status: "running" | "success" | "failed" | "skipped";
+  trigger_source: "manual" | "scheduled";
+  started_at: number;
+  completed_at: number | null;
+  skipped_reason: string | null;
+  error: string | null;
+}
+
+export const workflows = {
+  listByProject: (projectId: string) =>
+    queryAll<Workflow>(
+      "SELECT * FROM workflows WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC",
+      [projectId]
+    ),
+  listEnabled: () =>
+    queryAll<Workflow>("SELECT * FROM workflows WHERE enabled = 1 ORDER BY updated_at DESC, created_at DESC"),
+  get: (id: string) => queryOne<Workflow>("SELECT * FROM workflows WHERE id = ?", [id]),
+  getByRootSession: (rootSessionId: string) =>
+    queryOne<Workflow>("SELECT * FROM workflows WHERE root_session_id = ?", [rootSessionId]),
+  create: (input: Omit<Workflow, "run_count" | "last_run_at" | "next_run_at" | "last_error" | "last_skip_reason"> & {
+    run_count?: number;
+    last_run_at?: number | null;
+    next_run_at?: number | null;
+    last_error?: string | null;
+    last_skip_reason?: string | null;
+  }) =>
+    run(
+      `INSERT INTO workflows (
+        id, project_id, root_session_id, name, prompt, schedule_json, gate_json, enabled, collapsed,
+        learning_notes, feedback_notes, model, backend, run_count, last_run_at, next_run_at, last_error, last_skip_reason,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.id,
+        input.project_id,
+        input.root_session_id,
+        input.name,
+        input.prompt,
+        input.schedule_json,
+        input.gate_json,
+        input.enabled,
+        input.collapsed,
+        input.learning_notes,
+        input.feedback_notes,
+        input.model,
+        input.backend,
+        input.run_count ?? 0,
+        input.last_run_at ?? null,
+        input.next_run_at ?? null,
+        input.last_error ?? null,
+        input.last_skip_reason ?? null,
+        input.created_at,
+        input.updated_at,
+      ]
+    ),
+  update: (
+    id: string,
+    updates: Partial<
+      Pick<
+        Workflow,
+        | "name"
+        | "prompt"
+        | "schedule_json"
+        | "gate_json"
+        | "enabled"
+        | "collapsed"
+        | "learning_notes"
+        | "feedback_notes"
+        | "model"
+        | "backend"
+        | "run_count"
+        | "last_run_at"
+        | "next_run_at"
+        | "last_error"
+        | "last_skip_reason"
+      >
+    >
+  ) => {
+    const existing = workflows.get(id);
+    if (!existing) return;
+
+    run(
+      `UPDATE workflows SET
+        name = ?,
+        prompt = ?,
+        schedule_json = ?,
+        gate_json = ?,
+        enabled = ?,
+        collapsed = ?,
+        learning_notes = ?,
+        feedback_notes = ?,
+        model = ?,
+        backend = ?,
+        run_count = ?,
+        last_run_at = ?,
+        next_run_at = ?,
+        last_error = ?,
+        last_skip_reason = ?,
+        updated_at = ?
+      WHERE id = ?`,
+      [
+        updates.name ?? existing.name,
+        updates.prompt ?? existing.prompt,
+        updates.schedule_json ?? existing.schedule_json,
+        updates.gate_json ?? existing.gate_json,
+        updates.enabled ?? existing.enabled,
+        updates.collapsed ?? existing.collapsed,
+        updates.learning_notes === undefined ? existing.learning_notes : updates.learning_notes,
+        updates.feedback_notes === undefined ? existing.feedback_notes : updates.feedback_notes,
+        updates.model === undefined ? existing.model : updates.model,
+        updates.backend === undefined ? existing.backend : updates.backend,
+        updates.run_count ?? existing.run_count,
+        updates.last_run_at === undefined ? existing.last_run_at : updates.last_run_at,
+        updates.next_run_at === undefined ? existing.next_run_at : updates.next_run_at,
+        updates.last_error === undefined ? existing.last_error : updates.last_error,
+        updates.last_skip_reason === undefined ? existing.last_skip_reason : updates.last_skip_reason,
+        Date.now(),
+        id,
+      ]
+    );
+  },
+  delete: (id: string) => run("DELETE FROM workflows WHERE id = ?", [id]),
+};
+
+export const workflowRuns = {
+  listByWorkflow: (workflowId: string, limit: number = 25) =>
+    queryAll<WorkflowRun>(
+      "SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT ?",
+      [workflowId, limit]
+    ),
+  getActiveBySession: (sessionId: string) =>
+    queryOne<WorkflowRun>(
+      "SELECT * FROM workflow_runs WHERE session_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+      [sessionId]
+    ),
+  create: (runData: WorkflowRun) =>
+    run(
+      `INSERT INTO workflow_runs (
+        id, workflow_id, session_id, status, trigger_source, started_at, completed_at, skipped_reason, error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        runData.id,
+        runData.workflow_id,
+        runData.session_id,
+        runData.status,
+        runData.trigger_source,
+        runData.started_at,
+        runData.completed_at,
+        runData.skipped_reason,
+        runData.error,
+      ]
+    ),
+  update: (
+    id: string,
+    updates: Partial<Pick<WorkflowRun, "session_id" | "status" | "completed_at" | "skipped_reason" | "error">>
+  ) => {
+    const existing = queryOne<WorkflowRun>("SELECT * FROM workflow_runs WHERE id = ?", [id]);
+    if (!existing) return;
+    run(
+      `UPDATE workflow_runs SET
+        session_id = ?,
+        status = ?,
+        completed_at = ?,
+        skipped_reason = ?,
+        error = ?
+      WHERE id = ?`,
+      [
+        updates.session_id === undefined ? existing.session_id : updates.session_id,
+        updates.status ?? existing.status,
+        updates.completed_at === undefined ? existing.completed_at : updates.completed_at,
+        updates.skipped_reason === undefined ? existing.skipped_reason : updates.skipped_reason,
+        updates.error === undefined ? existing.error : updates.error,
+        id,
+      ]
+    );
+  },
+  completeBySession: (
+    sessionId: string,
+    status: WorkflowRun["status"],
+    details?: { error?: string | null; skippedReason?: string | null }
+  ) => {
+    const activeRun = workflowRuns.getActiveBySession(sessionId);
+    if (!activeRun) return;
+    workflowRuns.update(activeRun.id, {
+      status,
+      completed_at: Date.now(),
+      error: details?.error ?? null,
+      skipped_reason: details?.skippedReason ?? null,
+    });
+  },
+  deleteByWorkflow: (workflowId: string) =>
+    run("DELETE FROM workflow_runs WHERE workflow_id = ?", [workflowId]),
+};
+
 export const projects = {
   list: (includeArchived: boolean = false) => queryAll<ProjectWithStats>(`
     SELECT p.*, 
@@ -1013,6 +1293,7 @@ export interface SessionSidebar {
   project_id: string;
   title: string;
   claude_session_id: string | null;
+  backend_session_id: string | null;
   model: string | null;
   total_cost_usd: number;
   input_tokens: number;
@@ -1045,7 +1326,7 @@ export interface SessionSidebar {
 }
 
 // Columns used for sidebar display (avoids SELECT * overhead with large JSON columns)
-const SIDEBAR_COLUMNS = `id, project_id, title, claude_session_id, model, total_cost_usd,
+const SIDEBAR_COLUMNS = `id, project_id, title, claude_session_id, backend_session_id, model, total_cost_usd,
   input_tokens, output_tokens, pinned, favorite, archived, sort_order,
   created_at, updated_at, worktree_path, worktree_branch, auto_accept_all, marked_for_review,
   parent_session_id, root_session_id, depth, role, task, agent_status, agent_type, session_type, escalation, deliverable, backend, folder_id`;
@@ -1086,6 +1367,21 @@ export const sessions = {
     run("UPDATE sessions SET model = ? WHERE id = ?", [model, id]),
   updateBackend: (backend: string, id: string) =>
     run("UPDATE sessions SET backend = ? WHERE id = ?", [backend, id]),
+  updateBackendSessionState: (
+    backendSessionId: string | null,
+    backendSessionMetadata: string | null,
+    updated_at: number,
+    id: string
+  ) =>
+    run(
+      "UPDATE sessions SET backend_session_id = ?, backend_session_metadata = ?, updated_at = ? WHERE id = ?",
+      [backendSessionId, backendSessionMetadata, updated_at, id]
+    ),
+  clearBackendSessionState: (id: string) =>
+    run(
+      "UPDATE sessions SET claude_session_id = NULL, backend_session_id = NULL, backend_session_metadata = NULL, updated_at = ? WHERE id = ?",
+      [Date.now(), id]
+    ),
   updateConversationPhase: (phase: string, id: string) =>
     run("UPDATE sessions SET conversation_phase = ? WHERE id = ?", [phase, id]),
   updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, inputTokens: number, outputTokens: number, updated_at: number, id: string) =>
@@ -1147,7 +1443,7 @@ export const sessions = {
     ),
   clearWorktree: (id: string) =>
     run(
-      "UPDATE sessions SET worktree_path = NULL, worktree_branch = NULL, worktree_base_branch = NULL, claude_session_id = NULL, updated_at = ? WHERE id = ?",
+      "UPDATE sessions SET worktree_path = NULL, worktree_branch = NULL, worktree_base_branch = NULL, claude_session_id = NULL, backend_session_id = NULL, backend_session_metadata = NULL, updated_at = ? WHERE id = ?",
       [Date.now(), id]
     ),
   listWithWorktrees: (projectId: string) =>
@@ -2407,6 +2703,7 @@ export const sessionHierarchy = {
       model?: string;
       backend?: string;   // 'claude' | 'codex' | 'gemini' for multi-backend dispatch
       agentType?: string;  // 'browser' | 'coding' | 'research' | etc. for native UI
+      updateParentStatus?: boolean;
     }
   ): Session | null => {
     const parent = sessions.get(parentSessionId);
@@ -2459,11 +2756,12 @@ export const sessionHierarchy = {
       ]
     );
 
-    // Update parent to waiting status
-    run(
-      "UPDATE sessions SET agent_status = 'waiting', updated_at = ? WHERE id = ?",
-      [now, parentSessionId]
-    );
+    if (config.updateParentStatus !== false) {
+      run(
+        "UPDATE sessions SET agent_status = 'waiting', updated_at = ? WHERE id = ?",
+        [now, parentSessionId]
+      );
+    }
 
     return sessions.get(config.id) || null;
   },
