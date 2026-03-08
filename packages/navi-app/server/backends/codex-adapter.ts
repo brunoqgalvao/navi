@@ -6,6 +6,9 @@
  */
 
 import { spawn, ChildProcess } from "child_process";
+import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import type {
   BackendAdapter,
   BackendInfo,
@@ -15,33 +18,160 @@ import type {
   NormalizedContentBlock,
 } from "./types";
 
+const DEFAULT_CODEX_MODEL = "gpt-5.2-codex";
+const COMPATIBLE_CODEX_REASONING_EFFORTS = new Set(["low", "medium", "high"]);
+const BASE_CODEX_MODELS = [
+  // Current Codex-focused models
+  "gpt-5.2-codex",
+  "gpt-5-codex",
+  "codex-mini-latest",
+  // Prior Codex snapshots still seen in existing sessions
+  "gpt-5.1-codex-max",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-mini",
+  // General OpenAI models that Codex CLI can also target
+  "gpt-5",
+  "gpt-5-mini",
+  "gpt-5-nano",
+  "gpt-5.1",
+  "o4-mini",
+  "o3",
+  "o3-mini",
+  "o1",
+  "o1-mini",
+  "o1-preview",
+  "gpt-4.5-preview",
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4-turbo",
+  // Experimental
+  "exp",
+] as const;
+
+type CodexExecutionPlan = {
+  args: string[];
+  model: string;
+  downgradedToReadOnly: boolean;
+  adjustedReasoningEffort?: {
+    from: string;
+    to: string;
+  };
+};
+
+function getCodexConfigPath(): string {
+  return join(homedir(), ".codex", "config.toml");
+}
+
+function readCodexConfigValue(key: string): string | undefined {
+  const configPath = getCodexConfigPath();
+  if (!existsSync(configPath)) {
+    return undefined;
+  }
+
+  try {
+    const content = readFileSync(configPath, "utf-8");
+    const match = content.match(new RegExp(`^${key}\\s*=\\s*"([^"]+)"`, "m"));
+    return match?.[1]?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isCodexReasoningStrictModel(model: string): boolean {
+  return model.includes("codex") || model === "codex-mini-latest";
+}
+
+export function getConfiguredCodexModel(): string | undefined {
+  return readCodexConfigValue("model");
+}
+
+export function getConfiguredCodexReasoningEffort(): string | undefined {
+  return readCodexConfigValue("model_reasoning_effort");
+}
+
+export function buildCodexModelCatalog(configuredModel?: string): string[] {
+  const models = [...BASE_CODEX_MODELS];
+
+  if (configuredModel && !models.includes(configuredModel as (typeof BASE_CODEX_MODELS)[number])) {
+    models.unshift(configuredModel);
+  }
+
+  return models;
+}
+
+export function buildCodexExecPlan(
+  options: QueryOptions,
+  defaultModel: string
+): CodexExecutionPlan {
+  const model = options.model || defaultModel;
+  const backendOpts = options.backendOptions || {};
+  const requestedReasoningEffort =
+    typeof backendOpts.reasoningEffort === "string" &&
+    backendOpts.reasoningEffort.trim()
+      ? backendOpts.reasoningEffort.trim()
+      : "medium";
+
+  let reasoningEffort = requestedReasoningEffort;
+  let adjustedReasoningEffort: CodexExecutionPlan["adjustedReasoningEffort"];
+
+  if (
+    isCodexReasoningStrictModel(model) &&
+    !COMPATIBLE_CODEX_REASONING_EFFORTS.has(requestedReasoningEffort)
+  ) {
+    reasoningEffort = "medium";
+    adjustedReasoningEffort = {
+      from: requestedReasoningEffort,
+      to: reasoningEffort,
+    };
+  }
+
+  // Codex exec does not expose approval callbacks. Preserve write access only
+  // for explicit auto-approve mode; otherwise run safely in read-only mode.
+  const downgradedToReadOnly = options.permissionMode !== "auto";
+  const sandboxMode = downgradedToReadOnly ? "read-only" : "workspace-write";
+
+  const args = ["exec", "--json", "-m", model];
+  args.push("--config", `model_reasoning_effort="${reasoningEffort}"`);
+  args.push("--sandbox", sandboxMode);
+
+  if (options.permissionMode === "auto") {
+    args.push("--full-auto");
+  }
+
+  args.push("--skip-git-repo-check");
+
+  if (options.resume) {
+    args.push("resume");
+    if (options.resume === "last") {
+      args.push("--last");
+    } else {
+      args.push(options.resume);
+    }
+  } else {
+    args.push(options.prompt);
+  }
+
+  return {
+    args,
+    model,
+    downgradedToReadOnly,
+    adjustedReasoningEffort,
+  };
+}
+
 export class CodexAdapter implements BackendAdapter {
   readonly id = "codex" as const;
   readonly name = "OpenAI Codex";
-  readonly supportsCallbackPermissions = false; // Uses --full-auto flag instead
+  readonly supportsCallbackPermissions = false; // Exec mode has no callback approval bridge
   readonly supportsResume = true;
 
-  readonly models = [
-    // GPT-5.x Codex series (agentic coding)
-    "gpt-5.2-codex",
-    "gpt-5.1-codex-max",
-    "gpt-5.1-codex",
-    "gpt-5.1-codex-mini",
-    "gpt-5.1",
-    // GPT-4.x series
-    "o3",
-    "o3-mini",
-    "o1",
-    "o1-mini",
-    "o1-preview",
-    "gpt-4.5-preview",
-    "gpt-4o",
-    "gpt-4o-mini",
-    "gpt-4-turbo",
-    // Experimental
-    "exp",
-  ];
-  readonly defaultModel = "gpt-5.2-codex";
+  get models(): string[] {
+    return buildCodexModelCatalog(getConfiguredCodexModel());
+  }
+
+  get defaultModel(): string {
+    return getConfiguredCodexModel() || DEFAULT_CODEX_MODEL;
+  }
 
   private childProcess: ChildProcess | null = null;
 
@@ -90,49 +220,7 @@ export class CodexAdapter implements BackendAdapter {
   }
 
   async *query(options: QueryOptions): AsyncGenerator<NormalizedEvent> {
-    const model = options.model || this.defaultModel;
-    const backendOpts = options.backendOptions || {};
-    const reasoningEffort =
-      (backendOpts.reasoningEffort as string) || "medium";
-
-    // Build command args
-    const args = ["exec", "--json"];
-
-    // Model
-    args.push("-m", model);
-
-    // Reasoning effort
-    args.push("--config", `model_reasoning_effort="${reasoningEffort}"`);
-
-    // Sandbox mode based on permission mode
-    const sandboxMode =
-      options.permissionMode === "auto"
-        ? "workspace-write"
-        : options.permissionMode === "deny"
-          ? "read-only"
-          : "workspace-write";
-    args.push("--sandbox", sandboxMode);
-
-    // Full auto if auto-approve
-    if (options.permissionMode === "auto") {
-      args.push("--full-auto");
-    }
-
-    // Skip git check
-    args.push("--skip-git-repo-check");
-
-    // Resume support
-    if (options.resume) {
-      args.push("resume");
-      if (options.resume === "last") {
-        args.push("--last");
-      } else {
-        args.push(options.resume);
-      }
-    } else {
-      // Add the prompt as the last argument
-      args.push(options.prompt);
-    }
+    const plan = buildCodexExecPlan(options, this.defaultModel);
 
     // Emit init event
     yield {
@@ -140,13 +228,30 @@ export class CodexAdapter implements BackendAdapter {
       subtype: "init",
       sessionId: options.sessionId,
       backendId: "codex",
-      model,
+      model: plan.model,
       cwd: options.cwd,
       tools: ["Read", "Write", "Edit", "Bash", "WebSearch"],
     };
 
+    if (options.permissionMode === "confirm" && plan.downgradedToReadOnly) {
+      yield {
+        type: "system",
+        subtype: "status",
+        status:
+          "Codex manual approvals are not wired in Navi yet. Running this turn in read-only mode.",
+      };
+    }
+
+    if (plan.adjustedReasoningEffort) {
+      yield {
+        type: "system",
+        subtype: "status",
+        status: `Codex model ${plan.model} does not support reasoning effort "${plan.adjustedReasoningEffort.from}". Using "${plan.adjustedReasoningEffort.to}".`,
+      };
+    }
+
     // Spawn codex process
-    this.childProcess = spawn("codex", args, {
+    this.childProcess = spawn("codex", plan.args, {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: {

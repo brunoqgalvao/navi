@@ -99,6 +99,10 @@ export async function loadBackendModels() {
 
 function formatModelName(model: string, backend: string): string {
   if (backend === "codex") {
+    if (model === "codex-mini-latest") {
+      return "Codex Mini Latest";
+    }
+
     return model
       .replace("gpt-", "GPT-")
       .replace("-codex", " Codex")
@@ -119,10 +123,17 @@ function getModelDescription(model: string, backend: string): string {
   const descriptions: Record<string, string> = {
     // Codex
     "gpt-5.2-codex": "Latest agentic coding model",
+    "gpt-5-codex": "Fast Codex model for agentic coding",
+    "codex-mini-latest": "Lightweight Codex model",
     "gpt-5.1-codex-max": "Maximum capability",
     "gpt-5.1-codex": "Standard agentic model",
     "gpt-5.1-codex-mini": "Fast & efficient",
+    "gpt-5": "General GPT-5 model via Codex CLI",
+    "gpt-5-mini": "Smaller GPT-5 model via Codex CLI",
+    "gpt-5-nano": "Lowest-latency GPT-5 model via Codex CLI",
     "gpt-5.1": "Base GPT-5.1",
+    "o4-mini": "Fast reasoning model",
+    "o3": "High-reasoning model",
     "exp": "Experimental",
     // Gemini
     "gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
@@ -130,7 +141,16 @@ function getModelDescription(model: string, backend: string): string {
     "gemini-2.5-pro": "1M context, most capable",
     "gemini-2.5-flash": "Fast & efficient",
   };
-  return descriptions[model] || "";
+
+  if (descriptions[model]) {
+    return descriptions[model];
+  }
+
+  if (backend === "codex" && /^gpt-5/.test(model)) {
+    return "GPT-5 family model via local Codex CLI";
+  }
+
+  return "";
 }
 
 export async function loadPermissions() {

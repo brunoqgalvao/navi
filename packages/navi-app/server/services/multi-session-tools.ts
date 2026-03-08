@@ -52,7 +52,7 @@ Available agent types with native UI:
 
 Available backends:
 - 'claude' (default): Claude models (haiku, sonnet, opus)
-- 'codex': OpenAI Codex CLI (gpt-5.2-codex, o3, etc.)
+- 'codex': OpenAI Codex CLI (gpt-5.2-codex, gpt-5-codex, gpt-5.4, o3, etc.)
 - 'gemini': Google Gemini (gemini-2.0-flash, etc.)
 
 The child agent has its own context window and can spawn its own children (up to depth 3).
@@ -92,7 +92,7 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
         model: {
           type: "string",
           description:
-            "Optional: Model to use. For Claude: 'haiku', 'sonnet', 'opus'. For Codex: 'gpt-5.2-codex', 'o3', etc. For Gemini: 'gemini-2.0-flash', etc. Defaults to parent's model.",
+            "Optional: Model to use. For Claude: 'haiku', 'sonnet', 'opus'. For Codex: 'gpt-5.2-codex', 'gpt-5-codex', 'gpt-5.4', 'o3', etc. For Gemini: 'gemini-2.0-flash', etc. Defaults to parent's model.",
         },
         backend: {
           type: "string",

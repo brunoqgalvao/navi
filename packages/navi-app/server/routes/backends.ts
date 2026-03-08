@@ -152,6 +152,21 @@ function scanCodexLogs(issues: BackendHealthIssue[]) {
   }
 }
 
+function scanCodexConfig(configPath: string, configContent: string, issues: BackendHealthIssue[]) {
+  const reasoningEffort = extractTomlStringValue(configContent, "model_reasoning_effort");
+  if (
+    reasoningEffort &&
+    !["low", "medium", "high"].includes(reasoningEffort)
+  ) {
+    issues.push({
+      level: "warning",
+      code: "reasoning_effort_may_break_newer_codex_models",
+      message: `Configured reasoning effort "${reasoningEffort}" may be rejected by newer Codex models like gpt-5-codex. Navi overrides this per run, but raw Codex CLI calls may fail.`,
+      path: configPath,
+    });
+  }
+}
+
 async function getCodexHealth(): Promise<CodexHealth> {
   const info = await backendRegistry.get("codex")?.detect();
   const configPath = join(homedir(), ".codex", "config.toml");
@@ -160,6 +175,7 @@ async function getCodexHealth(): Promise<CodexHealth> {
 
   scanCodexSkills(issues);
   scanCodexLogs(issues);
+  scanCodexConfig(configPath, configContent, issues);
 
   return {
     backend: "codex",
