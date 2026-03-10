@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SubagentEventBlock } from "../claude";
+  import Markdown from "./Markdown.svelte";
 
   interface Props {
     block: SubagentEventBlock;
@@ -72,7 +73,9 @@
       </div>
 
       {#if block.summary}
-        <div class="text-sm text-gray-700 mt-1">{block.summary}</div>
+        <div class="text-sm text-gray-700 mt-1 deliverable-summary">
+          <Markdown content={block.summary} />
+        </div>
       {/if}
 
       {#if block.eventType === "clarification_response" && block.question}
@@ -99,7 +102,9 @@
       {/if}
 
       {#if expanded && block.content}
-        <pre class="mt-2 text-xs text-gray-700 bg-white/80 border border-white rounded-lg p-2 whitespace-pre-wrap max-h-52 overflow-y-auto">{block.content}</pre>
+        <div class="mt-2 text-xs text-gray-700 bg-white/80 border border-white rounded-lg p-3 max-h-72 overflow-y-auto deliverable-content">
+          <Markdown content={block.content} />
+        </div>
       {/if}
 
       {#if block.artifacts && block.artifacts.length > 0}
@@ -123,3 +128,83 @@
     </button>
   </div>
 </div>
+
+<style>
+  .deliverable-summary :global(.markdown-content) {
+    display: inline;
+  }
+
+  .deliverable-summary :global(.markdown-content p) {
+    display: inline;
+    margin: 0;
+  }
+
+  .deliverable-summary :global(.markdown-content code) {
+    font-size: 0.8125rem;
+  }
+
+  .deliverable-content :global(.markdown-content) {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+
+  .deliverable-content :global(.markdown-content h1) {
+    font-size: 0.9375rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.375rem;
+  }
+
+  .deliverable-content :global(.markdown-content h2) {
+    font-size: 0.875rem;
+    margin-top: 0.625rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .deliverable-content :global(.markdown-content h3) {
+    font-size: 0.8125rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .deliverable-content :global(.markdown-content p) {
+    margin: 0.375rem 0;
+  }
+
+  .deliverable-content :global(.markdown-content ul),
+  .deliverable-content :global(.markdown-content ol) {
+    margin: 0.375rem 0;
+    padding-left: 1.25rem;
+  }
+
+  .deliverable-content :global(.markdown-content li) {
+    margin: 0.125rem 0;
+  }
+
+  .deliverable-content :global(.markdown-content pre) {
+    font-size: 0.75rem;
+    padding: 0.5rem;
+    margin: 0.375rem 0;
+    border-radius: 0.375rem;
+    background: rgba(0, 0, 0, 0.04);
+  }
+
+  .deliverable-content :global(.markdown-content code) {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.25rem;
+  }
+
+  .deliverable-content :global(.markdown-content blockquote) {
+    margin: 0.375rem 0;
+    padding-left: 0.75rem;
+    border-left-width: 3px;
+  }
+
+  .deliverable-content :global(.markdown-content table) {
+    font-size: 0.75rem;
+  }
+
+  .deliverable-content :global(.markdown-content th),
+  .deliverable-content :global(.markdown-content td) {
+    padding: 0.25rem 0.5rem;
+  }
+</style>

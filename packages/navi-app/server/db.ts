@@ -1422,6 +1422,8 @@ export const sessions = {
     run("UPDATE sessions SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
   setMarkedForReview: (id: string, markedForReview: boolean) =>
     run("UPDATE sessions SET marked_for_review = ?, updated_at = ? WHERE id = ?", [markedForReview ? 1 : 0, Date.now(), id]),
+  setBacklog: (id: string, inBacklog: boolean, note?: string) =>
+    run("UPDATE sessions SET in_backlog = ?, backlog_added_at = ?, backlog_note = ?, updated_at = ? WHERE id = ?", [inBacklog ? 1 : 0, inBacklog ? Date.now() : null, note ?? null, Date.now(), id]),
   setFolder: (id: string, folderId: string | null) =>
     run("UPDATE sessions SET folder_id = ?, updated_at = ? WHERE id = ?", [folderId, Date.now(), id]),
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Project, Session } from "../api";
+  import { api } from "../api";
   import RelativeTime from "../components/RelativeTime.svelte";
   import { attentionItems, projectStatus, sessionStatus } from "../stores";
 
@@ -11,207 +12,147 @@
     onNewProject: () => void;
   }
 
-  type WorkspaceNotificationKind =
-    | "running"
-    | "permission"
-    | "awaiting_input"
-    | "unread"
-    | "review"
-    | "update"
-    | "project-running"
-    | "project-attention";
-
-  interface WorkspaceNotificationItem {
-    key: string;
-    kind: WorkspaceNotificationKind;
-    summary: string;
-    description: string;
-    timestamp: number;
-    session?: Session;
-  }
-
-  interface WorkspaceNotificationGroup {
-    project: Project;
-    items: WorkspaceNotificationItem[];
-    runningCount: number;
-    attentionCount: number;
-    latestTimestamp: number;
-  }
-
-  const RECENT_PROJECT_LIMIT = 6;
-  const NOTIFICATION_PROJECT_LIMIT = 4;
-  const ITEMS_PER_PROJECT = 3;
-  const SESSION_NOTIFICATION_PRIORITY: Record<WorkspaceNotificationKind, number> = {
-    permission: 0,
-    awaiting_input: 1,
-    unread: 2,
-    running: 3,
-    review: 4,
-    update: 5,
-    "project-attention": 6,
-    "project-running": 7,
-  };
-
-  const notificationStyles: Record<
-    WorkspaceNotificationKind,
-    { label: string; dot: string; badge: string; hover: string }
-  > = {
-    running: {
-      label: "Running",
-      dot: "bg-cyan-500 shadow-[0_0_0_4px_rgba(6,182,212,0.16)]",
-      badge: "bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-200",
-      hover: "hover:border-cyan-200 hover:bg-cyan-50/70 dark:hover:border-cyan-400/20 dark:hover:bg-cyan-400/10",
-    },
-    permission: {
-      label: "Approval",
-      dot: "bg-amber-500 shadow-[0_0_0_4px_rgba(245,158,11,0.18)]",
-      badge: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200",
-      hover: "hover:border-amber-200 hover:bg-amber-50/70 dark:hover:border-amber-400/20 dark:hover:bg-amber-400/10",
-    },
-    awaiting_input: {
-      label: "Needs Input",
-      dot: "bg-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.18)]",
-      badge: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-200",
-      hover: "hover:border-orange-200 hover:bg-orange-50/70 dark:hover:border-orange-400/20 dark:hover:bg-orange-400/10",
-    },
-    unread: {
-      label: "New Output",
-      dot: "bg-blue-500 shadow-[0_0_0_4px_rgba(59,130,246,0.16)]",
-      badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200",
-      hover: "hover:border-blue-200 hover:bg-blue-50/70 dark:hover:border-blue-400/20 dark:hover:bg-blue-400/10",
-    },
-    review: {
-      label: "Review",
-      dot: "bg-indigo-500 shadow-[0_0_0_4px_rgba(99,102,241,0.18)]",
-      badge: "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200",
-      hover: "hover:border-indigo-200 hover:bg-indigo-50/70 dark:hover:border-indigo-400/20 dark:hover:bg-indigo-400/10",
-    },
-    update: {
-      label: "Recent",
-      dot: "bg-slate-400 shadow-[0_0_0_4px_rgba(148,163,184,0.18)]",
-      badge: "bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-200",
-      hover: "hover:border-slate-200 hover:bg-slate-50/70 dark:hover:border-slate-400/20 dark:hover:bg-slate-400/10",
-    },
-    "project-running": {
-      label: "Running",
-      dot: "bg-cyan-500 shadow-[0_0_0_4px_rgba(6,182,212,0.16)]",
-      badge: "bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-200",
-      hover: "hover:border-cyan-200 hover:bg-cyan-50/70 dark:hover:border-cyan-400/20 dark:hover:bg-cyan-400/10",
-    },
-    "project-attention": {
-      label: "Attention",
-      dot: "bg-rose-500 shadow-[0_0_0_4px_rgba(244,63,94,0.16)]",
-      badge: "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200",
-      hover: "hover:border-rose-200 hover:bg-rose-50/70 dark:hover:border-rose-400/20 dark:hover:bg-rose-400/10",
-    },
-  };
-
   let { projects, recentChats, onSelectProject, onSelectSession, onNewProject }: Props = $props();
+
+  const COLLAPSED_LIMIT = 3;
+
+  // Track collapsed rows (keyed by "projectId:laneId")
+  let expandedCells = $state(new Set<string>());
+  // Track collapsed project rows
+  let collapsedRows = $state(new Set<string>());
+  // New task modal
+  let newTaskModal = $state<{ projectId: string; projectName: string } | null>(null);
+  let newTaskTitle = $state("");
+
+  function toggleCellExpand(key: string) {
+    const next = new Set(expandedCells);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    expandedCells = next;
+  }
+
+  function toggleRow(projectId: string) {
+    const next = new Set(collapsedRows);
+    if (next.has(projectId)) next.delete(projectId);
+    else next.add(projectId);
+    collapsedRows = next;
+  }
+
+  function openNewTask(project: Project) {
+    newTaskModal = { projectId: project.id, projectName: project.name };
+    newTaskTitle = "";
+  }
+
+  async function createTask() {
+    if (!newTaskModal || !newTaskTitle.trim()) return;
+    try {
+      const session = await api.sessions.create(newTaskModal.projectId, { title: newTaskTitle.trim() });
+      if (session) {
+        // Put it in backlog
+        await api.sessions.setBacklog(session.id, true, newTaskTitle.trim());
+      }
+    } catch (e) {
+      console.error("Failed to create task:", e);
+    }
+    newTaskModal = null;
+    newTaskTitle = "";
+  }
 
   function getProjectActivity(project: Project): number {
     return project.last_activity ?? project.updated_at ?? project.created_at ?? 0;
   }
 
-  function pluralize(count: number, label: string): string {
-    return `${count} ${label}${count === 1 ? "" : "s"}`;
-  }
+  // Lane definitions
+  type LaneId = "backlog" | "running" | "needs_input" | "done" | "idle";
 
-  function attentionSummary(count: number): string {
-    return count === 1 ? "1 chat needs attention" : `${count} chats need attention`;
-  }
-
-  function runningSummary(count: number): string {
-    return count === 1 ? "1 chat is currently running" : `${count} chats are currently running`;
-  }
-
-  function getStatusTimestamp(sessionId: string, fallback: number): number {
-    const status = $sessionStatus.get(sessionId);
-    const lastActivity = status?.lastActivity;
-    return lastActivity instanceof Date ? lastActivity.getTime() : fallback;
-  }
-
-  function createSessionNotification(session: Session): WorkspaceNotificationItem {
+  function getSessionLane(session: Session): LaneId {
+    if (session.in_backlog) return "backlog";
     const liveStatus = $sessionStatus.get(session.id)?.status;
-    const timestamp = getStatusTimestamp(session.id, session.updated_at);
-
-    if (liveStatus === "permission") {
-      return {
-        key: `${session.id}-permission`,
-        kind: "permission",
-        summary: session.title,
-        description: "Waiting on an approval before the run can continue.",
-        timestamp,
-        session,
-      };
-    }
-
-    if (liveStatus === "awaiting_input") {
-      return {
-        key: `${session.id}-awaiting-input`,
-        kind: "awaiting_input",
-        summary: session.title,
-        description: "The agent asked a follow-up question and is blocked on your reply.",
-        timestamp,
-        session,
-      };
-    }
-
-    if (liveStatus === "unread") {
-      return {
-        key: `${session.id}-unread`,
-        kind: "unread",
-        summary: session.title,
-        description: "Fresh output landed in this chat since you last looked at it.",
-        timestamp,
-        session,
-      };
-    }
-
-    if (liveStatus === "running") {
-      return {
-        key: `${session.id}-running`,
-        kind: "running",
-        summary: session.title,
-        description: "A run is still in progress right now.",
-        timestamp,
-        session,
-      };
-    }
-
-    if (session.marked_for_review) {
-      return {
-        key: `${session.id}-review`,
-        kind: "review",
-        summary: session.title,
-        description: "Flagged for a closer pass before you move on.",
-        timestamp: session.updated_at,
-        session,
-      };
-    }
-
-    return {
-      key: `${session.id}-recent`,
-      kind: "update",
-      summary: session.title,
-      description: "Recent work happened here and it is ready to revisit.",
-      timestamp: session.updated_at,
-      session,
-    };
+    if (liveStatus === "running") return "running";
+    if (liveStatus === "permission" || liveStatus === "awaiting_input") return "needs_input";
+    if (liveStatus === "unread" || session.marked_for_review) return "done";
+    return "idle";
   }
 
-  function handleNotificationClick(project: Project, item: WorkspaceNotificationItem) {
-    if (item.session) {
-      onSelectSession(item.session);
-      return;
-    }
-
-    onSelectProject(project);
+  interface Lane {
+    id: LaneId;
+    label: string;
+    dot: string;
+    bg: string;
+    text: string;
+    border: string;
+    animate: boolean;
   }
 
-  const recentProjects = $derived.by(() => {
+  const lanes: Lane[] = [
+    { id: "backlog", label: "Backlog", dot: "bg-violet-400", bg: "bg-violet-50 dark:bg-violet-500/8", text: "text-violet-600 dark:text-violet-300", border: "border-violet-200/50 dark:border-violet-500/15", animate: false },
+    { id: "running", label: "Running", dot: "bg-cyan-500", bg: "bg-cyan-50 dark:bg-cyan-500/8", text: "text-cyan-600 dark:text-cyan-300", border: "border-cyan-200/50 dark:border-cyan-500/15", animate: true },
+    { id: "needs_input", label: "Needs Input", dot: "bg-amber-500", bg: "bg-amber-50 dark:bg-amber-500/8", text: "text-amber-600 dark:text-amber-300", border: "border-amber-200/50 dark:border-amber-500/15", animate: false },
+    { id: "done", label: "Done", dot: "bg-emerald-500", bg: "bg-emerald-50 dark:bg-emerald-500/8", text: "text-emerald-600 dark:text-emerald-300", border: "border-emerald-200/50 dark:border-emerald-500/15", animate: false },
+    { id: "idle", label: "Idle", dot: "bg-slate-400 dark:bg-slate-500", bg: "bg-slate-50 dark:bg-slate-800/40", text: "text-slate-500 dark:text-slate-400", border: "border-slate-200/50 dark:border-slate-700/30", animate: false },
+  ];
+
+  // Build the grid data: for each project, bucket sessions into lanes
+  interface ProjectRow {
+    project: Project;
+    cells: Map<LaneId, Session[]>;
+    totalSessions: number;
+    latestTimestamp: number;
+  }
+
+  const projectRows = $derived.by(() => {
+    // Index all non-archived recent chats by project
+    const chatsByProject = new Map<string, Session[]>();
+    for (const chat of recentChats) {
+      if (chat.archived) continue;
+      const list = chatsByProject.get(chat.project_id) ?? [];
+      list.push(chat);
+      chatsByProject.set(chat.project_id, list);
+    }
+
     return [...projects]
       .sort((a, b) => getProjectActivity(b) - getProjectActivity(a))
-      .slice(0, RECENT_PROJECT_LIMIT);
+      .map((project): ProjectRow => {
+        const allSessions = chatsByProject.get(project.id) ?? [];
+        const cells = new Map<LaneId, Session[]>();
+
+        for (const lane of lanes) {
+          cells.set(lane.id, []);
+        }
+
+        for (const s of allSessions) {
+          const laneId = getSessionLane(s);
+          cells.get(laneId)!.push(s);
+        }
+
+        // Sort each cell by recency
+        for (const [, list] of cells) {
+          list.sort((a, b) => b.updated_at - a.updated_at);
+        }
+
+        return {
+          project,
+          cells,
+          totalSessions: allSessions.length,
+          latestTimestamp: getProjectActivity(project),
+        };
+      })
+      .filter((row) => {
+        const status = $projectStatus.get(row.project.id);
+        return row.totalSessions > 0 || !!status?.runningCount || !!status?.attentionCount;
+      });
+  });
+
+  // Lane totals for column headers
+  const laneTotals = $derived.by(() => {
+    const totals = new Map<LaneId, number>();
+    for (const lane of lanes) totals.set(lane.id, 0);
+    for (const row of projectRows) {
+      for (const [laneId, sessions] of row.cells) {
+        totals.set(laneId, (totals.get(laneId) ?? 0) + sessions.length);
+      }
+    }
+    return totals;
   });
 
   const totalNeedsAttention = $derived(
@@ -219,367 +160,253 @@
       $attentionItems.totalNeedsInput +
       $attentionItems.totalNeedsReview
   );
-
-  const activeWorkspaceCount = $derived.by(() => {
-    let count = 0;
-
-    for (const status of $projectStatus.values()) {
-      if (status.runningCount > 0 || status.attentionCount > 0) {
-        count += 1;
-      }
-    }
-
-    return count;
-  });
-
-  const workspaceNotificationGroups = $derived.by(() => {
-    const chatsByProject = new Map<string, Session[]>();
-
-    for (const chat of recentChats) {
-      if (chat.archived) continue;
-      const existing = chatsByProject.get(chat.project_id) ?? [];
-      existing.push(chat);
-      chatsByProject.set(chat.project_id, existing);
-    }
-
-    return recentProjects
-      .filter((project) => {
-        const status = $projectStatus.get(project.id);
-        return (
-          chatsByProject.has(project.id) ||
-          !!status?.runningCount ||
-          !!status?.attentionCount
-        );
-      })
-      .map((project): WorkspaceNotificationGroup => {
-        const projectChats = [...(chatsByProject.get(project.id) ?? [])].sort((a, b) => {
-          const aItem = createSessionNotification(a);
-          const bItem = createSessionNotification(b);
-
-          const priorityDelta =
-            SESSION_NOTIFICATION_PRIORITY[aItem.kind] - SESSION_NOTIFICATION_PRIORITY[bItem.kind];
-
-          if (priorityDelta !== 0) {
-            return priorityDelta;
-          }
-
-          return bItem.timestamp - aItem.timestamp;
-        });
-
-        const status = $projectStatus.get(project.id);
-        const items = projectChats
-          .map((chat) => createSessionNotification(chat))
-          .slice(0, ITEMS_PER_PROJECT);
-
-        const visibleRunning = items.filter((item) => item.kind === "running").length;
-        const visibleAttention = items.filter((item) =>
-          ["permission", "awaiting_input", "unread", "review"].includes(item.kind)
-        ).length;
-
-        if ((status?.attentionCount ?? 0) > visibleAttention && items.length < ITEMS_PER_PROJECT) {
-          const hiddenAttention = (status?.attentionCount ?? 0) - visibleAttention;
-          items.push({
-            key: `${project.id}-project-attention`,
-            kind: "project-attention",
-            summary: attentionSummary(hiddenAttention),
-            description: "Approvals, unread output, or follow-up questions are waiting in this workspace.",
-            timestamp: getProjectActivity(project),
-          });
-        }
-
-        if ((status?.runningCount ?? 0) > visibleRunning && items.length < ITEMS_PER_PROJECT) {
-          const hiddenRunning = (status?.runningCount ?? 0) - visibleRunning;
-          items.push({
-            key: `${project.id}-project-running`,
-            kind: "project-running",
-            summary: runningSummary(hiddenRunning),
-            description: "Open this workspace to jump back into the latest active runs.",
-            timestamp: getProjectActivity(project),
-          });
-        }
-
-        if (items.length === 0) {
-          items.push({
-            key: `${project.id}-recent-update`,
-            kind: "update",
-            summary: "Recent workspace activity",
-            description: "Open the workspace to see the latest chats, files, and context.",
-            timestamp: getProjectActivity(project),
-          });
-        }
-
-        const latestTimestamp = Math.max(
-          getProjectActivity(project),
-          ...items.map((item) => item.timestamp)
-        );
-
-        return {
-          project,
-          items,
-          runningCount: status?.runningCount ?? 0,
-          attentionCount: status?.attentionCount ?? 0,
-          latestTimestamp,
-        };
-      })
-      .sort((a, b) => b.latestTimestamp - a.latestTimestamp)
-      .slice(0, NOTIFICATION_PROJECT_LIMIT);
-  });
 </script>
 
-<div class="flex-1 overflow-y-auto bg-[linear-gradient(180deg,hsl(25,60%,98%)_0%,#ffffff_42%,hsl(25,40%,97%)_100%)] dark:bg-[linear-gradient(180deg,#09111f_0%,#0f172a_42%,#111827_100%)]">
-  <div class="relative isolate min-h-full overflow-hidden">
-    <div class="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_top_left,hsl(25,90%,60%,0.12),transparent_50%),radial-gradient(circle_at_top_right,hsl(25,90%,50%,0.10),transparent_40%),radial-gradient(circle_at_bottom_left,hsl(25,80%,70%,0.06),transparent_35%)] dark:bg-[radial-gradient(circle_at_top_left,hsl(25,90%,50%,0.14),transparent_50%),radial-gradient(circle_at_top_right,hsl(25,90%,60%,0.10),transparent_40%)]"></div>
+<div class="flex-1 overflow-hidden bg-[linear-gradient(180deg,hsl(25,60%,98%)_0%,#ffffff_30%,hsl(25,40%,97.5%)_100%)] dark:bg-[linear-gradient(180deg,#09111f_0%,#0f172a_30%,#111827_100%)]">
+  <div class="relative isolate flex h-full flex-col">
+    <!-- Subtle radials -->
+    <div class="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_top_left,hsl(25,90%,60%,0.07),transparent_50%),radial-gradient(circle_at_top_right,hsl(25,90%,50%,0.05),transparent_40%)] dark:bg-[radial-gradient(circle_at_top_left,hsl(25,90%,50%,0.08),transparent_50%)]"></div>
 
-    <div class="relative mx-auto flex min-h-full max-w-6xl flex-col gap-6 px-6 py-8 md:px-8 lg:gap-8 lg:py-10">
-      <section class="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <div class="rounded-[28px] border border-accent-200/50 bg-white/85 p-6 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35),0_0_0_1px_hsl(25,90%,85%,0.15)] backdrop-blur dark:border-accent-400/10 dark:bg-white/6 md:p-8">
-          <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div class="max-w-2xl">
-              <div class="inline-flex items-center gap-2 rounded-full border border-accent-200/80 bg-accent-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-accent-700 shadow-sm dark:border-accent-400/20 dark:bg-accent-500/10 dark:text-accent-200">
-                <span class="h-2 w-2 rounded-full bg-accent-500"></span>
-                Workspace Pulse
-              </div>
-
-              <h1 class="mt-4 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
-                Recent work should stay visible after a run ends.
-              </h1>
-
-              <p class="mt-4 max-w-xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-                Keep the active workspaces, approvals, unread output, and fresh updates in one place so the dashboard feels alive instead of empty.
-              </p>
-            </div>
-
-            <button
-              onclick={onNewProject}
-              class="inline-flex items-center justify-center gap-2 rounded-2xl bg-accent-600 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-accent-600/25 transition-all hover:-translate-y-0.5 hover:bg-accent-700 dark:bg-accent-500 dark:text-white dark:shadow-accent-500/20 dark:hover:bg-accent-400"
-            >
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              Create Workspace
-            </button>
-          </div>
-
-          <div class="mt-8 grid gap-3 sm:grid-cols-3">
-            <div class="rounded-2xl border border-cyan-100 bg-cyan-50/80 p-4 dark:border-cyan-400/15 dark:bg-cyan-400/8">
-              <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700 dark:text-cyan-200">
-                Running Now
-              </div>
-              <div class="mt-3 text-3xl font-semibold text-slate-950 dark:text-white">
-                {$attentionItems.totalRunning}
-              </div>
-              <p class="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                Active runs still moving through your recent chats.
-              </p>
-            </div>
-
-            <div class="rounded-2xl border border-amber-100 bg-amber-50/85 p-4 dark:border-amber-400/15 dark:bg-amber-400/8">
-              <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-700 dark:text-amber-200">
-                Need Eyes
-              </div>
-              <div class="mt-3 text-3xl font-semibold text-slate-950 dark:text-white">
-                {totalNeedsAttention}
-              </div>
-              <p class="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                Approvals, questions, and review items waiting for you.
-              </p>
-            </div>
-
-            <div class="rounded-2xl border border-accent-200 bg-accent-50/90 p-4 dark:border-accent-400/15 dark:bg-accent-500/8">
-              <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent-700 dark:text-accent-200">
-                Live Workspaces
-              </div>
-              <div class="mt-3 text-3xl font-semibold text-slate-950 dark:text-white">
-                {activeWorkspaceCount}
-              </div>
-              <p class="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                Recent workspaces with active runs or outstanding attention.
-              </p>
-            </div>
-          </div>
+    <!-- Header -->
+    <div class="relative z-10 flex flex-col gap-3 px-5 pb-3 pt-5 sm:flex-row sm:items-center sm:justify-between md:px-6">
+      <div class="flex items-center gap-3">
+        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-600 shadow-md shadow-accent-600/20">
+          <svg class="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+          </svg>
         </div>
-
-        <div class="rounded-[28px] border border-slate-200/80 bg-white/88 p-5 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] backdrop-blur dark:border-white/10 dark:bg-white/6 md:p-6">
-          <div class="flex items-start justify-between gap-4 border-b border-slate-200/80 pb-4 dark:border-white/10">
-            <div>
-              <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent-600 dark:text-accent-400">
-                Notification Center
-              </p>
-              <h2 class="mt-2 text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
-                Recent workspace activity
-              </h2>
-              <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Runs, approvals, unread output, and updates from the workspaces you touched most recently.
-              </p>
-            </div>
-
-            <div class="rounded-full bg-accent-600 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white dark:bg-accent-500 dark:text-white">
-              {workspaceNotificationGroups.length > 0
-                ? `${workspaceNotificationGroups.length} live`
-                : "Quiet"}
-            </div>
-          </div>
-
-          {#if workspaceNotificationGroups.length > 0}
-            <div class="mt-4 space-y-4">
-              {#each workspaceNotificationGroups as group}
-                <article class="rounded-3xl border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-slate-950/20">
-                  <div class="flex items-start justify-between gap-4">
-                    <div class="min-w-0">
-                      <button
-                        onclick={() => onSelectProject(group.project)}
-                        class="text-left transition-opacity hover:opacity-80"
-                      >
-                        <div class="text-sm font-semibold text-slate-950 dark:text-white">
-                          {group.project.name}
-                        </div>
-                        <div
-                          class="mt-1 truncate text-[11px] text-slate-500 dark:text-slate-400"
-                          title={group.project.path}
-                        >
-                          {group.project.path}
-                        </div>
-                      </button>
-
-                      <div class="mt-3 flex flex-wrap gap-2">
-                        <span class="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm dark:bg-white/8 dark:text-slate-300">
-                          {pluralize(group.project.session_count || 0, "chat")}
-                        </span>
-                        {#if group.runningCount > 0}
-                          <span class="rounded-full bg-cyan-100 px-2.5 py-1 text-[11px] font-medium text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-200">
-                            {pluralize(group.runningCount, "run")}
-                          </span>
-                        {/if}
-                        {#if group.attentionCount > 0}
-                          <span class="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">
-                            {pluralize(group.attentionCount, "alert")}
-                          </span>
-                        {/if}
-                      </div>
-                    </div>
-
-                    <div class="shrink-0 text-right">
-                      <div class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-                        Latest
-                      </div>
-                      <RelativeTime
-                        timestamp={group.latestTimestamp}
-                        class="mt-1 text-xs text-slate-500 dark:text-slate-400"
-                      />
-                    </div>
-                  </div>
-
-                  <div class="mt-4 space-y-2.5">
-                    {#each group.items as item}
-                      {@const style = notificationStyles[item.kind]}
-                      <button
-                        onclick={() => handleNotificationClick(group.project, item)}
-                        class={`w-full rounded-2xl border border-white/80 bg-white/80 p-3 text-left transition-all dark:border-white/8 dark:bg-white/[0.04] ${style.hover}`}
-                      >
-                        <div class="flex items-center gap-2">
-                          <span class={`h-2.5 w-2.5 rounded-full ${style.dot}`}></span>
-                          <span
-                            class={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${style.badge}`}
-                          >
-                            {style.label}
-                          </span>
-                          <span class="ml-auto text-[11px] text-slate-400 dark:text-slate-500">
-                            <RelativeTime timestamp={item.timestamp} />
-                          </span>
-                        </div>
-
-                        <div class="mt-2 text-sm font-medium text-slate-900 dark:text-white">
-                          {item.summary}
-                        </div>
-                        <div class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                          {item.description}
-                        </div>
-                      </button>
-                    {/each}
-                  </div>
-                </article>
-              {/each}
-            </div>
-          {:else}
-            <div class="mt-6 rounded-3xl border border-dashed border-accent-200/60 bg-accent-50/40 px-6 py-10 text-center dark:border-accent-400/10 dark:bg-accent-500/[0.03]">
-              <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm dark:bg-white/8">
-                <svg class="h-6 w-6 text-accent-400 dark:text-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3h5.25m-7.5 8.25h13.5A2.25 2.25 0 0021 17.25V6.75A2.25 2.25 0 0018.75 4.5H5.25A2.25 2.25 0 003 6.75v10.5A2.25 2.25 0 005.25 19.5z" />
-                </svg>
-              </div>
-              <h3 class="mt-4 text-sm font-semibold text-slate-900 dark:text-white">
-                No recent notifications yet
-              </h3>
-              <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Start a workspace or let a run finish, and the latest activity will land here.
-              </p>
-            </div>
-          {/if}
+        <div>
+          <h1 class="text-lg font-semibold tracking-tight text-slate-900 dark:text-white">Workspaces</h1>
+          <p class="text-[11px] text-slate-500 dark:text-slate-400">{projects.length} workspace{projects.length === 1 ? '' : 's'}</p>
         </div>
-      </section>
+      </div>
 
-      {#if recentProjects.length > 0}
-        <section class="rounded-[28px] border border-accent-200/40 bg-white/88 p-5 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.3)] backdrop-blur dark:border-accent-400/10 dark:bg-white/6 md:p-6">
-          <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent-600 dark:text-accent-400">
-                Recent Workspaces
-              </p>
-              <h2 class="mt-2 text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
-                Jump back into your latest context
-              </h2>
+      <div class="flex items-center gap-2.5">
+        {#if $attentionItems.totalRunning > 0}
+          <div class="flex items-center gap-1.5 rounded-full bg-cyan-500/10 px-2.5 py-1 text-[11px] font-medium text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">
+            <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500"></span>
+            {$attentionItems.totalRunning} running
+          </div>
+        {/if}
+        {#if totalNeedsAttention > 0}
+          <div class="flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+            <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+            {totalNeedsAttention} need eyes
+          </div>
+        {/if}
+        <button
+          onclick={onNewProject}
+          class="inline-flex items-center gap-1.5 rounded-lg bg-accent-600 px-3.5 py-1.5 text-sm font-medium text-white shadow-md shadow-accent-600/20 transition-all hover:-translate-y-0.5 hover:bg-accent-700 hover:shadow-lg dark:bg-accent-500 dark:hover:bg-accent-400"
+        >
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          New Workspace
+        </button>
+      </div>
+    </div>
+
+    <!-- Board -->
+    {#if projectRows.length > 0}
+      <div class="relative flex-1 overflow-auto px-5 pb-4 md:px-6">
+        <div style="min-width: 900px;">
+          <!-- Column headers (sticky) -->
+          <div class="sticky top-0 z-20 grid gap-px bg-white/80 backdrop-blur dark:bg-slate-900/80" style="grid-template-columns: 200px repeat(5, minmax(0, 1fr));">
+            <!-- Empty corner for project name column -->
+            <div class="py-2 pr-3">
+              <span class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">Project</span>
             </div>
 
-            <p class="text-sm text-slate-500 dark:text-slate-400">
-              Ranked by actual workspace activity instead of sidebar order.
-            </p>
-          </div>
-
-          <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {#each recentProjects as project}
-              {@const status = $projectStatus.get(project.id)}
-              <button
-                onclick={() => onSelectProject(project)}
-                class="group rounded-3xl border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.92))] p-4 text-left transition-all hover:-translate-y-0.5 hover:border-accent-300 hover:shadow-[0_8px_30px_-8px_hsl(25,90%,50%,0.15)] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.72),rgba(15,23,42,0.42))] dark:hover:border-accent-400/20 dark:hover:shadow-[0_8px_30px_-8px_hsl(25,90%,50%,0.1)]"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <div class="text-sm font-semibold text-slate-950 dark:text-white">
-                      {project.name}
-                    </div>
-                    <div
-                      class="mt-1 truncate text-xs text-slate-500 dark:text-slate-400"
-                      title={project.path}
-                    >
-                      {project.path}
-                    </div>
-                  </div>
-
-                  <div class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-white/8 dark:text-slate-300">
-                    <RelativeTime timestamp={getProjectActivity(project)} />
-                  </div>
-                </div>
-
-                <div class="mt-4 flex flex-wrap gap-2">
-                  <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700 dark:bg-white/8 dark:text-slate-200">
-                    {pluralize(project.session_count || 0, "chat")}
-                  </span>
-                  {#if status?.runningCount}
-                    <span class="rounded-full bg-cyan-100 px-2.5 py-1 text-[11px] font-medium text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-200">
-                      {pluralize(status.runningCount, "run")}
-                    </span>
-                  {/if}
-                  {#if status?.attentionCount}
-                    <span class="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
-                      {pluralize(status.attentionCount, "alert")}
-                    </span>
-                  {/if}
-                </div>
-              </button>
+            {#each lanes as lane}
+              {@const total = laneTotals.get(lane.id) ?? 0}
+              <div class={`flex items-center gap-2 rounded-lg px-3 py-2 ${lane.bg} border ${lane.border}`}>
+                <span class={`h-2 w-2 rounded-full ${lane.dot} ${lane.animate ? 'animate-pulse' : ''}`}></span>
+                <span class={`text-[11px] font-semibold uppercase tracking-wider ${lane.text}`}>{lane.label}</span>
+                {#if total > 0}
+                  <span class={`ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold ${lane.text} opacity-70`}>{total}</span>
+                {/if}
+              </div>
             {/each}
           </div>
-        </section>
-      {/if}
-    </div>
+
+          <!-- Project rows -->
+          {#each projectRows as row}
+            {@const isCollapsed = collapsedRows.has(row.project.id)}
+
+            <!-- Project header row -->
+            <div class="mt-1.5 grid gap-px" style="grid-template-columns: 200px repeat(5, minmax(0, 1fr));">
+              <!-- Project info cell -->
+              <div class="flex items-center gap-2 rounded-l-lg border border-r-0 border-slate-200/60 bg-white py-2 pl-2 pr-3 dark:border-white/8 dark:bg-slate-900/60">
+                <button
+                  onclick={() => toggleRow(row.project.id)}
+                  class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-white/8 dark:hover:text-slate-300"
+                  title={isCollapsed ? 'Expand row' : 'Collapse row'}
+                >
+                  <svg class="h-3 w-3 transition-transform {isCollapsed ? '-rotate-90' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </button>
+
+                <button
+                  onclick={() => onSelectProject(row.project)}
+                  class="min-w-0 flex-1 text-left transition-opacity hover:opacity-70"
+                >
+                  <div class="truncate text-[13px] font-semibold text-slate-900 dark:text-white">
+                    {row.project.name}
+                  </div>
+                  <div class="truncate text-[10px] text-slate-400 dark:text-slate-500" title={row.project.path}>
+                    {row.project.path?.replace(/^\/Users\/[^/]+\//, '~/') ?? ''}
+                  </div>
+                </button>
+
+                <!-- + new task button -->
+                <button
+                  onclick={() => openNewTask(row.project)}
+                  class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-300 transition-colors hover:bg-accent-50 hover:text-accent-600 dark:text-slate-600 dark:hover:bg-accent-500/10 dark:hover:text-accent-400"
+                  title="New task"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                </button>
+              </div>
+
+              <!-- Lane cells -->
+              {#each lanes as lane, laneIdx}
+                {@const sessions = row.cells.get(lane.id) ?? []}
+                {@const cellKey = `${row.project.id}:${lane.id}`}
+                {@const isExpanded = expandedCells.has(cellKey)}
+                {@const visible = isExpanded ? sessions : sessions.slice(0, COLLAPSED_LIMIT)}
+                {@const hasMore = sessions.length > COLLAPSED_LIMIT}
+                {@const isLast = laneIdx === lanes.length - 1}
+
+                <div class="border border-l-0 border-slate-200/60 bg-white px-1.5 py-1.5 dark:border-white/8 dark:bg-slate-900/60 {isLast ? 'rounded-r-lg' : ''} {isCollapsed ? 'hidden' : ''}">
+                  {#if sessions.length > 0}
+                    <div class="space-y-0.5">
+                      {#each visible as session}
+                        <button
+                          onclick={() => onSelectSession(session)}
+                          class="group/s flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-slate-50 dark:hover:bg-white/5"
+                        >
+                          <span class={`h-1.5 w-1.5 shrink-0 rounded-full ${lane.dot} ${lane.animate ? 'animate-pulse' : ''}`}></span>
+                          <span class="min-w-0 flex-1 truncate text-[12px] text-slate-700 group-hover/s:text-slate-900 dark:text-slate-300 dark:group-hover/s:text-white">
+                            {session.title}
+                          </span>
+                          <span class="shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                            <RelativeTime timestamp={session.updated_at} />
+                          </span>
+                        </button>
+                      {/each}
+
+                      {#if hasMore}
+                        <button
+                          onclick={() => toggleCellExpand(cellKey)}
+                          class="flex w-full items-center justify-center gap-1 rounded-md py-1 text-[10px] font-medium text-slate-400 transition-colors hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                        >
+                          <svg class="h-3 w-3 {isExpanded ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                          </svg>
+                          {isExpanded ? 'less' : `${sessions.length - COLLAPSED_LIMIT} more`}
+                        </button>
+                      {/if}
+                    </div>
+                  {:else}
+                    <div class="py-2 text-center text-[10px] text-slate-300 dark:text-slate-600">
+                      -
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+
+            <!-- Collapsed state: just show counts inline -->
+            {#if isCollapsed}
+              <div class="mt-1.5 grid gap-px" style="grid-template-columns: 200px repeat(5, minmax(0, 1fr));">
+                <div></div>
+                {#each lanes as lane, laneIdx}
+                  {@const sessions = row.cells.get(lane.id) ?? []}
+                  {@const isLast = laneIdx === lanes.length - 1}
+                  <div class="border border-l-0 border-slate-200/40 bg-slate-50/50 px-3 py-1.5 dark:border-white/5 dark:bg-slate-900/30 {laneIdx === 0 ? 'border-l rounded-l-lg' : ''} {isLast ? 'rounded-r-lg' : ''}">
+                    {#if sessions.length > 0}
+                      <span class="text-[10px] font-medium {lane.text}">{sessions.length}</span>
+                    {:else}
+                      <span class="text-[10px] text-slate-300 dark:text-slate-600">-</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {/each}
+        </div>
+      </div>
+    {:else}
+      <!-- Empty state -->
+      <div class="flex flex-1 flex-col items-center justify-center text-center px-6">
+        <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-100 shadow-sm dark:bg-accent-500/10">
+          <svg class="h-7 w-7 text-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+          </svg>
+        </div>
+        <h3 class="mt-4 text-base font-semibold text-slate-900 dark:text-white">No workspaces yet</h3>
+        <p class="mt-2 max-w-sm text-sm text-slate-500 dark:text-slate-400">
+          Create your first workspace to start a conversation with Claude about your project.
+        </p>
+        <button
+          onclick={onNewProject}
+          class="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-accent-600 px-5 py-2.5 text-sm font-medium text-white shadow-md shadow-accent-600/20 transition-all hover:-translate-y-0.5 hover:bg-accent-700 dark:bg-accent-500 dark:hover:bg-accent-400"
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          Create Workspace
+        </button>
+      </div>
+    {/if}
   </div>
 </div>
+
+<!-- New Task Modal -->
+{#if newTaskModal}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+    onclick={() => newTaskModal = null}
+  >
+    <div
+      class="mx-4 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-slate-900"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <h3 class="text-sm font-semibold text-slate-900 dark:text-white">
+        New task in {newTaskModal.projectName}
+      </h3>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        This creates a new session in the backlog. Run it when you're ready.
+      </p>
+
+      <input
+        type="text"
+        bind:value={newTaskTitle}
+        placeholder="What needs to be done?"
+        class="mt-4 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none transition-colors focus:border-accent-400 focus:ring-2 focus:ring-accent-400/20 dark:border-white/10 dark:bg-slate-800 dark:text-white dark:placeholder-slate-500 dark:focus:border-accent-500"
+        onkeydown={(e) => { if (e.key === 'Enter') createTask(); }}
+      />
+
+      <div class="mt-4 flex justify-end gap-2">
+        <button
+          onclick={() => newTaskModal = null}
+          class="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/8"
+        >
+          Cancel
+        </button>
+        <button
+          onclick={createTask}
+          disabled={!newTaskTitle.trim()}
+          class="rounded-lg bg-accent-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm transition-all hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-accent-500 dark:hover:bg-accent-400"
+        >
+          Add to Backlog
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

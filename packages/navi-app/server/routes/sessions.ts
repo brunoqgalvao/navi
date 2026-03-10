@@ -442,6 +442,14 @@ export async function handleSessionRoutes(
     return json(sessions.get(id));
   }
 
+  const sessionBacklogMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/backlog$/);
+  if (sessionBacklogMatch && method === "POST") {
+    const id = sessionBacklogMatch[1];
+    const body = await req.json();
+    sessions.setBacklog(id, body.inBacklog, body.note);
+    return json(sessions.get(id));
+  }
+
   const sessionAutoAcceptMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/auto-accept$/);
   if (sessionAutoAcceptMatch && method === "POST") {
     const id = sessionAutoAcceptMatch[1];

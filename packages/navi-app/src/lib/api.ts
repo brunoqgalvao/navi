@@ -453,6 +453,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ markedForReview }),
       }),
+    setBacklog: (id: string, inBacklog: boolean, note?: string) =>
+      request<Session>(`/sessions/${id}/backlog`, {
+        method: "POST",
+        body: JSON.stringify({ inBacklog, note }),
+      }),
     reorder: (projectId: string, order: string[]) =>
       request<{ success: boolean }>(`/projects/${projectId}/sessions/reorder`, {
         method: "POST",

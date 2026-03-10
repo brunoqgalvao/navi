@@ -3594,10 +3594,11 @@ export function createWebSocketHandlers() {
 }
 
 export function triggerQuery(sessionId: string, projectId: string, prompt: string, model?: string) {
-  const activeWs = Array.from(connectedClients)[0];
+  const activeWs = Array.from(connectedClients)[0] ?? null;
   if (!activeWs) {
-    console.error("No active WebSocket connection to trigger query");
-    return false;
+    console.warn(
+      `[${sessionId}] Triggering query without an active WebSocket connection; UI updates will appear after reconnect`
+    );
   }
   handleQueryWithProcess(activeWs, {
     type: "query",

@@ -118,6 +118,7 @@
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
   import CloudExecutionStatus from "./lib/components/CloudExecutionStatus.svelte";
+  import WorkflowMonitorView from "./lib/features/workflows/components/WorkflowMonitorView.svelte";
   import ContextWarning from "./lib/components/ContextWarning.svelte";
   import MergeModal from "./lib/components/MergeModal.svelte";
   import CommandHelpModal from "./lib/components/CommandHelpModal.svelte";
@@ -286,6 +287,11 @@
 
   // Get current session data from sidebar sessions for worktree info
   let currentSessionData = $derived($session.sessionId ? sidebarSessions.find(s => s.id === $session.sessionId) : null);
+  let currentWorkflow = $derived(
+    $session.sessionId
+      ? workflowsForProject.find((item) => item.rootSessionId === $session.sessionId) ?? null
+      : null
+  );
 
   // Session hierarchy info for multi-agent
   let currentSessionHierarchy = $derived(() => {
@@ -368,6 +374,8 @@
   let isResolvingMergeConflicts = $state(false);
   let mergeConflictInfo = $state<{ branch: string; baseBranch: string; fileCount: number; snapshotId: string } | null>(null);
   let sidebarCollapsed = $state(false);
+  let sidebarCollapsedByCanvas = $state(false);
+  let isCanvasMode = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
   let linkContextMenu = $state<{ url: string; x: number; y: number } | null>(null);
@@ -1632,6 +1640,23 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
   }
 
+  async function selectSessionById(sessionId: string) {
+    const existing = sidebarSessions.find((sess) => sess.id === sessionId);
+    if (existing) {
+      await selectSession(existing);
+      return;
+    }
+
+    try {
+      const fetched = await api.sessions.get(sessionId);
+      if (fetched) {
+        await selectSession(fetched);
+      }
+    } catch (err) {
+      console.error("Failed to open workflow session:", err);
+    }
+  }
+
   async function toggleFolderPin(folder: WorkspaceFolder, e: Event) {
     e.stopPropagation();
     await toggleFolderPinAction(folder);
@@ -2036,6 +2061,13 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function selectSession(s: Session, skipHistory = false) {
+    // Restore sidebar if canvas had auto-collapsed it
+    isCanvasMode = false;
+    if (sidebarCollapsedByCanvas) {
+      sidebarCollapsed = false;
+      sidebarCollapsedByCanvas = false;
+    }
+
     const prevSessionId = $session.sessionId;
     if (prevSessionId && inputText.trim()) {
       sessionDrafts.setDraft(prevSessionId, inputText);
@@ -3330,6 +3362,21 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
   }
 
+  function handleCanvasToggle(isCanvas: boolean) {
+    isCanvasMode = isCanvas;
+    if (isCanvas) {
+      if (!sidebarCollapsed) {
+        sidebarCollapsed = true;
+        sidebarCollapsedByCanvas = true;
+      }
+    } else {
+      if (sidebarCollapsedByCanvas) {
+        sidebarCollapsed = false;
+        sidebarCollapsedByCanvas = false;
+      }
+    }
+  }
+
   /**
    * Handle extension toolbar clicks - toggles the corresponding panel
    */
@@ -3949,13 +3996,13 @@ Please walk me through the setup step by step. When I have the credentials, save
   <!-- Chat Area -->
   <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-900 relative overflow-hidden">
 
-    <!-- Navigation History (top-left) -->
-    <div class="absolute top-3 left-3 z-20 bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
+    <!-- Navigation History (top-left) - hidden in canvas mode -->
+    <div class="absolute top-3 left-3 z-20 bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm {isCanvasMode ? 'hidden' : ''}">
       <NavHistoryButton onNavigate={handleNavHistoryNavigate} />
     </div>
 
-    <!-- Toolbar Buttons -->
-    {#if currentProject}
+    <!-- Toolbar Buttons - hidden in canvas mode -->
+    {#if currentProject && !isCanvasMode}
     <div class="absolute top-3 right-3 z-20 flex gap-1">
       {#if $advancedMode}
       <button
@@ -4000,9 +4047,9 @@ Please walk me through the setup step by step. When I have the credentials, save
       />
     {:else}
 
-        <!-- Header (Mobile/Simplified) -->
+        <!-- Header (Mobile/Simplified) - hidden in canvas mode -->
 
-        <header class="h-14 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 bg-white/95 dark:bg-gray-800/95 md:hidden z-10 sticky top-0">
+        <header class="h-14 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 bg-white/95 dark:bg-gray-800/95 md:hidden z-10 sticky top-0 {isCanvasMode ? '!hidden' : ''}">
 
             <button onclick={() => session.setProject(null)} class="text-gray-500 dark:text-gray-400">
 
@@ -4076,13 +4123,25 @@ Please walk me through the setup step by step. When I have the credentials, save
             {:else}
               <!-- Project selected, no session - show dashboard -->
               <ProjectLanding
+                projectId={currentProject.id}
                 projectPath={currentProject?.path || ''}
                 projectName={currentProject.name}
+                sessions={sidebarSessions}
                 projectDescription={currentProject?.description}
                 {claudeMdContent}
                 {projectContext}
                 onSuggestionClick={(suggestion) => { inputText = suggestion; }}
+                onSelectSession={(sess) => {
+                  selectSession(sess as Session);
+                }}
+                onNewSession={startNewChatAction}
+                onPreviewFile={openPreview}
+                onOpenFiles={() => {
+                  showFileBrowser = true;
+                  rightPanelMode = "files";
+                }}
                 onShowClaudeMd={() => showClaudeMdModal = true}
+                onCanvasToggle={handleCanvasToggle}
               />
             {/if}
           {:else}
@@ -4139,74 +4198,89 @@ Please walk me through the setup step by step. When I have the credentials, save
               </div>
             {/if}
 
-            <ChatView
-              sessionId={$session.sessionId}
-              projectPath={currentProject?.path || ''}
-              activeSubagents={activeSubagents}
-              pendingPermissionRequest={pendingPermissionRequest}
-              pendingQuestion={pendingQuestion}
-              editingMessageId={editingMessageId}
-              bind:editingMessageContent={editingMessageContent}
-              renderMarkdown={renderMarkdown}
-              jsonBlocksMap={jsonBlocksMap}
-              shellBlocksMap={shellBlocksMap}
-              onEditMessage={startEditMessage}
-              onSaveEdit={saveEditedMessage}
-              onCancelEdit={cancelEditMessage}
-              onRollback={rollbackToMessage}
-              onFork={forkFromMessage}
-              onDelete={deleteMessage}
-              onPreview={openPreview}
-              onRunInTerminal={handleExecCommand}
-              onSendToClaude={handleBashSendToClaude}
-              onMessageClick={handleMessageClick}
-              onQuoteText={quoteTextInChat}
-              onForkWithQuote={forkWithQuote}
-              onAskCouncil={(text) => {
-                councilStore.newConversation(text);
-                councilStore.sendMessage(text);
-              }}
-              onPermissionApprove={handlePermissionApprove}
-              onPermissionDeny={handlePermissionDeny}
-              onQuestionAnswer={handleQuestionAnswer}
-              emptyState="continue"
-              onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
-              onSuggestionClick={(prompt) => { inputText = prompt; }}
-              {projectContext}
-              projectDescription={currentProject?.description}
-              isGitRepo={currentProjectIsGitRepo}
-              worktreeBranch={currentSessionData?.worktree_branch}
-              worktreeBaseBranch={currentSessionData?.worktree_base_branch}
-              sessionTitle={currentSessionData?.title || ''}
-              sessionHierarchy={currentSessionHierarchy()}
-              onSelectHierarchySession={(sess) => {
-                // Switch to the selected session (use selectSession to properly load messages)
-                if (sess.id && sess.id !== $session.sessionId) {
-                  selectSession(sess as Session);
-                }
-              }}
-              onEscalationResolved={async () => {
-                // Refresh session data
-                if ($session.projectId) {
-                  const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
-                  sidebarSessions = sessionsList;
-                }
-              }}
-              onMergeComplete={async () => {
+            {#if currentWorkflow}
+              <WorkflowMonitorView
+                workflow={currentWorkflow}
+                onRunNow={async () => {
+                  await runWorkflow(currentWorkflow.id);
+                }}
+                onSelectSession={async (sessionId) => {
+                  if (sessionId && sessionId !== $session.sessionId) {
+                    await selectSessionById(sessionId);
+                  }
+                }}
+                onOpenArtifact={openPreview}
+              />
+            {:else}
+              <ChatView
+                sessionId={$session.sessionId}
+                projectPath={currentProject?.path || ''}
+                activeSubagents={activeSubagents}
+                pendingPermissionRequest={pendingPermissionRequest}
+                pendingQuestion={pendingQuestion}
+                editingMessageId={editingMessageId}
+                bind:editingMessageContent={editingMessageContent}
+                renderMarkdown={renderMarkdown}
+                jsonBlocksMap={jsonBlocksMap}
+                shellBlocksMap={shellBlocksMap}
+                onEditMessage={startEditMessage}
+                onSaveEdit={saveEditedMessage}
+                onCancelEdit={cancelEditMessage}
+                onRollback={rollbackToMessage}
+                onFork={forkFromMessage}
+                onDelete={deleteMessage}
+                onPreview={openPreview}
+                onRunInTerminal={handleExecCommand}
+                onSendToClaude={handleBashSendToClaude}
+                onMessageClick={handleMessageClick}
+                onQuoteText={quoteTextInChat}
+                onForkWithQuote={forkWithQuote}
+                onAskCouncil={(text) => {
+                  councilStore.newConversation(text);
+                  councilStore.sendMessage(text);
+                }}
+                onPermissionApprove={handlePermissionApprove}
+                onPermissionDeny={handlePermissionDeny}
+                onQuestionAnswer={handleQuestionAnswer}
+                emptyState="continue"
+                onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
+                onSuggestionClick={(prompt) => { inputText = prompt; }}
+                {projectContext}
+                projectDescription={currentProject?.description}
+                isGitRepo={currentProjectIsGitRepo}
+                worktreeBranch={currentSessionData?.worktree_branch}
+                worktreeBaseBranch={currentSessionData?.worktree_base_branch}
+                sessionTitle={currentSessionData?.title || ''}
+                sessionHierarchy={currentSessionHierarchy()}
+                onSelectHierarchySession={(sess) => {
+                  // Switch to the selected session (use selectSession to properly load messages)
+                  if (sess.id && sess.id !== $session.sessionId) {
+                    selectSession(sess as Session);
+                  }
+                }}
+                onEscalationResolved={async () => {
+                  // Refresh session data
+                  if ($session.projectId) {
+                    const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
+                    sidebarSessions = sessionsList;
+                  }
+                }}
+                onMergeComplete={async () => {
                 // Refresh sessions list after merge
                 if ($session.projectId) {
                   const sessionsList = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
                   sidebarSessions = sessionsList;
                 }
-              }}
-            />
+                }}
+              />
+            {/if}
           {/if}
 
         </div>
 
-        <!-- Scroll to Bottom Button -->
+        <!-- Scroll to Bottom Button - hidden in canvas mode -->
         <div
-          class="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 transition-all duration-300 ease-out {!userIsNearBottom && currentMessages.length > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}"
+          class="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 transition-all duration-300 ease-out {isCanvasMode ? 'hidden' : ''} {!userIsNearBottom && currentMessages.length > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}"
         >
           <button
             onclick={jumpToBottom}
@@ -4224,7 +4298,8 @@ Please walk me through the setup step by step. When I have the credentials, save
           </button>
         </div>
 
-        <!-- Input Area -->
+        <!-- Input Area - hidden in canvas mode -->
+        {#if !isCanvasMode}
         <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent dark:from-gray-900 dark:via-gray-900" data-tour="chat-input">
 
             <div class="w-full max-w-3xl pointer-events-auto relative">
@@ -4325,6 +4400,7 @@ Please walk me through the setup step by step. When I have the credentials, save
             </div>
 
         </div>
+        {/if}
 
     {/if}
 
