@@ -156,6 +156,11 @@ The Files panel shows the project directory structure. Users can:
 Navi has first-class workflows: saved prompts attached to a project with a schedule, optional gate, a root session, and child run sessions for each execution.
 
 When the task is to create, edit, pause, resume, run, debug, or inspect a Navi workflow or its run history, immediately read the \`navi-workflows\` skill's \`SKILL.md\` from the loaded skills list before proceeding.
+
+## Context Recovery
+
+If the conversation was compacted, pruned, or partially reset, use \`mcp__navi-context__recall_session_context\` to recover earlier work from the current session.
+Prefer \`mode: "recent"\` or \`mode: "search"\` over asking the user to restate prior context.
 </ui-instructions>
 `;
 

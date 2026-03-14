@@ -31,6 +31,27 @@ describe("prune-tool-results route", () => {
     dbModule.projects.create(projectId, "Prune Test Project", projectPath, null, now, now);
     dbModule.sessions.create(sessionId, projectId, "Prune Test Session", now, now, "claude");
     dbModule.sessions.updateClaudeSession(claudeSessionId, "claude-sonnet-4-5", 0, 0, 0, 0, now, sessionId);
+    dbModule.messages.create(
+      `msg-user-${unique}`,
+      sessionId,
+      "user",
+      JSON.stringify("Investigate why prune + continue loses context"),
+      now
+    );
+    dbModule.messages.create(
+      `msg-assistant-${unique}`,
+      sessionId,
+      "assistant",
+      JSON.stringify([{ type: "text", text: "I found that prune resets the session but does not provide a usable handoff." }]),
+      now + 1
+    );
+    dbModule.messages.create(
+      `msg-user-latest-${unique}`,
+      sessionId,
+      "user",
+      JSON.stringify("most recent turn should be preserved"),
+      now + 2
+    );
 
     const veryLongText = "A".repeat(3000);
     const veryLongNestedText = "B".repeat(2800);
@@ -95,6 +116,7 @@ describe("prune-tool-results route", () => {
 
   afterAll(() => {
     try {
+      dbModule.messages.deleteBySession(sessionId);
       dbModule.sessions.delete(sessionId);
       dbModule.projects.delete(projectId);
       dbModule.saveDb();
@@ -132,12 +154,16 @@ describe("prune-tool-results route", () => {
       prunedCount: number;
       tokensSaved: number;
       prunedToolUseIds: string[];
+      historyContext?: string;
     };
 
     expect(payload.success).toBe(true);
     expect(payload.prunedCount).toBeGreaterThanOrEqual(4);
     expect(payload.tokensSaved).toBeGreaterThan(0);
     expect(payload.prunedToolUseIds).toContain("toolu_old_external");
+    expect(payload.historyContext).toContain("Continuation Handoff");
+    expect(payload.historyContext).toContain("mcp__navi-context__recall_session_context");
+    expect(payload.historyContext).toContain("most recent turn should be preserved");
 
     const updatedLines = readFileSync(sessionFilePath, "utf-8").trim().split("\n");
     const oldUserEntry = JSON.parse(updatedLines[0]);

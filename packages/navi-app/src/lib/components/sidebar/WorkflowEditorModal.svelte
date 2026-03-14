@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from "../Modal.svelte";
-  import type { Workflow, WorkflowGate, WorkflowSchedule, WorkflowRun } from "../../api";
+  import type { Agent, Workflow, WorkflowGate, WorkflowSchedule, WorkflowRun } from "../../api";
   import { api } from "../../api";
   import RelativeTime from "../RelativeTime.svelte";
 
@@ -13,17 +13,19 @@
     collapsed?: boolean;
     learningNotes?: string | null;
     feedbackNotes?: string | null;
+    ownerAgentId?: string | null;
   }
 
   interface Props {
     open: boolean;
     workflow?: Workflow | null;
+    agents?: Agent[];
     onClose: () => void;
     onSave: (input: WorkflowInput) => Promise<void>;
     onSelectSession?: (sessionId: string) => void;
   }
 
-  let { open, workflow = null, onClose, onSave, onSelectSession }: Props = $props();
+  let { open, workflow = null, agents = [], onClose, onSave, onSelectSession }: Props = $props();
 
   type Tab = "schedule" | "prompt" | "learnings" | "sessions";
   let activeTab = $state<Tab>("prompt");
@@ -31,6 +33,7 @@
   let name = $state("");
   let prompt = $state("");
   let enabled = $state(true);
+  let ownerAgentId = $state("");
   let learningNotes = $state("");
   let feedbackNotes = $state("");
   let scheduleKind = $state<WorkflowSchedule["kind"]>("every");
@@ -57,6 +60,7 @@
     name = workflow?.name || "";
     prompt = workflow?.prompt || "";
     enabled = workflow?.enabled ?? true;
+    ownerAgentId = workflow?.ownerAgentId || "";
     learningNotes = workflow?.learningNotes || "";
     feedbackNotes = workflow?.feedbackNotes || "";
     scheduleKind = workflow?.schedule.kind || "every";
@@ -152,6 +156,7 @@
         schedule,
         gate,
         enabled,
+        ownerAgentId: ownerAgentId || null,
         collapsed: workflow?.collapsed ?? true,
         learningNotes: learningNotes.trim() || null,
         feedbackNotes: feedbackNotes.trim() || null,
@@ -251,6 +256,21 @@
         <!-- PROMPT TAB -->
         {#if activeTab === "prompt"}
           <div class="space-y-4">
+            <div>
+              <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Owner agent</label>
+              <select
+                bind:value={ownerAgentId}
+                class="w-full px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-300 dark:focus:border-violet-600 transition-colors"
+              >
+                <option value="">Workspace</option>
+                {#each agents as agent}
+                  <option value={agent.id}>{agent.name}</option>
+                {/each}
+              </select>
+              <p class="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
+                The owning agent becomes the durable identity above this workflow.
+              </p>
+            </div>
             <div>
               <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Instructions</label>
               <textarea

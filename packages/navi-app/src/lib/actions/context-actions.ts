@@ -15,6 +15,26 @@ import {
   TOOL_RESULT_PRUNED_MAX_LENGTH,
 } from "../constants";
 
+const PRUNED_CONTEXT_PREFIX = "<pruned_context>\n";
+
+export function makePrunedHistoryContext(historyContext: string): string {
+  return `${PRUNED_CONTEXT_PREFIX}${historyContext}`;
+}
+
+export function extractHistoryContextForQuery(
+  storedContext: string | null | undefined
+): string | undefined {
+  if (!storedContext || storedContext === "pruned") {
+    return undefined;
+  }
+
+  if (storedContext.startsWith(PRUNED_CONTEXT_PREFIX)) {
+    return storedContext.slice(PRUNED_CONTEXT_PREFIX.length);
+  }
+
+  return storedContext;
+}
+
 /**
  * Check if a session has pruned context active (not rollback)
  * Uses sessionHistoryContext as source of truth
@@ -26,7 +46,7 @@ export function hasPrunedContext(sessionId: string): boolean {
   const ctx = historyCtx.get(sessionId);
   // Only consider it "pruned" if we explicitly set it to "pruned"
   // Rollback context starts with "<conversation_history>"
-  return ctx === "pruned";
+  return ctx === "pruned" || !!ctx?.startsWith(PRUNED_CONTEXT_PREFIX);
 }
 
 /**
@@ -37,7 +57,7 @@ export function hasRollbackContext(sessionId: string): boolean {
   const historyCtx = get(sessionHistoryContext);
   const ctx = historyCtx.get(sessionId);
   // Rollback context starts with "<conversation_history>"
-  return !!ctx && ctx !== "pruned" && ctx.startsWith("<conversation_history>");
+  return !!ctx && ctx !== "pruned" && !ctx.startsWith(PRUNED_CONTEXT_PREFIX) && ctx.startsWith("<conversation_history>");
 }
 
 /**
@@ -120,9 +140,11 @@ export async function pruneToolResults(sessionId: string): Promise<{ success: bo
     // Reset the Claude SDK session so the next run starts with fresh context.
     // This makes prune behavior deterministic for context recovery.
     let sessionReset = false;
+    let historyContext = result.historyContext;
     try {
       const resetResult = await api.sessions.resetContext(sessionId);
       sessionReset = !!resetResult.sessionReset;
+      historyContext = historyContext || resetResult.historyContext;
 
       const activeSession = get(currentSession);
       if (sessionReset && activeSession.sessionId === sessionId) {
@@ -139,7 +161,10 @@ export async function pruneToolResults(sessionId: string): Promise<{ success: bo
 
     // Mark session as having pruned context (for UI indicator)
     sessionHistoryContext.update(map => {
-      map.set(sessionId, "pruned");
+      map.set(
+        sessionId,
+        historyContext ? makePrunedHistoryContext(historyContext) : "pruned"
+      );
       return new Map(map);
     });
 

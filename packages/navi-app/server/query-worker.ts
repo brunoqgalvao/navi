@@ -867,6 +867,7 @@ The deliverable will be sent to your parent, who will incorporate it into their 
 // ============================================================================
 
 const NAVI_API_BASE = process.env.NAVI_API_URL || "http://localhost:3001";
+let currentSessionIdForNaviContext: string | null = null;
 
 async function fetchNaviApi(path: string): Promise<any> {
   try {
@@ -884,10 +885,142 @@ function stripAnsiCodes(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "");
 }
 
+function truncateToolText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}\n...[truncated ${text.length - maxLength} chars]`;
+}
+
 const naviContextServer = createSdkMcpServer({
   name: "navi-context",
   version: "1.0.0",
   tools: [
+    tool(
+      "recall_session_context",
+      `Recall previous work from the current chat after context pruning or compaction.
+Use this when you need to recover what you were working on without asking the user to repeat themselves.
+
+Modes:
+- 'summary': original task plus latest known assistant state
+- 'recent': recent user/assistant turns
+- 'search': keyword search over the session transcript`,
+      {
+        sessionId: z.string().optional().describe("Optional session ID. Defaults to the current session."),
+        mode: z.enum(["summary", "recent", "search"]).optional().default("recent").describe("How to recall prior work."),
+        query: z.string().optional().describe("Required for mode='search'. Keywords to search in the transcript."),
+        last: z.number().min(1).max(20).optional().default(8).describe("When mode='recent', how many recent messages to return."),
+      },
+      async (args) => {
+        const sessionId = args.sessionId || currentSessionIdForNaviContext;
+        if (!sessionId) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: "Error: No current session is available. Pass an explicit sessionId.",
+            }],
+          };
+        }
+
+        if (args.mode === "summary") {
+          const data = await fetchNaviApi(`/api/sessions/${sessionId}/inspect?scope=summary`);
+          if (data.error) {
+            return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+          }
+
+          const firstUser = data.summary?.firstUserMessage || "(No user summary available)";
+          const lastAssistant = data.summary?.lastAssistantMessage || "(No assistant summary available)";
+          return {
+            content: [{
+              type: "text" as const,
+              text: `## Session Summary
+**Title:** ${data.metadata?.title || sessionId}
+**Project:** ${data.metadata?.projectName || "Unknown"}
+
+### Original Task
+${truncateToolText(firstUser, 900)}
+
+### Latest Known State
+${truncateToolText(lastAssistant, 1200)}`,
+            }],
+          };
+        }
+
+        if (args.mode === "search") {
+          if (!args.query?.trim()) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: "Error: query is required when mode='search'.",
+              }],
+            };
+          }
+
+          const data = await fetchNaviApi(
+            `/api/sessions/${sessionId}/inspect?scope=search&search=${encodeURIComponent(args.query)}`
+          );
+          if (data.error) {
+            return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+          }
+
+          const matches = Array.isArray(data.matches) ? data.matches : [];
+          if (matches.length === 0) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: `No transcript matches found for "${args.query}".`,
+              }],
+            };
+          }
+
+          const formattedMatches = matches
+            .map((match: any, index: number) => {
+              const role = match.role === "user" ? "User" : "Assistant";
+              return `### Match ${index + 1} (${role})\n${truncateToolText(String(match.text || ""), 600)}`;
+            })
+            .join("\n\n");
+
+          return {
+            content: [{
+              type: "text" as const,
+              text: `## Transcript Search: ${args.query}\n${formattedMatches}`,
+            }],
+          };
+        }
+
+        const data = await fetchNaviApi(
+          `/api/sessions/${sessionId}/inspect?scope=last&last=${args.last || 8}`
+        );
+        if (data.error) {
+          return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+        }
+
+        const recentMessages = Array.isArray(data.messages) ? data.messages : [];
+        if (recentMessages.length === 0) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: "No recent transcript messages found for this session.",
+            }],
+          };
+        }
+
+        const formattedMessages = recentMessages
+          .map((message: any) => {
+            const role = message.role === "user" ? "User" : "Assistant";
+            return `### ${role}\n${truncateToolText(String(message.text || ""), 900)}`;
+          })
+          .join("\n\n");
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: `## Recent Session Context (${recentMessages.length} messages)\n${formattedMessages}`,
+          }],
+        };
+      }
+    ),
+
     tool(
       "view_processes",
       `List and view output from background processes (dev servers, builds, etc).
@@ -1233,6 +1366,7 @@ let sessionApprovedAll = false;
 
 async function runQuery(input: WorkerInput): Promise<boolean> {
   const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs } = input;
+  currentSessionIdForNaviContext = sessionId;
 
   // Debug: Log multiSession state
   console.error(`[Worker] multiSession received:`, JSON.stringify(multiSession, null, 2));

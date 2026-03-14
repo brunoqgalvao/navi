@@ -14,6 +14,9 @@
   let name = $state("");
   let description = $state("");
   let instructions = $state("");
+  let format = $state<"simple" | "bundle">("simple");
+  let soul = $state("");
+  let memory = $state("");
   let model = $state<"haiku" | "sonnet" | "opus" | "">("");
   let selectedTools = $state<string[]>([]);
 
@@ -50,6 +53,9 @@
       name = fullAgent.name;
       description = fullAgent.description;
       instructions = fullAgent.body || "";
+      format = fullAgent.format || "simple";
+      soul = fullAgent.soul || "";
+      memory = fullAgent.memory || "";
       model = fullAgent.model || "";
       selectedTools = fullAgent.tools || [];
     } catch (e: any) {
@@ -77,6 +83,9 @@ Describe the agent's expertise and responsibilities.
 
 Describe how the agent should format its responses.
 `;
+    format = projectId ? "bundle" : "simple";
+    soul = "";
+    memory = "";
     model = "";
     selectedTools = [];
     error = null;
@@ -111,6 +120,9 @@ Describe how the agent should format its responses.
           name: name.trim(),
           description: description.trim(),
           instructions: instructions.trim(),
+          format,
+          soul: format === "bundle" ? soul.trim() || undefined : "",
+          memory: format === "bundle" ? memory.trim() || undefined : "",
           model: model || undefined,
           tools: selectedTools.length > 0 ? selectedTools : undefined,
         };
@@ -120,6 +132,9 @@ Describe how the agent should format its responses.
           name: name.trim(),
           description: description.trim(),
           instructions: instructions.trim(),
+          format,
+          soul: format === "bundle" ? soul.trim() || undefined : undefined,
+          memory: format === "bundle" ? memory.trim() || undefined : undefined,
           model: model || undefined,
           tools: selectedTools.length > 0 ? selectedTools : undefined,
         };
@@ -217,7 +232,11 @@ Describe how the agent should format its responses.
                   placeholder="code-reviewer"
                   class="w-full bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:border-gray-900 focus:outline-none transition-colors"
                 />
-                <p class="text-xs text-gray-400 mt-1">Used as filename: {name ? name.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "agent-name"}.md</p>
+                <p class="text-xs text-gray-400 mt-1">
+                  Saved as {projectId ? ".claude/agents/" : "~/.claude/agents/"}
+                  {name ? name.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "agent-name"}
+                  {format === "bundle" ? "/" : ".md"}
+                </p>
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
@@ -230,6 +249,33 @@ Describe how the agent should format its responses.
                   {/each}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Storage Format</label>
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onclick={() => (format = "simple")}
+                  class="rounded-lg border px-3 py-2 text-sm transition-colors {format === 'simple'
+                    ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'}"
+                >
+                  Single file
+                </button>
+                <button
+                  type="button"
+                  onclick={() => (format = "bundle")}
+                  class="rounded-lg border px-3 py-2 text-sm transition-colors {format === 'bundle'
+                    ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'}"
+                >
+                  Bundle
+                </button>
+              </div>
+              <p class="text-xs text-gray-400 mt-1">
+                Bundle agents get separate prompt, soul, and memory files under a dedicated folder.
+              </p>
             </div>
 
             <div>
@@ -247,7 +293,9 @@ Describe how the agent should format its responses.
             </div>
 
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Agent Instructions</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">
+                {format === "bundle" ? "Prompt" : "Agent Instructions"}
+              </label>
               <textarea
                 bind:value={instructions}
                 rows="12"
@@ -255,6 +303,31 @@ Describe how the agent should format its responses.
                 class="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 text-sm font-mono focus:border-gray-900 focus:outline-none transition-colors resize-none"
               ></textarea>
             </div>
+
+            {#if format === "bundle"}
+              <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Soul</label>
+                  <textarea
+                    bind:value={soul}
+                    rows="8"
+                    placeholder="Values, temperament, and identity cues for this agent."
+                    class="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 text-sm focus:border-gray-900 focus:outline-none transition-colors resize-none"
+                  ></textarea>
+                  <p class="text-xs text-gray-400 mt-1">Stored as <code class="bg-gray-100 px-1 rounded">soul.md</code>.</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Memory</label>
+                  <textarea
+                    bind:value={memory}
+                    rows="8"
+                    placeholder="Stable reminders, learned preferences, and working context."
+                    class="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 text-sm focus:border-gray-900 focus:outline-none transition-colors resize-none"
+                  ></textarea>
+                  <p class="text-xs text-gray-400 mt-1">Stored as <code class="bg-gray-100 px-1 rounded">memory.md</code>.</p>
+                </div>
+              </div>
+            {/if}
 
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-2">Allowed Tools</label>
@@ -293,7 +366,7 @@ Describe how the agent should format its responses.
 
       <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between shrink-0">
         <div class="text-xs text-gray-400">
-          Saved to: {projectId ? ".claude/agents/" : "~/.claude/agents/"}
+          Saved to: {projectId ? ".claude/agents/" : "~/.claude/agents/"}{format === "bundle" ? "<agent>/" : "<agent>.md"}
         </div>
         <div class="flex gap-3">
           <button

@@ -41,6 +41,7 @@ export interface Workflow {
   id: string;
   projectId: string;
   rootSessionId: string;
+  ownerAgentId: string | null;
   name: string;
   prompt: string;
   schedule: WorkflowSchedule;
@@ -172,9 +173,79 @@ export interface Session {
   backend?: BackendId | null;
   // Folder grouping
   folder_id?: string | null;
+  // Agent workspace links
+  agent_id?: string | null;
+  workflow_id?: string | null;
+  work_item_id?: string | null;
   created_at: number;
   updated_at: number;
   project_name?: string;
+}
+
+export type WorkItemStatus =
+  | "todo"
+  | "triaged"
+  | "in_progress"
+  | "blocked"
+  | "waiting_human"
+  | "in_review"
+  | "done"
+  | "cancelled";
+
+export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
+
+export interface WorkItem {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string | null;
+  status: WorkItemStatus;
+  priority: WorkItemPriority;
+  assignee_agent_id: string | null;
+  reporter_type: "user" | "agent" | "system";
+  reporter_id: string | null;
+  source_session_id: string | null;
+  primary_session_id: string | null;
+  acceptance_criteria: string | null;
+  metadata: string | null;
+  created_at: number;
+  updated_at: number;
+  completed_at: number | null;
+}
+
+export interface WorkItemEvent {
+  id: string;
+  work_item_id: string;
+  event_type: string;
+  actor_type: "user" | "agent" | "system";
+  actor_id: string | null;
+  session_id: string | null;
+  content: string | null;
+  metadata: string | null;
+  created_at: number;
+}
+
+export type InboxItemStatus = "open" | "acknowledged" | "resolved" | "dismissed";
+export type InboxItemPriority = "low" | "medium" | "high" | "urgent";
+export type InboxItemKind = "report" | "question" | "attention" | "approval" | "delivery";
+
+export interface InboxItem {
+  id: string;
+  project_id: string;
+  kind: InboxItemKind;
+  title: string;
+  body: string | null;
+  status: InboxItemStatus;
+  priority: InboxItemPriority;
+  source_agent_id: string | null;
+  source_session_id: string | null;
+  work_item_id: string | null;
+  requires_response: number;
+  response_options: string | null;
+  metadata: string | null;
+  created_at: number;
+  updated_at: number;
+  resolved_at: number | null;
 }
 
 export interface ActiveSessionStatus {
@@ -372,6 +443,7 @@ export const api = {
         feedbackNotes?: string | null;
         model?: string | null;
         backend?: BackendId | null;
+        ownerAgentId?: string | null;
       }
     ) =>
       request<Workflow>(`/projects/${projectId}/workflows`, {
@@ -391,6 +463,7 @@ export const api = {
         feedbackNotes?: string | null;
         model?: string | null;
         backend?: BackendId | null;
+        ownerAgentId?: string | null;
       }
     ) =>
       request<Workflow>(`/workflows/${id}`, {
@@ -405,6 +478,120 @@ export const api = {
       request<{ workflowId: string; runs: WorkflowRun[] }>(`/workflows/${id}/runs?limit=${limit}`),
   },
 
+  workItems: {
+    list: (projectId: string) => request<WorkItem[]>(`/projects/${projectId}/work-items`),
+    get: (id: string) => request<WorkItem>(`/work-items/${id}`),
+    create: (
+      projectId: string,
+      data: {
+        title: string;
+        description?: string | null;
+        status?: WorkItemStatus;
+        priority?: WorkItemPriority;
+        assigneeAgentId?: string | null;
+        reporterType?: "user" | "agent" | "system";
+        reporterId?: string | null;
+        sourceSessionId?: string | null;
+        primarySessionId?: string | null;
+        acceptanceCriteria?: string | null;
+        metadata?: unknown;
+      }
+    ) =>
+      request<WorkItem>(`/projects/${projectId}/work-items`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: string,
+      data: {
+        title?: string;
+        description?: string | null;
+        status?: WorkItemStatus;
+        priority?: WorkItemPriority;
+        assigneeAgentId?: string | null;
+        reporterType?: "user" | "agent" | "system";
+        reporterId?: string | null;
+        sourceSessionId?: string | null;
+        primarySessionId?: string | null;
+        acceptanceCriteria?: string | null;
+        metadata?: unknown;
+        completedAt?: number | null;
+        actorType?: "user" | "agent" | "system";
+        actorId?: string | null;
+        sessionId?: string | null;
+        eventSummary?: string | null;
+      }
+    ) =>
+      request<WorkItem>(`/work-items/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) => request<{ success: boolean }>(`/work-items/${id}`, { method: "DELETE" }),
+    listEvents: (id: string) => request<WorkItemEvent[]>(`/work-items/${id}/events`),
+    createEvent: (
+      id: string,
+      data: {
+        eventType: string;
+        actorType?: "user" | "agent" | "system";
+        actorId?: string | null;
+        sessionId?: string | null;
+        content?: string | null;
+        metadata?: unknown;
+      }
+    ) =>
+      request<WorkItemEvent>(`/work-items/${id}/events`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  },
+
+  inbox: {
+    list: (projectId: string) => request<InboxItem[]>(`/projects/${projectId}/inbox`),
+    get: (id: string) => request<InboxItem>(`/inbox/${id}`),
+    create: (
+      projectId: string,
+      data: {
+        kind: InboxItemKind;
+        title: string;
+        body?: string | null;
+        status?: InboxItemStatus;
+        priority?: InboxItemPriority;
+        sourceAgentId?: string | null;
+        sourceSessionId?: string | null;
+        workItemId?: string | null;
+        requiresResponse?: boolean;
+        responseOptions?: unknown;
+        metadata?: unknown;
+      }
+    ) =>
+      request<InboxItem>(`/projects/${projectId}/inbox`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: string,
+      data: {
+        kind?: InboxItemKind;
+        title?: string;
+        body?: string | null;
+        status?: InboxItemStatus;
+        priority?: InboxItemPriority;
+        sourceAgentId?: string | null;
+        sourceSessionId?: string | null;
+        workItemId?: string | null;
+        requiresResponse?: boolean;
+        responseOptions?: unknown;
+        metadata?: unknown;
+        resolvedAt?: number | null;
+      }
+    ) =>
+      request<InboxItem>(`/inbox/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) => request<{ success: boolean }>(`/inbox/${id}`, { method: "DELETE" }),
+  },
+
   sessions: {
     list: (projectId: string, includeArchived: boolean = false) =>
       request<Session[]>(`/projects/${projectId}/sessions${includeArchived ? '?includeArchived=true' : ''}`),
@@ -412,12 +599,31 @@ export const api = {
       request<Session[]>(`/sessions/recent?limit=${limit}${includeArchived ? '&includeArchived=true' : ''}`),
     active: () => request<ActiveSessionStatus[]>("/sessions/active"),
     get: (id: string) => request<Session>(`/sessions/${id}`),
-    create: (projectId: string, data: { title?: string; backend?: BackendId }) =>
+    create: (
+      projectId: string,
+      data: {
+        title?: string;
+        backend?: BackendId;
+        agentId?: string | null;
+        workflowId?: string | null;
+        workItemId?: string | null;
+      }
+    ) =>
       request<Session>(`/projects/${projectId}/sessions`, {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: { title?: string; model?: string; backend?: BackendId }) =>
+    update: (
+      id: string,
+      data: {
+        title?: string;
+        model?: string;
+        backend?: BackendId;
+        agentId?: string | null;
+        workflowId?: string | null;
+        workItemId?: string | null;
+      }
+    ) =>
       request<Session>(`/sessions/${id}`, {
         method: "PATCH",
         body: JSON.stringify(data),
@@ -464,7 +670,7 @@ export const api = {
         body: JSON.stringify({ order }),
       }),
     resetContext: (id: string) =>
-      request<{ success: boolean; sessionReset: boolean }>(`/sessions/${id}/reset-context`, {
+      request<{ success: boolean; sessionReset: boolean; historyContext?: string }>(`/sessions/${id}/reset-context`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
@@ -488,7 +694,7 @@ export const api = {
         body: JSON.stringify({ folderId }),
       }),
     pruneToolResults: (id: string, options?: { preserveRecentCount?: number; maxPrunedLength?: number }) =>
-      request<{ success: boolean; prunedCount: number; tokensSaved: number; prunedToolUseIds: string[] }>(
+      request<{ success: boolean; prunedCount: number; tokensSaved: number; prunedToolUseIds: string[]; historyContext?: string }>(
         `/sessions/${id}/prune-tool-results`,
         {
           method: "POST",
@@ -796,6 +1002,25 @@ export interface Skill {
   body?: string;
 }
 
+export type SkillDocumentScope = "library" | "global" | "project";
+
+export interface SkillDocument {
+  skill_id: string;
+  scope: SkillDocumentScope;
+  project_id: string | null;
+  path: string;
+  directory_path: string;
+  content: string;
+  exists: boolean;
+  enabled: boolean;
+  editable: boolean;
+  hash: string;
+  library_hash: string;
+  is_diverged: boolean;
+  last_synced_version: string | null;
+  version: string;
+}
+
 export interface SkillCategory {
   id: string;
   label: string;
@@ -905,6 +1130,16 @@ export const skillsApi = {
       method: "POST",
       body: JSON.stringify({ scope, projectId }),
     }),
+  getDocument: (id: string, scope: SkillDocumentScope, projectId?: string) => {
+    const params = new URLSearchParams({ scope });
+    if (projectId) params.set("projectId", projectId);
+    return request<SkillDocument>(`/skills/${id}/document?${params.toString()}`);
+  },
+  saveDocument: (id: string, scope: SkillDocumentScope, content: string, projectId?: string) =>
+    request<SkillDocument>(`/skills/${id}/document`, {
+      method: "PUT",
+      body: JSON.stringify({ scope, content, projectId }),
+    }),
   getFiles: (id: string) =>
     request<{ path: string; files: SkillFileInfo[] }>(`/skills/${id}/files`),
   openInEditor: (id: string, editor: "code" | "cursor" | "zed" | "finder" = "code") =>
@@ -989,6 +1224,9 @@ export interface Agent {
   scope: "global" | "project";
   projectId?: string;
   path: string;
+  format?: "simple" | "bundle";
+  soul?: string | null;
+  memory?: string | null;
 }
 
 export interface CreateAgentInput {
@@ -997,6 +1235,9 @@ export interface CreateAgentInput {
   model?: "haiku" | "sonnet" | "opus";
   tools?: string[];
   instructions?: string;
+  format?: "simple" | "bundle";
+  soul?: string;
+  memory?: string;
 }
 
 export interface UpdateAgentInput {
@@ -1005,6 +1246,9 @@ export interface UpdateAgentInput {
   model?: "haiku" | "sonnet" | "opus";
   tools?: string[];
   instructions?: string;
+  format?: "simple" | "bundle";
+  soul?: string;
+  memory?: string;
 }
 
 export const agentsApi = {

@@ -31,10 +31,137 @@ import {
   type SkillWithStatus,
 } from "../skills";
 
+type SkillDocumentScope = "library" | "global" | "project";
+
+interface ResolvedSkillScope {
+  scope: SkillDocumentScope;
+  projectId: string | null;
+  directoryPath: string;
+  skillMdPath: string;
+  enabledRecord: ReturnType<typeof enabledSkillsDb.get> | null;
+}
+
 function bumpPatch(version: string): string {
   const parts = version.split(".").map(Number);
   if (parts.length !== 3 || parts.some(isNaN)) return "1.0.1";
   return `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
+}
+
+function isValidSkillDocumentScope(value: unknown): value is SkillDocumentScope {
+  return value === "library" || value === "global" || value === "project";
+}
+
+function resolveSkillScope(
+  skill: NonNullable<ReturnType<typeof skillsDb.get>>,
+  scope: SkillDocumentScope,
+  projectId?: string | null
+): ResolvedSkillScope {
+  if (scope === "library") {
+    const directoryPath = safeJoin(SKILL_LIBRARY_PATH, skill.slug);
+    return {
+      scope,
+      projectId: null,
+      directoryPath,
+      skillMdPath: join(directoryPath, "SKILL.md"),
+      enabledRecord: null,
+    };
+  }
+
+  if (scope === "global") {
+    const enabledRecord = enabledSkillsDb.get(skill.id, "global");
+    if (!enabledRecord) {
+      throw new Error("Skill is not enabled globally");
+    }
+
+    const directoryPath = safeJoin(CLAUDE_GLOBAL_SKILLS, skill.slug);
+    return {
+      scope,
+      projectId: null,
+      directoryPath,
+      skillMdPath: join(directoryPath, "SKILL.md"),
+      enabledRecord,
+    };
+  }
+
+  if (!projectId) {
+    throw new Error("Project ID is required for project scope");
+  }
+
+  const project = projects.get(projectId);
+  if (!project) {
+    throw new Error("Project not found");
+  }
+
+  const enabledRecord = enabledSkillsDb.get(skill.id, "project", projectId);
+  if (!enabledRecord) {
+    throw new Error("Skill is not enabled for this project");
+  }
+
+  const directoryPath = safeJoin(getProjectSkillsDir(project.path), skill.slug);
+  return {
+    scope,
+    projectId,
+    directoryPath,
+    skillMdPath: join(directoryPath, "SKILL.md"),
+    enabledRecord,
+  };
+}
+
+function validateSkillDocumentContent(content: string) {
+  const parsed = parseSkillMd(content);
+  if (!parsed.frontmatter.name || !parsed.frontmatter.description) {
+    throw new Error("SKILL.md must include frontmatter with name and description");
+  }
+  return parsed;
+}
+
+function buildSkillDocument(
+  skill: NonNullable<ReturnType<typeof skillsDb.get>>,
+  scope: SkillDocumentScope,
+  projectId?: string | null
+) {
+  const resolved = resolveSkillScope(skill, scope, projectId);
+  const exists = existsSync(resolved.skillMdPath);
+  const content = exists ? readFileSync(resolved.skillMdPath, "utf-8") : "";
+  const hash = exists ? calculateSkillHash(resolved.directoryPath) : "";
+  const isDiverged =
+    scope === "library" ? false : !exists || hash !== skill.content_hash;
+
+  if (resolved.enabledRecord) {
+    const nextHasLocalChanges = isDiverged ? 1 : 0;
+    if (
+      resolved.enabledRecord.local_hash !== hash ||
+      resolved.enabledRecord.has_local_changes !== nextHasLocalChanges
+    ) {
+      enabledSkillsDb.update(resolved.enabledRecord.id, {
+        local_hash: hash,
+        has_local_changes: nextHasLocalChanges,
+        updated_at: Date.now(),
+      });
+      resolved.enabledRecord = enabledSkillsDb.get(
+        skill.id,
+        scope === "global" ? "global" : "project",
+        resolved.projectId
+      );
+    }
+  }
+
+  return {
+    skill_id: skill.id,
+    scope,
+    project_id: resolved.projectId,
+    path: resolved.skillMdPath,
+    directory_path: resolved.directoryPath,
+    content,
+    exists,
+    enabled: scope === "library" ? true : !!resolved.enabledRecord,
+    editable: scope === "library" ? true : !!resolved.enabledRecord,
+    hash,
+    library_hash: skill.content_hash,
+    is_diverged: isDiverged,
+    last_synced_version: resolved.enabledRecord?.library_version ?? skill.version,
+    version: skill.version,
+  };
 }
 
 async function parseSkillContent(
@@ -192,10 +319,14 @@ export async function handleSkillRoutes(url: URL, method: string, req: Request):
         const projectEnabled = allEnabled.filter(
           (e) => e.skill_id === skill.id && e.scope === "project"
         );
+        const enabledCopies = allEnabled.filter((e) => e.skill_id === skill.id);
 
-        const needsSync = globalEnabled
-          ? globalEnabled.library_version !== skill.version || globalEnabled.local_hash !== skill.content_hash
-          : false;
+        const needsSync = enabledCopies.some(
+          (enabled) =>
+            enabled.library_version !== skill.version ||
+            enabled.local_hash !== skill.content_hash ||
+            enabled.has_local_changes === 1
+        );
 
         return {
           ...skill,
@@ -278,6 +409,96 @@ export async function handleSkillRoutes(url: URL, method: string, req: Request):
         }, 201);
       } catch (e: any) {
         return json({ error: e.message || "Failed to create skill" }, 400);
+      }
+    }
+  }
+
+  const skillDocumentMatch = url.pathname.match(/^\/api\/skills\/([^/]+)\/document$/);
+  if (skillDocumentMatch) {
+    const id = skillDocumentMatch[1];
+    const skill = skillsDb.get(id);
+    if (!skill) return json({ error: "Skill not found" }, 404);
+
+    if (method === "GET") {
+      const scope = url.searchParams.get("scope") || "library";
+      const projectId = url.searchParams.get("projectId");
+
+      if (!isValidSkillDocumentScope(scope)) {
+        return json({ error: `Invalid scope: ${scope}` }, 400);
+      }
+
+      try {
+        return json(buildSkillDocument(skill, scope, projectId));
+      } catch (e: any) {
+        return json({ error: e.message || "Failed to load skill document" }, 400);
+      }
+    }
+
+    if (method === "PUT") {
+      try {
+        const body = await req.json().catch(() => ({}));
+        const scope = body.scope;
+        const projectId = body.projectId as string | null | undefined;
+        const content = body.content;
+
+        if (!isValidSkillDocumentScope(scope)) {
+          return json({ error: `Invalid scope: ${scope}` }, 400);
+        }
+        if (typeof content !== "string") {
+          return json({ error: "Document content is required" }, 400);
+        }
+
+        const parsed = validateSkillDocumentContent(content);
+        const resolved = resolveSkillScope(skill, scope, projectId);
+        mkdirSync(resolved.directoryPath, { recursive: true });
+        writeFileSync(resolved.skillMdPath, content);
+
+        if (scope === "library") {
+          const nextHash = calculateSkillHash(resolved.directoryPath);
+          const nextVersion =
+            typeof parsed.frontmatter.version === "string" && parsed.frontmatter.version
+              ? parsed.frontmatter.version
+              : skill.version;
+          const now = Date.now();
+
+          skillsDb.update(id, {
+            name: parsed.frontmatter.name,
+            description: parsed.frontmatter.description,
+            version: nextVersion,
+            allowed_tools: parsed.frontmatter["allowed-tools"]
+              ? JSON.stringify(parsed.frontmatter["allowed-tools"])
+              : null,
+            license: (parsed.frontmatter.license as string | undefined) || null,
+            content_hash: nextHash,
+            updated_at: now,
+          });
+
+          if (nextVersion !== skill.version) {
+            skillVersions.create({
+              id: crypto.randomUUID(),
+              skill_id: id,
+              version: nextVersion,
+              content_hash: nextHash,
+              changelog: null,
+              created_at: now,
+            });
+          }
+
+          return json(buildSkillDocument(skillsDb.get(id)!, scope, projectId));
+        }
+
+        const nextHash = calculateSkillHash(resolved.directoryPath);
+        if (resolved.enabledRecord) {
+          enabledSkillsDb.update(resolved.enabledRecord.id, {
+            local_hash: nextHash,
+            has_local_changes: nextHash !== skill.content_hash ? 1 : 0,
+            updated_at: Date.now(),
+          });
+        }
+
+        return json(buildSkillDocument(skill, scope, projectId));
+      } catch (e: any) {
+        return json({ error: e.message || "Failed to save skill document" }, 400);
       }
     }
   }

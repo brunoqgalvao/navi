@@ -1,5 +1,5 @@
 import { json } from "../utils/response";
-import { projects, sessions, messages, searchIndex, pendingQuestions, sessionHierarchy, sessionFolders, workflows, workflowRuns, type Message } from "../db";
+import { projects, sessions, messages, searchIndex, pendingQuestions, sessionHierarchy, sessionFolders, workflows, workflowRuns, workItems, type Message } from "../db";
 import { enableUntilDone, disableUntilDone, getUntilDoneSessions, cleanupSessionState, skipSessionWait, getActiveWaits } from "../websocket/handler";
 import { nativePreviewService } from "../services/native-preview";
 import { sessionManager } from "../services/session-manager";
@@ -45,6 +45,91 @@ function buildPrunedSummary(originalContent: string, maxPrunedLength: number): s
 
 function dedupeStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function extractTextFromStoredContent(content: string): string {
+  try {
+    const parsed = JSON.parse(content);
+    if (typeof parsed === "string") {
+      return parsed;
+    }
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((block: any) => block?.type === "text" && typeof block.text === "string")
+        .map((block: any) => block.text)
+        .join("\n");
+    }
+    return "";
+  } catch {
+    return content;
+  }
+}
+
+function truncateForHandoff(text: string, maxLength: number): string {
+  const normalized = text.trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
+function buildSessionContinuationHandoff(sessionId: string): string | undefined {
+  const session = sessions.get(sessionId);
+  if (!session) {
+    return undefined;
+  }
+
+  const project = projects.get(session.project_id);
+  const transcriptMessages = messages
+    .listBySession(sessionId)
+    .map((message) => ({
+      role: message.role,
+      text: extractTextFromStoredContent(message.content).trim(),
+    }))
+    .filter((message) => message.role !== "system" && message.text.length > 0);
+
+  if (transcriptMessages.length === 0) {
+    return undefined;
+  }
+
+  const firstUser = transcriptMessages.find((message) => message.role === "user");
+  const lastAssistant = [...transcriptMessages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  const recentMessages = transcriptMessages.slice(-6);
+
+  const recentTranscript = recentMessages
+    .map((message) => {
+      const role = message.role === "user" ? "User" : "Assistant";
+      return `### ${role}\n${truncateForHandoff(message.text, 900)}`;
+    })
+    .join("\n\n");
+
+  return [
+    "# Continuation Handoff",
+    "",
+    "You are continuing this task after the session context was pruned or compacted.",
+    "You do not have the full transcript in prompt context anymore.",
+    "",
+    `Session: ${session.title}`,
+    `Project: ${project?.name || "Unknown"}`,
+    "",
+    "## Original Task",
+    firstUser ? truncateForHandoff(firstUser.text, 700) : "(No original user message found)",
+    "",
+    "## Latest Known State",
+    lastAssistant ? truncateForHandoff(lastAssistant.text, 1100) : "(No assistant state found yet)",
+    "",
+    "## Recent Conversation",
+    recentTranscript,
+    "",
+    "## Recover More Context If Needed",
+    "- Use `mcp__navi-context__recall_session_context` with `mode: \"recent\"` to fetch more recent turns.",
+    "- Use `mcp__navi-context__recall_session_context` with `mode: \"search\"` plus keywords to recover older decisions or notes.",
+    "- Use `Grep` and `Read` to re-check codebase state instead of rereading large files.",
+    "",
+    "Continue from here instead of restarting the task.",
+  ].join("\n");
 }
 
 async function scanToolResultsDirs(sessionDir: string, maxDepth: number = 4): Promise<string[]> {
@@ -350,6 +435,17 @@ export async function handleSessionRoutes(
       const id = crypto.randomUUID();
       const now = Date.now();
       sessions.create(id, projectId, body.title || "New conversation", now, now, body.backend);
+      sessions.setWorkspaceLinks(id, {
+        agent_id: body.agentId ?? null,
+        workflow_id: body.workflowId ?? null,
+        work_item_id: body.workItemId ?? null,
+      });
+      if (body.workItemId) {
+        const workItem = workItems.get(body.workItemId);
+        if (workItem && !workItem.primary_session_id) {
+          workItems.update(body.workItemId, { primary_session_id: id });
+        }
+      }
       searchIndex.indexSession(id);
       return json(sessions.get(id), 201);
     }
@@ -373,6 +469,23 @@ export async function handleSessionRoutes(
       }
       if (body.backend !== undefined) {
         sessions.updateBackend(body.backend, id);
+      }
+      if (
+        body.agentId !== undefined ||
+        body.workflowId !== undefined ||
+        body.workItemId !== undefined
+      ) {
+        sessions.setWorkspaceLinks(id, {
+          agent_id: body.agentId,
+          workflow_id: body.workflowId,
+          work_item_id: body.workItemId,
+        });
+        if (body.workItemId) {
+          const workItem = workItems.get(body.workItemId);
+          if (workItem && !workItem.primary_session_id) {
+            workItems.update(body.workItemId, { primary_session_id: id });
+          }
+        }
       }
       return json(sessions.get(id));
     }
@@ -473,7 +586,11 @@ export async function handleSessionRoutes(
     }
     // Clear backend-specific session state so the next query starts fresh.
     sessions.clearBackendSessionState(id);
-    return json({ success: true, sessionReset: true });
+    return json({
+      success: true,
+      sessionReset: true,
+      historyContext: buildSessionContinuationHandoff(id),
+    });
   }
 
   const sessionsReorderMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions\/reorder$/);
@@ -625,22 +742,6 @@ export async function handleSessionRoutes(
     let historyContext: string | undefined;
     if (!newSession?.claude_session_id && messagesToCopy.length > 0) {
       // Extract text content from messages to build history context
-      const extractText = (content: string): string => {
-        try {
-          const parsed = JSON.parse(content);
-          if (typeof parsed === "string") return parsed;
-          if (Array.isArray(parsed)) {
-            return parsed
-              .filter((b: any) => b.type === "text")
-              .map((b: any) => b.text)
-              .join("\n");
-          }
-          return "";
-        } catch {
-          return content;
-        }
-      };
-
       // Build context from message history (limit to prevent token overflow)
       const contextParts: string[] = [
         "# Previous Conversation Context",
@@ -652,7 +753,7 @@ export async function handleSessionRoutes(
       // Include last N messages (keep it reasonable)
       const recentMessages = messagesToCopy.slice(-20);
       for (const msg of recentMessages) {
-        const text = extractText(msg.content).slice(0, 2000); // Truncate long messages
+        const text = extractTextFromStoredContent(msg.content).slice(0, 2000); // Truncate long messages
         if (text.trim()) {
           const role = msg.role === "user" ? "User" : "Assistant";
           contextParts.push(`## ${role}:`);
@@ -731,22 +832,6 @@ export async function handleSessionRoutes(
     }
 
     // Helper to extract text from message content
-    const extractText = (content: string): string => {
-      try {
-        const parsed = JSON.parse(content);
-        if (typeof parsed === "string") return parsed;
-        if (Array.isArray(parsed)) {
-          return parsed
-            .filter((b: any) => b.type === "text")
-            .map((b: any) => b.text)
-            .join("\n");
-        }
-        return "";
-      } catch {
-        return content;
-      }
-    };
-
     if (scope === "summary") {
       // Return first user message + last assistant message as summary
       const firstUser = allMessages.find(m => m.role === "user");
@@ -755,8 +840,8 @@ export async function handleSessionRoutes(
       return json({
         metadata,
         summary: {
-          firstUserMessage: firstUser ? extractText(firstUser.content).slice(0, 500) : null,
-          lastAssistantMessage: lastAssistant ? extractText(lastAssistant.content).slice(0, 500) : null,
+          firstUserMessage: firstUser ? extractTextFromStoredContent(firstUser.content).slice(0, 500) : null,
+          lastAssistantMessage: lastAssistant ? extractTextFromStoredContent(lastAssistant.content).slice(0, 500) : null,
         },
       });
     }
@@ -766,7 +851,7 @@ export async function handleSessionRoutes(
       const recentMessages = allMessages.slice(-lastN).map(m => ({
         id: m.id,
         role: m.role,
-        text: extractText(m.content),
+        text: extractTextFromStoredContent(m.content),
         timestamp: m.timestamp,
       }));
 
@@ -780,12 +865,12 @@ export async function handleSessionRoutes(
       // Search within this chat's messages
       const query = searchQuery.toLowerCase();
       const matches = allMessages
-        .filter(m => extractText(m.content).toLowerCase().includes(query))
+        .filter(m => extractTextFromStoredContent(m.content).toLowerCase().includes(query))
         .slice(0, 10)
         .map(m => ({
           id: m.id,
           role: m.role,
-          text: extractText(m.content).slice(0, 300),
+          text: extractTextFromStoredContent(m.content).slice(0, 300),
           timestamp: m.timestamp,
         }));
 
@@ -801,7 +886,7 @@ export async function handleSessionRoutes(
       const fullMessages = allMessages.map(m => ({
         id: m.id,
         role: m.role,
-        text: extractText(m.content),
+        text: extractTextFromStoredContent(m.content),
         timestamp: m.timestamp,
       }));
 
@@ -1025,6 +1110,7 @@ export async function handleSessionRoutes(
         prunedCount: totalPrunedCount,
         tokensSaved,
         prunedToolUseIds: Array.from(counters.prunedToolUseIds),
+        historyContext: buildSessionContinuationHandoff(sessionId),
       });
     } catch (e) {
       console.error("Failed to prune tool results:", e);

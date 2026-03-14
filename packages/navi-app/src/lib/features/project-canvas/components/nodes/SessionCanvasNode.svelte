@@ -9,6 +9,17 @@
 
   let { data, selected = false }: Props = $props();
 
+  function handleArchivePointerDown(event: MouseEvent) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+
+  function handleArchiveClick(event: MouseEvent) {
+    event.stopPropagation();
+    event.preventDefault();
+    data.onArchive?.(data.sessionId);
+  }
+
   const statusMeta: Record<ProjectCanvasSessionData["status"], { label: string; dot: string; badge: string }> = {
     running: {
       label: "Running",
@@ -53,7 +64,7 @@
 </script>
 
 <article
-  class={`w-[290px] rounded-[24px] border bg-white/95 backdrop-blur shadow-[0_18px_45px_rgba(15,23,42,0.08)] transition-all ${
+  class={`group w-[290px] rounded-[24px] border bg-white/95 backdrop-blur shadow-[0_18px_45px_rgba(15,23,42,0.08)] transition-all ${
     selected
       ? "border-slate-900 ring-2 ring-slate-900/10"
       : "border-slate-200 hover:border-slate-300"
@@ -73,19 +84,35 @@
         </h3>
       </div>
 
-      <button
-        type="button"
-        class="nodrag inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
-        onclick={(event) => {
-          event.stopPropagation();
-          data.onOpen?.(data.sessionId);
-        }}
-        title="Open chat"
-      >
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M8 5l8 7-8 7" />
-        </svg>
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class={`nodrag inline-flex h-8 w-8 items-center justify-center rounded-full border border-rose-100 bg-rose-50 text-rose-500 shadow-sm transition-all hover:border-rose-200 hover:bg-rose-100 hover:text-rose-700 ${
+            selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+          onmousedown={handleArchivePointerDown}
+          onclick={handleArchiveClick}
+          title="Archive chat"
+        >
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        <button
+          type="button"
+          class="nodrag inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
+          onclick={(event) => {
+            event.stopPropagation();
+            data.onOpen?.(data.sessionId);
+          }}
+          title="Open chat"
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M8 5l8 7-8 7" />
+          </svg>
+        </button>
+      </div>
     </div>
 
     <div class="mt-4 grid grid-cols-2 gap-2 text-[11px] text-slate-500">

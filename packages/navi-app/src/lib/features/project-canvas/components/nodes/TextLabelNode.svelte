@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { ProjectCanvasTextLabelData } from "../../types";
 
+  type ResizeMode = "width" | "height" | "both";
+
   interface Props {
     data: ProjectCanvasTextLabelData;
     selected?: boolean;
@@ -17,8 +19,8 @@
   let resizeStartW = 0;
   let resizeStartH = 0;
 
-  const MIN_WIDTH = 100;
-  const MIN_HEIGHT = 40;
+  const MIN_WIDTH = 120;
+  const MIN_HEIGHT = 48;
 
   function startEdit() {
     editText = data.text;
@@ -47,7 +49,7 @@
     }
   }
 
-  function handleResizeStart(event: MouseEvent) {
+  function handleResizeStart(event: MouseEvent, mode: ResizeMode) {
     event.stopPropagation();
     event.preventDefault();
     resizing = true;
@@ -59,8 +61,10 @@
     function onMouseMove(e: MouseEvent) {
       const dx = e.clientX - resizeStartX;
       const dy = e.clientY - resizeStartY;
-      const newW = Math.max(MIN_WIDTH, resizeStartW + dx);
-      const newH = Math.max(MIN_HEIGHT, resizeStartH + dy);
+      const newW =
+        mode === "height" ? resizeStartW : Math.max(MIN_WIDTH, resizeStartW + dx);
+      const newH =
+        mode === "width" ? resizeStartH : Math.max(MIN_HEIGHT, resizeStartH + dy);
       data.onResize?.(newW, newH);
     }
 
@@ -73,68 +77,83 @@
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
   }
+
+  function handleRemovePointerDown(event: MouseEvent) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+
+  function handleRemoveClick(event: MouseEvent) {
+    event.stopPropagation();
+    event.preventDefault();
+    data.onRemove?.();
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="group relative nodrag"
-  style="width: {data.width}px; min-height: {data.height}px;"
+  class="group relative"
+  style="width: {Math.max(MIN_WIDTH, data.width)}px; min-height: {Math.max(MIN_HEIGHT, data.height)}px;"
 >
-  <div
-    class={`relative rounded-xl border bg-white/90 backdrop-blur shadow-sm transition-all ${
-      selected
-        ? "border-slate-900 ring-2 ring-slate-900/10"
-        : "border-slate-200/80 hover:border-slate-300"
-    }`}
-    style="min-height: {data.height}px;"
-  >
+  {#if selected || editing || resizing}
+    <div class="pointer-events-none absolute inset-0 rounded-2xl border-2 border-sky-400/75 shadow-[0_0_0_1px_rgba(56,189,248,0.16)]"></div>
+  {/if}
+
+  <div class="relative">
     {#if editing}
       <textarea
         bind:this={textareaEl}
         bind:value={editText}
         onblur={commitEdit}
         onkeydown={handleKeydown}
-        class="w-full resize-none rounded-xl bg-transparent px-3 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400"
-        style="min-height: {data.height - 8}px;"
-        placeholder="Type a label..."
+        class="nodrag w-full resize-none bg-transparent px-3 py-2 text-[20px] font-medium leading-[1.12] tracking-[-0.025em] text-slate-800 outline-none placeholder:text-slate-300"
+        style="min-height: {Math.max(MIN_HEIGHT, data.height)}px;"
+        placeholder="Type text..."
       ></textarea>
     {:else}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="cursor-text whitespace-pre-wrap break-words px-3 py-2 text-sm text-slate-800"
-        style="min-height: {data.height - 8}px;"
-        ondblclick={startEdit}
+        class="cursor-grab select-none whitespace-pre-wrap break-words px-3 py-2 text-[20px] font-medium leading-[1.12] tracking-[-0.025em] text-slate-800 transition-colors hover:text-slate-950 active:cursor-grabbing"
+        style="min-height: {Math.max(MIN_HEIGHT, data.height)}px;"
+        ondblclick={(event) => {
+          event.stopPropagation();
+          startEdit();
+        }}
       >
         {data.text || "Double-click to edit"}
       </div>
     {/if}
+  </div>
 
-    <!-- Remove button -->
+  {#if selected || editing || resizing}
     <button
       type="button"
-      class="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 group-hover:flex"
-      onclick={(e) => {
-        e.stopPropagation();
-        data.onRemove?.();
-      }}
-      title="Remove label"
+      class="nodrag absolute right-1 top-1 z-20 flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+      onmousedown={handleRemovePointerDown}
+      onclick={handleRemoveClick}
+      title="Remove text"
     >
-      <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
       </svg>
     </button>
-  </div>
 
-  <!-- Resize handle -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="absolute bottom-0 right-0 h-4 w-4 cursor-se-resize opacity-0 transition-opacity group-hover:opacity-100"
-    onmousedown={handleResizeStart}
-  >
-    <svg class="h-4 w-4 text-slate-400" viewBox="0 0 16 16" fill="currentColor">
-      <circle cx="12" cy="12" r="1.5" />
-      <circle cx="8" cy="12" r="1.5" />
-      <circle cx="12" cy="8" r="1.5" />
-    </svg>
-  </div>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="nodrag absolute right-[-7px] top-1/2 h-4 w-4 -translate-y-1/2 cursor-ew-resize rounded-full border-2 border-sky-400 bg-white shadow-sm"
+      onmousedown={(event) => handleResizeStart(event, "width")}
+    ></div>
+
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="nodrag absolute bottom-[-7px] left-1/2 h-4 w-4 -translate-x-1/2 cursor-ns-resize rounded-full border-2 border-sky-400 bg-white shadow-sm"
+      onmousedown={(event) => handleResizeStart(event, "height")}
+    ></div>
+
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="nodrag absolute bottom-[-8px] right-[-8px] h-4 w-4 cursor-se-resize rounded-full border-2 border-sky-500 bg-white shadow-sm"
+      onmousedown={(event) => handleResizeStart(event, "both")}
+    ></div>
+  {/if}
 </div>

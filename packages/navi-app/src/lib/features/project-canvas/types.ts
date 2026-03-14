@@ -19,6 +19,7 @@ export interface ProjectCanvasSessionData extends ProjectCanvasBaseData {
   worktreeBranch: string | null;
   status: SessionStatusType | "review" | "idle";
   onOpen?: (sessionId: string) => void;
+  onArchive?: (sessionId: string) => void;
 }
 
 export interface ProjectCanvasFileData extends ProjectCanvasBaseData {

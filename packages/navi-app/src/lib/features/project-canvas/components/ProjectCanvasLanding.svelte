@@ -4,6 +4,7 @@
     Background,
     MiniMap,
     BackgroundVariant,
+    SelectionMode,
     type NodeTypes,
     type Node,
   } from "@xyflow/svelte";
@@ -30,6 +31,7 @@
     projectPath: string;
     sessions: Session[];
     onSelectSession?: (session: Session) => void;
+    onArchiveSession?: (session: Session) => void;
     onNewSession?: () => void;
     onPreviewFile?: (path: string) => void;
     onOpenFiles?: () => void;
@@ -49,6 +51,7 @@
     projectPath,
     sessions,
     onSelectSession,
+    onArchiveSession,
     onNewSession,
     onPreviewFile,
     onOpenFiles,
@@ -57,7 +60,7 @@
 
   let persistedItems = $state<PersistedCanvasCard[]>([]);
   let savedViewport = $state<CanvasViewportState>(DEFAULT_VIEWPORT);
-  let selectedNodeId = $state<string | null>(null);
+  let selectedNodeIds = $state<string[]>([]);
   let draggingFileOver = $state(false);
   let dragDepth = $state(0);
   let canvasKey = $state(0);
@@ -75,6 +78,20 @@
     "file-card": FileCanvasNode,
     "text-label": TextLabelNode,
   } as NodeTypes;
+
+  function setSelectedNodeIds(ids: string[]) {
+    selectedNodeIds = [...new Set(ids)];
+  }
+
+  function clearSelection() {
+    selectedNodeIds = [];
+  }
+
+  function unselectNodeIds(ids: string[]) {
+    if (ids.length === 0) return;
+    const idsToRemove = new Set(ids);
+    selectedNodeIds = selectedNodeIds.filter((id) => !idsToRemove.has(id));
+  }
 
   function storageKey(id: string): string {
     return `navi-project-canvas:${id}`;
@@ -182,14 +199,14 @@
 
     persistedItems = nextItems;
     saveLayout(nextItems);
-    selectedNodeId = nodeId;
+    setSelectedNodeIds([nodeId]);
   }
 
   function removeFileCard(filePath: string) {
     const nodeId = getFileNodeId(filePath);
     const nextItems = persistedItems.filter((item) => item.id !== nodeId);
     persistedItems = nextItems;
-    selectedNodeId = selectedNodeId === nodeId ? null : selectedNodeId;
+    unselectNodeIds([nodeId]);
     saveLayout(nextItems);
   }
 
@@ -207,7 +224,7 @@
     const nextItems = [...persistedItems, newItem];
     persistedItems = nextItems;
     saveLayout(nextItems);
-    selectedNodeId = id;
+    setSelectedNodeIds([id]);
   }
 
   function updateTextLabel(id: string, text: string) {
@@ -229,7 +246,7 @@
   function removeTextLabel(id: string) {
     const nextItems = persistedItems.filter((item) => item.id !== id);
     persistedItems = nextItems;
-    selectedNodeId = selectedNodeId === id ? null : selectedNodeId;
+    unselectNodeIds([id]);
     saveLayout(nextItems);
   }
 
@@ -266,7 +283,7 @@
   function repackSessions() {
     const nextItems = persistedItems.filter((item) => item.type === "file" || item.type === "text-label");
     persistedItems = nextItems;
-    selectedNodeId = null;
+    clearSelection();
     savedViewport = DEFAULT_VIEWPORT;
     saveLayout(nextItems, DEFAULT_VIEWPORT);
     bumpCanvasKey();
@@ -352,7 +369,40 @@
     event: MouseEvent | TouchEvent;
   }) {
     if (!targetNode) return;
-    updateItemPosition(targetNode.id, targetNode.position);
+    updatePersistedPositions([targetNode]);
+  }
+
+  function updatePersistedPositions(nodesToUpdate: Node[]) {
+    if (nodesToUpdate.length === 0) return;
+
+    const positions = new Map(nodesToUpdate.map((node) => [node.id, node.position]));
+    let changed = false;
+
+    const nextItems = persistedItems.map((item) => {
+      const nextPosition = positions.get(item.id);
+      if (
+        !nextPosition ||
+        (item.position.x === nextPosition.x && item.position.y === nextPosition.y)
+      ) {
+        return item;
+      }
+
+      changed = true;
+      return { ...item, position: nextPosition };
+    });
+
+    if (!changed) return;
+
+    persistedItems = nextItems;
+    saveLayout(nextItems);
+  }
+
+  function handleSelectionDragStop(event: MouseEvent, nodes: Node[]) {
+    updatePersistedPositions(nodes);
+  }
+
+  function handleSelectionChange({ nodes }: { nodes: Node[] }) {
+    setSelectedNodeIds(nodes.map((node) => node.id));
   }
 
   function handleNodeClick({ node }: { node: Node; event: MouseEvent | TouchEvent }) {
@@ -361,9 +411,9 @@
       node.id === lastClickedNodeId && clickedAt - lastClickedAt < DOUBLE_CLICK_THRESHOLD;
     const data = node.data as ProjectCanvasNodeData;
 
-    selectedNodeId = node.id;
     lastClickedNodeId = node.id;
     lastClickedAt = clickedAt;
+    closeContextMenu();
 
     if (!isDoubleClick) return;
 
@@ -378,8 +428,61 @@
   }
 
   function handlePaneClick() {
-    selectedNodeId = null;
+    clearSelection();
     closeContextMenu();
+  }
+
+  function isEditableTarget(target: EventTarget | null): boolean {
+    const element = target instanceof HTMLElement ? target : null;
+    if (!element) return false;
+    return (
+      element.isContentEditable ||
+      ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName) ||
+      Boolean(element.closest("[contenteditable='true'], input, textarea, select, .nokey"))
+    );
+  }
+
+  function deleteSelectedNode() {
+    if (selectedNodeIds.length === 0) return;
+
+    const selectedNodes = canvasNodes.filter((node) => selectedNodeIds.includes(node.id));
+    if (selectedNodes.length === 0) return;
+
+    clearSelection();
+
+    for (const node of selectedNodes) {
+      const data = node.data as ProjectCanvasNodeData;
+
+      if (data.type === "session-card") {
+        data.onArchive?.(data.sessionId);
+        continue;
+      }
+
+      if (data.type === "file-card") {
+        data.onRemove?.(data.filePath);
+        continue;
+      }
+
+      if (data.type === "text-label") {
+        data.onRemove?.();
+      }
+    }
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (event.defaultPrevented || isEditableTarget(event.target)) return;
+
+    if (event.key === "Escape") {
+      closeContextMenu();
+      clearSelection();
+      return;
+    }
+
+    if ((event.key === "Backspace" || event.key === "Delete") && selectedNodeIds.length > 0) {
+      event.preventDefault();
+      closeContextMenu();
+      deleteSelectedNode();
+    }
   }
 
   function handleMove(_event: MouseEvent | TouchEvent | null, viewport: CanvasViewportState) {
@@ -445,7 +548,7 @@
         type: "session-card",
         draggable: true,
         selectable: true,
-        selected: selectedNodeId === getSessionNodeId(session.id),
+        selected: selectedNodeIds.includes(getSessionNodeId(session.id)),
         position: sessionLayout.get(session.id) ?? getSessionPosition(index),
         data: {
           type: "session-card",
@@ -462,6 +565,11 @@
               onSelectSession?.(session);
             }
           },
+          onArchive: (sessionId: string) => {
+            if (sessionId === session.id) {
+              onArchiveSession?.(session);
+            }
+          },
         },
       };
     });
@@ -471,7 +579,7 @@
       type: "file-card",
       draggable: true,
       selectable: true,
-      selected: selectedNodeId === item.id,
+      selected: selectedNodeIds.includes(item.id),
       position: item.position ?? getFallbackFilePosition(index),
       data: {
         type: "file-card",
@@ -492,7 +600,7 @@
       type: "text-label",
       draggable: true,
       selectable: true,
-      selected: selectedNodeId === item.id,
+      selected: selectedNodeIds.includes(item.id),
       position: item.position,
       data: {
         type: "text-label" as const,
@@ -513,7 +621,7 @@
     const layout = loadLayout(projectId);
     persistedItems = layout.items;
     savedViewport = layout.viewport ?? DEFAULT_VIEWPORT;
-    selectedNodeId = null;
+    clearSelection();
     resetTransientDropState();
     bumpCanvasKey();
   });
@@ -525,6 +633,13 @@
     rootSessionSignature;
     const currentItems = untrack(() => persistedItems);
     const currentRootSessions = untrack(() => rootSessions);
+
+    // Don't sync when sessions haven't loaded yet — an empty rootSessions
+    // would strip all saved session positions from persistedItems/localStorage,
+    // causing positions to reset to fallback grid once sessions arrive.
+    if (currentRootSessions.length === 0 && currentItems.some((item) => item.type === "session")) {
+      return;
+    }
 
     const liveRootIds = new Set(currentRootSessions.map((session) => getSessionNodeId(session.id)));
     const persistedSessionCards = currentRootSessions.map((session, index) => ({
@@ -564,7 +679,18 @@
     persistedItems = nextItems;
     saveLayout(nextItems);
   });
+
+  $effect(() => {
+    const liveNodeIds = new Set(canvasNodes.map((node) => node.id));
+    const nextSelection = selectedNodeIds.filter((id) => liveNodeIds.has(id));
+
+    if (nextSelection.length !== selectedNodeIds.length) {
+      selectedNodeIds = nextSelection;
+    }
+  });
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <div
   bind:this={canvasElement}
@@ -603,9 +729,16 @@
           initialViewport={savedViewport}
           minZoom={0.25}
           maxZoom={2}
+          panOnDrag={[1]}
           panOnScroll
+          selectionOnDrag
+          selectionMode={SelectionMode.Partial}
+          multiSelectionKey={["Meta", "Control", "Shift"]}
+          deleteKey={null}
           zoomOnDoubleClick={false}
           onnodedragstop={handleNodeDragStop}
+          onselectionchange={handleSelectionChange}
+          onselectiondragstop={handleSelectionDragStop}
           onnodeclick={handleNodeClick}
           onpaneclick={handlePaneClick}
           onmove={handleMove}

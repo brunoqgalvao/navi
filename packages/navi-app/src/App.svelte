@@ -196,6 +196,7 @@
     loadActiveSessions as loadActiveSessionsAction,
     pruneToolResults,
     startNewChatWithSummary,
+    extractHistoryContextForQuery,
     hasPrunedContext,
     hasRollbackContext,
     getDefaultModel,
@@ -374,7 +375,6 @@
   let isResolvingMergeConflicts = $state(false);
   let mergeConflictInfo = $state<{ branch: string; baseBranch: string; fileCount: number; snapshotId: string } | null>(null);
   let sidebarCollapsed = $state(false);
-  let sidebarCollapsedByCanvas = $state(false);
   let isCanvasMode = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
@@ -1579,6 +1579,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     schedule: WorkflowSchedule;
     gate?: WorkflowGate;
     enabled?: boolean;
+    ownerAgentId?: string | null;
     collapsed?: boolean;
     learningNotes?: string | null;
     feedbackNotes?: string | null;
@@ -1600,6 +1601,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       schedule?: WorkflowSchedule;
       gate?: WorkflowGate;
       enabled?: boolean;
+      ownerAgentId?: string | null;
       collapsed?: boolean;
       learningNotes?: string | null;
       feedbackNotes?: string | null;
@@ -2061,12 +2063,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function selectSession(s: Session, skipHistory = false) {
-    // Restore sidebar if canvas had auto-collapsed it
     isCanvasMode = false;
-    if (sidebarCollapsedByCanvas) {
-      sidebarCollapsed = false;
-      sidebarCollapsedByCanvas = false;
-    }
 
     const prevSessionId = $session.sessionId;
     if (prevSessionId && inputText.trim()) {
@@ -2410,7 +2407,10 @@ Please walk me through the setup step by step. When I have the credentials, save
 
   async function toggleSessionArchive(sess: Session, e: Event) {
     e.stopPropagation();
-    const newArchived = !sess.archived;
+    await setSessionArchived(sess, !sess.archived);
+  }
+
+  async function setSessionArchived(sess: Session, newArchived: boolean) {
     try {
       await api.sessions.setArchived(sess.id, newArchived);
       if (newArchived && !$showArchivedWorkspaces) {
@@ -2428,6 +2428,11 @@ Please walk me through the setup step by step. When I have the credentials, save
     } catch (err) {
       console.error("Failed to toggle session archive:", err);
     }
+  }
+
+  async function archiveSessionFromCanvas(sess: Session) {
+    if (sess.archived) return;
+    await setSessionArchived(sess, true);
   }
 
   async function archiveAllNonStarred() {
@@ -2672,6 +2677,7 @@ Please walk me through the setup step by step. When I have the credentials, save
 
     // Get the backend for this session
     const backend = sessionBackendStore.get(sessionId, get(sessionBackendStore)) || get(defaultBackend);
+    const historyCtx = resolveHistoryContextForQuery(sessionId, backend);
 
     client.query({
       prompt,
@@ -2679,8 +2685,16 @@ Please walk me through the setup step by step. When I have the credentials, save
       sessionId,
       claudeSessionId: $session.claudeSessionId || undefined,
       model: $session.selectedModel || undefined,
+      historyContext: historyCtx,
       backend,
     });
+
+    if ($sessionHistoryContext.get(sessionId)) {
+      sessionHistoryContext.update(map => {
+        map.delete(sessionId);
+        return new Map(map);
+      });
+    }
 
     if (sessionId === $session.sessionId) {
       scrollToBottom();
@@ -2783,9 +2797,9 @@ Please walk me through the setup step by step. When I have the credentials, save
   function resolveHistoryContextForQuery(sessionId: string, backend: BackendId): string | undefined {
     const historyCtx = $sessionHistoryContext.get(sessionId);
 
-    // "pruned" is a UI marker, not actual prompt context.
-    if (historyCtx && historyCtx !== "pruned") {
-      return historyCtx;
+    const storedHistoryContext = extractHistoryContextForQuery(historyCtx);
+    if (storedHistoryContext) {
+      return storedHistoryContext;
     }
 
     if (backend !== "claude") {
@@ -2801,11 +2815,11 @@ Please walk me through the setup step by step. When I have the credentials, save
     if (!$session.projectId || !$session.sessionId) return;
 
     const currentSessionId = $session.sessionId;
+    const backend = sessionBackendStore.get(currentSessionId, get(sessionBackendStore)) || get(defaultBackend);
+    const historyCtx = resolveHistoryContextForQuery(currentSessionId, backend);
 
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
-
-    const backend = sessionBackendStore.get(currentSessionId, get(sessionBackendStore)) || get(defaultBackend);
 
     client.query({
       prompt: command,
@@ -2813,8 +2827,16 @@ Please walk me through the setup step by step. When I have the credentials, save
       sessionId: currentSessionId,
       claudeSessionId: $session.claudeSessionId || undefined,
       model: $session.selectedModel || undefined,
+      historyContext: historyCtx,
       backend,
     });
+
+    if ($sessionHistoryContext.get(currentSessionId)) {
+      sessionHistoryContext.update(map => {
+        map.delete(currentSessionId);
+        return new Map(map);
+      });
+    }
   }
 
   async function sendMessage() {
@@ -3364,17 +3386,6 @@ Please walk me through the setup step by step. When I have the credentials, save
 
   function handleCanvasToggle(isCanvas: boolean) {
     isCanvasMode = isCanvas;
-    if (isCanvas) {
-      if (!sidebarCollapsed) {
-        sidebarCollapsed = true;
-        sidebarCollapsedByCanvas = true;
-      }
-    } else {
-      if (sidebarCollapsedByCanvas) {
-        sidebarCollapsed = false;
-        sidebarCollapsedByCanvas = false;
-      }
-    }
   }
 
   /**
@@ -4127,6 +4138,7 @@ Please walk me through the setup step by step. When I have the credentials, save
                 projectPath={currentProject?.path || ''}
                 projectName={currentProject.name}
                 sessions={sidebarSessions}
+                workflows={workflowsForProject}
                 projectDescription={currentProject?.description}
                 {claudeMdContent}
                 {projectContext}
@@ -4134,6 +4146,8 @@ Please walk me through the setup step by step. When I have the credentials, save
                 onSelectSession={(sess) => {
                   selectSession(sess as Session);
                 }}
+                onOpenSession={selectSessionById}
+                onArchiveSession={archiveSessionFromCanvas}
                 onNewSession={startNewChatAction}
                 onPreviewFile={openPreview}
                 onOpenFiles={() => {

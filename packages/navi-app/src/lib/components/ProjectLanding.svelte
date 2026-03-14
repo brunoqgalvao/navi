@@ -6,7 +6,7 @@
    * otherwise falls back to ProjectEmptyState.
    */
   import { onMount, onDestroy } from "svelte";
-  import type { Session } from "$lib/api";
+  import type { Session, Workflow } from "$lib/api";
   import ProjectEmptyState from "./ProjectEmptyState.svelte";
   import DashboardView from "$lib/features/dashboard/components/DashboardView.svelte";
   import { getDashboard } from "$lib/features/dashboard";
@@ -20,11 +20,14 @@
     projectPath: string;
     projectName: string;
     sessions: Session[];
+    workflows: Workflow[];
     projectDescription?: string | null;
     claudeMdContent: string | null;
     projectContext: { summary: string; suggestions: string[] } | null;
     onSuggestionClick?: (suggestion: string) => void;
     onSelectSession?: (session: Session) => void;
+    onOpenSession?: (sessionId: string) => void;
+    onArchiveSession?: (session: Session) => void;
     onNewSession?: () => void;
     onPreviewFile?: (path: string) => void;
     onOpenFiles?: () => void;
@@ -37,11 +40,14 @@
     projectPath,
     projectName,
     sessions,
+    workflows,
     projectDescription = null,
     claudeMdContent,
     projectContext,
     onSuggestionClick,
     onSelectSession,
+    onOpenSession,
+    onArchiveSession,
     onNewSession,
     onPreviewFile,
     onOpenFiles,
@@ -115,9 +121,9 @@
   });
 </script>
 
-<div class="flex h-full flex-col">
+<div class="flex h-full flex-col pt-4">
   {#if landingView !== "canvas"}
-    <div class="px-4 pr-52 pt-5 md:px-6 md:pr-56">
+    <div class="px-4 pr-52 pt-1 md:px-6 md:pr-56">
       <div class="flex w-full flex-wrap items-center justify-between gap-3">
         <div>
           <div class="flex items-center gap-2">
@@ -156,6 +162,7 @@
         {projectPath}
         {sessions}
         {onSelectSession}
+        {onArchiveSession}
         {onNewSession}
         {onPreviewFile}
         {onOpenFiles}

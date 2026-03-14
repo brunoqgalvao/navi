@@ -21,6 +21,7 @@ interface WorkflowDto {
   id: string;
   projectId: string;
   rootSessionId: string;
+  ownerAgentId: string | null;
   name: string;
   prompt: string;
   schedule: WorkflowSchedule;
@@ -45,6 +46,7 @@ function workflowToDto(workflow: Workflow): WorkflowDto {
     id: workflow.id,
     projectId: workflow.project_id,
     rootSessionId: workflow.root_session_id,
+    ownerAgentId: workflow.owner_agent_id,
     name: workflow.name,
     prompt: workflow.prompt,
     schedule: JSON.parse(workflow.schedule_json) as WorkflowSchedule,
@@ -117,6 +119,7 @@ async function createWorkflow(
     feedbackNotes?: string | null;
     model?: string | null;
     backend?: string | null;
+    ownerAgentId?: string | null;
   }
 ) {
   const now = Date.now();
@@ -146,6 +149,7 @@ async function createWorkflow(
     feedback_notes: body.feedbackNotes ?? null,
     model: body.model ?? null,
     backend: (body.backend as Workflow["backend"]) ?? null,
+    owner_agent_id: body.ownerAgentId ?? null,
     run_count: 0,
     last_run_at: null,
     next_run_at:
@@ -160,6 +164,10 @@ async function createWorkflow(
   if (!workflow) {
     throw new Error("Failed to create workflow");
   }
+  sessions.setWorkspaceLinks(rootSessionId, {
+    workflow_id: workflowId,
+    agent_id: body.ownerAgentId ?? null,
+  });
   upsertWorkflowSummaryMessage(workflow);
   workflowScheduler.sync(workflowId);
   return workflow;
@@ -253,6 +261,8 @@ export async function handleWorkflowRoutes(
             body.feedbackNotes === undefined ? undefined : (body.feedbackNotes ?? null),
           model: body.model === undefined ? undefined : body.model,
           backend: body.backend === undefined ? undefined : body.backend,
+          owner_agent_id:
+            body.ownerAgentId === undefined ? undefined : (body.ownerAgentId ?? null),
           next_run_at:
             body.schedule || typeof body.enabled === "boolean"
               ? (
@@ -272,6 +282,12 @@ export async function handleWorkflowRoutes(
 
         if (body.name && body.name !== workflow.name) {
           sessions.updateTitle(body.name.trim(), Date.now(), workflow.root_session_id);
+        }
+        if (body.ownerAgentId !== undefined) {
+          sessions.setWorkspaceLinks(workflow.root_session_id, {
+            workflow_id: workflowId,
+            agent_id: body.ownerAgentId ?? null,
+          });
         }
 
         upsertWorkflowSummaryMessage(updatedWorkflow);

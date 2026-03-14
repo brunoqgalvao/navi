@@ -636,6 +636,92 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
   `);
 
+  try {
+    db.run("ALTER TABLE workflows ADD COLUMN owner_agent_id TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN agent_id TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN workflow_id TEXT REFERENCES workflows(id)");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN work_item_id TEXT");
+  } catch {}
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS work_items (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'todo',
+      priority TEXT NOT NULL DEFAULT 'medium',
+      assignee_agent_id TEXT,
+      reporter_type TEXT NOT NULL DEFAULT 'user',
+      reporter_id TEXT,
+      source_session_id TEXT,
+      primary_session_id TEXT,
+      acceptance_criteria TEXT,
+      metadata TEXT DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_session_id) REFERENCES sessions(id) ON DELETE SET NULL,
+      FOREIGN KEY (primary_session_id) REFERENCES sessions(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_work_items_project ON work_items(project_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_work_items_status ON work_items(project_id, status);
+    CREATE INDEX IF NOT EXISTS idx_work_items_assignee ON work_items(project_id, assignee_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_work_items_primary_session ON work_items(primary_session_id);
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS work_item_events (
+      id TEXT PRIMARY KEY,
+      work_item_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      actor_type TEXT NOT NULL,
+      actor_id TEXT,
+      session_id TEXT,
+      content TEXT,
+      metadata TEXT DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_work_item_events_item ON work_item_events(work_item_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_work_item_events_session ON work_item_events(session_id);
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS inbox_items (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      priority TEXT NOT NULL DEFAULT 'medium',
+      source_agent_id TEXT,
+      source_session_id TEXT,
+      work_item_id TEXT,
+      requires_response INTEGER DEFAULT 0,
+      response_options TEXT,
+      metadata TEXT DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      resolved_at INTEGER,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_session_id) REFERENCES sessions(id) ON DELETE SET NULL,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_project ON inbox_items(project_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_status ON inbox_items(project_id, status);
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_work_item ON inbox_items(work_item_id);
+  `);
+
   // Channels - cross-workspace spaces for agent collaboration
   db.run(`
     CREATE TABLE IF NOT EXISTS channels (
@@ -870,9 +956,79 @@ export interface Session {
   e2b_sandbox_id: string | null;
   // Multi-backend support
   backend: "claude" | "codex" | "gemini" | null;
+  // Agent workspace links
+  agent_id: string | null;
+  workflow_id: string | null;
+  work_item_id: string | null;
   // Timestamps
   created_at: number;
   updated_at: number;
+}
+
+export type WorkItemStatus =
+  | "todo"
+  | "triaged"
+  | "in_progress"
+  | "blocked"
+  | "waiting_human"
+  | "in_review"
+  | "done"
+  | "cancelled";
+
+export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
+
+export interface WorkItem {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string | null;
+  status: WorkItemStatus;
+  priority: WorkItemPriority;
+  assignee_agent_id: string | null;
+  reporter_type: "user" | "agent" | "system";
+  reporter_id: string | null;
+  source_session_id: string | null;
+  primary_session_id: string | null;
+  acceptance_criteria: string | null;
+  metadata: string | null;
+  created_at: number;
+  updated_at: number;
+  completed_at: number | null;
+}
+
+export interface WorkItemEvent {
+  id: string;
+  work_item_id: string;
+  event_type: string;
+  actor_type: "user" | "agent" | "system";
+  actor_id: string | null;
+  session_id: string | null;
+  content: string | null;
+  metadata: string | null;
+  created_at: number;
+}
+
+export type InboxItemStatus = "open" | "acknowledged" | "resolved" | "dismissed";
+export type InboxItemPriority = "low" | "medium" | "high" | "urgent";
+export type InboxItemKind = "report" | "question" | "attention" | "approval" | "delivery";
+
+export interface InboxItem {
+  id: string;
+  project_id: string;
+  kind: InboxItemKind;
+  title: string;
+  body: string | null;
+  status: InboxItemStatus;
+  priority: InboxItemPriority;
+  source_agent_id: string | null;
+  source_session_id: string | null;
+  work_item_id: string | null;
+  requires_response: number;
+  response_options: string | null;
+  metadata: string | null;
+  created_at: number;
+  updated_at: number;
+  resolved_at: number | null;
 }
 
 export interface Message {
@@ -1037,6 +1193,7 @@ export interface Workflow {
   feedback_notes: string | null;
   model: string | null;
   backend: "claude" | "codex" | "gemini" | null;
+  owner_agent_id: string | null;
   run_count: number;
   last_run_at: number | null;
   next_run_at: number | null;
@@ -1069,7 +1226,8 @@ export const workflows = {
   get: (id: string) => queryOne<Workflow>("SELECT * FROM workflows WHERE id = ?", [id]),
   getByRootSession: (rootSessionId: string) =>
     queryOne<Workflow>("SELECT * FROM workflows WHERE root_session_id = ?", [rootSessionId]),
-  create: (input: Omit<Workflow, "run_count" | "last_run_at" | "next_run_at" | "last_error" | "last_skip_reason"> & {
+  create: (input: Omit<Workflow, "run_count" | "last_run_at" | "next_run_at" | "last_error" | "last_skip_reason" | "owner_agent_id"> & {
+    owner_agent_id?: string | null;
     run_count?: number;
     last_run_at?: number | null;
     next_run_at?: number | null;
@@ -1080,8 +1238,8 @@ export const workflows = {
       `INSERT INTO workflows (
         id, project_id, root_session_id, name, prompt, schedule_json, gate_json, enabled, collapsed,
         learning_notes, feedback_notes, model, backend, run_count, last_run_at, next_run_at, last_error, last_skip_reason,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        owner_agent_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.id,
         input.project_id,
@@ -1101,6 +1259,7 @@ export const workflows = {
         input.next_run_at ?? null,
         input.last_error ?? null,
         input.last_skip_reason ?? null,
+        input.owner_agent_id ?? null,
         input.created_at,
         input.updated_at,
       ]
@@ -1120,6 +1279,7 @@ export const workflows = {
         | "feedback_notes"
         | "model"
         | "backend"
+        | "owner_agent_id"
         | "run_count"
         | "last_run_at"
         | "next_run_at"
@@ -1143,6 +1303,7 @@ export const workflows = {
         feedback_notes = ?,
         model = ?,
         backend = ?,
+        owner_agent_id = ?,
         run_count = ?,
         last_run_at = ?,
         next_run_at = ?,
@@ -1161,6 +1322,7 @@ export const workflows = {
         updates.feedback_notes === undefined ? existing.feedback_notes : updates.feedback_notes,
         updates.model === undefined ? existing.model : updates.model,
         updates.backend === undefined ? existing.backend : updates.backend,
+        updates.owner_agent_id === undefined ? existing.owner_agent_id : updates.owner_agent_id,
         updates.run_count ?? existing.run_count,
         updates.last_run_at === undefined ? existing.last_run_at : updates.last_run_at,
         updates.next_run_at === undefined ? existing.next_run_at : updates.next_run_at,
@@ -1244,6 +1406,214 @@ export const workflowRuns = {
     run("DELETE FROM workflow_runs WHERE workflow_id = ?", [workflowId]),
 };
 
+export const workItems = {
+  listByProject: (projectId: string) =>
+    queryAll<WorkItem>(
+      "SELECT * FROM work_items WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC",
+      [projectId]
+    ),
+  get: (id: string) => queryOne<WorkItem>("SELECT * FROM work_items WHERE id = ?", [id]),
+  create: (item: WorkItem) =>
+    run(
+      `INSERT INTO work_items (
+        id, project_id, title, description, status, priority, assignee_agent_id, reporter_type,
+        reporter_id, source_session_id, primary_session_id, acceptance_criteria, metadata,
+        created_at, updated_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        item.id,
+        item.project_id,
+        item.title,
+        item.description,
+        item.status,
+        item.priority,
+        item.assignee_agent_id,
+        item.reporter_type,
+        item.reporter_id,
+        item.source_session_id,
+        item.primary_session_id,
+        item.acceptance_criteria,
+        item.metadata ?? "{}",
+        item.created_at,
+        item.updated_at,
+        item.completed_at,
+      ]
+    ),
+  update: (
+    id: string,
+    updates: Partial<
+      Pick<
+        WorkItem,
+        | "title"
+        | "description"
+        | "status"
+        | "priority"
+        | "assignee_agent_id"
+        | "reporter_type"
+        | "reporter_id"
+        | "source_session_id"
+        | "primary_session_id"
+        | "acceptance_criteria"
+        | "metadata"
+        | "completed_at"
+      >
+    >
+  ) => {
+    const existing = workItems.get(id);
+    if (!existing) return;
+    run(
+      `UPDATE work_items SET
+        title = ?,
+        description = ?,
+        status = ?,
+        priority = ?,
+        assignee_agent_id = ?,
+        reporter_type = ?,
+        reporter_id = ?,
+        source_session_id = ?,
+        primary_session_id = ?,
+        acceptance_criteria = ?,
+        metadata = ?,
+        completed_at = ?,
+        updated_at = ?
+      WHERE id = ?`,
+      [
+        updates.title ?? existing.title,
+        updates.description === undefined ? existing.description : updates.description,
+        updates.status ?? existing.status,
+        updates.priority ?? existing.priority,
+        updates.assignee_agent_id === undefined ? existing.assignee_agent_id : updates.assignee_agent_id,
+        updates.reporter_type ?? existing.reporter_type,
+        updates.reporter_id === undefined ? existing.reporter_id : updates.reporter_id,
+        updates.source_session_id === undefined ? existing.source_session_id : updates.source_session_id,
+        updates.primary_session_id === undefined ? existing.primary_session_id : updates.primary_session_id,
+        updates.acceptance_criteria === undefined ? existing.acceptance_criteria : updates.acceptance_criteria,
+        updates.metadata === undefined ? existing.metadata : updates.metadata,
+        updates.completed_at === undefined ? existing.completed_at : updates.completed_at,
+        Date.now(),
+        id,
+      ]
+    );
+  },
+  delete: (id: string) => run("DELETE FROM work_items WHERE id = ?", [id]),
+};
+
+export const workItemEvents = {
+  listByWorkItem: (workItemId: string) =>
+    queryAll<WorkItemEvent>(
+      "SELECT * FROM work_item_events WHERE work_item_id = ? ORDER BY created_at ASC",
+      [workItemId]
+    ),
+  create: (event: WorkItemEvent) =>
+    run(
+      `INSERT INTO work_item_events (
+        id, work_item_id, event_type, actor_type, actor_id, session_id, content, metadata, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        event.id,
+        event.work_item_id,
+        event.event_type,
+        event.actor_type,
+        event.actor_id,
+        event.session_id,
+        event.content,
+        event.metadata ?? "{}",
+        event.created_at,
+      ]
+    ),
+};
+
+export const inboxItems = {
+  listByProject: (projectId: string) =>
+    queryAll<InboxItem>(
+      "SELECT * FROM inbox_items WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC",
+      [projectId]
+    ),
+  get: (id: string) => queryOne<InboxItem>("SELECT * FROM inbox_items WHERE id = ?", [id]),
+  create: (item: InboxItem) =>
+    run(
+      `INSERT INTO inbox_items (
+        id, project_id, kind, title, body, status, priority, source_agent_id, source_session_id,
+        work_item_id, requires_response, response_options, metadata, created_at, updated_at, resolved_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        item.id,
+        item.project_id,
+        item.kind,
+        item.title,
+        item.body,
+        item.status,
+        item.priority,
+        item.source_agent_id,
+        item.source_session_id,
+        item.work_item_id,
+        item.requires_response,
+        item.response_options,
+        item.metadata ?? "{}",
+        item.created_at,
+        item.updated_at,
+        item.resolved_at,
+      ]
+    ),
+  update: (
+    id: string,
+    updates: Partial<
+      Pick<
+        InboxItem,
+        | "kind"
+        | "title"
+        | "body"
+        | "status"
+        | "priority"
+        | "source_agent_id"
+        | "source_session_id"
+        | "work_item_id"
+        | "requires_response"
+        | "response_options"
+        | "metadata"
+        | "resolved_at"
+      >
+    >
+  ) => {
+    const existing = inboxItems.get(id);
+    if (!existing) return;
+    run(
+      `UPDATE inbox_items SET
+        kind = ?,
+        title = ?,
+        body = ?,
+        status = ?,
+        priority = ?,
+        source_agent_id = ?,
+        source_session_id = ?,
+        work_item_id = ?,
+        requires_response = ?,
+        response_options = ?,
+        metadata = ?,
+        resolved_at = ?,
+        updated_at = ?
+      WHERE id = ?`,
+      [
+        updates.kind ?? existing.kind,
+        updates.title ?? existing.title,
+        updates.body === undefined ? existing.body : updates.body,
+        updates.status ?? existing.status,
+        updates.priority ?? existing.priority,
+        updates.source_agent_id === undefined ? existing.source_agent_id : updates.source_agent_id,
+        updates.source_session_id === undefined ? existing.source_session_id : updates.source_session_id,
+        updates.work_item_id === undefined ? existing.work_item_id : updates.work_item_id,
+        updates.requires_response === undefined ? existing.requires_response : updates.requires_response,
+        updates.response_options === undefined ? existing.response_options : updates.response_options,
+        updates.metadata === undefined ? existing.metadata : updates.metadata,
+        updates.resolved_at === undefined ? existing.resolved_at : updates.resolved_at,
+        Date.now(),
+        id,
+      ]
+    );
+  },
+  delete: (id: string) => run("DELETE FROM inbox_items WHERE id = ?", [id]),
+};
+
 export const projects = {
   list: (includeArchived: boolean = false) => queryAll<ProjectWithStats>(`
     SELECT p.*, 
@@ -1323,13 +1693,18 @@ export interface SessionSidebar {
   backend: string | null;
   // Folder grouping
   folder_id: string | null;
+  // Agent workspace links
+  agent_id: string | null;
+  workflow_id: string | null;
+  work_item_id: string | null;
 }
 
 // Columns used for sidebar display (avoids SELECT * overhead with large JSON columns)
 const SIDEBAR_COLUMNS = `id, project_id, title, claude_session_id, backend_session_id, model, total_cost_usd,
   input_tokens, output_tokens, pinned, favorite, archived, sort_order,
   created_at, updated_at, worktree_path, worktree_branch, auto_accept_all, marked_for_review,
-  parent_session_id, root_session_id, depth, role, task, agent_status, agent_type, session_type, escalation, deliverable, backend, folder_id`;
+  parent_session_id, root_session_id, depth, role, task, agent_status, agent_type, session_type, escalation, deliverable, backend, folder_id,
+  agent_id, workflow_id, work_item_id`;
 
 export const sessions = {
   // Optimized query for sidebar - excludes heavy columns like deliverable, escalation, context_excerpt
@@ -1426,6 +1801,34 @@ export const sessions = {
     run("UPDATE sessions SET in_backlog = ?, backlog_added_at = ?, backlog_note = ?, updated_at = ? WHERE id = ?", [inBacklog ? 1 : 0, inBacklog ? Date.now() : null, note ?? null, Date.now(), id]),
   setFolder: (id: string, folderId: string | null) =>
     run("UPDATE sessions SET folder_id = ?, updated_at = ? WHERE id = ?", [folderId, Date.now(), id]),
+  setWorkspaceLinks: (
+    id: string,
+    updates: {
+      agent_id?: string | null;
+      workflow_id?: string | null;
+      work_item_id?: string | null;
+    }
+  ) => {
+    const existing = sessions.get(id);
+    if (!existing) return;
+    run(
+      "UPDATE sessions SET agent_id = ?, workflow_id = ?, work_item_id = ?, updated_at = ? WHERE id = ?",
+      [
+        updates.agent_id === undefined ? existing.agent_id : updates.agent_id,
+        updates.workflow_id === undefined ? existing.workflow_id : updates.workflow_id,
+        updates.work_item_id === undefined ? existing.work_item_id : updates.work_item_id,
+        Date.now(),
+        id,
+      ]
+    );
+  },
+  listByWorkItem: (workItemId: string) =>
+    queryAll<Session>("SELECT * FROM sessions WHERE work_item_id = ? ORDER BY created_at ASC", [workItemId]),
+  listByAgent: (projectId: string, agentId: string) =>
+    queryAll<Session>(
+      "SELECT * FROM sessions WHERE project_id = ? AND agent_id = ? ORDER BY updated_at DESC",
+      [projectId, agentId]
+    ),
 
   // Until Done (Ralph loop) mode methods
   setUntilDoneMode: (id: string, enabled: boolean, maxIterations: number = 10) =>

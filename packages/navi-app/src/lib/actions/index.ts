@@ -81,6 +81,7 @@ export {
   triggerSDKCompact,
   startNewChatWithSummary,
   getMessagesForApi,
+  extractHistoryContextForQuery,
   hasPrunedContext,
   hasRollbackContext,
   clearPrunedCache,

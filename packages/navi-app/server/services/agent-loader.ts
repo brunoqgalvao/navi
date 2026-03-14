@@ -662,6 +662,25 @@ export class AgentLoader {
         bundle.navi = { ...bundle.navi, ...naviParsed };
       }
 
+      // Optional workspace-agent companion files.
+      // These keep identity and memory as separate editable documents while still
+      // compiling into a single runtime prompt.
+      const soulMdPath = path.join(dirPath, "soul.md");
+      if (fs.existsSync(soulMdPath)) {
+        const soulContent = fs.readFileSync(soulMdPath, "utf-8").trim();
+        if (soulContent) {
+          bundle.prompt = `${bundle.prompt || ""}\n\n## Identity\n${soulContent}`.trim();
+        }
+      }
+
+      const memoryMdPath = path.join(dirPath, "memory.md");
+      if (fs.existsSync(memoryMdPath)) {
+        const memoryContent = fs.readFileSync(memoryMdPath, "utf-8").trim();
+        if (memoryContent) {
+          bundle.prompt = `${bundle.prompt || ""}\n\n## Memory\n${memoryContent}`.trim();
+        }
+      }
+
       // Validate required fields
       if (!bundle.description) {
         console.warn(`[AgentLoader] Agent ${id} missing description, skipping`);

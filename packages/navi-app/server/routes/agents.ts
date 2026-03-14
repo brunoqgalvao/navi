@@ -123,6 +123,79 @@ export interface Agent {
   scope: "global" | "project";
   projectId?: string;
   path: string;
+  format?: "simple" | "bundle";
+  soul?: string | null;
+  memory?: string | null;
+}
+
+function toAgentResponse(
+  scope: "global" | "project",
+  slug: string,
+  bundle: AgentBundle,
+  projectId?: string
+): Agent {
+  const path = bundle.path ||
+    (scope === "global"
+      ? join(CLAUDE_GLOBAL_AGENTS, `${slug}.md`)
+      : join(process.cwd(), ".claude", "agents", `${slug}.md`))
+
+  let soul: string | null = null
+  let memory: string | null = null
+  let format: "simple" | "bundle" = path.endsWith(".md") ? "simple" : "bundle"
+  let body = bundle.prompt
+
+  if (existsSync(path) && statSync(path).isDirectory()) {
+    const promptPath = join(path, "prompt.md")
+    const soulPath = join(path, "soul.md")
+    const memoryPath = join(path, "memory.md")
+    body = existsSync(promptPath) ? readFileSync(promptPath, "utf-8") : bundle.prompt
+    soul = existsSync(soulPath) ? readFileSync(soulPath, "utf-8") : null
+    memory = existsSync(memoryPath) ? readFileSync(memoryPath, "utf-8") : null
+    format = "bundle"
+  }
+
+  return {
+    id: `${scope}:${projectId || "global"}:${slug}`,
+    slug,
+    name: bundle.name,
+    description: bundle.description,
+    model: bundle.model,
+    tools: bundle.tools?.allowed,
+    body,
+    scope,
+    projectId,
+    path,
+    format,
+    soul,
+    memory,
+  }
+}
+
+function serializeBundleAgentYaml(input: {
+  slug: string;
+  description: string;
+  model?: "haiku" | "sonnet" | "opus";
+  tools?: string[];
+}): string {
+  const lines = [
+    `name: ${input.slug}`,
+    `description: ${input.description || ""}`,
+    "prompt: file:prompt.md",
+  ]
+
+  if (input.model) {
+    lines.push(`model: ${input.model}`)
+  }
+
+  if (input.tools && input.tools.length > 0) {
+    lines.push("tools:")
+    lines.push("  allowed:")
+    for (const tool of input.tools) {
+      lines.push(`    - ${tool}`)
+    }
+  }
+
+  return `${lines.join("\n")}\n`
 }
 
 function scanAgentDirectory(dir: string, scope: "global" | "project", projectId?: string): Agent[] {
@@ -179,21 +252,32 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
       // Convert AgentBundle to the frontend Agent format
       const agents: Agent[] = [];
       for (const [id, bundle] of agentBundles) {
-        agents.push({
-          id: `${bundle.source}:${id}`,
-          slug: id,
-          name: bundle.name,
-          description: bundle.description,
-          model: bundle.model,
-          tools: bundle.tools?.allowed,
-          body: bundle.prompt,
-          scope: bundle.source === "project" ? "project" : "global",
-          path: bundle.source === "builtin"
-            ? `builtin:${id}`
-            : bundle.source === "global"
-              ? join(CLAUDE_GLOBAL_AGENTS, `${id}.md`)
-              : join(projectPath, ".claude", "agents", `${id}.md`),
-        });
+        if (bundle.source === "builtin") {
+          agents.push({
+            id: `global:global:${id}`,
+            slug: id,
+            name: bundle.name,
+            description: bundle.description,
+            model: bundle.model,
+            tools: bundle.tools?.allowed,
+            body: bundle.prompt,
+            scope: "global",
+            path: `builtin:${id}`,
+            format: "simple",
+          });
+          continue;
+        }
+
+        agents.push(
+          toAgentResponse(
+            bundle.source === "project" ? "project" : "global",
+            id,
+            bundle,
+            bundle.source === "project"
+              ? projects.list().find((project) => bundle.path?.startsWith(join(project.path, ".claude", "agents")) )?.id
+              : undefined
+          )
+        );
       }
 
       return json(agents);
@@ -274,14 +358,21 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
     }
 
     const filePath = join(agentsDir, `${slug}.md`);
-    if (!existsSync(filePath)) {
+    const bundleDir = join(agentsDir, slug);
+    if (!existsSync(filePath) && !(existsSync(bundleDir) && statSync(bundleDir).isDirectory())) {
       return json({ error: "Agent not found" }, 404);
+    }
+
+    if (existsSync(bundleDir) && statSync(bundleDir).isDirectory()) {
+      const projectPath = scope === "project" ? projects.get(scopeId!)?.path || process.cwd() : process.cwd()
+      const bundle = await agentLoader.loadAgent(slug, projectPath)
+      if (!bundle) return json({ error: "Agent not found" }, 404)
+      return json(toAgentResponse(scope as "global" | "project", slug, bundle, scope === "project" ? scopeId : undefined))
     }
 
     const content = readFileSync(filePath, "utf-8");
     const parsed = parseAgentMd(content);
-
-    const agent: Agent = {
+    return json({
       id,
       slug,
       name: parsed.frontmatter.name || slug,
@@ -292,9 +383,8 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
       scope: scope as "global" | "project",
       projectId: scope === "project" ? scopeId : undefined,
       path: filePath,
-    };
-
-    return json(agent);
+      format: "simple",
+    } satisfies Agent);
   }
 
   // PUT /api/agents/:id - Update agent
@@ -314,18 +404,130 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
     }
 
     const filePath = join(agentsDir, `${slug}.md`);
-    if (!existsSync(filePath)) {
+    const bundleDir = join(agentsDir, slug);
+    if (!existsSync(filePath) && !(existsSync(bundleDir) && statSync(bundleDir).isDirectory())) {
       return json({ error: "Agent not found" }, 404);
     }
 
     try {
       const body = await req.json();
-      const { name, description, model, tools, instructions } = body;
+      const { name, description, model, tools, instructions, soul, memory, format } = body;
+      const nextName = name || slug;
+      const nextDescription = description || "";
+
+      if (existsSync(bundleDir) && statSync(bundleDir).isDirectory()) {
+        if (format === "simple") {
+          const content = serializeAgentMd({
+            frontmatter: {
+              name: nextName,
+              description: nextDescription,
+              model,
+              tools,
+            },
+            body: instructions || "",
+          });
+
+          writeFileSync(filePath, content);
+          rmSync(bundleDir, { recursive: true, force: true });
+          agentLoader.clearCache();
+
+          const agent: Agent = {
+            id,
+            slug,
+            name: nextName,
+            description: nextDescription,
+            model,
+            tools,
+            body: instructions || "",
+            scope: scope as "global" | "project",
+            projectId: scope === "project" ? scopeId : undefined,
+            path: filePath,
+            format: "simple",
+          };
+
+          return json(agent);
+        }
+
+        const agentYamlPath = join(bundleDir, "agent.yaml");
+        const promptPath = join(bundleDir, "prompt.md");
+        const soulPath = join(bundleDir, "soul.md");
+        const memoryPath = join(bundleDir, "memory.md");
+
+        const existingBundle = await agentLoader.loadAgent(
+          slug,
+          scope === "project" && scopeId ? projects.get(scopeId)?.path || process.cwd() : process.cwd()
+        );
+        if (!existingBundle) {
+          return json({ error: "Agent not found" }, 404);
+        }
+
+        writeFileSync(
+          agentYamlPath,
+          serializeBundleAgentYaml({
+            slug,
+            description: description ?? existingBundle.description,
+            model: model ?? existingBundle.model,
+            tools: tools ?? existingBundle.tools?.allowed,
+          })
+        );
+        writeFileSync(promptPath, instructions ?? readFileSync(promptPath, "utf-8"));
+        if (soul !== undefined) writeFileSync(soulPath, soul || "");
+        if (memory !== undefined) writeFileSync(memoryPath, memory || "");
+
+        agentLoader.clearCache();
+        const updatedBundle = await agentLoader.loadAgent(
+          slug,
+          scope === "project" && scopeId ? projects.get(scopeId)?.path || process.cwd() : process.cwd()
+        );
+        if (!updatedBundle) return json({ error: "Failed to reload agent" }, 500);
+        return json(
+          toAgentResponse(
+            scope as "global" | "project",
+            slug,
+            updatedBundle,
+            scope === "project" ? scopeId : undefined
+          )
+        );
+      }
+
+      if (format === "bundle") {
+        mkdirSync(bundleDir, { recursive: true });
+        writeFileSync(
+          join(bundleDir, "agent.yaml"),
+          serializeBundleAgentYaml({
+            slug,
+            description: nextDescription,
+            model,
+            tools,
+          })
+        );
+        writeFileSync(join(bundleDir, "prompt.md"), instructions || "");
+        writeFileSync(join(bundleDir, "soul.md"), soul || "");
+        writeFileSync(join(bundleDir, "memory.md"), memory || "");
+        if (existsSync(filePath)) {
+          rmSync(filePath, { force: true });
+        }
+
+        agentLoader.clearCache();
+        const updatedBundle = await agentLoader.loadAgent(
+          slug,
+          scope === "project" && scopeId ? projects.get(scopeId)?.path || process.cwd() : process.cwd()
+        );
+        if (!updatedBundle) return json({ error: "Failed to reload agent" }, 500);
+        return json(
+          toAgentResponse(
+            scope as "global" | "project",
+            slug,
+            updatedBundle,
+            scope === "project" ? scopeId : undefined
+          )
+        );
+      }
 
       const content = serializeAgentMd({
         frontmatter: {
-          name: name || slug,
-          description: description || "",
+          name: nextName,
+          description: nextDescription,
           model,
           tools,
         },
@@ -333,18 +535,20 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
       });
 
       writeFileSync(filePath, content);
+      agentLoader.clearCache();
 
       const agent: Agent = {
         id,
         slug,
-        name: name || slug,
-        description: description || "",
+        name: nextName,
+        description: nextDescription,
         model,
         tools,
         body: instructions || "",
         scope: scope as "global" | "project",
         projectId: scope === "project" ? scopeId : undefined,
         path: filePath,
+        format: "simple",
       };
 
       return json(agent);
@@ -370,12 +574,18 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
     }
 
     const filePath = join(agentsDir, `${slug}.md`);
-    if (!existsSync(filePath)) {
+    const bundleDir = join(agentsDir, slug);
+    if (!existsSync(filePath) && !(existsSync(bundleDir) && statSync(bundleDir).isDirectory())) {
       return json({ error: "Agent not found" }, 404);
     }
 
     try {
-      rmSync(filePath);
+      if (existsSync(bundleDir) && statSync(bundleDir).isDirectory()) {
+        rmSync(bundleDir, { recursive: true, force: true });
+      } else {
+        rmSync(filePath);
+      }
+      agentLoader.clearCache();
       return json({ success: true });
     } catch (e: any) {
       return json({ error: e.message || "Failed to delete agent" }, 500);
@@ -389,11 +599,25 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
     const project = projects.get(projectId);
 
     if (!project) return json({ error: "Project not found" }, 404);
+    const bundles = await agentLoader.loadAllAgents(project.path);
+    const projectAgents: Agent[] = [];
+    const globalAgents: Agent[] = [];
 
-    const projectAgents = scanAgentDirectory(getProjectAgentsDir(project.path), "project", projectId);
-    const globalAgents = scanAgentDirectory(CLAUDE_GLOBAL_AGENTS, "global");
+    for (const [slug, bundle] of bundles) {
+      if (bundle.source === "builtin") continue;
+      const response = toAgentResponse(
+        bundle.source === "project" ? "project" : "global",
+        slug,
+        bundle,
+        bundle.source === "project" ? projectId : undefined
+      );
+      if (bundle.source === "project") {
+        projectAgents.push(response);
+      } else {
+        globalAgents.push(response);
+      }
+    }
 
-    // Return both, with project agents first
     return json([...projectAgents, ...globalAgents]);
   }
 
@@ -406,7 +630,7 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
 
     try {
       const body = await req.json();
-      const { name, description, model, tools, instructions } = body;
+      const { name, description, model, tools, instructions, soul, memory, format } = body;
 
       if (!name) {
         return json({ error: "Name is required" }, 400);
@@ -415,13 +639,37 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       const agentsDir = getProjectAgentsDir(project.path);
       const filePath = join(agentsDir, `${slug}.md`);
+      const bundleDir = join(agentsDir, slug);
 
-      if (existsSync(filePath)) {
+      if (existsSync(filePath) || existsSync(bundleDir)) {
         return json({ error: `Agent "${slug}" already exists in this project` }, 400);
       }
 
       if (!existsSync(agentsDir)) {
         mkdirSync(agentsDir, { recursive: true });
+      }
+
+      if (format === "bundle" || soul !== undefined || memory !== undefined) {
+        mkdirSync(bundleDir, { recursive: true });
+        writeFileSync(
+          join(bundleDir, "agent.yaml"),
+          serializeBundleAgentYaml({
+            slug,
+            description: description || "",
+            model,
+            tools,
+          })
+        );
+        writeFileSync(join(bundleDir, "prompt.md"), instructions || "");
+        writeFileSync(join(bundleDir, "soul.md"), soul || "");
+        writeFileSync(join(bundleDir, "memory.md"), memory || "");
+        agentLoader.clearCache();
+
+        const bundle = await agentLoader.loadAgent(slug, project.path);
+        if (!bundle) {
+          return json({ error: "Failed to create bundle agent" }, 500);
+        }
+        return json(toAgentResponse("project", slug, bundle, projectId), 201);
       }
 
       const content = serializeAgentMd({
@@ -435,8 +683,9 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
       });
 
       writeFileSync(filePath, content);
+      agentLoader.clearCache();
 
-      const agent: Agent = {
+      return json({
         id: `project:${projectId}:${slug}`,
         slug,
         name,
@@ -447,9 +696,8 @@ export async function handleAgentRoutes(url: URL, method: string, req: Request):
         scope: "project",
         projectId,
         path: filePath,
-      };
-
-      return json(agent, 201);
+        format: "simple",
+      } satisfies Agent, 201);
     } catch (e: any) {
       return json({ error: e.message || "Failed to create agent" }, 400);
     }
