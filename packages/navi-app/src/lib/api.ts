@@ -1181,6 +1181,8 @@ export interface MarketplaceInstallResult {
   success: boolean;
   source: string;
   global: boolean;
+  scope?: "global" | "project";
+  requestedSkill?: string | null;
   output: string;
 }
 
@@ -1191,10 +1193,15 @@ export const marketplaceApi = {
     request<{ skills: MarketplaceSkill[]; total: number }>("/marketplace/trending"),
   info: (owner: string, repo: string, skill: string) =>
     request<MarketplaceSkill>(`/marketplace/info/${owner}/${repo}/${skill}`),
-  install: (source: string, global = true) =>
+  install: (source: string, global = true, projectPath?: string) =>
     request<MarketplaceInstallResult>("/marketplace/install", {
       method: "POST",
-      body: JSON.stringify({ source, global }),
+      body: JSON.stringify({ source, global, projectPath }),
+    }),
+  installCommand: (command: string, global = true, projectPath?: string) =>
+    request<MarketplaceInstallResult>("/marketplace/install", {
+      method: "POST",
+      body: JSON.stringify({ command, global, projectPath }),
     }),
   uninstall: (name: string, global = true) =>
     request<{ success: boolean; name: string; output: string }>("/marketplace/uninstall", {

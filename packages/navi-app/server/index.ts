@@ -88,6 +88,7 @@ import { handleInboxItemRoutes } from "./routes/inbox-items";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
+import { scheduleStorageMaintenance } from "./services/storage-maintenance";
 
 // WebSocket
 import {
@@ -635,6 +636,9 @@ initExperimentalWebSocket(broadcastToClients);
 // Initialize cron scheduler with WebSocket broadcast
 cronScheduler.init(broadcastToClients);
 workflowScheduler.init(broadcastToClients);
+
+// Compact oversized persisted messages and prune archived transcript artifacts in the background.
+scheduleStorageMaintenance();
 
 // Cleanup PTY server on exit
 function cleanupPtyServer() {

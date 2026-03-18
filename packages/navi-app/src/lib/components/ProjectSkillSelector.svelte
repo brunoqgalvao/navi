@@ -2,21 +2,24 @@
   import { onMount } from "svelte";
   import { skillsApi, type Skill } from "../api";
   import { skillLibrary } from "../stores";
+  import SkillCommandInstall from "./SkillCommandInstall.svelte";
 
   interface Props {
     projectId: string;
+    projectPath?: string | null;
     onCreateSkill?: () => void;
     onEditSkill?: (skill: Skill) => void;
     onOpenLibrary?: () => void;
   }
 
-  let { projectId, onCreateSkill, onEditSkill, onOpenLibrary }: Props = $props();
+  let { projectId, projectPath = null, onCreateSkill, onEditSkill, onOpenLibrary }: Props = $props();
 
   let loading = $state(true);
   let error: string | null = $state(null);
   let togglingSkill: string | null = $state(null);
   let openMenuId: string | null = $state(null);
   let searchQuery = $state("");
+  let showCommandInstall = $state(false);
 
   // Helper to check if skill matches search
   function matchesSearch(skill: Skill, query: string): boolean {
@@ -61,7 +64,7 @@
     loading = true;
     error = null;
     try {
-      await skillsApi.syncGlobal();
+      await skillsApi.scan(projectPath ?? undefined);
       const skills = await skillsApi.list();
       skillLibrary.set(skills);
     } catch (e: any) {
@@ -123,17 +126,33 @@
           Choose which skills Claude can use in this project
         </p>
       </div>
-      {#if onCreateSkill}
+      <div class="flex items-center gap-2">
         <button
-          onclick={onCreateSkill}
-          class="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-black transition-colors"
+          onclick={() => (showCommandInstall = true)}
+          class="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100"
         >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13 10V3L4 14h7v7l9-11h-7z"
+            />
           </svg>
-          Create Skill
+          Install Skill
         </button>
-      {/if}
+        {#if onCreateSkill}
+          <button
+            onclick={onCreateSkill}
+            class="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-black transition-colors"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Create Skill
+          </button>
+        {/if}
+      </div>
     </div>
 
     <!-- Search -->
@@ -161,6 +180,7 @@
         {#if searchQuery}
           <button
             onclick={() => (searchQuery = "")}
+            aria-label="Clear skill search"
             class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -198,15 +218,31 @@
           Create your first skill to extend Claude's capabilities in this project.
         </p>
         {#if onCreateSkill}
-          <button
-            onclick={onCreateSkill}
-            class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-black transition-colors"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            Create Skill
-          </button>
+          <div class="flex items-center justify-center gap-3">
+            <button
+              onclick={() => (showCommandInstall = true)}
+              class="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100"
+            >
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+              Install Skill
+            </button>
+            <button
+              onclick={onCreateSkill}
+              class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-black transition-colors"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              Create Skill
+            </button>
+          </div>
         {/if}
       </div>
     {:else}
@@ -270,7 +306,6 @@
                       {#if openMenuId === skill.id}
                         <div
                           class="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 min-w-40"
-                          onclick={(e) => e.stopPropagation()}
                         >
                           {#if onEditSkill}
                             <button
@@ -383,7 +418,6 @@
                       {#if openMenuId === skill.id}
                         <div
                           class="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 min-w-40"
-                          onclick={(e) => e.stopPropagation()}
                         >
                           {#if onEditSkill}
                             <button
@@ -453,3 +487,11 @@
     {/if}
   </div>
 </div>
+
+<SkillCommandInstall
+  open={showCommandInstall}
+  onClose={() => (showCommandInstall = false)}
+  installTarget="project"
+  {projectId}
+  {projectPath}
+/>

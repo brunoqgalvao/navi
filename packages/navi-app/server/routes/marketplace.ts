@@ -20,13 +20,22 @@ interface SearchResult {
   query: string;
 }
 
+interface RunSkillsCliOptions {
+  cwd?: string;
+}
+
+interface InstallCommandDetails {
+  args: string[];
+  requestedSkill: string | null;
+}
+
 /**
  * Execute the skills CLI command and parse output
  */
-async function runSkillsCli(args: string[]): Promise<string> {
+async function runSkillsCli(args: string[], options: RunSkillsCliOptions = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("npx", ["skills", ...args], {
-      shell: true,
+    const proc = spawn("npx", ["-y", "skills", ...args], {
+      cwd: options.cwd,
       timeout: 30000,
     });
 
@@ -53,6 +62,182 @@ async function runSkillsCli(args: string[]): Promise<string> {
       reject(err);
     });
   });
+}
+
+function tokenizeCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+
+  for (const char of command.trim()) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (quote) {
+    throw new Error("Command has an unmatched quote");
+  }
+
+  if (escaped) {
+    current += "\\";
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
+function stripKnownCliPrefix(tokens: string[]): string[] {
+  let remaining = [...tokens];
+
+  if (remaining[0] === "npx") {
+    remaining = remaining.slice(1);
+    if (remaining[0] === "-y" || remaining[0] === "--yes") {
+      remaining = remaining.slice(1);
+    }
+  } else if (
+    (remaining[0] === "pnpm" || remaining[0] === "yarn") &&
+    remaining[1] === "dlx"
+  ) {
+    remaining = remaining.slice(2);
+  } else if (remaining[0] === "bunx") {
+    remaining = remaining.slice(1);
+  }
+
+  if (remaining[0] === "skills") {
+    remaining = remaining.slice(1);
+  }
+
+  return remaining;
+}
+
+function inferRequestedSkill(args: string[]): string | null {
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i];
+    if (token === "--skill") {
+      return args[i + 1] ?? null;
+    }
+    if (token.startsWith("--skill=")) {
+      return token.slice("--skill=".length) || null;
+    }
+  }
+
+  const source = args.find((token) => !token.startsWith("-"));
+  if (!source || /^https?:\/\//.test(source)) {
+    return null;
+  }
+
+  const parts = source.split("/").filter(Boolean);
+  return parts.length >= 3 ? parts[parts.length - 1] : null;
+}
+
+function buildInstallCommandDetails(params: {
+  command?: string;
+  source?: string;
+  installGlobal: boolean;
+}): InstallCommandDetails {
+  const { command, source, installGlobal } = params;
+
+  if (command?.trim()) {
+    const tokens = stripKnownCliPrefix(tokenizeCommand(command));
+    if (tokens[0] !== "add") {
+      throw new Error("Only `skills add` commands are supported here");
+    }
+
+    const rawArgs = tokens.slice(1);
+    if (rawArgs.length === 0) {
+      throw new Error("Command is missing the skill source");
+    }
+
+    const normalizedArgs: string[] = [];
+    let sourceToken: string | null = null;
+
+    for (let i = 0; i < rawArgs.length; i += 1) {
+      const token = rawArgs[i];
+
+      if (token === "--global") {
+        continue;
+      }
+
+      if (token === "--skill" || token === "--ref") {
+        const value = rawArgs[i + 1];
+        if (!value) {
+          throw new Error(`${token} requires a value`);
+        }
+        normalizedArgs.push(token, value);
+        i += 1;
+        continue;
+      }
+
+      normalizedArgs.push(token);
+      if (!token.startsWith("-") && sourceToken === null) {
+        sourceToken = token;
+      }
+    }
+
+    if (!sourceToken) {
+      throw new Error("Command is missing the skill source");
+    }
+
+    if (installGlobal) {
+      normalizedArgs.push("--global");
+    }
+
+    return {
+      args: ["add", ...normalizedArgs],
+      requestedSkill: inferRequestedSkill(normalizedArgs),
+    };
+  }
+
+  if (source?.trim()) {
+    const normalizedSource = source.trim();
+    const args = ["add", normalizedSource];
+    if (installGlobal) {
+      args.push("--global");
+    }
+
+    return {
+      args,
+      requestedSkill: inferRequestedSkill([normalizedSource]),
+    };
+  }
+
+  throw new Error("source or command is required");
 }
 
 /**
@@ -236,26 +421,39 @@ export async function handleMarketplaceRoutes(
   if (url.pathname === "/api/marketplace/install" && method === "POST") {
     try {
       const body = await req.json();
-      const { source, global: installGlobal = true } = body;
+      const {
+        source,
+        command,
+        global: installGlobal = true,
+        projectPath,
+      } = body;
 
-      if (!source) {
-        return json({ error: "source is required (owner/repo or owner/repo/skill)" }, 400);
+      if (!source && !command) {
+        return json({ error: "source or command is required" }, 400);
       }
 
-      const args = ["add", source];
-      if (installGlobal) {
-        args.push("--global");
+      if (!installGlobal && !projectPath) {
+        return json({ error: "projectPath is required for project installs" }, 400);
       }
 
-      const output = await runSkillsCli(args);
+      const installDetails = buildInstallCommandDetails({
+        source,
+        command,
+        installGlobal,
+      });
+      const output = await runSkillsCli(installDetails.args, {
+        cwd: installGlobal ? undefined : projectPath,
+      });
 
       // After install, trigger a scan to import into Navi's library
       // This will be handled by the calling code
 
       return json({
         success: true,
-        source,
+        source: source ?? command,
         global: installGlobal,
+        scope: installGlobal ? "global" : "project",
+        requestedSkill: installDetails.requestedSkill,
         output: output.replace(/\x1b\[[0-9;]*m/g, ""), // Strip ANSI
       });
     } catch (e: any) {

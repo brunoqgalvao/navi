@@ -255,6 +255,16 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     defaultEnabled: true,
     defaultOrder: 7,
   },
+  inbox: {
+    id: "inbox",
+    name: "Inbox",
+    icon: "inbox",
+    description: "Action requests from workflows, agents, and prompts",
+    panelMode: "inbox",
+    requiresProject: true,
+    defaultEnabled: true,
+    defaultOrder: 8,
+  },
   email: {
     id: "email",
     name: "Email",

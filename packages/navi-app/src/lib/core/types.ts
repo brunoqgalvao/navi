@@ -41,6 +41,7 @@ export type ExtensionId =
   | "kanban"
   | "preview"
   | "context"         // Session context visibility
+  | "inbox"           // Workspace inbox
   | "email"           // Navi's email inbox
   | "channels"        // WhatsApp, Telegram & messaging integrations
   | "browser-preview"; // Browser-use live preview
@@ -58,6 +59,7 @@ export type PanelMode =
   | "kanban"
   | "preview-unified"
   | "context"         // Context sidebar view
+  | "inbox"           // Workspace inbox view
   | "email"           // Email inbox view
   | "channels"        // WhatsApp, Telegram & messaging inbox
   | "browser-preview"; // Browser-use preview

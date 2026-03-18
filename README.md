@@ -1,202 +1,112 @@
 # Navi
 
-> A beautiful desktop GUI for Claude Code with real-time preview, multi-agent coordination, and powerful developer tools.
+**Already on it.**
+
+A local-first GUI for AI coding agents. Sessions, multi-agent orchestration, terminal, git, skills, extensions — all running on your machine through the browser.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub stars](https://img.shields.io/github/stars/brunoqgalvao/navi?style=social)](https://github.com/brunoqgalvao/navi/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/brunoqgalvao/navi)](https://github.com/brunoqgalvao/navi/issues)
 [![Built with Svelte](https://img.shields.io/badge/Svelte-5.0-FF3E00?logo=svelte)](https://svelte.dev)
-[![Built with Tauri](https://img.shields.io/badge/Tauri-2.0-FFC131?logo=tauri)](https://tauri.app)
-
-![Navi Screenshot](docs/demo-screenshot.png)
-
-## ✨ Features
-
-### Core Capabilities
-
-- **Rich Chat Interface** - Real-time streaming with Claude, code highlighting, and markdown rendering
-- **Live Previews** - Preview URLs, files, markdown, and images in a dedicated panel
-- **File Browser** - Navigate projects with syntax highlighting and quick access
-- **Integrated Terminal** - Run commands directly within the app
-- **Git Integration** - Status, commits, branches, and worktree management
-- **Multi-Agent System** - Spawn specialized AI agents for parallel tasks
-
-### Extensibility
-
-- **Skills** - Extend Claude with custom capabilities (`.claude/skills/`)
-- **Agents** - AI personas for specialized tasks (coding, research, browsing)
-- **Extensions** - Sidebar panels for custom tools
-- **Message Widgets** - Custom inline renderers for chat content
-- **Commands** - Slash commands for quick actions
-
-### Integrations
-
-- **Gmail** - Read and send emails
-- **Google Sheets** - Spreadsheet operations
-- **Slack** - Message posting and channel management
-- **Linear** - Issue tracking and project management
-- **Notion** - Page and database operations
-- **GitHub** - Repository and issue management
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Bun** - Fast JavaScript runtime ([install](https://bun.sh))
-- **Rust** - For desktop app builds ([install](https://rustup.rs))
-- **macOS** or **Linux** (Windows support planned)
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/brunoqgalvao/navi.git
-cd navi
-
-# Install dependencies
-bun install
-
-# Set up your environment
-cp .env.example .env
-cp packages/navi-app/.env.example packages/navi-app/.env
-
-# Edit .env and add your Anthropic API key
-# ANTHROPIC_API_KEY=sk-ant-xxxxx
-```
-
-### Running
-
-```bash
-# Run web version (frontend + backend)
-bun run dev:all
-
-# Run as desktop app (Tauri)
-bun run tauri:dev
-```
-
-Visit `http://localhost:1420` for the web version.
-
-### Building
-
-```bash
-# Build web app
-bun run --cwd packages/navi-app build
-
-# Build desktop app
-./scripts/build-app.sh
-```
-
-## 📁 Project Structure
-
-```
-navi/
-├── packages/
-│   ├── navi-app/           # Main desktop application
-│   │   ├── src/            # Svelte 5 frontend
-│   │   ├── server/         # Bun backend (routes, services, websocket)
-│   │   └── src-tauri/      # Tauri desktop wrapper
-│   ├── landing-page/       # Marketing website
-│   └── navi-cloud/         # Cloud infrastructure (optional)
-├── docs/                   # Documentation
-├── .claude/                # Claude Code configuration
-└── scripts/                # Build & deploy scripts
-```
-
-## 🏗️ Architecture
-
-### Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| **Frontend** | Svelte 5, Vite, Tailwind CSS |
-| **Backend** | Bun, WebSocket, sql.js (SQLite) |
-| **Desktop** | Tauri v2 |
-| **AI** | @anthropic-ai/claude-agent-sdk |
-
-### Key Concepts
-
-#### Extensions
-Sidebar panels that provide specialized views (Files, Git, Terminal, Preview, Kanban, Agents).
-
-#### Skills
-Extend Claude's capabilities with custom tools and workflows. Located in `.claude/skills/`.
-
-#### Agents
-Specialized AI personas that can be spawned for parallel tasks. Types include:
-- `browser` - Web research and URL analysis
-- `coding` - Code implementation and file editing
-- `runner` - Command execution and testing
-- `research` - Deep analysis and findings synthesis
-- `planning` - Task breakdown and architecture design
-
-#### Features
-Self-contained modules following `/src/lib/features/{feature}/` pattern with:
-- `api.ts` - Backend API client
-- `types.ts` - TypeScript interfaces
-- `stores.ts` - Svelte stores
-- `components/` - UI components
-
-## 🔧 Configuration
-
-### Environment Variables
-
-See `.env.example` files for all available options:
-
-```bash
-# Required
-ANTHROPIC_API_KEY=sk-ant-xxxxx
-
-# Optional services
-ZAI_API_KEY=xxxxx           # Internal Anthropic backend
-E2B_API_KEY=xxxxx           # Cloud code execution (deprecated)
-AGENTMAIL_API_KEY=xxxxx     # Email integration
-```
-
-### Settings
-
-Configure Navi behavior in `.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "pre-query": "echo 'Starting...'",
-    "post-tool": "npm run lint --fix"
-  },
-  "disabledFeatures": ["channels"]
-}
-```
-
-## 📚 Documentation
-
-- **[Architecture Guide](CLAUDE.md)** - Detailed system architecture
-- **[Feature Status](docs/STATUS.md)** - Feature inventory and roadmap
-- **[Contributing](CONTRIBUTING.md)** - How to contribute
-- **[Security Policy](SECURITY.md)** - Security and vulnerability reporting
-
-## 🤝 Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Quick Contribution Checklist
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run type checking (`bun run check`)
-5. Submit a pull request
-
-## 📜 License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
-## 🙏 Acknowledgments
-
-Built with amazing open-source tools:
-- [Claude Code](https://github.com/anthropics/claude-code) - AI-powered coding assistant
-- [Svelte](https://svelte.dev) - Reactive UI framework
-- [Tauri](https://tauri.app) - Desktop app framework
-- [Bun](https://bun.sh) - Fast JavaScript runtime
 
 ---
 
-**Made with ❤️ by [Bruno Galvao](https://github.com/brunoqgalvao)**
+## Quick Start
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brunoqgalvao/navi/main/scripts/install-cli.sh | bash
+navi
+```
+
+This installs Navi into `~/.navi`, installs the app package, and exposes a local `navi` command through Bun's bin directory.
+
+### Run From a Clone
+
+```bash
+git clone https://github.com/brunoqgalvao/navi.git
+cd navi/packages/navi-app
+bun install
+bun run start
+```
+
+This starts only the app stack at **http://localhost:1420**. The landing page package is not involved.
+
+### Requirements
+
+| Tool | Install |
+|------|---------|
+| [Bun](https://bun.sh) | `curl -fsSL https://bun.sh/install \| bash` |
+| [Node.js](https://nodejs.org) | Required for terminal (PTY) server |
+| [Claude API Key](https://console.anthropic.com) | Set in Navi's settings UI |
+
+---
+
+## What You Get
+
+**Core**
+- Rich chat interface with streaming, code highlighting, markdown
+- Multi-agent system — spawn browser, coder, runner, researcher agents in parallel
+- Integrated terminal with full PTY support
+- Git — branches, diffs, commits from the UI
+- File browser with syntax highlighting
+- Live preview panel for URLs, files, images
+
+**Extensibility**
+- **Skills** — reusable prompts and scripts (`.claude/skills/`)
+- **Agents** — AI personas for specialized tasks (`.claude/agents/`)
+- **Extensions** — sidebar panels (Files, Git, Terminal, Kanban, Processes)
+- **MCP Servers** — plug in any Model Context Protocol tool
+- **Commands** — slash commands for quick actions
+
+**Integrations**
+- Gmail, Google Sheets, Slack, Linear, Notion, GitHub (OAuth)
+- WhatsApp, Email (AgentMail)
+
+---
+
+## Architecture
+
+```
+packages/
+  navi-app/       # Main app (Svelte 5 frontend + Bun backend)
+  landing-page/   # Website
+```
+
+| Port | Service |
+|------|---------|
+| 1420 | Frontend (Vite dev server) |
+| 3001 | Backend (Bun HTTP + WebSocket) |
+| 3002 | PTY Server (Node.js) |
+
+**Stack:** Svelte 5 + Vite + Tailwind CSS + Bun + sql.js (SQLite) + @anthropic-ai/claude-agent-sdk
+
+Data lives in `~/.claude-code-ui/`. Your data stays on your machine.
+
+---
+
+## Development
+
+App-only launcher:
+
+```bash
+cd packages/navi-app
+bun install
+bun run start
+```
+
+Repo-root development commands:
+
+```bash
+bun run dev:app
+bun run --cwd packages/navi-app check
+bun run --cwd packages/navi-app test:api
+```
+
+---
+
+## License
+
+MIT
+
+---
+
+**Made by [Bruno Galvao](https://github.com/brunoqgalvao)**

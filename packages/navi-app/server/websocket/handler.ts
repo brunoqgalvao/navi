@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb, clarificationRequests, draftDeliverables, workflowRuns, type DraftDeliverable } from "../db";
+import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb, clarificationRequests, draftDeliverables, workflowRuns, workflows, type DraftDeliverable } from "../db";
 import { executeInCloud, type CloudExecutionStage } from "../services/e2b-executor";
 import { sessionManager, type SessionEvent } from "../services/session-manager";
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
@@ -27,6 +27,7 @@ import {
 } from "../services/hook-executor";
 import { runQueryHooks } from "../services/query-hooks";
 import { initPhaseTracker, setPhaseUpdateBroadcast, type ConversationPhase } from "../services/phase-tracker";
+import { createProjectInboxItem, processAssistantInboxDirectives } from "../services/inbox-service";
 import { readFileSync } from "fs";
 import { homedir } from "os";
 // Infinite Loop Mode (Ralph Wiggum bot)
@@ -86,6 +87,27 @@ function logBunSpawnDiagnostics(
   const message = `[${sessionId}] Bun spawn diagnostics: ${JSON.stringify(payload)}`;
   console.error(message);
   writeDebugLog(message);
+}
+
+function broadcastInboxItemsCreated(count: number, firstTitle: string) {
+  const title = count === 1 ? `Inbox item created` : `${count} inbox items created`;
+  const message = count === 1 ? firstTitle : `Latest item: ${firstTitle}`;
+  broadcastToClients({
+    type: "ui_command",
+    command: "notification",
+    payload: {
+      title,
+      message,
+      type: "warning",
+    },
+  });
+}
+
+function workflowForSession(sessionId: string) {
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  const rootSessionId = session.root_session_id || session.id;
+  return (session.workflow_id ? workflows.get(session.workflow_id) : null) || workflows.getByRootSession(rootSessionId);
 }
 
 export interface ClientMessage {
@@ -2740,11 +2762,37 @@ The user will explicitly approve the plan before any execution begins.
           if (lastMainAssistantMsgId) {
             messages.markFinal(lastMainAssistantMsgId);
           }
-          if (sessionId && msg.lastAssistantContent?.length > 0) {
-            searchIndex.indexMessage(crypto.randomUUID(), sessionId, JSON.stringify(msg.lastAssistantContent), Date.now());
+
+          let assistantContentForPostProcessing = msg.lastAssistantContent;
+          if (sessionId && projectId && msg.lastAssistantContent?.length > 0) {
+            const inboxResult = processAssistantInboxDirectives({
+              projectId,
+              sessionId,
+              messageId: lastMainAssistantMsgId,
+              content: msg.lastAssistantContent,
+            });
+
+            if (inboxResult.createdItems.length > 0) {
+              assistantContentForPostProcessing = Array.isArray(inboxResult.sanitizedContent)
+                ? inboxResult.sanitizedContent
+                : msg.lastAssistantContent;
+              broadcastInboxItemsCreated(
+                inboxResult.createdItems.length,
+                inboxResult.createdItems[0].title
+              );
+            }
+          }
+
+          if (sessionId && assistantContentForPostProcessing?.length > 0) {
+            searchIndex.indexMessage(
+              crypto.randomUUID(),
+              sessionId,
+              JSON.stringify(assistantContentForPostProcessing),
+              Date.now()
+            );
 
             if (needsAutoTitle && prompt) {
-              generateChatTitle(prompt, msg.lastAssistantContent, sessionId);
+              generateChatTitle(prompt, assistantContentForPostProcessing, sessionId);
             }
           }
 
@@ -3094,6 +3142,31 @@ The user will explicitly approve the plan before any execution begins.
             // Update kanban card to blocked on error
             setKanbanCardBlocked(sessionId, `Error: ${msg.error}`);
             cleanupProcessScopedState(child, sessionId);
+
+            const workflow = workflowForSession(sessionId);
+            if (projectId && workflow) {
+              const item = createProjectInboxItem({
+                projectId,
+                sessionId,
+                source: "workflow-system",
+                dedupeKey: `workflow:${workflow.id}:runtime-error`,
+                item: {
+                  title: `Workflow failed: ${workflow.name}`,
+                  body: msg.error,
+                  kind: "attention",
+                  status: "open",
+                  priority: "high",
+                  requiresResponse: true,
+                  responseOptions: ["I fixed it", "Retry the workflow"],
+                  workItemId: null,
+                  metadata: {
+                    workflowId: workflow.id,
+                    workflowName: workflow.name,
+                  },
+                },
+              });
+              broadcastInboxItemsCreated(1, item.title);
+            }
 
             // Run query hooks on error (fire-and-forget) - e.g., phase tracking
             const errorMessages = messages.listBySession(sessionId);

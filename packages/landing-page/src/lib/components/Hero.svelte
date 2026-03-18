@@ -2,58 +2,24 @@
   import { onMount } from 'svelte';
 
   let visible = $state(false);
-  let showEmailModal = $state(false);
-  let email = $state('');
-  let submitting = $state(false);
-  let submitted = $state(false);
+  let copied = $state(false);
 
-  // Dynamic app info
-  let appVersion = $state('1.8.1');
-  let downloadUrl = $state('https://storage.googleapis.com/navi-releases/Navi_1.8.1_aarch64.dmg');
+  const installCmd = 'git clone https://github.com/brunoqgalvao/navi.git && cd navi && bun install && bun run dev:app';
 
-  onMount(async () => {
+  onMount(() => {
     setTimeout(() => visible = true, 100);
-
-    // Fetch latest app info
-    try {
-      const res = await fetch('/api/app-info');
-      if (res.ok) {
-        const info = await res.json();
-        appVersion = info.version;
-        downloadUrl = info.downloads?.macosArm || downloadUrl;
-      }
-    } catch (e) {
-      console.warn('Failed to fetch app info:', e);
-    }
   });
 
-  async function handleSubmit(e: Event) {
-    e.preventDefault();
-    if (!email.trim()) return;
-    
-    submitting = true;
-    
-    try {
-      const response = await fetch('/api/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      
-      if (response.ok) {
-        submitted = true;
-      }
-    } catch (err) {
-      submitted = true;
-    }
-    
-    submitting = false;
+  function copyCommand() {
+    navigator.clipboard.writeText(installCmd);
+    copied = true;
+    setTimeout(() => copied = false, 2000);
   }
 </script>
 
 <section class="relative pt-32 pb-20 px-6 overflow-hidden">
   <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-gray-50 blur-[120px] rounded-full pointer-events-none opacity-50"></div>
-  
+
   <div class="max-w-6xl mx-auto text-center relative z-10">
     <div class={`transition-all duration-1000 transform ${visible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
       <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-sm text-amber-700 mb-8 font-medium">
@@ -61,39 +27,84 @@
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
           <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
         </span>
-        Early Access Alpha
+        Open Source
       </div>
-      
+
       <h1 class="text-6xl md:text-8xl font-bold tracking-tight mb-8 text-gray-900">
         Already on it.
       </h1>
-      
+
       <p class="text-xl text-gray-500 max-w-2xl mx-auto mb-10 leading-relaxed">
-        The capable local assistant that handles your digital chaos. <br>
-        Navi lives on your desktop, knows your files, and gets work done.
+        The capable local AI coding assistant that handles your digital chaos. <br>
+        Clone it. Run it. Navi lives on your machine.
       </p>
-      
+
+      <!-- Install command -->
+      <div class="max-w-2xl mx-auto mb-6">
+        <div class="bg-gray-950 rounded-2xl overflow-hidden shadow-2xl shadow-gray-300 ring-1 ring-gray-800">
+          <div class="flex items-center justify-between px-4 py-2.5 border-b border-gray-800">
+            <div class="flex gap-1.5">
+              <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+              <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+              <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+            </div>
+            <span class="text-xs font-medium text-gray-500">terminal</span>
+            <button
+              onclick={copyCommand}
+              class="text-xs text-gray-500 hover:text-white transition-colors px-2 py-0.5 rounded border border-gray-700 hover:border-gray-500"
+            >
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <div class="p-5 font-mono text-sm text-left overflow-x-auto">
+            <div class="flex items-start gap-2">
+              <span class="text-emerald-400 select-none shrink-0">$</span>
+              <span class="text-gray-300">git clone https://github.com/brunoqgalvao/navi.git</span>
+            </div>
+            <div class="flex items-start gap-2 mt-1">
+              <span class="text-emerald-400 select-none shrink-0">$</span>
+              <span class="text-gray-300">cd navi && bun install</span>
+            </div>
+            <div class="flex items-start gap-2 mt-1">
+              <span class="text-emerald-400 select-none shrink-0">$</span>
+              <span class="text-gray-300">bun run dev:app</span>
+            </div>
+            <div class="mt-3 text-gray-600 text-xs">
+              # opens at http://localhost:1420
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Prerequisites -->
+      <p class="text-sm text-gray-400 mb-8">
+        Requires <a href="https://bun.sh" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 transition-colors">Bun</a> and <a href="https://nodejs.org" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 transition-colors">Node.js</a>.
+        You'll also need a <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 transition-colors">Claude API key</a>.
+      </p>
+
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-        <button 
-          onclick={() => showEmailModal = true}
-          class="px-8 py-4 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-800 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-gray-200"
-        >
-          Get Early Access
-        </button>
         <a
           href="https://github.com/brunoqgalvao/navi"
           target="_blank"
           rel="noopener noreferrer"
-          class="px-8 py-4 bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:bg-gray-50 transition-all"
+          class="px-8 py-4 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-800 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-gray-200"
         >
           View on GitHub
         </a>
+        <a
+          href="https://github.com/brunoqgalvao/navi#readme"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="px-8 py-4 bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:bg-gray-50 transition-all"
+        >
+          Read the Docs
+        </a>
       </div>
     </div>
-    
+
     <div class={`mt-24 relative transition-all duration-1000 delay-300 transform ${visible ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'}`}>
       <div class="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent z-20 h-full w-full pointer-events-none"></div>
-      
+
       <div class="bg-white rounded-2xl border border-gray-200 shadow-2xl overflow-hidden max-w-5xl mx-auto aspect-[16/10] relative group ring-1 ring-gray-900/5">
         <div class="h-12 bg-gray-50/80 backdrop-blur border-b border-gray-100 flex items-center px-4 gap-2 justify-between">
           <div class="flex gap-2">
@@ -101,10 +112,10 @@
             <div class="w-3 h-3 rounded-full bg-gray-300"></div>
             <div class="w-3 h-3 rounded-full bg-gray-300"></div>
           </div>
-          <div class="text-xs font-medium text-gray-400">navi-local</div>
+          <div class="text-xs font-medium text-gray-400">localhost:1420</div>
           <div class="w-10"></div>
         </div>
-        
+
         <div class="flex h-full">
           <div class="w-64 bg-gray-50 border-r border-gray-100 hidden md:flex flex-col p-4 gap-6">
              <div class="space-y-1">
@@ -116,14 +127,14 @@
                 <div class="px-3 py-2 text-sm text-gray-500 font-medium hover:text-gray-900 cursor-pointer">Q4 Planning</div>
                 <div class="px-3 py-2 text-sm text-gray-500 font-medium hover:text-gray-900 cursor-pointer">Personal Blog</div>
              </div>
-             
+
              <div class="space-y-1">
                 <div class="px-2 py-1 text-xs font-bold text-gray-400 uppercase tracking-widest">Recent Threads</div>
                 <div class="px-3 py-2 text-sm text-gray-600 truncate">Fixing nav bar z-index</div>
                 <div class="px-3 py-2 text-sm text-gray-600 truncate">Drafting about page</div>
              </div>
           </div>
-          
+
           <div class="flex-1 p-8 flex flex-col bg-white relative">
              <div class="flex-1 space-y-8">
                 <div class="flex justify-end">
@@ -131,12 +142,12 @@
                       Navi, refactor the header component. It's looking cluttered on mobile.
                    </div>
                 </div>
-                
+
                 <div class="flex gap-4 max-w-[85%]">
                    <div class="w-10 h-10 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center font-bold text-sm text-gray-900 shadow-sm shrink-0">N</div>
                    <div class="space-y-4 flex-1 pt-1">
                       <p class="text-[15px] text-gray-800 leading-relaxed font-medium">On it. I'll simplify the navigation links and implement a hamburger menu for mobile viewports.</p>
-                      
+
                       <div class="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
                          <div class="px-4 py-2 border-b border-gray-200 bg-gray-100/50 flex items-center gap-2">
                             <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
@@ -156,7 +167,7 @@
                    </div>
                 </div>
              </div>
-             
+
              <div class="mt-auto relative group">
                 <div class="absolute -inset-0.5 bg-gradient-to-r from-gray-200 to-gray-100 rounded-2xl opacity-50 blur group-hover:opacity-100 transition duration-200"></div>
                 <div class="relative bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-4 shadow-sm">
@@ -172,88 +183,3 @@
     </div>
   </div>
 </section>
-
-{#if showEmailModal}
-  <div 
-    class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-    onclick={() => showEmailModal = false}
-    onkeydown={(e) => e.key === 'Escape' && (showEmailModal = false)}
-    role="dialog"
-    tabindex="-1"
-  >
-    <div 
-      class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 relative"
-      onclick={(e) => e.stopPropagation()}
-      role="document"
-    >
-      <button 
-        onclick={() => showEmailModal = false}
-        class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-        aria-label="Close"
-      >
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-
-      {#if submitted}
-        <div class="text-center py-4">
-          <div class="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg class="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h3 class="text-xl font-bold text-gray-900 mb-2">You're on the list!</h3>
-          <p class="text-gray-500 mb-6">Thanks for your interest. Download Navi below.</p>
-          <a
-            href={downloadUrl}
-            download
-            class="inline-flex items-center gap-2 px-6 py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-800 transition-all"
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Download for macOS (Apple Silicon)
-          </a>
-          <p class="text-xs text-gray-400 mt-4">v{appVersion} Alpha • macOS 12+</p>
-          <div class="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-left">
-            <p class="text-xs text-amber-800 font-medium mb-1">Alpha Build Notice</p>
-            <p class="text-xs text-amber-700">macOS may show "app is damaged" for unsigned builds. To open, run in Terminal:</p>
-            <code class="block mt-1.5 text-xs bg-amber-100 px-2 py-1 rounded text-amber-900 font-mono">xattr -cr /Applications/Navi.app</code>
-          </div>
-        </div>
-      {:else}
-        <div class="text-center mb-6">
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-sm text-amber-700 mb-4 font-medium">
-            Early Access Alpha
-          </div>
-          <h3 class="text-2xl font-bold text-gray-900 mb-2">Get Early Access</h3>
-          <p class="text-gray-500">Enter your email to download the alpha version and receive updates.</p>
-        </div>
-
-        <form onsubmit={handleSubmit} class="space-y-4">
-          <div>
-            <input
-              type="email"
-              bind:value={email}
-              placeholder="you@example.com"
-              required
-              class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={submitting}
-            class="w-full px-6 py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {submitting ? 'Submitting...' : 'Continue to Download'}
-          </button>
-        </form>
-
-        <p class="text-xs text-gray-400 text-center mt-4">
-          We'll only email you about important updates. No spam.
-        </p>
-      {/if}
-    </div>
-  </div>
-{/if}

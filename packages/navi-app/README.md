@@ -1,7 +1,27 @@
-# Tauri + SvelteKit + TypeScript
+# Navi App
 
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+The local Navi application package. This is the browser UI, Bun backend, PTY server, and CLI launcher without the marketing site.
 
-## Recommended IDE Setup
+## Run
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+```bash
+cd packages/navi-app
+bun install
+bun run start
+```
+
+Opens at `http://localhost:1420`.
+
+## CLI
+
+After installing through the repo-level installer:
+
+```bash
+navi
+```
+
+You can also override the backend base port:
+
+```bash
+navi --port 3101
+```

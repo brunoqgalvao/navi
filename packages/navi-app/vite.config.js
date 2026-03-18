@@ -42,7 +42,7 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: host || false,
-    allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,
+    allowedHosts: true,
     // HMR configuration - always use explicit config to ensure WebSocket connects to correct port
     // This is critical when viewing through a proxy (like native preview on port 3001)
     hmr: host
