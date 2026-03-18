@@ -48,5 +48,7 @@ describe("workflow run prompt", () => {
     expect(prompt).toContain("Feedback and updates:");
     expect(prompt).toContain("Capture paid partnership rates before escalating.");
     expect(prompt).toContain("Recent workflow history:");
+    expect(prompt).toContain("`inbox-item` JSON block");
+    expect(prompt).toContain("blocked auth, approvals, missing credentials");
   });
 });

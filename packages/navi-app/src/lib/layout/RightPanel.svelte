@@ -19,11 +19,12 @@
   import PreviewPanel from "../components/PreviewPanel.svelte";
   import EmailPanel from "../features/email/EmailPanel.svelte";
   import { ChannelsPanel } from "../features/channel-inbox/components";
+  import InboxPanel from "../features/inbox/components/InboxPanel.svelte";
   import { ContextPanel } from "../features/context";
   import AuthGate from "../components/AuthGate.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "channels";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "channels" | "inbox";
 
   interface Props {
     mode: PanelMode;
@@ -318,6 +319,15 @@
       <!-- Channels panel - WhatsApp, Telegram & messaging integrations -->
       <div class="flex-1 flex flex-col w-full overflow-hidden">
         <ChannelsPanel />
+      </div>
+    {:else if mode === "inbox"}
+      <!-- Workspace inbox - follow-ups requested by workflows, agents, and prompts -->
+      <div class="flex-1 flex flex-col w-full overflow-hidden">
+        <InboxPanel
+          {projectId}
+          currentSessionId={sessionId}
+          onOpenSession={(nextSessionId) => onNavigateToSession?.(nextSessionId)}
+        />
       </div>
     {/if}
   </div>

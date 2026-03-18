@@ -564,6 +564,7 @@ Write instructions for Claude here. This file tells Claude:
       {:else if activeTab === "skills"}
         <ProjectSkillSelector
           projectId={project.id}
+          projectPath={project.path}
           onCreateSkill={() => { editingSkill = null; showSkillEditor = true; }}
           onEditSkill={(skill) => { editingSkill = skill; showSkillEditor = true; }}
           onOpenLibrary={() => showSkillLibrary = true}
@@ -600,7 +601,7 @@ Write instructions for Claude here. This file tells Claude:
         </button>
       </div>
       <div class="flex-1 overflow-y-auto p-6">
-        <SkillLibrary projectId={project.id} showProjectToggle={true} />
+        <SkillLibrary projectId={project.id} projectPath={project.path} showProjectToggle={true} />
       </div>
     </div>
   </div>

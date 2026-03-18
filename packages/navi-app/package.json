@@ -1,12 +1,13 @@
 {
   "name": "navi-app",
   "version": "1.8.1",
-  "description": "",
+  "description": "Navi — the local AI coding assistant UI. Already on it.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "dev:all": "concurrently \"bun run server\" \"bun run pty\" \"bun run dev\"",
     "dev:nowatch": "bun run build && concurrently \"bun run server\" \"bun run pty\" \"bun run preview\"",
+    "start": "bun run bin/navi.ts",
     "server": "bun run server/index.ts",
     "pty": "node server/pty-server.cjs",
     "build": "vite build",
@@ -14,12 +15,11 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
     "test:api": "bun run server/test-api.ts",
-    "test:api:verbose": "bun run server/test-api.ts --verbose",
-    "tauri": "tauri",
-    "tauri:dev": "concurrently \"bun run server\" \"bun run pty\" \"bun run tauri dev\""
+    "test:api:verbose": "bun run server/test-api.ts --verbose"
   },
   "license": "MIT",
   "bin": {
+    "navi": "./bin/navi.ts",
     "navi-integrations": "./server/integrations/cli.ts"
   },
   "dependencies": {

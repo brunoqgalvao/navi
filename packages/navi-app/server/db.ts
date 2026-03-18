@@ -2,6 +2,7 @@ import initSqlJs, { type Database } from "sql.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { sanitizePersistedMessageContent } from "./services/message-storage";
 
 const DATA_DIR = join(homedir(), ".claude-code-ui");
 const DB_PATH = join(DATA_DIR, "data.db");
@@ -1085,6 +1086,77 @@ export function saveDbImmediate() {
   saveDb();
 }
 
+export interface MessageStorageCompactionResult {
+  scanned: number;
+  compacted: number;
+  bytesSaved: number;
+  vacuumed: boolean;
+}
+
+export function compactStoredMessages(options: { sessionIds?: string[] } = {}): MessageStorageCompactionResult {
+  const params: any[] = [];
+  let sql = `
+    SELECT id, content
+    FROM messages
+    WHERE
+  `;
+
+  if (options.sessionIds && options.sessionIds.length > 0) {
+    sql += ` session_id IN (${options.sessionIds.map(() => "?").join(", ")}) AND `;
+    params.push(...options.sessionIds);
+  }
+
+  sql += `(
+    content LIKE '%"type":"base64"%'
+    OR content LIKE '%"type":"tool_result"%'
+    OR length(content) > 2000
+  )`;
+
+  const candidates = queryAll<{ id: string; content: string }>(sql, params);
+  if (candidates.length === 0) {
+    return { scanned: 0, compacted: 0, bytesSaved: 0, vacuumed: false };
+  }
+
+  let compacted = 0;
+  let bytesSaved = 0;
+
+  const updateStmt = db.prepare("UPDATE messages SET content = ? WHERE id = ?");
+
+  try {
+    for (const candidate of candidates) {
+      const sanitized = sanitizePersistedMessageContent(candidate.content);
+      if (!sanitized.changed) continue;
+
+      updateStmt.run([sanitized.content, candidate.id]);
+      compacted += 1;
+      bytesSaved += sanitized.bytesSaved;
+    }
+  } finally {
+    updateStmt.free();
+  }
+
+  let vacuumed = false;
+  if (compacted > 0) {
+    try {
+      db.run("VACUUM");
+      vacuumed = true;
+    } catch (error) {
+      console.warn(
+        "[DB] VACUUM after message compaction failed:",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    saveDbImmediate();
+  }
+
+  return {
+    scanned: candidates.length,
+    compacted,
+    bytesSaved,
+    vacuumed,
+  };
+}
+
 export interface ProjectWithStats extends Project {
   session_count: number;
   last_activity: number | null;
@@ -1699,6 +1771,15 @@ export interface SessionSidebar {
   work_item_id: string | null;
 }
 
+export interface SessionStoragePruneCandidate {
+  id: string;
+  claude_session_id: string | null;
+  worktree_path: string | null;
+  archived: number;
+  updated_at: number;
+  project_path: string;
+}
+
 // Columns used for sidebar display (avoids SELECT * overhead with large JSON columns)
 const SIDEBAR_COLUMNS = `id, project_id, title, claude_session_id, backend_session_id, model, total_cost_usd,
   input_tokens, output_tokens, pinned, favorite, archived, sort_order,
@@ -1732,6 +1813,31 @@ export const sessions = {
       ORDER BY s.updated_at DESC
       LIMIT ?
     `, [limit]),
+  listStoragePruneCandidates: (sessionIds?: string[]) => {
+    const params: any[] = [];
+    let sql = `
+      SELECT
+        s.id,
+        s.claude_session_id,
+        s.worktree_path,
+        s.archived,
+        s.updated_at,
+        p.path as project_path
+      FROM sessions s
+      INNER JOIN projects p ON p.id = s.project_id
+      WHERE s.claude_session_id IS NOT NULL
+    `;
+
+    if (sessionIds && sessionIds.length > 0) {
+      sql += ` AND s.id IN (${sessionIds.map(() => "?").join(", ")})`;
+      params.push(...sessionIds);
+    } else {
+      sql += " AND s.archived = 1";
+    }
+
+    sql += " ORDER BY s.updated_at DESC";
+    return queryAll<SessionStoragePruneCandidate>(sql, params);
+  },
   get: (id: string) => queryOne<Session>("SELECT * FROM sessions WHERE id = ?", [id]),
   create: (id: string, project_id: string, title: string, created_at: number, updated_at: number, backend?: string) =>
     run("INSERT INTO sessions (id, project_id, title, created_at, updated_at, backend) VALUES (?, ?, ?, ?, ?, ?)",
@@ -2016,7 +2122,16 @@ export const messages = {
   ) =>
     run(
       "INSERT INTO messages (id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic, is_final) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic, is_final]
+      [
+        id,
+        session_id,
+        role,
+        sanitizePersistedMessageContent(content).content,
+        timestamp,
+        parent_tool_use_id,
+        is_synthetic,
+        is_final,
+      ]
     ),
   upsert: (
     id: string,
@@ -2038,12 +2153,21 @@ export const messages = {
          parent_tool_use_id = excluded.parent_tool_use_id,
          is_synthetic = excluded.is_synthetic,
          is_final = excluded.is_final`,
-      [id, session_id, role, content, timestamp, parent_tool_use_id, is_synthetic, is_final]
+      [
+        id,
+        session_id,
+        role,
+        sanitizePersistedMessageContent(content).content,
+        timestamp,
+        parent_tool_use_id,
+        is_synthetic,
+        is_final,
+      ]
     ),
   markFinal: (id: string) =>
     run("UPDATE messages SET is_final = 1 WHERE id = ?", [id]),
   update: (id: string, content: string) =>
-    run("UPDATE messages SET content = ? WHERE id = ?", [content, id]),
+    run("UPDATE messages SET content = ? WHERE id = ?", [sanitizePersistedMessageContent(content).content, id]),
   delete: (id: string) => run("DELETE FROM messages WHERE id = ?", [id]),
   deleteBySession: (sessionId: string) => run("DELETE FROM messages WHERE session_id = ?", [sessionId]),
   deleteAfter: (sessionId: string, timestamp: number) =>

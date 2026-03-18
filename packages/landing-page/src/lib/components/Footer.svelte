@@ -7,7 +7,7 @@
       </div>
       
       <div class="text-gray-500 text-sm font-medium">
-        &copy; 2025 Navi Local. Already on it.
+        &copy; 2025-2026 Navi. Already on it.
       </div>
       
       <div class="flex gap-8">

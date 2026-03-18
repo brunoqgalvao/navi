@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, auth, planMode, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, auth, planMode, autoCompactEnabled, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId } from "./lib/stores";
   import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill, type Workflow, type WorkflowGate, type WorkflowSchedule } from "./lib/api";
   import { mcpApi, type McpServer } from "./lib/features/mcp";
@@ -628,8 +628,12 @@
           }
         }
       }
-      // Process any queued messages
-      processMessageQueue(sessionId);
+      const autoCompacted = reason === "done" && maybeAutoCompactSession(sessionId, "threshold");
+
+      // Process any queued messages unless auto-compact needs to run first
+      if (!autoCompacted) {
+        processMessageQueue(sessionId);
+      }
       // Refresh sidebar sessions list
       if ($session.projectId) {
         api.sessions.list($session.projectId, $showArchivedWorkspaces).then(list => {
@@ -719,6 +723,8 @@
         setTimeout(() => {
           sendCommand("Continue from where you left off, but be more concise. Avoid reading entire large files - use targeted grep/search instead. Summarize findings rather than showing full content.");
         }, 500);
+      } else if (maybeAutoCompactSession(sessionId, "overflow")) {
+        return;
       } else {
         // No auto-retry possible, show modal
         showContextOverflowModal = true;
@@ -904,10 +910,12 @@
   let showTerminal = $state(false);
   let showKanban = $state(false);
   let showContext = $state(false);
+  let showInbox = $state(false);
+  let showChannels = $state(false);
   let showEmail = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email">("preview");
+  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "inbox" | "email" | "channels">("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
@@ -1144,12 +1152,37 @@
   let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.sessionId === $session.sessionId).length : 0);
   let showOnboarding = $derived(!$onboardingComplete);
 
+  const AUTO_COMPACT_THRESHOLD_PERCENT = 80;
+
   // Context usage percentage for current session
   const contextWindow = $derived(currentProject?.context_window || 200000);
   const usagePercent = $derived(contextWindow > 0 ? Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100)) : 0);
   let activeSkills = $state<Skill[]>([]);
   let mcpServers = $state<McpServer[]>([]);
   let customCommands = $state<CustomCommand[]>([]);
+
+  function getSessionBackend(sessionId: string): BackendId {
+    return sessionBackendStore.get(sessionId, get(sessionBackendStore)) || get(defaultBackend);
+  }
+
+  function maybeAutoCompactSession(sessionId: string, reason: "threshold" | "overflow"): boolean {
+    if (sessionId !== $session.sessionId) return false;
+    if (!get(autoCompactEnabled)) return false;
+    if (getSessionBackend(sessionId) !== "claude") return false;
+    if (get(compactingSessionsStore).has(sessionId)) return false;
+    if (reason === "threshold" && usagePercent < AUTO_COMPACT_THRESHOLD_PERCENT) return false;
+
+    notifications.add({
+      type: reason === "overflow" ? "warning" : "info",
+      title: reason === "overflow" ? "Context limit reached" : "Auto-compact",
+      message: reason === "overflow"
+        ? "Auto-compact is enabled. Asking Claude to summarize the conversation before continuing."
+        : "Context usage is high. Asking Claude to summarize the conversation before continuing.",
+    });
+
+    sendCommand("/compact");
+    return true;
+  }
 
   // Check git status when project changes
   $effect(() => {
@@ -3290,6 +3323,8 @@ Please walk me through the setup step by step. When I have the credentials, save
     showTerminal = false;
     showKanban = false;
     showContext = false;
+    showInbox = false;
+    showChannels = false;
     showEmail = false;
     previewSource = "";
     terminalInitialCommand = "";
@@ -3388,15 +3423,20 @@ Please walk me through the setup step by step. When I have the credentials, save
     isCanvasMode = isCanvas;
   }
 
+  function openInboxPanel() {
+    showInbox = true;
+    rightPanelMode = "inbox";
+  }
+
   /**
    * Handle extension toolbar clicks - toggles the corresponding panel
    */
   function handleExtensionClick(mode: string) {
-    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email";
+    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "inbox" | "email" | "channels";
     const panelMode = mode as PanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showEmail;
+    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showInbox || showChannels || showEmail;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -3425,6 +3465,12 @@ Please walk me through the setup step by step. When I have the credentials, save
         break;
       case "context":
         showContext = true;
+        break;
+      case "inbox":
+        openInboxPanel();
+        break;
+      case "channels":
+        showChannels = true;
         break;
       case "email":
         showEmail = true;
@@ -3988,6 +4034,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     onOpenSessionsBoard={(projectId) => { sessionsDashboardProjectId = projectId; showSessionsDashboard = true; }}
     onOpenAgentBuilder={() => showAgentBuilder = true}
     onGoToProjectDashboard={() => session.setSession(null)}
+    onOpenInbox={openInboxPanel}
     agents={sidebarAgents}
     onSelectAgent={(agent) => {
       openAgent(agent as AgentDefinition);
@@ -4438,7 +4485,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   <!-- End Chat + Council Split Container -->
 
   <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context / Email) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showEmail}
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showInbox || showChannels || showEmail}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -4462,6 +4509,8 @@ Please walk me through the setup step by step. When I have the credentials, save
         else if (mode === "kanban") showKanban = true;
         else if (mode === "preview-unified") showPreview = true;
         else if (mode === "context") showContext = true;
+        else if (mode === "inbox") showInbox = true;
+        else if (mode === "channels") showChannels = true;
       }}
       onClose={closeRightPanel}
       onStartResize={startResizingRight}

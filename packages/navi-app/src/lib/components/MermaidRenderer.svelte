@@ -159,6 +159,19 @@
           <div class="json-tree-block">
             <div class="json-tree-header">
               <span class="json-label">JSON</span>
+              <button
+                type="button"
+                class="json-copy-btn"
+                title="Copy JSON"
+                onclick={() => {
+                  navigator.clipboard.writeText(JSON.stringify(part.jsonData, null, 2));
+                }}
+              >
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="9" y="9" width="13" height="13" rx="2" stroke-width="2" />
+                  <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2" />
+                </svg>
+              </button>
             </div>
             <JsonTreeViewer value={part.jsonData} maxHeight="400px" showButtons={true} />
           </div>
@@ -216,6 +229,25 @@
     background: #f9fafb;
     padding: 0.5rem 1rem;
     border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .json-copy-btn {
+    padding: 0.25rem;
+    color: #9ca3af;
+    background: transparent;
+    border: none;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    transition: color 0.15s;
+  }
+
+  .json-copy-btn:hover {
+    color: #374151;
   }
 
   .json-label {
