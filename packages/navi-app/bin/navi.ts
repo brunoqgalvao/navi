@@ -32,6 +32,90 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Parse args
 const args = process.argv.slice(2);
+const command = args[0];
+
+// ── navi update ──────────────────────────────────────────────
+if (command === "update") {
+  const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
+  const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
+  const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
+  const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
+
+  console.log(dim("\n  Updating Navi...\n"));
+
+  // Check if this is a git repo (installed via install-cli.sh)
+  const isGitRepo = existsSync(resolve(ROOT, ".git")) || existsSync(resolve(ROOT, "..", ".git"));
+  const gitRoot = existsSync(resolve(ROOT, ".git")) ? ROOT : resolve(ROOT, "..");
+
+  if (!isGitRepo) {
+    console.log(yellow("  Not a git-based install. Re-run the install script:"));
+    console.log(cyan("  curl -fsSL https://raw.githubusercontent.com/brunoqgalvao/navi/main/scripts/install-cli.sh | bash\n"));
+    process.exit(0);
+  }
+
+  // Fetch + pull
+  const fetch = Bun.spawnSync(["git", "fetch", "origin", "main"], { cwd: gitRoot, stdout: "pipe", stderr: "pipe" });
+  if (fetch.exitCode !== 0) {
+    console.error("  Failed to fetch from origin:", fetch.stderr.toString());
+    process.exit(1);
+  }
+
+  // Check if there are updates
+  const localHash = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: gitRoot, stdout: "pipe" }).stdout.toString().trim();
+  const remoteHash = Bun.spawnSync(["git", "rev-parse", "origin/main"], { cwd: gitRoot, stdout: "pipe" }).stdout.toString().trim();
+
+  if (localHash === remoteHash) {
+    console.log(green("  Already up to date!\n"));
+    process.exit(0);
+  }
+
+  // Show what's new
+  const logResult = Bun.spawnSync(["git", "log", "--oneline", `${localHash}..${remoteHash}`], { cwd: gitRoot, stdout: "pipe" });
+  const newCommits = logResult.stdout.toString().trim().split("\n").filter(Boolean);
+  console.log(dim(`  ${newCommits.length} new commit${newCommits.length === 1 ? "" : "s"}:`));
+  for (const line of newCommits.slice(0, 10)) {
+    console.log(`    ${dim(line)}`);
+  }
+  if (newCommits.length > 10) console.log(dim(`    ... and ${newCommits.length - 10} more`));
+  console.log("");
+
+  // Pull
+  const pull = Bun.spawnSync(["git", "reset", "--hard", "origin/main"], { cwd: gitRoot, stdout: "pipe", stderr: "pipe" });
+  if (pull.exitCode !== 0) {
+    console.error("  Failed to update:", pull.stderr.toString());
+    process.exit(1);
+  }
+
+  // Reinstall deps
+  console.log(dim("  Installing dependencies..."));
+  const install = Bun.spawnSync(["bun", "install"], { cwd: ROOT, stdout: "pipe", stderr: "pipe" });
+  if (install.exitCode !== 0) {
+    console.error("  Failed to install dependencies:", install.stderr.toString());
+    process.exit(1);
+  }
+
+  // Read new version
+  try {
+    const pkg = await Bun.file(resolve(ROOT, "package.json")).json();
+    console.log(green(`  Updated to Navi v${pkg.version}!\n`));
+  } catch {
+    console.log(green("  Updated successfully!\n"));
+  }
+
+  process.exit(0);
+}
+
+// ── navi version ─────────────────────────────────────────────
+if (command === "version" || command === "--version" || command === "-v") {
+  try {
+    const pkg = await Bun.file(resolve(ROOT, "package.json")).json();
+    console.log(`Navi v${pkg.version}`);
+  } catch {
+    console.log("Navi (unknown version)");
+  }
+  process.exit(0);
+}
+
 const portIndex = args.indexOf("--port");
 const requestedBackendPort = portIndex !== -1 ? args[portIndex + 1] : "3001";
 const backendPort = requestedBackendPort;
