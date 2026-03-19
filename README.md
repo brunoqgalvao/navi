@@ -13,23 +13,23 @@ A local-first GUI for AI coding agents. Sessions, multi-agent orchestration, ter
 ## Quick Start
 
 ```bash
+# Install
 curl -fsSL https://raw.githubusercontent.com/brunoqgalvao/navi/main/scripts/install-cli.sh | bash
+
+# Run
 navi
-```
 
-This installs Navi into `~/.navi`, installs the app package, and exposes a local `navi` command through Bun's bin directory.
-
-### Update
-
-```bash
+# Update
 navi update
 ```
 
-### Run From a Clone
+The install script downloads a lightweight tarball (~7MB) from the latest release. If the tarball isn't available, it falls back to a sparse git clone of just the app source.
+
+### Manual Install (no curl)
 
 ```bash
-git clone https://github.com/brunoqgalvao/navi.git
-cd navi/packages/navi-app
+git clone --depth=1 https://github.com/brunoqgalvao/navi.git ~/.navi-repo
+cd ~/.navi-repo/packages/navi-app
 bun install
 bun run start
 ```
