@@ -39,50 +39,63 @@ if (command === "update") {
   const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
   const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
   const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
-  const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 
-  console.log(dim("\n  Updating Navi...\n"));
+  console.log(dim("\n  Checking for updates...\n"));
 
-  // Check if this is a git repo (installed via install-cli.sh)
-  const isGitRepo = existsSync(resolve(ROOT, ".git")) || existsSync(resolve(ROOT, "..", ".git"));
-  const gitRoot = existsSync(resolve(ROOT, ".git")) ? ROOT : resolve(ROOT, "..");
+  const REPO = "brunoqgalvao/navi";
+  const INSTALL_DIR = resolve(ROOT, "..");
 
-  if (!isGitRepo) {
-    console.log(yellow("  Not a git-based install. Re-run the install script:"));
-    console.log(cyan("  curl -fsSL https://raw.githubusercontent.com/brunoqgalvao/navi/main/scripts/install-cli.sh | bash\n"));
+  // Get current version
+  let currentVersion = "0.0.0";
+  try {
+    const pkg = await Bun.file(resolve(ROOT, "package.json")).json();
+    currentVersion = pkg.version;
+  } catch {}
+
+  // Fetch latest release
+  const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+  if (!res.ok) {
+    console.error("  Failed to check for updates.");
+    process.exit(1);
+  }
+  const release = await res.json() as { tag_name: string; assets: { name: string; browser_download_url: string }[] };
+  const latestVersion = release.tag_name.replace(/^v/, "");
+
+  if (currentVersion === latestVersion) {
+    console.log(green(`  Already on the latest version (v${currentVersion})!\n`));
     process.exit(0);
   }
 
-  // Fetch + pull
-  const fetch = Bun.spawnSync(["git", "fetch", "origin", "main"], { cwd: gitRoot, stdout: "pipe", stderr: "pipe" });
-  if (fetch.exitCode !== 0) {
-    console.error("  Failed to fetch from origin:", fetch.stderr.toString());
+  console.log(dim(`  Current: v${currentVersion}`));
+  console.log(cyan(`  Latest:  v${latestVersion}\n`));
+
+  // Find the CLI tarball asset
+  const tarballAsset = release.assets.find((a: { name: string }) => a.name.startsWith("navi-cli-") && a.name.endsWith(".tar.gz"));
+  if (!tarballAsset) {
+    console.error("  No CLI tarball found in release. Try reinstalling:");
+    console.error(cyan("  curl -fsSL https://raw.githubusercontent.com/brunoqgalvao/navi/main/scripts/install-cli.sh | bash\n"));
     process.exit(1);
   }
 
-  // Check if there are updates
-  const localHash = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: gitRoot, stdout: "pipe" }).stdout.toString().trim();
-  const remoteHash = Bun.spawnSync(["git", "rev-parse", "origin/main"], { cwd: gitRoot, stdout: "pipe" }).stdout.toString().trim();
-
-  if (localHash === remoteHash) {
-    console.log(green("  Already up to date!\n"));
-    process.exit(0);
+  // Download and extract
+  console.log(dim("  Downloading..."));
+  const download = Bun.spawnSync(
+    ["curl", "-fsSL", tarballAsset.browser_download_url, "-o", "/tmp/navi-cli-update.tar.gz"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (download.exitCode !== 0) {
+    console.error("  Download failed:", download.stderr.toString());
+    process.exit(1);
   }
 
-  // Show what's new
-  const logResult = Bun.spawnSync(["git", "log", "--oneline", `${localHash}..${remoteHash}`], { cwd: gitRoot, stdout: "pipe" });
-  const newCommits = logResult.stdout.toString().trim().split("\n").filter(Boolean);
-  console.log(dim(`  ${newCommits.length} new commit${newCommits.length === 1 ? "" : "s"}:`));
-  for (const line of newCommits.slice(0, 10)) {
-    console.log(`    ${dim(line)}`);
-  }
-  if (newCommits.length > 10) console.log(dim(`    ... and ${newCommits.length - 10} more`));
-  console.log("");
-
-  // Pull
-  const pull = Bun.spawnSync(["git", "reset", "--hard", "origin/main"], { cwd: gitRoot, stdout: "pipe", stderr: "pipe" });
-  if (pull.exitCode !== 0) {
-    console.error("  Failed to update:", pull.stderr.toString());
+  // Extract over existing install (preserves node_modules)
+  console.log(dim("  Extracting..."));
+  const extract = Bun.spawnSync(
+    ["tar", "-xzf", "/tmp/navi-cli-update.tar.gz", "-C", INSTALL_DIR, "--strip-components=0"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (extract.exitCode !== 0) {
+    console.error("  Extract failed:", extract.stderr.toString());
     process.exit(1);
   }
 
@@ -94,14 +107,10 @@ if (command === "update") {
     process.exit(1);
   }
 
-  // Read new version
-  try {
-    const pkg = await Bun.file(resolve(ROOT, "package.json")).json();
-    console.log(green(`  Updated to Navi v${pkg.version}!\n`));
-  } catch {
-    console.log(green("  Updated successfully!\n"));
-  }
+  // Cleanup
+  Bun.spawnSync(["rm", "-f", "/tmp/navi-cli-update.tar.gz"]);
 
+  console.log(green(`\n  Updated to Navi v${latestVersion}!\n`));
   process.exit(0);
 }
 

@@ -2,14 +2,18 @@
 
 set -euo pipefail
 
-REPO_URL="${NAVI_REPO_URL:-https://github.com/brunoqgalvao/navi.git}"
-REPO_REF="${NAVI_REPO_REF:-main}"
-SOURCE_DIR="${NAVI_SOURCE_DIR:-}"
+REPO="brunoqgalvao/navi"
 INSTALL_DIR="${NAVI_INSTALL_DIR:-$HOME/.navi}"
 BUN_HOME_DIR="${BUN_INSTALL:-$HOME/.bun}"
 BUN_BIN_DIR="$BUN_HOME_DIR/bin"
-APP_DIR="$INSTALL_DIR/packages/navi-app"
+APP_DIR="$INSTALL_DIR/navi-app"
 WRAPPER_PATH="$BUN_BIN_DIR/navi"
+
+# Colors
+dim() { printf '\033[2m%s\033[0m' "$1"; }
+green() { printf '\033[32m%s\033[0m' "$1"; }
+cyan() { printf '\033[36m%s\033[0m' "$1"; }
+bold() { printf '\033[1m%s\033[0m' "$1"; }
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -18,39 +22,42 @@ require_cmd() {
   fi
 }
 
-require_cmd git
 require_cmd bun
 require_cmd node
+require_cmd curl
 
-echo "Installing Navi CLI..."
-if [ -n "$SOURCE_DIR" ]; then
-  echo "  Source:  $SOURCE_DIR"
-else
-  echo "  Repo:    $REPO_URL"
-  echo "  Ref:     $REPO_REF"
-fi
-echo "  Install: $INSTALL_DIR"
+echo ""
+echo "  Installing Navi..."
+echo ""
 
+# Get latest release version
+echo "  $(dim "Fetching latest release...")"
+RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
+VERSION=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"v\([^"]*\)".*/\1/')
+TARBALL_URL="https://github.com/$REPO/releases/download/v${VERSION}/navi-cli-${VERSION}.tar.gz"
+
+echo "  $(dim "Version:")  $(cyan "v$VERSION")"
+echo "  $(dim "Install:")  $(cyan "$INSTALL_DIR")"
+echo ""
+
+# Download and extract
+echo "  $(dim "Downloading...")"
 rm -rf "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
 
-if [ -n "$SOURCE_DIR" ]; then
-  mkdir -p "$INSTALL_DIR"
-  tar \
-    --exclude="packages/navi-app/build" \
-    --exclude="packages/navi-app/src-tauri/target" \
-    -C "$SOURCE_DIR" \
-    -cf - packages/navi-app | tar -C "$INSTALL_DIR" -xf -
-else
-  git clone --depth=1 --branch "$REPO_REF" "$REPO_URL" "$INSTALL_DIR"
+curl -fsSL "$TARBALL_URL" | tar -xz -C "$INSTALL_DIR"
+
+if [ ! -d "$APP_DIR" ]; then
+  echo "  Error: Download failed or tarball structure unexpected." >&2
+  echo "  Expected $APP_DIR to exist." >&2
+  exit 1
 fi
 
-if [ -d "$APP_DIR/node_modules" ]; then
-  echo "Using copied app dependencies..."
-else
-  echo "Installing app dependencies..."
-  (cd "$APP_DIR" && bun install)
-fi
+# Install dependencies
+echo "  $(dim "Installing dependencies...")"
+(cd "$APP_DIR" && bun install --silent)
 
+# Create wrapper script
 mkdir -p "$BUN_BIN_DIR"
 
 cat >"$WRAPPER_PATH" <<EOF
@@ -61,17 +68,21 @@ EOF
 
 chmod +x "$WRAPPER_PATH"
 
-echo
-echo "Navi CLI installed."
-echo "  Command: $WRAPPER_PATH"
+echo ""
+echo "  $(green "$(bold "Navi v$VERSION installed!")")"
+echo ""
+echo "  $(dim "Command:") $WRAPPER_PATH"
 
 case ":$PATH:" in
   *":$BUN_BIN_DIR:"*)
-    echo "  Run: navi"
+    echo ""
+    echo "  Run: $(cyan "navi")"
     ;;
   *)
+    echo ""
     echo "  Add to PATH:"
     echo "    export PATH=\"$BUN_BIN_DIR:\$PATH\""
-    echo "  Then run: navi"
+    echo "  Then run: $(cyan "navi")"
     ;;
 esac
+echo ""

@@ -28,6 +28,40 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using version: $VERSION"
 
+  # Build CLI tarball (lightweight, no git/tauri needed)
+  build-cli:
+    needs: [get-version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package CLI tarball
+        run: |
+          VERSION="${{ needs.get-version.outputs.version }}"
+          STAGING="navi-cli"
+          mkdir -p "$STAGING"
+
+          # Copy only what the CLI needs
+          cp -r packages/navi-app "$STAGING/navi-app"
+
+          # Remove stuff users don't need
+          rm -rf "$STAGING/navi-app/src-tauri"
+          rm -rf "$STAGING/navi-app/node_modules"
+          rm -rf "$STAGING/navi-app/build"
+          rm -rf "$STAGING/navi-app/.tmp*"
+
+          # Add a version marker
+          echo "$VERSION" > "$STAGING/navi-app/.version"
+
+          tar -czf "navi-cli-${VERSION}.tar.gz" -C "$STAGING" navi-app
+          ls -lh "navi-cli-${VERSION}.tar.gz"
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: navi-cli
+          path: navi-cli-*.tar.gz
+
   # Build Tauri app for all platforms
   build-tauri:
     needs: [get-version]
@@ -167,8 +201,8 @@ jobs:
 
   # Create GitHub Release
   create-release:
-    needs: [get-version, build-tauri]
-    if: needs.build-tauri.result == 'success'
+    needs: [get-version, build-cli, build-tauri]
+    if: always() && needs.build-cli.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -191,6 +225,9 @@ jobs:
           mkdir -p release-assets
 
           VERSION="${{ needs.get-version.outputs.version }}"
+
+          # CLI tarball
+          find artifacts -name "navi-cli-*.tar.gz" -exec cp {} release-assets/ \;
 
           # Find and copy all release files with proper names
           find artifacts -name "*.dmg" -exec cp {} release-assets/ \;
@@ -220,8 +257,8 @@ jobs:
 
   # Deploy landing page and publish update manifest
   deploy:
-    needs: [get-version, build-tauri, create-release]
-    if: needs.build-tauri.result == 'success'
+    needs: [get-version, build-cli, build-tauri, create-release]
+    if: always() && needs.create-release.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
