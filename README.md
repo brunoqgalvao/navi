@@ -19,6 +19,12 @@ navi
 
 This installs Navi into `~/.navi`, installs the app package, and exposes a local `navi` command through Bun's bin directory.
 
+### Update
+
+```bash
+navi update
+```
+
 ### Run From a Clone
 
 ```bash
