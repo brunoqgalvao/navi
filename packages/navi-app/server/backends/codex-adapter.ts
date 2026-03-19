@@ -19,7 +19,8 @@ import type {
 } from "./types";
 
 const DEFAULT_CODEX_MODEL = "gpt-5.2-codex";
-const COMPATIBLE_CODEX_REASONING_EFFORTS = new Set(["low", "medium", "high"]);
+// The Codex CLI only accepts these values for model_reasoning_effort (any model)
+const COMPATIBLE_CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high"]);
 const BASE_CODEX_MODELS = [
   // Current Codex-focused models
   "gpt-5.2-codex",
@@ -77,10 +78,6 @@ function readCodexConfigValue(key: string): string | undefined {
   }
 }
 
-function isCodexReasoningStrictModel(model: string): boolean {
-  return model.includes("codex") || model === "codex-mini-latest";
-}
-
 export function getConfiguredCodexModel(): string | undefined {
   return readCodexConfigValue("model");
 }
@@ -114,11 +111,10 @@ export function buildCodexExecPlan(
   let reasoningEffort = requestedReasoningEffort;
   let adjustedReasoningEffort: CodexExecutionPlan["adjustedReasoningEffort"];
 
-  if (
-    isCodexReasoningStrictModel(model) &&
-    !COMPATIBLE_CODEX_REASONING_EFFORTS.has(requestedReasoningEffort)
-  ) {
-    reasoningEffort = "medium";
+  // The Codex CLI rejects any reasoning effort outside its known set for ALL models,
+  // not just codex-named ones. Always clamp to a valid value.
+  if (!COMPATIBLE_CODEX_REASONING_EFFORTS.has(requestedReasoningEffort)) {
+    reasoningEffort = "high";
     adjustedReasoningEffort = {
       from: requestedReasoningEffort,
       to: reasoningEffort,
@@ -383,29 +379,189 @@ export class CodexAdapter implements BackendAdapter {
   /**
    * Normalize Codex JSON events to unified format
    *
-   * Codex event types:
-   * - thread.started
-   * - turn.started / turn.completed / turn.failed
-   * - item.started / item.completed (messages, reasoning, commands, file changes, MCP, web search, plan)
-   * - error
+   * Codex CLI v0.23+ uses a wrapped event format:
+   *   {"id":"0","msg":{"type":"task_started"}}
+   *   {"id":"0","msg":{"type":"agent_message","message":"..."}}
+   *   {"id":"0","msg":{"type":"exec_command_begin","call_id":"...","command":[...]}}
+   *   {"id":"0","msg":{"type":"exec_command_end","call_id":"...","stdout":"...","exit_code":0}}
+   *   {"id":"0","msg":{"type":"agent_reasoning","text":"..."}}
+   *   {"id":"0","msg":{"type":"token_count","input_tokens":...}}
+   *
+   * There are also top-level config/prompt echo lines (no "msg" key):
+   *   {"reasoning summaries":"auto","model":"gpt-5.4",...}
+   *   {"prompt":"..."}
    */
   private normalizeCodexEvent(
     event: any,
     sessionId: string
   ): NormalizedEvent | null {
-    const eventType = event.type || event.event;
+    // New format: events are wrapped in {"id":"X","msg":{...}}
+    const msg = event.msg;
+    if (msg && typeof msg === "object" && msg.type) {
+      return this.normalizeCodexMsg(msg, sessionId);
+    }
 
+    // Top-level config echo line (has "model" key but no "msg")
+    if (event.model && !event.type && !event.msg) {
+      return null; // Skip config echo
+    }
+
+    // Top-level prompt echo line
+    if (event.prompt && !event.type && !event.msg) {
+      return null; // Skip prompt echo
+    }
+
+    // Legacy format fallback: events with top-level "type" (older Codex versions)
+    const eventType = event.type || event.event;
+    if (eventType) {
+      return this.normalizeLegacyCodexEvent(event, eventType, sessionId);
+    }
+
+    return null;
+  }
+
+  /**
+   * Normalize the inner "msg" object from Codex v0.23+ wrapped events
+   */
+  private normalizeCodexMsg(
+    msg: any,
+    sessionId: string
+  ): NormalizedEvent | null {
+    switch (msg.type) {
+      case "task_started":
+        return {
+          type: "system",
+          subtype: "status",
+          status: "Processing...",
+        };
+
+      case "agent_message":
+        return {
+          type: "assistant",
+          sessionId,
+          content: this.extractTextContent(msg.message || msg.content || msg.text),
+        };
+
+      case "agent_reasoning":
+        return {
+          type: "assistant",
+          sessionId,
+          content: [
+            {
+              type: "thinking",
+              thinking: msg.text || msg.content || "",
+            },
+          ],
+        };
+
+      case "agent_reasoning_section_break":
+        return null; // UI separator, skip
+
+      case "exec_command_begin":
+        return {
+          type: "tool_progress",
+          toolUseId: msg.call_id || crypto.randomUUID(),
+          toolName: "Bash",
+        };
+
+      case "exec_command_end": {
+        const toolUseId = msg.call_id || crypto.randomUUID();
+        const cmdStr = Array.isArray(msg.command) ? msg.command.join(" ") : msg.command || "";
+        return {
+          type: "assistant",
+          sessionId,
+          content: [
+            {
+              type: "tool_use",
+              id: toolUseId,
+              name: "Bash",
+              input: {
+                command: cmdStr,
+                description: this.extractBashDescription(cmdStr),
+              },
+            },
+            {
+              type: "tool_result",
+              tool_use_id: toolUseId,
+              content: msg.stdout || msg.output || "",
+              is_error: msg.exit_code !== 0,
+            },
+          ],
+        };
+      }
+
+      case "exec_command_output_delta":
+        return null; // Streaming chunk, we use exec_command_end for final output
+
+      case "file_change_begin":
+        return {
+          type: "tool_progress",
+          toolUseId: msg.call_id || crypto.randomUUID(),
+          toolName: msg.action === "create" ? "Write" : "Edit",
+        };
+
+      case "file_change_end": {
+        const fileToolId = msg.call_id || crypto.randomUUID();
+        const toolName = msg.action === "create" ? "Write" : "Edit";
+        return {
+          type: "assistant",
+          sessionId,
+          content: [
+            {
+              type: "tool_use",
+              id: fileToolId,
+              name: toolName,
+              input: {
+                file_path: msg.path || msg.file,
+                content: msg.content,
+              },
+            },
+            {
+              type: "tool_result",
+              tool_use_id: fileToolId,
+              content: `${msg.action || "modified"}: ${msg.path || msg.file}`,
+            },
+          ],
+        };
+      }
+
+      case "token_count":
+        // Token usage events — emit as result with usage info
+        return {
+          type: "result",
+          sessionId,
+          subtype: "success",
+          numTurns: 1,
+        };
+
+      case "error":
+        return {
+          type: "error",
+          sessionId,
+          error: msg.message || msg.error || "Unknown error",
+          code: msg.code,
+        };
+
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Legacy event normalizer for older Codex versions (top-level "type" field)
+   */
+  private normalizeLegacyCodexEvent(
+    event: any,
+    eventType: string,
+    sessionId: string
+  ): NormalizedEvent | null {
     switch (eventType) {
       case "thread.started":
         return {
           type: "backend_session",
           backendId: "codex",
           backendSessionId: event.thread_id,
-          metadata: event.thread_id
-            ? {
-                thread_id: event.thread_id,
-              }
-            : undefined,
+          metadata: event.thread_id ? { thread_id: event.thread_id } : undefined,
         };
 
       case "turn.started":
@@ -433,12 +589,6 @@ export class CodexAdapter implements BackendAdapter {
           errors: [event.error || "Turn failed"],
         };
 
-      case "item.started":
-        return this.normalizeItemStarted(event, sessionId);
-
-      case "item.completed":
-        return this.normalizeItemCompleted(event, sessionId);
-
       case "error":
         return {
           type: "error",
@@ -448,177 +598,6 @@ export class CodexAdapter implements BackendAdapter {
         };
 
       default:
-        // Unknown event type
-        return null;
-    }
-  }
-
-  private normalizeItemStarted(
-    event: any,
-    sessionId: string
-  ): NormalizedEvent | null {
-    const item = event.item || {};
-    const itemType = item.type;
-
-    switch (itemType) {
-      case "command_execution":
-        return {
-          type: "tool_progress",
-          toolUseId: item.id || crypto.randomUUID(),
-          toolName: "Bash",
-        };
-
-      case "file_change":
-        return {
-          type: "tool_progress",
-          toolUseId: item.id || crypto.randomUUID(),
-          toolName: item.action === "create" ? "Write" : "Edit",
-        };
-
-      case "mcp_tool_call":
-        return {
-          type: "tool_progress",
-          toolUseId: item.id || crypto.randomUUID(),
-          toolName: `mcp__${item.tool_name || "unknown"}`,
-        };
-
-      default:
-        return null;
-    }
-  }
-
-  private normalizeItemCompleted(
-    event: any,
-    sessionId: string
-  ): NormalizedEvent | null {
-    const item = event.item || {};
-    const itemType = item.type;
-
-    switch (itemType) {
-      case "agent_message":
-        return {
-          type: "assistant",
-          sessionId,
-          content: this.extractTextContent(item.content || item.text),
-          usage: event.usage
-            ? {
-                input_tokens: event.usage.input_tokens || 0,
-                output_tokens: event.usage.output_tokens || 0,
-              }
-            : undefined,
-        };
-
-      case "reasoning":
-        return {
-          type: "assistant",
-          sessionId,
-          content: [
-            {
-              type: "thinking",
-              thinking: item.content || item.text || "",
-            },
-          ],
-        };
-
-      case "command_execution": {
-        // Use consistent ID for both tool_use and tool_result
-        const toolUseId = item.id || crypto.randomUUID();
-        return {
-          type: "assistant",
-          sessionId,
-          content: [
-            {
-              type: "tool_use",
-              id: toolUseId,
-              name: "Bash",
-              input: {
-                command: item.command,
-                // Add description for cleaner display
-                description: this.extractBashDescription(item.command),
-              },
-            },
-            {
-              type: "tool_result",
-              tool_use_id: toolUseId,
-              content: item.output || item.result || "",
-              is_error: item.exit_code !== 0,
-            },
-          ],
-        };
-      }
-
-      case "file_change": {
-        // Use consistent ID for both tool_use and tool_result
-        const fileToolUseId = item.id || crypto.randomUUID();
-        const toolName = item.action === "create" ? "Write" : "Edit";
-        return {
-          type: "assistant",
-          sessionId,
-          content: [
-            {
-              type: "tool_use",
-              id: fileToolUseId,
-              name: toolName,
-              input: {
-                file_path: item.path,
-                content: item.content,
-              },
-            },
-            {
-              type: "tool_result",
-              tool_use_id: fileToolUseId,
-              content: `${item.action}: ${item.path}`,
-            },
-          ],
-        };
-      }
-
-      case "web_search": {
-        // Use consistent ID for both tool_use and tool_result
-        const searchToolUseId = item.id || crypto.randomUUID();
-        return {
-          type: "assistant",
-          sessionId,
-          content: [
-            {
-              type: "tool_use",
-              id: searchToolUseId,
-              name: "WebSearch",
-              input: { query: item.query },
-            },
-            {
-              type: "tool_result",
-              tool_use_id: searchToolUseId,
-              content: item.results
-                ? JSON.stringify(item.results, null, 2)
-                : "Search completed",
-            },
-          ],
-        };
-      }
-
-      case "plan_update":
-        // Plan updates shown as assistant messages
-        return {
-          type: "assistant",
-          sessionId,
-          content: [
-            {
-              type: "text",
-              text: `📋 **Plan Update**\n${item.plan || item.content || ""}`,
-            },
-          ],
-        };
-
-      default:
-        // Generic message fallback
-        if (item.content || item.text) {
-          return {
-            type: "assistant",
-            sessionId,
-            content: this.extractTextContent(item.content || item.text),
-          };
-        }
         return null;
     }
   }

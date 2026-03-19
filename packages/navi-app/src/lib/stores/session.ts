@@ -563,6 +563,31 @@ export const sessionBackendStore = createBackendStore();
 // Default backend for new sessions
 export const defaultBackend = writable<BackendId>("claude");
 
+// Reasoning effort per session (low, medium, high)
+export type ReasoningEffort = "low" | "medium" | "high";
+function createReasoningEffortStore() {
+  const { subscribe, update } = writable<Map<string, ReasoningEffort>>(new Map());
+
+  return {
+    subscribe,
+    get: (sessionId: string, map: Map<string, ReasoningEffort>): ReasoningEffort => {
+      return map.get(sessionId) || "medium";
+    },
+    set: (sessionId: string, effort: ReasoningEffort) =>
+      update((map) => {
+        map.set(sessionId, effort);
+        return new Map(map);
+      }),
+    clear: (sessionId: string) =>
+      update((map) => {
+        map.delete(sessionId);
+        return new Map(map);
+      }),
+  };
+}
+export const sessionReasoningEffort = createReasoningEffortStore();
+export const defaultReasoningEffort = writable<ReasoningEffort>("medium");
+
 // Models for each backend (populated from API)
 export const backendModels = writable<Record<BackendId, ModelInfo[]>>({
   claude: [],

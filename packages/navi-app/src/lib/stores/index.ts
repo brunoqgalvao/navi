@@ -58,6 +58,9 @@ export {
   defaultBackend,
   backendModels,
   getBackendModelsFormatted,
+  // Reasoning effort
+  sessionReasoningEffort,
+  defaultReasoningEffort,
   // Memory management utilities
   cleanupAuxiliaryStores,
   getClientMemoryStats,
@@ -66,7 +69,7 @@ export {
   currentSessionWait,
 } from "./session";
 
-export type { ProjectWorkspace, SessionPaginationState, ExecutionMode, CloudExecutionSettings, CloudExecutionState, CloudExecutionStage, BackendId } from "./session";
+export type { ProjectWorkspace, SessionPaginationState, ExecutionMode, CloudExecutionSettings, CloudExecutionState, CloudExecutionStage, BackendId, ReasoningEffort } from "./session";
 
 // Project stores
 export {

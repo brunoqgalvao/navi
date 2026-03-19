@@ -126,6 +126,8 @@ export interface ClientMessage {
   agentId?: string;
   // Backend selection (claude, codex, gemini)
   backend?: "claude" | "codex" | "gemini";
+  // Reasoning effort for non-Claude backends
+  reasoningEffort?: string;
   // Plan mode - Claude plans before acting, no execution until approved
   planMode?: boolean;
   // Question response fields
@@ -2137,7 +2139,7 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
  * normalizes events to match the Claude SDK format for the UI.
  */
 async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: BackendId) {
-  const { prompt, projectId, sessionId, model, historyContext } = data;
+  const { prompt, projectId, sessionId, model, historyContext, reasoningEffort } = data;
 
   const session = sessionId ? sessions.get(sessionId) : null;
   const project = projectId ? projects.get(projectId) : null;
@@ -2202,6 +2204,7 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
       model,
       resume: resumeId,
       permissionMode: isAutoApprove ? "auto" : "confirm",
+      backendOptions: reasoningEffort ? { reasoningEffort } : undefined,
     })) {
       if (event.type === "backend_session" && sessionId) {
         sessions.updateBackendSessionState(

@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, auth, planMode, autoCompactEnabled, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, planMode, autoCompactEnabled, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId, type ReasoningEffort } from "./lib/stores";
   import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill, type Workflow, type WorkflowGate, type WorkflowSchedule } from "./lib/api";
   import { mcpApi, type McpServer } from "./lib/features/mcp";
@@ -2966,6 +2966,8 @@ Please walk me through the setup step by step. When I have the credentials, save
     // Claude maintains its own session state via claudeSessionId, but Gemini/Codex need the full context
     const historyCtx = resolveHistoryContextForQuery(currentSessionId, backend);
 
+    const effort = sessionReasoningEffort.get(currentSessionId, get(sessionReasoningEffort));
+
     client.query({
       prompt: promptWithoutAgent,
       projectId: $session.projectId || undefined,
@@ -2975,6 +2977,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       historyContext: historyCtx,
       agentId,
       backend,
+      reasoningEffort: effort,
       // Plan mode - Claude plans before acting
       planMode: get(planMode),
       // Cloud execution options
@@ -3060,6 +3063,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     sessionStatus.setRunning(targetSessionId, $session.projectId!);
 
     const backend = sessionBackendStore.get(targetSessionId, get(sessionBackendStore)) || get(defaultBackend);
+    const effort = sessionReasoningEffort.get(targetSessionId, get(sessionReasoningEffort));
 
     // For non-Claude backends, build history context from messages
     const historyCtx = resolveHistoryContextForQuery(targetSessionId, backend);
@@ -3072,6 +3076,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       model: $session.selectedModel || undefined,
       historyContext: historyCtx,
       backend,
+      reasoningEffort: effort,
     });
 
     if ($sessionHistoryContext.get(targetSessionId)) {
@@ -3104,6 +3109,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     sessionStatus.setRunning(targetSessionId, $session.projectId!);
 
     const backend = sessionBackendStore.get(targetSessionId, get(sessionBackendStore)) || get(defaultBackend);
+    const effort = sessionReasoningEffort.get(targetSessionId, get(sessionReasoningEffort));
 
     // Check sessionHistoryContext first (for forked sessions, rollback, etc.)
     // For non-Claude backends, fall back to building history from messages
@@ -3117,6 +3123,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       model: $session.selectedModel || undefined,
       historyContext: historyCtx,
       backend,
+      reasoningEffort: effort,
     });
 
     // Clear history context after use (one-time injection)
@@ -4452,6 +4459,13 @@ Please walk me through the setup step by step. When I have the credentials, save
                           handleModelSelect(models[0].value);
                         }
                       }
+                    }}
+                    reasoningEffort={$session.sessionId ? sessionReasoningEffort.get($session.sessionId, $sessionReasoningEffort) : $defaultReasoningEffort}
+                    onReasoningEffortChange={(effort) => {
+                      if ($session.sessionId) {
+                        sessionReasoningEffort.set($session.sessionId, effort);
+                      }
+                      defaultReasoningEffort.set(effort);
                     }}
                 />
 

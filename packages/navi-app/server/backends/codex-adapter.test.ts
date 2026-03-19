@@ -52,21 +52,35 @@ describe("codex adapter helpers", () => {
     expect(plan.downgradedToReadOnly).toBe(true);
   });
 
-  test("clamps incompatible reasoning effort for codex-family models", () => {
+  test("clamps incompatible reasoning effort for any model", () => {
     const plan = buildCodexExecPlan(
       createOptions({
-        model: "gpt-5-codex",
+        model: "gpt-5.4",
         backendOptions: {
           reasoningEffort: "xhigh",
         },
       }),
-      "gpt-5.2-codex"
+      "gpt-5.4"
     );
 
     expect(plan.adjustedReasoningEffort).toEqual({
       from: "xhigh",
-      to: "medium",
+      to: "high",
     });
-    expect(plan.args).toContain('model_reasoning_effort="medium"');
+    expect(plan.args).toContain('model_reasoning_effort="high"');
+  });
+
+  test("accepts valid reasoning effort values without clamping", () => {
+    for (const effort of ["minimal", "low", "medium", "high"]) {
+      const plan = buildCodexExecPlan(
+        createOptions({
+          model: "gpt-5.4",
+          backendOptions: { reasoningEffort: effort },
+        }),
+        "gpt-5.4"
+      );
+      expect(plan.adjustedReasoningEffort).toBeUndefined();
+      expect(plan.args).toContain(`model_reasoning_effort="${effort}"`);
+    }
   });
 });

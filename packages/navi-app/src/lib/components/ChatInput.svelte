@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, planMode, loopModeEnabled, chatInputValue } from "../stores";
+  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, type ReasoningEffort, planMode, loopModeEnabled, chatInputValue } from "../stores";
   import { agents, type Agent } from "../stores/agents";
   import FileAttachment from "./FileAttachment.svelte";
   import ReferenceChip from "./ReferenceChip.svelte";
@@ -88,13 +88,16 @@
     // Backend selection (claude, codex, gemini)
     backend?: BackendId;
     onBackendChange?: (backend: BackendId) => void;
+    // Reasoning effort (low, medium, high)
+    reasoningEffort?: ReasoningEffort;
+    onReasoningEffortChange?: (effort: ReasoningEffort) => void;
     // Slash commands from SDK
     slashCommands?: SlashCommand[];
     // UI-only command handlers
     onUICommand?: (command: string, args?: string) => boolean; // Return true if handled
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], backend = "claude", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, onBackendChange, slashCommands = [], onUICommand }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], backend = "claude", reasoningEffort = "medium", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, onBackendChange, onReasoningEffortChange, slashCommands = [], onUICommand }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
@@ -1561,6 +1564,33 @@
           </span>
           <span class="text-[11px] font-medium">{meta.label}</span>
         </div>
+      {/if}
+
+      <!-- Reasoning Effort Toggle -->
+      {#if onReasoningEffortChange}
+        {@const effortLevels: ReasoningEffort[] = ["low", "medium", "high"]}
+        {@const effortMeta = {
+          low: { label: "Lo", color: "text-sky-600 dark:text-sky-400", bgColor: "bg-sky-100 dark:bg-sky-900/30", desc: "Low" },
+          medium: { label: "Med", color: "text-amber-600 dark:text-amber-400", bgColor: "bg-amber-100 dark:bg-amber-900/30", desc: "Medium" },
+          high: { label: "Hi", color: "text-rose-600 dark:text-rose-400", bgColor: "bg-rose-100 dark:bg-rose-900/30", desc: "High" },
+        }}
+        {@const meta_effort = effortMeta[reasoningEffort]}
+        <Tooltip text="Reasoning: {meta_effort.desc}" position="top">
+          <button
+            onclick={() => {
+              const idx = effortLevels.indexOf(reasoningEffort);
+              const next = effortLevels[(idx + 1) % effortLevels.length];
+              onReasoningEffortChange(next);
+            }}
+            class="flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-150 {meta_effort.bgColor} {meta_effort.color} hover:opacity-80"
+            title="Reasoning effort: {meta_effort.desc} (click to cycle)"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+            </svg>
+            <span class="text-[11px] font-medium">{meta_effort.label}</span>
+          </button>
+        </Tooltip>
       {/if}
 
       <!-- Cloud Execution Toggle -->
