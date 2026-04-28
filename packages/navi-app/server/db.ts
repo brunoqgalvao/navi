@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "fs
 import { homedir } from "os";
 import { join } from "path";
 import { sanitizePersistedMessageContent } from "./services/message-storage";
+import { DEFAULT_CONTEXT_WINDOW } from "./utils/context-window";
 
 const DATA_DIR = join(homedir(), ".claude-code-ui");
 const DB_PATH = join(DATA_DIR, "data.db");
@@ -104,7 +105,7 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN sort_order INTEGER DEFAULT 0");
   } catch {}
   try {
-    db.run("ALTER TABLE projects ADD COLUMN context_window INTEGER DEFAULT 200000");
+    db.run(`ALTER TABLE projects ADD COLUMN context_window INTEGER DEFAULT ${DEFAULT_CONTEXT_WINDOW}`);
   } catch {}
   try {
     db.run("ALTER TABLE projects ADD COLUMN auto_accept_all INTEGER DEFAULT 0");
@@ -1032,6 +1033,12 @@ export interface InboxItem {
   resolved_at: number | null;
 }
 
+export interface InboxItemWithProject extends InboxItem {
+  project_name: string | null;
+  project_path: string | null;
+  project_archived: number | null;
+}
+
 export interface Message {
   id: string;
   session_id: string;
@@ -1601,6 +1608,17 @@ export const inboxItems = {
       "SELECT * FROM inbox_items WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC",
       [projectId]
     ),
+  listAll: () =>
+    queryAll<InboxItemWithProject>(
+      `SELECT
+        inbox_items.*,
+        projects.name AS project_name,
+        projects.path AS project_path,
+        projects.archived AS project_archived
+      FROM inbox_items
+      LEFT JOIN projects ON projects.id = inbox_items.project_id
+      ORDER BY inbox_items.updated_at DESC, inbox_items.created_at DESC`
+    ),
   get: (id: string) => queryOne<InboxItem>("SELECT * FROM inbox_items WHERE id = ?", [id]),
   create: (item: InboxItem) =>
     run(
@@ -1704,9 +1722,19 @@ export const projects = {
     ORDER BY p.updated_at DESC
   `),
   get: (id: string) => queryOne<Project>("SELECT * FROM projects WHERE id = ?", [id]),
-  create: (id: string, name: string, path: string, description: string | null, created_at: number, updated_at: number) =>
-    run("INSERT INTO projects (id, name, path, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", 
-        [id, name, path, description, created_at, updated_at]),
+  create: (
+    id: string,
+    name: string,
+    path: string,
+    description: string | null,
+    created_at: number,
+    updated_at: number,
+    contextWindow: number = DEFAULT_CONTEXT_WINDOW
+  ) =>
+    run(
+      "INSERT INTO projects (id, name, path, description, created_at, updated_at, context_window) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [id, name, path, description, created_at, updated_at, contextWindow]
+    ),
   update: (name: string, path: string, description: string | null, contextWindow: number, updated_at: number, id: string) =>
     run("UPDATE projects SET name = ?, path = ?, description = ?, context_window = ?, updated_at = ? WHERE id = ?",
         [name, path, description, contextWindow, updated_at, id]),

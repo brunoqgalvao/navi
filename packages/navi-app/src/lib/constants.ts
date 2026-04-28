@@ -83,10 +83,10 @@ export const TOUR_START_DELAY_MS = 500;
 // =============================================================================
 
 /** Default PTY server WebSocket URL */
-export const DEFAULT_PTY_SERVER_WS_URL = "ws://localhost:3002";
+export const DEFAULT_PTY_SERVER_WS_URL = "ws://localhost:3022";
 
 /** Default PTY server HTTP URL */
-export const DEFAULT_PTY_SERVER_HTTP_URL = "http://localhost:3002";
+export const DEFAULT_PTY_SERVER_HTTP_URL = "http://localhost:3022";
 
 export { TOUR_STEPS } from "./constants/tour-steps";
 export { HOTKEYS, type Hotkey } from "./constants/hotkeys";

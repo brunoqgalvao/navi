@@ -1,6 +1,7 @@
 import { existsSync } from "fs";
 import { homedir } from "os";
-import { delimiter, dirname, join } from "path";
+import { delimiter, dirname, extname, join } from "path";
+import { spawn as spawnChildProcess } from "node:child_process";
 import { fileURLToPath } from "url";
 import { resolveBunExecutable } from "./bun";
 import { describePath, writeDebugLog } from "./logging";
@@ -10,27 +11,112 @@ const __dirname = dirname(__filename);
 const CLAUDE_EXECUTABLE_NAMES = process.platform === "win32"
   ? ["claude.exe", "claude.cmd", "claude.bat", "claude"]
   : ["claude"];
+const NATIVE_CLAUDE_INLINE_BRIDGE_SCRIPT = [
+  'const { spawn } = require("node:child_process");',
+  "const nativeClaudePath = process.argv[1];",
+  "const claudeArgs = process.argv.slice(2);",
+  'const child = spawn(nativeClaudePath, claudeArgs, { cwd: process.cwd(), env: process.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });',
+  'process.stdin.resume();',
+  'process.stdin.on("data", (chunk) => child.stdin.write(chunk));',
+  'process.stdin.on("end", () => child.stdin.end());',
+  'child.stdout.on("data", (chunk) => process.stdout.write(chunk));',
+  'child.stderr.on("data", (chunk) => process.stderr.write(chunk));',
+  'child.on("error", (error) => { process.stderr.write(`[Navi Claude Bridge] ${error.message}\\n`); process.exit(1); });',
+  'child.on("exit", (code, signal) => { if (signal) { process.kill(process.pid, signal); return; } process.exit(code ?? 0); });',
+].join("\n");
 
 let runtimeLogged = false;
+const CLAUDE_SCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".tsx", ".ts", ".jsx"]);
 
 export type ClaudeAuthEnvOverrides = {
   apiKey?: string | null;
   baseUrl?: string | null;
 };
 
-export function getClaudeCodeRuntimeOptions(): { executable?: string; executableArgs?: string[]; pathToClaudeCodeExecutable?: string } {
+type ClaudeCodeRuntimeOptions = {
+  executable?: string;
+  executableArgs?: string[];
+  pathToClaudeCodeExecutable?: string;
+  spawnClaudeCodeProcess?: (options: {
+    command: string;
+    args: string[];
+    cwd?: string;
+    env: NodeJS.ProcessEnv;
+    signal?: AbortSignal;
+  }) => ReturnType<typeof spawnChildProcess>;
+};
+
+export function isScriptClaudeCodeExecutable(path: string | null | undefined): boolean {
+  if (!path) return false;
+  return CLAUDE_SCRIPT_EXTENSIONS.has(extname(path).toLowerCase());
+}
+
+export function buildClaudeCodeRuntimeOptions(inputs: {
+  isBun: boolean;
+  bunPath: string | null;
+  claudePath: string | null;
+}): ClaudeCodeRuntimeOptions {
+  const { isBun, bunPath, claudePath } = inputs;
+
+  if (claudePath && !isScriptClaudeCodeExecutable(claudePath)) {
+    return {
+      pathToClaudeCodeExecutable: claudePath,
+      spawnClaudeCodeProcess: ({ args, cwd, env, signal }) => {
+        const bridgeEnv = { ...env };
+        delete bridgeEnv.CLAUDE_CODE_ENTRYPOINT;
+
+        const sanitizedArgs: string[] = [];
+        for (let index = 0; index < args.length; index++) {
+          const arg = args[index];
+          const nextArg = args[index + 1];
+          if (arg === "--setting-sources" && nextArg === "") {
+            index++;
+            continue;
+          }
+          if (arg === "--permission-mode" && nextArg === "default") {
+            index++;
+            continue;
+          }
+          sanitizedArgs.push(arg);
+        }
+
+        return spawnChildProcess(
+          "node",
+          ["-e", NATIVE_CLAUDE_INLINE_BRIDGE_SCRIPT, claudePath, ...sanitizedArgs],
+          {
+            cwd,
+            env: bridgeEnv,
+            stdio: ["pipe", "pipe", "pipe"],
+            signal,
+            windowsHide: true,
+          }
+        );
+      },
+    };
+  }
+
+  if (isBun) {
+    return {
+      executable: bunPath ?? "bun",
+      executableArgs: ["--env-file=/dev/null"],
+      ...(claudePath && { pathToClaudeCodeExecutable: claudePath }),
+    };
+  }
+
+  return { executable: "node", ...(claudePath && { pathToClaudeCodeExecutable: claudePath }) };
+}
+
+export function getClaudeCodeRuntimeOptions(): ClaudeCodeRuntimeOptions {
   const isBun = Boolean((process as any)?.versions?.bun);
 
   const claudePath = resolveClaudeCodeExecutable();
   const bunPath = isBun ? resolveBunExecutable() : null;
 
-  const runtimeOptions = isBun
-    ? {
-        executable: bunPath ?? "bun",
-        executableArgs: ["--env-file=/dev/null"],
-        ...(claudePath && { pathToClaudeCodeExecutable: claudePath }),
-      }
-    : { executable: "node", ...(claudePath && { pathToClaudeCodeExecutable: claudePath }) };
+  const runtimeOptions = buildClaudeCodeRuntimeOptions({
+    isBun,
+    bunPath,
+    claudePath,
+  });
 
   logClaudeRuntimeDiagnostics(runtimeOptions, bunPath, claudePath);
 
@@ -40,22 +126,22 @@ export function getClaudeCodeRuntimeOptions(): { executable?: string; executable
 export function buildClaudeCodeEnv(baseEnv: NodeJS.ProcessEnv, overrides?: ClaudeAuthEnvOverrides) {
   const env: Record<string, string | undefined> = { ...baseEnv };
 
-  // Clean all auth-related env vars - Navi provides auth explicitly
+  // Strip Navi-specific env so Claude only sees a clean execution context.
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("NAVI_")) {
+      delete env[key];
+    }
+  }
+
+  // Clean auth-related env vars - Navi provides auth explicitly when needed.
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_BASE_URL;
-  delete env.NAVI_ANTHROPIC_API_KEY;
-  delete env.NAVI_ANTHROPIC_BASE_URL;
-  delete env.NAVI_AUTH_MODE;
-  delete env.NAVI_AUTH_SOURCE;
 
   // Apply Navi-controlled overrides
   const apiKey = overrides?.apiKey ?? null;
   const baseUrl = overrides?.baseUrl ?? null;
   if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
   if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
-
-  // Set max output tokens (64k is the SDK's hard cap - values above this get capped)
-  env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "64000";
 
   return env;
 }
@@ -70,15 +156,16 @@ export function getNaviAuthOverridesFromEnv(env: NodeJS.ProcessEnv): ClaudeAuthE
 export function resolveClaudeCodeExecutable(): string | null {
   return (
     resolveClaudeCodeFromExplicitOverride() ||
-    resolveClaudeCodeFromResources() ||
-    resolveClaudeCodeFromNodeModules() ||
+    resolveClaudeCodeFromCommonPaths() ||
     resolveClaudeCodeFromPathEnv() ||
-    resolveClaudeCodeFromCommonPaths()
+    resolveClaudeCodeFromBundledOverride() ||
+    resolveClaudeCodeFromResources() ||
+    resolveClaudeCodeFromNodeModules()
   );
 }
 
 function logClaudeRuntimeDiagnostics(
-  runtimeOptions: { executable?: string; executableArgs?: string[]; pathToClaudeCodeExecutable?: string },
+  runtimeOptions: ClaudeCodeRuntimeOptions,
   bunPath: string | null,
   claudePath: string | null
 ) {
@@ -94,6 +181,7 @@ function logClaudeRuntimeDiagnostics(
     bun: describePath(bunPath),
     claudeCode: describePath(claudePath),
     runtimeOptions,
+    usesSpawnBridge: Boolean(runtimeOptions.spawnClaudeCodeProcess),
   };
   const message = `[Runtime] Claude Code runtime: ${JSON.stringify(payload)}`;
   console.error(message);
@@ -115,14 +203,24 @@ function firstExisting(paths: string[]): string | null {
 
 function resolveClaudeCodeFromExplicitOverride(): string | null {
   const explicit = [
-    process.env.NAVI_CLAUDE_CODE_PATH,
     process.env.CLAUDE_CODE_PATH,
     process.env.CLAUDE_CODE_EXECUTABLE,
+    process.env.NAVI_CLAUDE_CODE_PATH,
   ]
     .filter(Boolean)
     .map((value) => expandHome(value as string));
 
   return firstExisting(explicit);
+}
+
+function resolveClaudeCodeFromBundledOverride(): string | null {
+  const bundled = [
+    process.env.NAVI_BUNDLED_CLAUDE_CODE_PATH,
+  ]
+    .filter(Boolean)
+    .map((value) => expandHome(value as string));
+
+  return firstExisting(bundled);
 }
 
 function resolveClaudeCodeFromResources(): string | null {

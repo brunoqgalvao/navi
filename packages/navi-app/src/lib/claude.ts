@@ -113,11 +113,12 @@ export interface UserMessage {
   type: "user";
   sessionId?: string;
   uiSessionId?: string;
-  content: ContentBlock[];
+  content: ContentBlock[] | string;
   parentToolUseId: string | null;
   uuid?: string;
   timestamp?: number;
   isSynthetic?: boolean;
+  isCompactSummary?: boolean;
   toolUseResult?: unknown;
 }
 

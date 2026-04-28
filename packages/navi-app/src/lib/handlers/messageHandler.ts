@@ -15,9 +15,13 @@ import type {
 } from "../claude";
 import type { HandlerCallbacks, UICommand } from "./types";
 import type { TodoItem } from "../stores/types";
-import { sessionMessages } from "../stores";
+import { sessionMessages } from "../stores/session";
 import { handleStreamEvent } from "./streamHandler";
 import { get } from "svelte/store";
+import {
+  isCompactSummaryContent,
+  shouldDisplayOrPersistUserMessage,
+} from "../../../shared/sdk-user-message";
 
 export interface MessageHandlerConfig {
   callbacks: HandlerCallbacks;
@@ -139,11 +143,17 @@ export function createMessageHandler(config: MessageHandlerConfig) {
         if (!uiSessionId) break;
         const userMsg = msg as UserMessage;
         const userContent = userMsg.content;
-        const isSynthetic = !!userMsg.isSynthetic;
-        const hasToolResult = Array.isArray(userContent)
-          ? userContent.some((block) => block.type === "tool_result")
-          : false;
-        if (isSynthetic || hasToolResult) {
+        const isCompactSummary =
+          !!userMsg.isCompactSummary || isCompactSummaryContent(userContent);
+        const isSynthetic = !!userMsg.isSynthetic || isCompactSummary;
+        const shouldDisplay = shouldDisplayOrPersistUserMessage({
+          content: userContent,
+          isCompactSummary,
+          isSynthetic,
+          toolUseResult: userMsg.toolUseResult,
+        });
+
+        if (shouldDisplay) {
           sessionMessages.addMessage(uiSessionId, {
             id: crypto.randomUUID(),
             role: "user",

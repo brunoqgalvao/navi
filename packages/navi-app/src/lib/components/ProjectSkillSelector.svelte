@@ -3,6 +3,7 @@
   import { skillsApi, type Skill } from "../api";
   import { skillLibrary } from "../stores";
   import SkillCommandInstall from "./SkillCommandInstall.svelte";
+  import SkillMarketplace from "./SkillMarketplace.svelte";
 
   interface Props {
     projectId: string;
@@ -20,6 +21,8 @@
   let openMenuId: string | null = $state(null);
   let searchQuery = $state("");
   let showCommandInstall = $state(false);
+  let showMarketplace = $state(false);
+  let rescanning = $state(false);
 
   // Helper to check if skill matches search
   function matchesSearch(skill: Skill, query: string): boolean {
@@ -57,20 +60,50 @@
   );
 
   onMount(async () => {
+    if ($skillLibrary.length > 0) {
+      loading = false;
+      void loadSkills({ quiet: true });
+      return;
+    }
+
     await loadSkills();
   });
 
-  async function loadSkills() {
-    loading = true;
+  async function loadSkills(options?: { scan?: boolean; quiet?: boolean }) {
+    const scan = options?.scan ?? false;
+    const quiet = options?.quiet ?? false;
+
+    if (!quiet) {
+      loading = true;
+    }
     error = null;
     try {
-      await skillsApi.scan(projectPath ?? undefined);
-      const skills = await skillsApi.list();
+      if (scan) {
+        await skillsApi.scan(projectPath ?? undefined);
+      }
+
+      let skills = await skillsApi.list();
+      if (!scan && skills.length === 0) {
+        await skillsApi.scan(projectPath ?? undefined);
+        skills = await skillsApi.list();
+      }
+
       skillLibrary.set(skills);
     } catch (e: any) {
       error = e.message || "Failed to load skills";
     } finally {
-      loading = false;
+      if (!quiet) {
+        loading = false;
+      }
+    }
+  }
+
+  async function handleRescan() {
+    rescanning = true;
+    try {
+      await loadSkills({ scan: true, quiet: true });
+    } finally {
+      rescanning = false;
     }
   }
 
@@ -128,6 +161,20 @@
       </div>
       <div class="flex items-center gap-2">
         <button
+          onclick={() => (showMarketplace = true)}
+          class="flex items-center gap-2 rounded-lg border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100"
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          Marketplace
+        </button>
+        <button
           onclick={() => (showCommandInstall = true)}
           class="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100"
         >
@@ -139,7 +186,22 @@
               d="M13 10V3L4 14h7v7l9-11h-7z"
             />
           </svg>
-          Install Skill
+          Paste Command
+        </button>
+        <button
+          onclick={handleRescan}
+          disabled={rescanning}
+          class="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <svg class="h-4 w-4 {rescanning ? 'animate-spin' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          {rescanning ? "Rescanning..." : "Rescan"}
         </button>
         {#if onCreateSkill}
           <button
@@ -220,6 +282,20 @@
         {#if onCreateSkill}
           <div class="flex items-center justify-center gap-3">
             <button
+              onclick={() => (showMarketplace = true)}
+              class="inline-flex items-center gap-2 rounded-lg border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100"
+            >
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+              Browse Marketplace
+            </button>
+            <button
               onclick={() => (showCommandInstall = true)}
               class="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100"
             >
@@ -231,7 +307,7 @@
                   d="M13 10V3L4 14h7v7l9-11h-7z"
                 />
               </svg>
-              Install Skill
+              Paste Command
             </button>
             <button
               onclick={onCreateSkill}
@@ -494,4 +570,18 @@
   installTarget="project"
   {projectId}
   {projectPath}
+  onInstalled={() => {
+    void loadSkills({ quiet: true });
+  }}
+/>
+
+<SkillMarketplace
+  open={showMarketplace}
+  onClose={() => (showMarketplace = false)}
+  installTarget="project"
+  {projectId}
+  {projectPath}
+  onInstalled={() => {
+    void loadSkills({ quiet: true });
+  }}
 />

@@ -226,7 +226,11 @@
     <!-- Header -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
       <h2 class="text-lg font-semibold text-gray-900">Branch Manager</h2>
-      <button onclick={onClose} class="p-1 text-gray-400 hover:text-gray-600 rounded">
+      <button
+        onclick={onClose}
+        aria-label="Close branch manager"
+        class="p-1 text-gray-400 hover:text-gray-600 rounded"
+      >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
         </svg>
@@ -467,7 +471,7 @@
       <h3 class="text-lg font-semibold text-gray-900 mb-4">Rename Branch</h3>
       <div class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Current Name</label>
+          <p class="block text-sm font-medium text-gray-700 mb-1">Current Name</p>
           <div class="px-3 py-2 bg-gray-100 rounded-lg text-sm text-gray-600">{selectedBranch}</div>
         </div>
         <div>

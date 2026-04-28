@@ -16,6 +16,19 @@ if [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
   exit 1
 fi
 
+prune_local_release_artifacts() {
+  echo "Cleaning stale Tauri bundle output..."
+  rm -rf src-tauri/target/release/bundle
+
+  mkdir -p ../landing-page/public/downloads
+  if [ "${NAVI_KEEP_DOWNLOAD_HISTORY:-0}" = "1" ]; then
+    echo "Keeping existing landing-page DMGs (NAVI_KEEP_DOWNLOAD_HISTORY=1)"
+  else
+    echo "Removing old landing-page DMGs..."
+    find ../landing-page/public/downloads -maxdepth 1 -type f -name 'Navi_*.dmg' -delete
+  fi
+}
+
 ARCH="$(uname -m)"
 case "$ARCH" in
   arm64)
@@ -63,6 +76,8 @@ if [ -z "$BUN_SRC" ] || [ ! -x "$BUN_SRC" ]; then
   echo "Set NAVI_BUN_SIDECAR_PATH or NAVI_BUN_PATH to the bun executable." >&2
   exit 1
 fi
+
+prune_local_release_artifacts
 
 mkdir -p src-tauri/binaries
 cp "$BUN_SRC" "src-tauri/binaries/bun-$TAURI_TARGET"

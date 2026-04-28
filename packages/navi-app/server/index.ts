@@ -172,7 +172,7 @@ if (stats.total === 0) {
   searchIndex.reindexAll();
 }
 
-const PREFERRED_PORT = parseInt(process.argv[2] || Bun.env.PORT || "3001", 10);
+const PREFERRED_PORT = parseInt(process.argv[2] || Bun.env.PORT || "3021", 10);
 const PORT = await findAvailablePort(PREFERRED_PORT);
 
 // Spawn PTY server when running in Tauri (bundled) mode

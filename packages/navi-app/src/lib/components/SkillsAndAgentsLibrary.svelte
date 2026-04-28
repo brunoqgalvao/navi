@@ -114,12 +114,20 @@
   });
 
   async function loadSkills() {
-    loadingSkills = true;
+    const alreadyLoaded = $skillLibrary.length > 0;
+    if (!alreadyLoaded) {
+      loadingSkills = true;
+    } else {
+      loadingSkills = false;
+    }
     skillsError = null;
     try {
-      // Scan both global and project skills to auto-import any new ones
-      await skillsApi.scan($currentProject?.path);
-      const skills = await skillsApi.list();
+      let skills = await skillsApi.list();
+      if (skills.length === 0) {
+        await skillsApi.scan($currentProject?.path);
+        skills = await skillsApi.list();
+      }
+
       skillLibrary.set(skills);
       showCreateExamples = skills.length === 0;
     } catch (e: any) {
@@ -494,6 +502,7 @@
         </div>
         <button
           onclick={() => (showHelp = false)}
+          aria-label="Close help"
           class="p-1 text-gray-400 hover:text-gray-600"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

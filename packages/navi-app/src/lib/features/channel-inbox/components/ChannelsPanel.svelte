@@ -60,6 +60,7 @@
     {#if view === "chat" && $selectedChat}
       <button
         onclick={backToInbox}
+        aria-label="Back to inbox"
         class="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
       >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -80,6 +81,7 @@
     {:else if view === "connect"}
       <button
         onclick={backToInbox}
+        aria-label="Back to inbox"
         class="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
       >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -103,6 +105,7 @@
       </div>
       <button
         onclick={openConnect}
+        aria-label="Connect a channel"
         class="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         title="Connect a channel"
       >

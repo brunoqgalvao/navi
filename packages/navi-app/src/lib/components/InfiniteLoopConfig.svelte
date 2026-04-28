@@ -1,22 +1,28 @@
 <script lang="ts">
   import Modal from "./Modal.svelte";
   import { getServerUrl } from "$lib/api";
+  import { getDefaultContextResetThresholdPercent } from "$lib/context-window";
   import { backendModels, getBackendModelsFormatted } from "$lib/stores";
   import { get } from "svelte/store";
+  import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../../shared/anthropic-models";
 
   interface Props {
     open: boolean;
     sessionId: string;
     projectId: string;
     prompt: string;
+    contextWindow: number;
     onClose: () => void;
     onStart: (loopId: string) => void;
   }
 
-  let { open, sessionId, projectId, prompt, onClose, onStart }: Props = $props();
+  let { open, sessionId, projectId, prompt, contextWindow, onClose, onStart }: Props = $props();
 
   // Get available Claude models for verifier
   let claudeModels = $derived(getBackendModelsFormatted("claude", get(backendModels)));
+  const defaultContextResetThreshold = $derived(
+    getDefaultContextResetThresholdPercent(contextWindow)
+  );
 
   // Configuration state
   let definitionOfDone = $state<string[]>(["Task is functionally complete"]);
@@ -24,9 +30,10 @@
   let maxIterations = $state(100);
   let maxCost = $state(50);
   let contextResetThreshold = $state(70);
-  let verifierModel = $state("claude-3-5-haiku-20241022"); // Default to haiku
+  let verifierModel = $state(DEFAULT_CLAUDE_LIGHT_MODEL);
   let isStarting = $state(false);
   let error = $state<string | null>(null);
+  let wasOpen = $state(false);
 
   // Preset DoD suggestions
   const dodPresets = [
@@ -103,6 +110,21 @@
       addDodItem();
     }
   }
+
+  $effect(() => {
+    if (open && !wasOpen) {
+      contextResetThreshold = defaultContextResetThreshold;
+      error = null;
+      wasOpen = true;
+      return;
+    }
+
+    if (!open && wasOpen) {
+      wasOpen = false;
+      isStarting = false;
+      error = null;
+    }
+  });
 </script>
 
 <Modal {open} {onClose} title="🔄 Infinite Loop Mode" size="lg">
@@ -221,7 +243,9 @@
             />
             <span class="text-gray-500">%</span>
           </div>
-          <p class="text-xs text-gray-500 mt-1">Reset context when window fills</p>
+          <p class="text-xs text-gray-500 mt-1">
+            Default for this workspace: {defaultContextResetThreshold}% of the {contextWindow.toLocaleString()} token window
+          </p>
         </div>
 
         <!-- Max Iterations -->
@@ -249,13 +273,13 @@
             class="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
           >
             {#each claudeModels as model}
-              <option value={model.id}>
-                {model.name}
-                {#if model.id.includes("haiku")}
+              <option value={model.value}>
+                {model.displayName}
+                {#if model.value.includes("haiku")}
                   (fast, cheap)
-                {:else if model.id.includes("sonnet")}
+                {:else if model.value.includes("sonnet")}
                   (balanced)
-                {:else if model.id.includes("opus")}
+                {:else if model.value.includes("opus")}
                   (thorough)
                 {/if}
               </option>

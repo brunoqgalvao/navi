@@ -222,7 +222,7 @@ function calculateNextRun(schedule: Schedule): number | undefined {
 
 async function executeQuery(payload: PayloadQuery): Promise<string> {
   // Use Navi API to inject message
-  const serverUrl = process.env.NAVI_SERVER_URL || "http://localhost:3001";
+  const serverUrl = process.env.NAVI_SERVER_URL || "http://localhost:3021";
 
   let sessionId = payload.sessionId;
 
@@ -283,7 +283,7 @@ async function executeCommand(payload: PayloadCommand): Promise<string> {
 
 async function executeNotification(payload: PayloadNotification): Promise<string> {
   // Use Navi API to show notification
-  const serverUrl = process.env.NAVI_SERVER_URL || "http://localhost:3001";
+  const serverUrl = process.env.NAVI_SERVER_URL || "http://localhost:3021";
 
   const response = await fetch(`${serverUrl}/api/ui/notification`, {
     method: "POST",

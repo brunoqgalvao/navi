@@ -4,10 +4,13 @@ import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { createHash } from "crypto";
+import sharp, { type Metadata } from "sharp";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions, getNaviAuthOverridesFromEnv } from "./utils/claude-code";
 import { getAgentDefinition, inferAgentTypeFromRole } from "./agent-types";
 import { agentLoader, type ResolvedAgent, type AgentBundle } from "./services/agent-loader";
 import { buildSystemPromptAppend } from "./services/system-prompt-append";
+import { getSdkUserMessageFlags } from "../shared/sdk-user-message";
 
 interface SkillInfo {
   name: string;
@@ -866,7 +869,7 @@ The deliverable will be sent to your parent, who will incorporate it into their 
 // Navi Context Tools - View process/terminal logs
 // ============================================================================
 
-const NAVI_API_BASE = process.env.NAVI_API_URL || "http://localhost:3001";
+const NAVI_API_BASE = process.env.NAVI_API_URL || "http://localhost:3021";
 let currentSessionIdForNaviContext: string | null = null;
 
 async function fetchNaviApi(path: string): Promise<any> {
@@ -1276,7 +1279,8 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         usage: (msg as any).message?.usage,
       };
 
-    case "user":
+    case "user": {
+      const userFlags = getSdkUserMessageFlags(msg);
       return {
         type: "user",
         uiSessionId,
@@ -1284,10 +1288,12 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         parentToolUseId: msg.parent_tool_use_id || null,
         uuid,
         timestamp,
-        isSynthetic: (msg as any).isSynthetic,
-        toolUseResult: (msg as any).tool_use_result,
-        isReplay: (msg as any).isReplay,
+        isSynthetic: userFlags.isSynthetic,
+        isCompactSummary: userFlags.isCompactSummary,
+        toolUseResult: userFlags.toolUseResult,
+        isReplay: userFlags.isReplay,
       };
+    }
 
     case "result": {
       const resultMsg = msg as any;
@@ -1363,6 +1369,241 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
 }
 
 let sessionApprovedAll = false;
+
+const FILE_REFERENCE_REGEX = /\[File: ([^\]]+)\]/g;
+const IMAGE_TARGET_BYTES = 4 * 1024 * 1024;
+const NORMAL_IMAGE_ATTEMPTS = [
+  { maxDimension: 2048, quality: 82 },
+  { maxDimension: 1800, quality: 76 },
+  { maxDimension: 1536, quality: 70 },
+];
+const AGGRESSIVE_IMAGE_ATTEMPTS = [
+  { maxDimension: 1600, quality: 68 },
+  { maxDimension: 1280, quality: 60 },
+  { maxDimension: 1024, quality: 52 },
+];
+const SUPPORTED_RASTER_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff"]);
+
+type ImageOptimizationMode = "normal" | "aggressive";
+
+interface OptimizedImageRef {
+  originalPath: string;
+  finalPath: string;
+  originalBytes: number;
+  finalBytes: number;
+}
+
+interface PreparedPromptResult {
+  prompt: string;
+  replacements: OptimizedImageRef[];
+}
+
+function extractFileReferences(prompt: string): string[] {
+  const refs: string[] = [];
+  const seen = new Set<string>();
+
+  for (const match of prompt.matchAll(FILE_REFERENCE_REGEX)) {
+    const filePath = match[1]?.trim();
+    if (!filePath || seen.has(filePath)) continue;
+    seen.add(filePath);
+    refs.push(filePath);
+  }
+
+  return refs;
+}
+
+function isSupportedRasterImage(filePath: string): boolean {
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  return SUPPORTED_RASTER_IMAGE_EXTENSIONS.has(ext);
+}
+
+function shouldOptimizeImage(stats: fs.Stats, metadata: Metadata, mode: ImageOptimizationMode): boolean {
+  if (!metadata.width || !metadata.height) return false;
+
+  const maxDimension = mode === "aggressive"
+    ? AGGRESSIVE_IMAGE_ATTEMPTS[0].maxDimension
+    : NORMAL_IMAGE_ATTEMPTS[0].maxDimension;
+
+  return (
+    mode === "aggressive" ||
+    stats.size > IMAGE_TARGET_BYTES ||
+    metadata.width > maxDimension ||
+    metadata.height > maxDimension
+  );
+}
+
+function buildOptimizedImagePath(
+  sourcePath: string,
+  cwd: string,
+  sourceStats: fs.Stats,
+  outputExt: "jpg" | "png",
+  mode: ImageOptimizationMode,
+  attempt: { maxDimension: number; quality: number }
+): string {
+  const outputDir = path.join(cwd, ".claude", "optimized_images");
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const safeBaseName = (path.basename(sourcePath, path.extname(sourcePath)).replace(/[^a-zA-Z0-9._-]+/g, "-") || "image")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "");
+
+  const cacheKey = createHash("sha1")
+    .update(JSON.stringify({
+      sourcePath,
+      mtimeMs: sourceStats.mtimeMs,
+      size: sourceStats.size,
+      outputExt,
+      mode,
+      attempt,
+    }))
+    .digest("hex")
+    .slice(0, 12);
+
+  return path.join(outputDir, `${safeBaseName}-${cacheKey}.${outputExt}`);
+}
+
+async function renderOptimizedImage(
+  sourcePath: string,
+  outputPath: string,
+  outputExt: "jpg" | "png",
+  attempt: { maxDimension: number; quality: number }
+): Promise<number> {
+  let pipeline = sharp(sourcePath, { animated: false, failOn: "none" })
+    .rotate()
+    .resize({
+      width: attempt.maxDimension,
+      height: attempt.maxDimension,
+      fit: "inside",
+      withoutEnlargement: true,
+    });
+
+  if (outputExt === "png") {
+    pipeline = pipeline.png({
+      compressionLevel: 9,
+      palette: true,
+      quality: attempt.quality,
+      effort: 10,
+    });
+  } else {
+    pipeline = pipeline.jpeg({
+      quality: attempt.quality,
+      mozjpeg: true,
+    });
+  }
+
+  await pipeline.toFile(outputPath);
+  return fs.statSync(outputPath).size;
+}
+
+async function optimizeImageReference(
+  sourcePath: string,
+  cwd: string,
+  mode: ImageOptimizationMode
+): Promise<OptimizedImageRef | null> {
+  if (!isSupportedRasterImage(sourcePath) || !fs.existsSync(sourcePath)) {
+    return null;
+  }
+
+  let sourceStats: fs.Stats;
+  try {
+    sourceStats = fs.statSync(sourcePath);
+  } catch {
+    return null;
+  }
+
+  if (!sourceStats.isFile()) {
+    return null;
+  }
+
+  const metadata = await sharp(sourcePath, { animated: true, failOn: "none" }).metadata();
+  if (!shouldOptimizeImage(sourceStats, metadata, mode)) {
+    return null;
+  }
+
+  // Skip animated images. They are rare in this flow and aggressive re-encoding
+  // would flatten the animation.
+  if ((metadata.pages || 1) > 1) {
+    return null;
+  }
+
+  const outputExt: "jpg" | "png" = metadata.hasAlpha ? "png" : "jpg";
+  const attempts = mode === "aggressive" ? AGGRESSIVE_IMAGE_ATTEMPTS : NORMAL_IMAGE_ATTEMPTS;
+  let bestCandidate: { path: string; size: number } | null = null;
+
+  for (const attempt of attempts) {
+    const outputPath = buildOptimizedImagePath(sourcePath, cwd, sourceStats, outputExt, mode, attempt);
+
+    let candidateSize: number;
+    if (fs.existsSync(outputPath)) {
+      candidateSize = fs.statSync(outputPath).size;
+    } else {
+      try {
+        candidateSize = await renderOptimizedImage(sourcePath, outputPath, outputExt, attempt);
+      } catch (error) {
+        console.error(`[Worker] Failed to optimize image ${sourcePath}:`, error);
+        continue;
+      }
+    }
+
+    if (candidateSize < sourceStats.size && (!bestCandidate || candidateSize < bestCandidate.size)) {
+      bestCandidate = { path: outputPath, size: candidateSize };
+    }
+
+    if (candidateSize <= IMAGE_TARGET_BYTES) {
+      break;
+    }
+  }
+
+  if (!bestCandidate) {
+    return null;
+  }
+
+  return {
+    originalPath: sourcePath,
+    finalPath: bestCandidate.path,
+    originalBytes: sourceStats.size,
+    finalBytes: bestCandidate.size,
+  };
+}
+
+async function preparePromptImageReferences(
+  prompt: string,
+  cwd: string,
+  mode: ImageOptimizationMode
+): Promise<PreparedPromptResult> {
+  const fileRefs = extractFileReferences(prompt);
+  if (fileRefs.length === 0) {
+    return { prompt, replacements: [] };
+  }
+
+  let nextPrompt = prompt;
+  const replacements: OptimizedImageRef[] = [];
+
+  for (const fileRef of fileRefs) {
+    try {
+      const optimized = await optimizeImageReference(fileRef, cwd, mode);
+      if (!optimized) continue;
+
+      nextPrompt = nextPrompt.split(`[File: ${optimized.originalPath}]`).join(`[File: ${optimized.finalPath}]`);
+      replacements.push(optimized);
+    } catch (error) {
+      console.error(`[Worker] Failed while preparing image ref ${fileRef}:`, error);
+    }
+  }
+
+  return { prompt: nextPrompt, replacements };
+}
+
+function isImageTooLargeError(error: unknown): boolean {
+  const text = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
+  return (
+    text.includes("image too large") ||
+    text.includes("file too large") ||
+    (text.includes("image") && text.includes("too large")) ||
+    (text.includes("image") && text.includes("size")) ||
+    (text.includes("image") && text.includes("exceeds"))
+  );
+}
 
 async function runQuery(input: WorkerInput): Promise<boolean> {
   const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs } = input;
@@ -1741,74 +1982,137 @@ Example clarifying questions:
     const finalModel = agentModel || model;
     console.error(`[Worker] Final model: ${finalModel || "default"}`);
 
-    const q = query({
-      prompt,
-      options: {
-        cwd,
-        resume,
-        model: finalModel,
-        tools: allTools,
-        allowedTools: permissionSettings?.autoAcceptAll ? allTools : autoAllowedTools,
-        env: claudeEnv,
-        ...runtimeOptions,
-        permissionMode: "default",
-        canUseTool,
-        settingSources: ['user', 'project', 'local'] as const,
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
-        includePartialMessages: true,
-        mcpServers,
-        // Pass SDK subagents (for Task tool spawning)
-        // This includes: all Navi Agents + their defined subagents
-        ...(Object.keys(sdkSubagents).length > 0 && { agents: sdkSubagents }),
-      },
-    });
+    type QueryAttemptResult = {
+      success: boolean;
+      error?: unknown;
+      errorMessage?: string;
+      lastAssistantContent: any[];
+      lastAssistantUsage: any;
+      resultData: any;
+      sawAssistantOutput: boolean;
+    };
 
-    let lastAssistantContent: any[] = [];
-    let lastAssistantUsage: any = null;
-    let resultData: any = null;
+    const executePrompt = async (promptToRun: string): Promise<QueryAttemptResult> => {
+      const q = query({
+        prompt: promptToRun,
+        options: {
+          cwd,
+          resume,
+          model: finalModel,
+          tools: allTools,
+          allowedTools: permissionSettings?.autoAcceptAll ? allTools : autoAllowedTools,
+          env: claudeEnv,
+          ...runtimeOptions,
+          permissionMode: "default",
+          canUseTool,
+          settingSources: ['user', 'project', 'local'] as const,
+          systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
+          includePartialMessages: true,
+          mcpServers,
+          // Pass SDK subagents (for Task tool spawning)
+          // This includes: all Navi Agents + their defined subagents
+          ...(Object.keys(sdkSubagents).length > 0 && { agents: sdkSubagents }),
+        },
+      });
 
-    for await (const msg of q) {
-      console.error(`[Worker] MSG type: ${msg.type}`, msg.type === "stream_event" ? (msg as any).event?.type : "");
-      
-      const formatted = formatMessage(msg, sessionId);
-      send({ type: "message", data: formatted });
+      let lastAssistantContent: any[] = [];
+      let lastAssistantUsage: any = null;
+      let resultData: any = null;
+      let sawAssistantOutput = false;
 
-      if (msg.type === "system" && (msg as any).subtype === "init") {
-        const initMsg = msg as any;
-        console.error(`[Worker] SDK init received:`);
-        console.error(`[Worker]   apiKeySource: ${initMsg.apiKeySource || "not reported"}`);
-        console.error(`[Worker]   model: ${initMsg.model}`);
-        console.error(`[Worker]   tools: ${initMsg.tools?.length || 0}`);
-        console.error(`[Worker]   skills: ${initMsg.skills?.join(", ") || "none"}`);
-      }
+      try {
+        for await (const msg of q) {
+          console.error(`[Worker] MSG type: ${msg.type}`, msg.type === "stream_event" ? (msg as any).event?.type : "");
 
-      if (msg.type === "assistant") {
-        lastAssistantContent = msg.message.content;
-        console.error(`[Worker] Assistant content:`, JSON.stringify(lastAssistantContent, null, 2));
-        const usage = (msg as any).message?.usage;
-        if (!msg.parent_tool_use_id && usage) {
-          lastAssistantUsage = usage;
+          const formatted = formatMessage(msg, sessionId);
+          send({ type: "message", data: formatted });
+
+          if (msg.type === "system" && (msg as any).subtype === "init") {
+            const initMsg = msg as any;
+            console.error(`[Worker] SDK init received:`);
+            console.error(`[Worker]   apiKeySource: ${initMsg.apiKeySource || "not reported"}`);
+            console.error(`[Worker]   model: ${initMsg.model}`);
+            console.error(`[Worker]   tools: ${initMsg.tools?.length || 0}`);
+            console.error(`[Worker]   skills: ${initMsg.skills?.join(", ") || "none"}`);
+          }
+
+          if (msg.type === "assistant") {
+            sawAssistantOutput = true;
+            lastAssistantContent = msg.message.content;
+            console.error(`[Worker] Assistant content:`, JSON.stringify(lastAssistantContent, null, 2));
+            const usage = (msg as any).message?.usage;
+            if (!msg.parent_tool_use_id && usage) {
+              lastAssistantUsage = usage;
+            }
+          }
+          if (msg.type === "result") {
+            resultData = msg;
+            console.error(`[Worker] Result:`, JSON.stringify(resultData, null, 2));
+          }
         }
+
+        send({
+          type: "complete",
+          sessionId,
+          lastAssistantContent,
+          lastAssistantUsage,
+          resultData: resultData ? {
+            session_id: resultData.session_id,
+            model: resultData.model,
+            total_cost_usd: resultData.total_cost_usd,
+            num_turns: resultData.num_turns,
+            usage: resultData.usage,
+          } : null,
+        });
+
+        return {
+          success: true,
+          lastAssistantContent,
+          lastAssistantUsage,
+          resultData,
+          sawAssistantOutput,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error,
+          errorMessage: error instanceof Error ? error.message : String(error || "Unknown error"),
+          lastAssistantContent,
+          lastAssistantUsage,
+          resultData,
+          sawAssistantOutput,
+        };
       }
-      if (msg.type === "result") {
-        resultData = msg;
-        console.error(`[Worker] Result:`, JSON.stringify(resultData, null, 2));
+    };
+
+    const preparedPrompt = await preparePromptImageReferences(prompt, cwd, "normal");
+    if (preparedPrompt.replacements.length > 0) {
+      const summary = preparedPrompt.replacements
+        .map((item) => `${path.basename(item.originalPath)} ${Math.round(item.originalBytes / 1024)}KB -> ${Math.round(item.finalBytes / 1024)}KB`)
+        .join(", ");
+      console.error(`[Worker] Optimized image refs before Claude query: ${summary}`);
+    }
+
+    let attemptResult = await executePrompt(preparedPrompt.prompt);
+
+    if (!attemptResult.success && isImageTooLargeError(attemptResult.error) && !attemptResult.sawAssistantOutput) {
+      console.error(`[Worker] Claude rejected an image as too large. Retrying once with aggressive image optimization.`);
+      const retryPrompt = await preparePromptImageReferences(prompt, cwd, "aggressive");
+
+      if (retryPrompt.replacements.length > 0) {
+        const retrySummary = retryPrompt.replacements
+          .map((item) => `${path.basename(item.originalPath)} ${Math.round(item.originalBytes / 1024)}KB -> ${Math.round(item.finalBytes / 1024)}KB`)
+          .join(", ");
+        console.error(`[Worker] Aggressive retry image refs: ${retrySummary}`);
+        attemptResult = await executePrompt(retryPrompt.prompt);
       }
     }
 
-    send({
-      type: "complete",
-      sessionId,
-      lastAssistantContent,
-      lastAssistantUsage,
-      resultData: resultData ? {
-        session_id: resultData.session_id,
-        model: resultData.model,
-        total_cost_usd: resultData.total_cost_usd,
-        num_turns: resultData.num_turns,
-        usage: resultData.usage,
-      } : null,
-    });
+    if (!attemptResult.success) {
+      throw attemptResult.error instanceof Error
+        ? attemptResult.error
+        : new Error(attemptResult.errorMessage || "Unknown error");
+    }
 
     return true;
 

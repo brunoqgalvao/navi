@@ -287,7 +287,7 @@
 
   function getProxiedUrl(url: string): string {
     const formatted = formatUrl(url);
-    // IMPORTANT: Use absolute URL with getServerUrl() to ensure requests go to backend (port 3001/3011)
+    // IMPORTANT: Use absolute URL with getServerUrl() to ensure requests go to backend (port 3021/3011)
     // not the frontend dev server (port 1420) which would serve the Navi UI instead
     const serverUrl = getServerUrl();
 
@@ -866,7 +866,7 @@
       // Set a timeout to show unavailable message
       inspectorTimeout = setTimeout(() => {
         if (!inspectorReady) {
-          alert('Inspector not available.\n\nAdd the Navi inspector script to your dev server.\nSee: http://localhost:3001/navi-inspector.js');
+          alert('Inspector not available.\n\nAdd the Navi inspector script to your dev server.\nSee: http://localhost:3021/navi-inspector.js');
         }
       }, 500);
       return;

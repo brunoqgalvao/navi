@@ -294,7 +294,7 @@ export async function autoDetectPreviewConfig(projectPath: string): Promise<Prev
   let framework = "generic";
   let devPort = 3000;
   let hasBackend = false;
-  let backendPort = 3001;
+  let backendPort = 3021;
   let installCmd = pm === "bun" ? "bun install --ignore-scripts" : `${pm} install`;
   let devCmd = "";
   let setupCmds: string[] = [];

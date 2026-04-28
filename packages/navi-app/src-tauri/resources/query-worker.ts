@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions, getNaviAuthOverridesFromEnv } from "./utils/claude-code";
+import { getSdkUserMessageFlags } from "../../shared/sdk-user-message";
 
 interface SkillInfo {
   name: string;
@@ -490,7 +491,8 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         usage: (msg as any).message?.usage,
       };
 
-    case "user":
+    case "user": {
+      const userFlags = getSdkUserMessageFlags(msg);
       return {
         type: "user",
         uiSessionId,
@@ -498,10 +500,12 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         parentToolUseId: msg.parent_tool_use_id || null,
         uuid,
         timestamp,
-        isSynthetic: (msg as any).isSynthetic,
-        toolUseResult: (msg as any).tool_use_result,
-        isReplay: (msg as any).isReplay,
+        isSynthetic: userFlags.isSynthetic,
+        isCompactSummary: userFlags.isCompactSummary,
+        toolUseResult: userFlags.toolUseResult,
+        isReplay: userFlags.isReplay,
       };
+    }
 
     case "result": {
       const resultMsg = msg as any;

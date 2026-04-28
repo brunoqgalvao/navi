@@ -80,7 +80,7 @@ bun run --cwd packages/navi-app check
 bun run --cwd packages/navi-app test:api
 ```
 
-**Ports:** Frontend dev: 1420 | Backend: 3001 | PTY server: 3002
+**Ports:** Frontend dev: 1420 | Backend: 3021 | PTY server: 3022
 
 ---
 

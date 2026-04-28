@@ -248,6 +248,12 @@ export interface InboxItem {
   resolved_at: number | null;
 }
 
+export interface InboxItemWithProject extends InboxItem {
+  project_name: string | null;
+  project_path: string | null;
+  project_archived: number | null;
+}
+
 export interface ActiveSessionStatus {
   sessionId: string;
   projectId: string;
@@ -546,6 +552,7 @@ export const api = {
   },
 
   inbox: {
+    listAll: () => request<InboxItemWithProject[]>("/inbox"),
     list: (projectId: string) => request<InboxItem[]>(`/projects/${projectId}/inbox`),
     get: (id: string) => request<InboxItem>(`/inbox/${id}`),
     create: (
@@ -1404,7 +1411,7 @@ export const terminalApi = {
     ),
 };
 
-// PTY Server API (talks directly to Node PTY server on port 3002)
+// PTY Server API (talks directly to Node PTY server on port 3022)
 export interface PtyTerminalInfo {
   terminalId: string;
   pid: number;

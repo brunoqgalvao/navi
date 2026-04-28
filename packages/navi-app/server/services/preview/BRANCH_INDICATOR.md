@@ -21,7 +21,7 @@ The preview panel now routes iframe requests through a **proxy** that automatica
 
 When you open a preview:
 - Direct URL: `http://localhost:4001` (for "Open in Browser")
-- Proxy URL: `http://localhost:3001/api/preview/proxy/4001/` (for iframe, with indicator)
+- Proxy URL: `http://localhost:3021/api/preview/proxy/4001/` (for iframe, with indicator)
 
 ## Automatic Injection (for Navi Apps Only)
 
@@ -42,7 +42,7 @@ Add this to your HTML `<head>` or before `</body>`:
   // Set branch name (optional, will auto-detect from parent window)
   window.NAVI_BRANCH = 'my-feature-branch';
 </script>
-<script src="http://localhost:3001/api/preview/branch-indicator.js" async></script>
+<script src="http://localhost:3021/api/preview/branch-indicator.js" async></script>
 ```
 
 ### Option 2: Dynamic Import
@@ -51,7 +51,7 @@ Add this to your HTML `<head>` or before `</body>`:
 // In your app's entry point
 if (process.env.NAVI_PREVIEW === 'true') {
   const script = document.createElement('script');
-  script.src = 'http://localhost:3001/api/preview/branch-indicator.js';
+  script.src = 'http://localhost:3021/api/preview/branch-indicator.js';
   script.async = true;
   document.head.appendChild(script);
 }

@@ -8,7 +8,7 @@
   // When loaded via proxy, we're same-origin with Navi. When loaded via dev server plugin,
   // we need to postMessage to the Navi origin. Detect which case we're in.
   const isProxied = window.location.pathname.startsWith('/api/preview/proxy/');
-  const NAVI_ORIGIN = isProxied ? window.location.origin : 'http://localhost:3001';
+  const NAVI_ORIGIN = isProxied ? window.location.origin : 'http://localhost:3021';
   const INSPECTOR_ID = 'navi-inspector-' + Math.random().toString(36).slice(2, 9);
 
   // State

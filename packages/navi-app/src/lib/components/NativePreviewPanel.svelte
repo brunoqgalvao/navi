@@ -126,7 +126,7 @@
 
   // Load preview through the proxy for script injection (inspector, branch indicator, OAuth intercept)
   // The proxy rewrites URLs and injects Navi's helper scripts into HTML responses
-  // IMPORTANT: Use absolute URL with getServerUrl() to ensure requests go to backend (port 3001/3011)
+  // IMPORTANT: Use absolute URL with getServerUrl() to ensure requests go to backend (port 3021/3011)
   // not the frontend dev server (port 1420) which would serve the Navi UI instead
   const iframeSrc = $derived(() => {
     const portFromUrl = currentUrl ? getPortFromUrl(currentUrl) : null;

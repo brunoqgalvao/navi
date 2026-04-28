@@ -69,6 +69,13 @@
 
   let showOAuthSetup = $state(false);
   let checkingOAuth = $state(false);
+  const claudeLoginCommand = "claude auth login";
+
+  function notifyClaudeAuthUpdated() {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("navi:claude-auth-updated"));
+    }
+  }
 
   let permissionSettings = $state<PermissionSettings | null>(null);
   let defaultTools = $state<string[]>([]);
@@ -352,6 +359,7 @@
       authMethod = "api_key";
       showAnthropicInput = false;
       anthropicKeyInput = "";
+      notifyClaudeAuthUpdated();
     } catch (e: any) {
       anthropicError = e.message || "Failed to save API key";
     } finally {
@@ -407,6 +415,7 @@
       if (auth.hasOAuth) {
         showOAuthSetup = false;
       }
+      notifyClaudeAuthUpdated();
     } finally {
       checkingOAuth = false;
     }
@@ -540,10 +549,10 @@
                         </div>
                         {#if hasOAuth && hasAnthropicKey}
                           <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">
-                            Using {authMethod === "oauth" ? "OAuth" : "API Key"}
+                            Using {authMethod === "oauth" ? "Claude Login" : "API Key"}
                           </span>
                         {:else if authMethod === "oauth"}
-                          <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">OAuth Connected</span>
+                          <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">Claude Login Connected</span>
                         {:else if authMethod === "api_key"}
                           <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">API Key Set</span>
                         {:else}
@@ -561,7 +570,7 @@
                       </div>
 
                       <div class="space-y-3 pt-2">
-                        <div class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">OAuth</div>
+                        <div class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Claude Login</div>
                         {#if hasOAuth && !showOAuthSetup}
                           <div class="flex items-center gap-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2.5">
                             <svg class="w-4 h-4 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -578,9 +587,9 @@
                         {:else if showOAuthSetup}
                           <div class="bg-gray-900 dark:bg-black rounded-lg p-3 font-mono text-sm">
                             <div class="flex items-center justify-between">
-                              <code class="text-emerald-400">claude login</code>
+                              <code class="text-emerald-400">{claudeLoginCommand}</code>
                               <button
-                                onclick={() => navigator.clipboard.writeText("claude login")}
+                                onclick={() => navigator.clipboard.writeText(claudeLoginCommand)}
                                 class="text-gray-500 hover:text-white transition-colors p-1"
                                 title="Copy to clipboard"
                               >
@@ -612,7 +621,7 @@
                             disabled={!claudeInstalled}
                             class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {claudeInstalled ? "Setup OAuth" : "Install Claude CLI first"}
+                            {claudeInstalled ? "Set Up Claude Login" : "Install Claude CLI first"}
                           </button>
                         {/if}
                       </div>
@@ -673,7 +682,7 @@
                           <div class="flex items-center justify-between">
                             <div>
                               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Active Method</span>
-                              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">You have both OAuth and API key configured</p>
+                              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">You have both Claude login and API key configured</p>
                             </div>
                             <div class="flex items-center gap-2">
                               <button
@@ -683,6 +692,7 @@
                                     await api.auth.setPreferred("oauth");
                                     preferredAuth = "oauth";
                                     authMethod = "oauth";
+                                    notifyClaudeAuthUpdated();
                                   } finally {
                                     switchingAuth = false;
                                   }
@@ -690,7 +700,7 @@
                                 disabled={switchingAuth}
                                 class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors {authMethod === 'oauth' ? 'bg-gray-900 dark:bg-gray-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
                               >
-                                OAuth
+                                Claude Login
                               </button>
                               <button
                                 onclick={async () => {
@@ -699,6 +709,7 @@
                                     await api.auth.setPreferred("api_key");
                                     preferredAuth = "api_key";
                                     authMethod = "api_key";
+                                    notifyClaudeAuthUpdated();
                                   } finally {
                                     switchingAuth = false;
                                   }

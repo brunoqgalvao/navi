@@ -1,14 +1,25 @@
 <script lang="ts">
-  import { marketplaceApi, skillsApi, type MarketplaceSkill } from "../api";
+  import { marketplaceApi, skillsApi, type MarketplaceSkill, type Skill } from "../api";
   import { skillLibrary, currentProject } from "../stores";
   import { showSuccess, showError } from "../errorHandler";
 
   interface Props {
     open: boolean;
     onClose: () => void;
+    installTarget?: "global" | "project";
+    projectId?: string | null;
+    projectPath?: string | null;
+    onInstalled?: (skill: Skill | null, scope: "global" | "project") => void;
   }
 
-  let { open, onClose }: Props = $props();
+  let {
+    open,
+    onClose,
+    installTarget = "global",
+    projectId = null,
+    projectPath = null,
+    onInstalled,
+  }: Props = $props();
 
   let searchQuery = $state("");
   let searching = $state(false);
@@ -16,6 +27,17 @@
   let installing = $state<string | null>(null);
   let error: string | null = $state(null);
   let activeTab: "search" | "trending" = $state("trending");
+  let modalTitle = $derived(
+    installTarget === "project" ? "Workspace Marketplace" : "Skills Marketplace"
+  );
+  let modalDescription = $derived(
+    installTarget === "project"
+      ? "Browse and install skills from skills.sh directly into this workspace."
+      : "Browse and install skills from skills.sh."
+  );
+  let installButtonLabel = $derived(
+    installTarget === "project" ? "Install to Workspace" : "Install"
+  );
 
   // Load trending on mount
   $effect(() => {
@@ -58,27 +80,109 @@
     }
   }
 
+  function getProjectPath(): string | undefined {
+    const trimmedPropPath = projectPath?.trim();
+    if (trimmedPropPath) {
+      return trimmedPropPath;
+    }
+    return $currentProject?.path;
+  }
+
+  function normalizeLookupKey(value: string | null | undefined): string {
+    return value?.trim().toLowerCase().replace(/^["']|["']$/g, "").replace(/\/+$/, "") ?? "";
+  }
+
+  function findInstalledSkill(
+    skills: Skill[],
+    existingSlugs: Set<string>,
+    requestedSkill?: string | null
+  ): Skill | null {
+    const lookupCandidates = new Set<string>();
+    const normalizedRequestedSkill = normalizeLookupKey(requestedSkill);
+
+    if (normalizedRequestedSkill) {
+      lookupCandidates.add(normalizedRequestedSkill);
+      const trailingSegment = normalizedRequestedSkill.split("/").filter(Boolean).pop();
+      if (trailingSegment) {
+        lookupCandidates.add(trailingSegment);
+      }
+    }
+
+    if (lookupCandidates.size > 0) {
+      const matched = skills.find((candidate) => {
+        const slug = normalizeLookupKey(candidate.slug);
+        const name = normalizeLookupKey(candidate.name);
+        return lookupCandidates.has(slug) || lookupCandidates.has(name);
+      });
+      if (matched) {
+        return matched;
+      }
+    }
+
+    const newSkills = skills.filter((candidate) => !existingSlugs.has(candidate.slug));
+    return newSkills.length === 1 ? newSkills[0] : null;
+  }
+
   async function handleInstall(skill: MarketplaceSkill) {
     const source = skill.owner && skill.repo
       ? `${skill.owner}/${skill.repo}/${skill.id}`
       : skill.id;
+    const installProjectPath = installTarget === "project" ? getProjectPath() : undefined;
+
+    if (installTarget === "project" && !projectId) {
+      error = "Workspace installs require an active workspace.";
+      return;
+    }
+
+    if (installTarget === "project" && !installProjectPath) {
+      error = "Workspace installs require a project path.";
+      return;
+    }
 
     installing = skill.id;
     error = null;
+    const existingSlugs = new Set($skillLibrary.map((librarySkill) => librarySkill.slug));
 
     try {
-      // Install via skills CLI
-      await marketplaceApi.install(source, true);
+      const result = await marketplaceApi.install(
+        source,
+        installTarget === "global",
+        installProjectPath
+      );
 
-      // Rescan to import into Navi's library
-      await skillsApi.scan($currentProject?.path);
-      const skills = await skillsApi.list();
+      await skillsApi.scan(installProjectPath);
+
+      let skills = await skillsApi.list();
+      let installedSkill = findInstalledSkill(skills, existingSlugs, result.requestedSkill);
+
+      if (installedSkill) {
+        if (installTarget === "global" && !installedSkill.enabled_globally) {
+          await skillsApi.enableGlobal(installedSkill.id);
+          skills = await skillsApi.list();
+          installedSkill = skills.find((candidate) => candidate.id === installedSkill?.id) ?? installedSkill;
+        }
+
+        if (
+          installTarget === "project" &&
+          projectId &&
+          !installedSkill.enabled_projects.includes(projectId)
+        ) {
+          await skillsApi.enableForProject(projectId, installedSkill.id);
+          skills = await skillsApi.list();
+          installedSkill = skills.find((candidate) => candidate.id === installedSkill?.id) ?? installedSkill;
+        }
+      }
+
       skillLibrary.set(skills);
 
-      showSuccess({
-        title: "Skill installed",
-        message: `${skill.name} has been installed globally`,
-      });
+      const installedLabel = installedSkill?.name || result.requestedSkill || skill.name;
+      showSuccess(
+        "Skill installed",
+        installTarget === "project"
+          ? `${installedLabel} is now available in this workspace`
+          : `${installedLabel} has been installed globally`
+      );
+      onInstalled?.(installedSkill ?? null, installTarget);
     } catch (e: any) {
       error = e.message || "Install failed";
       showError({
@@ -108,16 +212,15 @@
 </script>
 
 {#if open}
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
     role="dialog"
     aria-modal="true"
+    tabindex="-1"
     onkeydown={handleKeydown}
   >
     <div
       class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden"
-      onclick={(e) => e.stopPropagation()}
     >
       <!-- Header -->
       <div class="px-6 py-4 border-b border-gray-200">
@@ -129,14 +232,17 @@
               </svg>
             </div>
             <div>
-              <h2 class="text-lg font-semibold text-gray-900">Skills Marketplace</h2>
+              <h2 class="text-lg font-semibold text-gray-900">{modalTitle}</h2>
               <p class="text-sm text-gray-500">
-                Browse and install skills from <a href="https://skills.sh" target="_blank" rel="noopener" class="text-violet-600 hover:underline">skills.sh</a>
+                {modalDescription}
+                {" "}
+                <a href="https://skills.sh" target="_blank" rel="noopener" class="text-violet-600 hover:underline">skills.sh</a>
               </p>
             </div>
           </div>
           <button
             onclick={onClose}
+            aria-label="Close marketplace"
             class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -165,6 +271,7 @@
           {#if searchQuery}
             <button
               onclick={() => { searchQuery = ""; activeTab = "trending"; loadTrending(); }}
+              aria-label="Clear search"
               class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -301,7 +408,7 @@
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                       </svg>
-                      Install
+                      {installButtonLabel}
                     {/if}
                   </button>
                 </div>

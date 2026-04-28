@@ -141,7 +141,7 @@ export async function handleIntegrationsRoutes(
       : PROVIDERS[provider].services.map((s) => s.id);
 
     // Build redirect URI (callback to our server)
-    const baseUrl = url.origin || `http://localhost:${process.env.PORT || 3001}`;
+    const baseUrl = url.origin || `http://localhost:${process.env.PORT || 3021}`;
     const redirectUri = `${baseUrl}/api/integrations/oauth/callback`;
 
     const result = generateAuthUrl(provider, services, redirectUri);

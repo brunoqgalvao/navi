@@ -146,7 +146,16 @@
   }
 
   // UI-only commands that should NOT be sent to the SDK (defined here for use in handleSubmit)
-  const UI_ONLY_COMMANDS = new Set(["help", "config", "bug", "status"]);
+  const UI_ONLY_COMMANDS = new Set([
+    "help",
+    "config",
+    "bug",
+    "status",
+    "council",
+    "loop",
+    "batch",
+    "agent",
+  ]);
 
   function handleSubmit() {
     const trimmedValue = value.trim();
@@ -253,6 +262,11 @@
     { name: "model", description: "Switch to a different model", argsHint: "<model>", isBuiltIn: true },
     { name: "bug", description: "Report a bug or issue", isBuiltIn: true },
     { name: "config", description: "Open configuration settings", isBuiltIn: true },
+    { name: "status", description: "Show connection, model, and session status", isBuiltIn: true },
+    { name: "council", description: "Open the council panel for multi-model comparison", isBuiltIn: true },
+    { name: "loop", description: "Open the long-running loop runner for the current prompt", isBuiltIn: true },
+    { name: "batch", description: "Fan out worktree-backed sessions for multiple scoped tasks", isBuiltIn: true },
+    { name: "agent", description: "Open the agent builder or prefill an @agent prompt", isBuiltIn: true },
   ];
 
   // Combine built-in commands with SDK-provided slash commands

@@ -3,6 +3,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { messageComments } from "../db";
+import { DEFAULT_CLAUDE_FAST_MODEL } from "../../shared/anthropic-models";
 
 const COMMENT_SYSTEM_PROMPT = `You are answering a quick clarifying question about a specific part of a conversation.
 
@@ -49,9 +50,9 @@ export async function generateCommentResponse(
     // Build the user message with context
     const userMessage = buildUserMessage(request);
 
-    // Use Sonnet 4.5 for quality comment responses
+    // Use the latest Sonnet for quality comment responses
     const response = await client.messages.create({
-      model: "claude-sonnet-4-5-20250514",
+      model: DEFAULT_CLAUDE_FAST_MODEL,
       max_tokens: 500,
       system: COMMENT_SYSTEM_PROMPT,
       messages: [

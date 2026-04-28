@@ -29,6 +29,7 @@
   let isDragOver = $state(false);
   let isAddingCard = $state(false);
   let newCardTitle = $state("");
+  let newCardInput = $state<HTMLInputElement | undefined>();
 
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -66,6 +67,12 @@
       newCardTitle = "";
     }
   }
+
+  $effect(() => {
+    if (isAddingCard) {
+      setTimeout(() => newCardInput?.focus(), 0);
+    }
+  });
 </script>
 
 <div
@@ -85,6 +92,7 @@
     {#if onAddCard && (column.id === "backlog" || column.id === "spec")}
       <button
         onclick={() => { isAddingCard = true; }}
+        aria-label={`Add task to ${column.title}`}
         class="p-1 text-gray-400 hover:text-accent-500 rounded transition-colors"
         title="Add task"
       >
@@ -112,13 +120,13 @@
     {#if isAddingCard}
       <form onsubmit={handleAddSubmit} class="bg-white border border-accent-300 rounded-lg p-2">
         <input
+          bind:this={newCardInput}
           type="text"
           bind:value={newCardTitle}
           onkeydown={handleAddKeydown}
           onblur={() => { if (!newCardTitle.trim()) isAddingCard = false; }}
           placeholder={column.id === "backlog" ? "Idea or future task..." : "Task title..."}
           class="w-full text-sm text-gray-900 placeholder-gray-400 outline-none"
-          autofocus
         />
         <div class="flex items-center gap-1 mt-2">
           <button

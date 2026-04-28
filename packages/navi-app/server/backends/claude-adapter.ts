@@ -7,6 +7,9 @@
 
 import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
+import { resolveBunExecutable } from "../utils/bun";
+import { resolveClaudeCodeExecutable } from "../utils/claude-code";
+import { DEFAULT_CLAUDE_MODEL, getCuratedAnthropicModels } from "../../shared/anthropic-models";
 import type {
   BackendAdapter,
   BackendInfo,
@@ -22,12 +25,8 @@ export class ClaudeAdapter implements BackendAdapter {
   readonly supportsCallbackPermissions = true;
   readonly supportsResume = true;
 
-  readonly models = [
-    "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514",
-    "claude-haiku-3-5-20241022",
-  ];
-  readonly defaultModel = "claude-sonnet-4-20250514";
+  readonly models = getCuratedAnthropicModels().map((model) => model.value);
+  readonly defaultModel = DEFAULT_CLAUDE_MODEL;
 
   private childProcess: ChildProcess | null = null;
   private permissionResolvers = new Map<
@@ -37,24 +36,14 @@ export class ClaudeAdapter implements BackendAdapter {
 
   async detect(): Promise<BackendInfo> {
     try {
-      const { execSync } = await import("child_process");
-
-      // Try to find claude CLI
-      let claudePath: string | undefined;
-      const pathsToTry = ["which claude", "command -v claude"];
-
-      for (const cmd of pathsToTry) {
-        try {
-          claudePath = execSync(cmd, { encoding: "utf-8" }).trim();
-          if (claudePath) break;
-        } catch {}
-      }
+      const { execFileSync } = await import("child_process");
+      const claudePath = resolveClaudeCodeExecutable() ?? undefined;
 
       // Try to get version
       let version: string | undefined;
       if (claudePath) {
         try {
-          version = execSync("claude --version", { encoding: "utf-8" }).trim();
+          version = execFileSync(claudePath, ["--version"], { encoding: "utf-8" }).trim();
         } catch {}
       }
 
@@ -95,11 +84,15 @@ export class ClaudeAdapter implements BackendAdapter {
     });
 
     // Spawn the worker process
-    this.childProcess = spawn("bun", ["run", workerPath, inputJson], {
+    const bunPath = resolveBunExecutable() ?? "bun";
+    this.childProcess = spawn(bunPath, ["run", "--env-file=/dev/null", workerPath, inputJson], {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
+        NAVI_BUN_PATH: bunPath,
+        BUN_PATH: bunPath,
+        BUN_EXECUTABLE: bunPath,
         NAVI_AUTH_MODE: process.env.NAVI_AUTH_MODE || "api_key",
         NAVI_AUTH_SOURCE: process.env.NAVI_AUTH_SOURCE || "global_settings",
       },

@@ -5,6 +5,7 @@ import { pruneClaudeSessionArtifacts } from "../services/claude-session-storage"
 import { nativePreviewService } from "../services/native-preview";
 import { sessionManager } from "../services/session-manager";
 import { pruneArchivedSessionArtifacts } from "../services/storage-maintenance";
+import { DEFAULT_CLAUDE_FAST_MODEL } from "../../shared/anthropic-models";
 
 function extractTextFromStoredContent(content: string): string {
   try {
@@ -854,13 +855,13 @@ CONVERSATION:
 ${transcript}`;
 
     try {
-      const ephemeralResponse = await fetch("http://localhost:3001/api/ephemeral", {
+      const ephemeralResponse = await fetch("http://localhost:3021/api/ephemeral", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: summaryPrompt,
           systemPrompt: "You are a helpful assistant that creates clear, actionable summaries of technical conversations. Your summaries should help someone quickly understand the context and continue the work.",
-          model: "claude-sonnet-4-20250514",
+          model: DEFAULT_CLAUDE_FAST_MODEL,
           maxTokens: 1024,
         }),
       });

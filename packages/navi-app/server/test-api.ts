@@ -4,7 +4,7 @@
  * Run with: bun run server/test-api.ts
  */
 
-const BASE_URL = "http://localhost:3001";
+const BASE_URL = "http://localhost:3021";
 const VERBOSE = process.argv.includes("--verbose") || process.argv.includes("-v");
 
 type TestResult = { name: string; passed: boolean; error?: string; duration: number };
@@ -236,7 +236,7 @@ async function main() {
   console.log("🔍 Checking if server is running...");
 
   if (!(await checkServer())) {
-    console.log("❌ Server not running on port 3001");
+    console.log("❌ Server not running on port 3021");
     console.log("   Start it with: bun run server/index.ts");
     process.exit(1);
   }

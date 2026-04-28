@@ -61,8 +61,8 @@ export type PreviewStartResult =
 // These are Navi's own services and critical system ports
 const RESERVED_PORTS = new Set([
   1420,  // Vite dev server (frontend)
-  3001,  // Navi backend server
-  3002,  // PTY server
+  3021,  // Navi backend server
+  3022,  // PTY server
   3011,  // Bundled server port (Tauri production)
   3012,  // Bundled PTY port (Tauri production)
   5173,  // Vite default port (alternative)
@@ -995,7 +995,7 @@ class NativePreviewService {
 
   /**
    * Find next available port, skipping:
-   * - Reserved Navi ports (3001, 3002, etc.)
+   * - Reserved Navi ports (3021, 3022, etc.)
    * - Ports with pending reservations
    * - Ports already used by other Navi previews
    * - Ports in use by other processes

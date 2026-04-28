@@ -130,7 +130,13 @@
   });
 
   onMount(async () => {
-    await refreshSkills({ scan: true });
+    if ($skillLibrary.length > 0) {
+      loading = false;
+      await refreshSkills({ quiet: true });
+      return;
+    }
+
+    await refreshSkills();
   });
 
   $effect(() => {
@@ -301,7 +307,12 @@
         await skillsApi.scan(getScanProjectPath());
       }
 
-      const skills = await skillsApi.list();
+      let skills = await skillsApi.list();
+      if (!scan && skills.length === 0) {
+        await skillsApi.scan(getScanProjectPath());
+        skills = await skillsApi.list();
+      }
+
       skillLibrary.set(skills);
       showCreateExamples = skills.length === 0;
 
@@ -1146,8 +1157,21 @@
 
 <SkillMarketplace
   open={showMarketplace}
+  installTarget={commandInstallTarget}
+  {projectId}
+  {projectPath}
   onClose={() => {
     showMarketplace = false;
+    requestDocumentRefresh();
+  }}
+  onInstalled={(skill, scope) => {
+    if (!skill) {
+      requestDocumentRefresh();
+      return;
+    }
+
+    selectedSkillId = skill.id;
+    selectedScope = scope;
     requestDocumentRefresh();
   }}
 />

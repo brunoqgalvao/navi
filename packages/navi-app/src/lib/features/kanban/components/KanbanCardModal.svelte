@@ -18,6 +18,7 @@
   let title = $state("");
   let spec = $state("");
   let status = $state<KanbanStatus>("spec");
+  let titleInput = $state<HTMLInputElement | undefined>();
 
   $effect(() => {
     if (open) {
@@ -30,6 +31,8 @@
         spec = "";
         status = initialStatus;
       }
+
+      setTimeout(() => titleInput?.focus(), 0);
     }
   });
 
@@ -47,17 +50,24 @@
 
 <Modal {open} onClose={onClose} title={mode === "create" ? "New Task" : "Edit Task"} size="lg">
   {#snippet children()}
-    <div class="space-y-4" onkeydown={handleKeydown} role="form">
+    <form
+      class="space-y-4"
+      onsubmit={(e) => {
+        e.preventDefault();
+        handleSave();
+      }}
+    >
       <!-- Title -->
       <div>
         <label for="title" class="block text-sm font-medium text-gray-700 mb-1">Title</label>
         <input
+          bind:this={titleInput}
           id="title"
           type="text"
           bind:value={title}
+          onkeydown={handleKeydown}
           placeholder="What needs to be done?"
           class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-accent-400 focus:border-accent-400 outline-none"
-          autofocus
         />
       </div>
 
@@ -69,6 +79,7 @@
         <textarea
           id="spec"
           bind:value={spec}
+          onkeydown={handleKeydown}
           placeholder="Detailed requirements, acceptance criteria, context..."
           rows="6"
           class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-accent-400 focus:border-accent-400 outline-none resize-none font-mono text-sm"
@@ -79,8 +90,8 @@
       </div>
 
       <!-- Status -->
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-2">Status</label>
+      <fieldset>
+        <legend class="block text-sm font-medium text-gray-700 mb-2">Status</legend>
         <div class="flex flex-wrap gap-2">
           {#each KANBAN_COLUMNS as column}
             <button
@@ -96,7 +107,7 @@
             </button>
           {/each}
         </div>
-      </div>
+      </fieldset>
 
       <!-- Session link info -->
       {#if mode === "edit" && card?.session_id}
@@ -116,7 +127,7 @@
           </p>
         </div>
       {/if}
-    </div>
+    </form>
   {/snippet}
 
   {#snippet footer()}

@@ -4,6 +4,7 @@
   import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems, backendModels, getBackendModelsFormatted, type BackendId, channelsEnabled } from "../../stores";
   import { api, agentsApi, type Agent as ProjectAgent, type InboxItem, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult, type Workflow, type WorkflowGate, type WorkflowSchedule } from "../../api";
   import { getApiBase } from "../../config";
+  import { getEffectiveContextWindow } from "../../context-window";
   import ModelSelector from "../ModelSelector.svelte";
   import BackendSelector from "../BackendSelector.svelte";
   import StarButton from "../StarButton.svelte";
@@ -2570,7 +2571,7 @@
     {/if}
 
     {#if $session.inputTokens > 0 && !sidebarCollapsed}
-      {@const contextWindow = currentProject?.context_window || 200000}
+      {@const contextWindow = getEffectiveContextWindow(currentProject?.context_window)}
       {@const usagePercent = Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100))}
       <div class="space-y-1">
         <div class="flex items-center justify-between text-[10px] text-gray-500">

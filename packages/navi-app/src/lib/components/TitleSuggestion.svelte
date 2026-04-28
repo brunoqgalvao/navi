@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "../api";
   import type { ChatMessage } from "../stores";
+  import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../../shared/anthropic-models";
 
   interface Props {
     sessionId: string | null;
@@ -119,7 +120,7 @@ Do NOT include any explanation, quotes, or extra text. Just the title or NO_CHAN
 
 Good responses: NO_CHANGE, Debug React Components, Fix Database Connection
 Bad responses: "Debug React", Current title: ..., The new title should be...`,
-        model: "claude-3-haiku-20240307",
+        model: DEFAULT_CLAUDE_LIGHT_MODEL,
         maxTokens: 20,
         provider: "anthropic"
       });

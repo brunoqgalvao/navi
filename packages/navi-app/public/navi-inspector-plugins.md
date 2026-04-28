@@ -36,7 +36,7 @@ export default defineConfig({
         if (process.env.NODE_ENV === 'production') return html
         return html.replace(
           '</body>',
-          '<script src="http://localhost:3001/navi-inspector.js"></script></body>'
+          '<script src="http://localhost:3021/navi-inspector.js"></script></body>'
         )
       }
     },
@@ -61,7 +61,7 @@ export default function Document() {
         <Main />
         <NextScript />
         {process.env.NODE_ENV === 'development' && (
-          <script src="http://localhost:3001/navi-inspector.js" />
+          <script src="http://localhost:3021/navi-inspector.js" />
         )}
       </body>
     </Html>
@@ -81,7 +81,7 @@ export default function RootLayout({ children }) {
       <body>
         {children}
         {process.env.NODE_ENV === 'development' && (
-          <Script src="http://localhost:3001/navi-inspector.js" strategy="lazyOnload" />
+          <Script src="http://localhost:3021/navi-inspector.js" strategy="lazyOnload" />
         )}
       </body>
     </html>
@@ -104,7 +104,7 @@ Add to `src/app.html`:
     <script>
       if (location.hostname === 'localhost') {
         const s = document.createElement('script');
-        s.src = 'http://localhost:3001/navi-inspector.js';
+        s.src = 'http://localhost:3021/navi-inspector.js';
         document.body.appendChild(s);
       }
     </script>
@@ -128,7 +128,7 @@ export default function App() {
         {/* ... your content ... */}
         <Scripts />
         {process.env.NODE_ENV === 'development' && (
-          <script src="http://localhost:3001/navi-inspector.js" />
+          <script src="http://localhost:3021/navi-inspector.js" />
         )}
       </body>
     </html>
@@ -148,7 +148,7 @@ const isDev = import.meta.env.DEV
 <html>
   <body>
     <slot />
-    {isDev && <script src="http://localhost:3001/navi-inspector.js" />}
+    {isDev && <script src="http://localhost:3021/navi-inspector.js" />}
   </body>
 </html>
 ```
@@ -158,15 +158,15 @@ const isDev = import.meta.env.DEV
 Just add before `</body>`:
 
 ```html
-<script src="http://localhost:3001/navi-inspector.js"></script>
+<script src="http://localhost:3021/navi-inspector.js"></script>
 ```
 
 ## Troubleshooting
 
 ### "Inspector not available" message
 
-1. **Check if Navi is running** - The script loads from `localhost:3001`
-2. **Check for CSP blocking** - Your dev server might block external scripts. Add `http://localhost:3001` to your CSP `script-src`
+1. **Check if Navi is running** - The script loads from `localhost:3021`
+2. **Check for CSP blocking** - Your dev server might block external scripts. Add `http://localhost:3021` to your CSP `script-src`
 3. **Check iframe restrictions** - Some frameworks set `X-Frame-Options`. Remove or adjust it for dev mode
 
 ### Inspector loads but doesn't respond
@@ -179,7 +179,7 @@ Just add before `</body>`:
 Add to your dev server's response headers:
 
 ```
-Content-Security-Policy: script-src 'self' http://localhost:3001; frame-ancestors 'self' http://localhost:3001;
+Content-Security-Policy: script-src 'self' http://localhost:3021; frame-ancestors 'self' http://localhost:3021;
 ```
 
 ## What Gets Captured

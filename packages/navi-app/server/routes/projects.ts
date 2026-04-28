@@ -1,6 +1,7 @@
 import { json } from "../utils/response";
 import { projects, sessions, searchIndex, skills as skillsDb, enabledSkills as enabledSkillsDb } from "../db";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
+import { DEFAULT_CONTEXT_WINDOW, getEffectiveContextWindow } from "../utils/context-window";
 import { resolveNaviClaudeAuth } from "../utils/navi-auth";
 import { getSDK } from "../utils/sdk-loader";
 
@@ -23,7 +24,8 @@ export async function handleProjectRoutes(url: URL, method: string, req: Request
       }
       const id = crypto.randomUUID();
       const now = Date.now();
-      projects.create(id, body.name, body.path, body.description || null, now, now);
+      const contextWindow = getEffectiveContextWindow(body.context_window ?? DEFAULT_CONTEXT_WINDOW);
+      projects.create(id, body.name, body.path, body.description || null, now, now, contextWindow);
       searchIndex.indexProject(id);
 
       // Auto-enable default skills for new project
@@ -58,6 +60,10 @@ export async function handleProjectRoutes(url: URL, method: string, req: Request
     }
     if (method === "PUT") {
       const body = await req.json();
+      const existingProject = projects.get(id);
+      if (!existingProject) {
+        return json({ error: "Not found" }, 404);
+      }
       const fs = await import("fs/promises");
       try {
         const stat = await fs.stat(body.path);
@@ -67,7 +73,10 @@ export async function handleProjectRoutes(url: URL, method: string, req: Request
       } catch {
         return json({ error: "Directory does not exist" }, 400);
       }
-      projects.update(body.name, body.path, body.description || null, body.context_window || 200000, Date.now(), id);
+      const contextWindow = getEffectiveContextWindow(
+        body.context_window ?? existingProject.context_window ?? DEFAULT_CONTEXT_WINDOW
+      );
+      projects.update(body.name, body.path, body.description || null, contextWindow, Date.now(), id);
       searchIndex.indexProject(id);
       return json(projects.get(id));
     }
@@ -139,6 +148,10 @@ export async function handleProjectRoutes(url: URL, method: string, req: Request
     if (method === "POST") {
       try {
         const prompt = `Analyze this project directory and provide a brief summary (2-3 sentences) of what this project is about, its main technologies, and current state. Be concise.`;
+        const auth = resolveNaviClaudeAuth();
+        if (auth.mode === "none") {
+          return json({ error: auth.error || "No Claude authentication available" }, 400);
+        }
 
         const { query } = await getSDK();
         const q = query({
@@ -148,7 +161,7 @@ export async function handleProjectRoutes(url: URL, method: string, req: Request
             allowedTools: ["Read", "Glob", "Grep"],
             maxTurns: 3,
             settingSources: ['project'],
-            env: buildClaudeCodeEnv(process.env, resolveNaviClaudeAuth().overrides),
+            env: buildClaudeCodeEnv(process.env, auth.overrides),
             ...getClaudeCodeRuntimeOptions(),
           },
         });

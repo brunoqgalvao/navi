@@ -3,6 +3,7 @@ import { globalSettings } from "../db";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
 import { resolveNaviClaudeAuth } from "../utils/navi-auth";
 import { getSDK } from "../utils/sdk-loader";
+import { DEFAULT_CLAUDE_FAST_MODEL, normalizeAnthropicModelValue } from "../../shared/anthropic-models";
 
 export async function handleEphemeralChat(req: Request): Promise<Response> {
   try {
@@ -10,7 +11,7 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
     const {
       prompt,
       systemPrompt,
-      model = "claude-sonnet-4-20250514",
+      model = DEFAULT_CLAUDE_FAST_MODEL,
       maxTokens = 1024,
       projectPath,
       useTools = false,
@@ -24,6 +25,7 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
     let result = "";
     let usage = { input_tokens: 0, output_tokens: 0 };
     let costUsd = 0;
+    const normalizedClaudeModel = normalizeAnthropicModelValue(model) || DEFAULT_CLAUDE_FAST_MODEL;
 
     const effectiveProvider = provider === "auto"
       ? (process.env.OPENAI_API_KEY ? "openai" : "anthropic")
@@ -65,7 +67,6 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
       costUsd = (usage.input_tokens * 0.00015 + usage.output_tokens * 0.0006) / 1000;
     } else if (globalSettings.get("anthropicApiKey") && !useTools) {
       const storedApiKey = globalSettings.get("anthropicApiKey")!;
-      const anthropicModel = model.includes("haiku") ? "claude-3-haiku-20240307" : "claude-3-haiku-20240307";
 
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -75,7 +76,7 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: anthropicModel,
+          model: normalizedClaudeModel,
           max_tokens: maxTokens,
           system: systemPrompt || undefined,
           messages: [{ role: "user", content: prompt }],
@@ -95,7 +96,10 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
       };
       costUsd = (usage.input_tokens * 0.00025 + usage.output_tokens * 0.00125) / 1000;
     } else {
-      const { overrides } = resolveNaviClaudeAuth(model);
+      const auth = resolveNaviClaudeAuth(normalizedClaudeModel);
+      if (auth.mode === "none") {
+        throw new Error(auth.error || "No Claude authentication available");
+      }
       const { query } = await getSDK();
       const q = query({
         prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
@@ -103,8 +107,8 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
           cwd: projectPath || process.cwd(),
           allowedTools: useTools ? ["Read", "Glob", "Grep", "Bash"] : [],
           maxTurns: useTools ? 5 : 1,
-          model: model,
-          env: buildClaudeCodeEnv(process.env, overrides),
+          model: normalizedClaudeModel,
+          env: buildClaudeCodeEnv(process.env, auth.overrides),
           ...getClaudeCodeRuntimeOptions(),
         },
       });

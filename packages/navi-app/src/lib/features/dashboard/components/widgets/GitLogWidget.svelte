@@ -18,7 +18,7 @@
   let commits = $state<GitCommit[]>([]);
   let error = $state<string | null>(null);
 
-  const limit = config.limit || 5;
+  const limit = $derived(config.limit || 5);
 
   async function loadCommits() {
     loading = true;
@@ -44,6 +44,7 @@
     <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Recent Commits</span>
     <button
       onclick={loadCommits}
+      aria-label="Refresh recent commits"
       class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
       title="Refresh"
     >

@@ -13,7 +13,9 @@ import { handlePtyWebSocket, detachFromAllTerminals, cleanupWsExec, type PtyMess
 import { resolveNaviClaudeAuth, formatAuthForLog } from "../utils/navi-auth";
 import { resolveBunExecutable } from "../utils/bun";
 import { resolveClaudeCodeExecutable } from "../utils/claude-code";
+import { DEFAULT_CONTEXT_WINDOW, getDefaultContextResetThreshold, getEffectiveContextWindow } from "../utils/context-window";
 import { describePath, writeDebugLog } from "../utils/logging";
+import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 // Multi-backend support
 import { getAdapter, type BackendId, type NormalizedEvent } from "../backends";
 import { mcpSettings, getAllEnabledMcpServers } from "../services/mcp-settings";
@@ -48,6 +50,7 @@ import {
   type LoopState,
 } from "../services/loop-manager";
 import { runVerifier, quickVerifyCheck } from "../services/verifier-agent";
+import { getSdkUserMessageFlags } from "../../shared/sdk-user-message";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -75,6 +78,7 @@ function logBunSpawnDiagnostics(
     env: {
       NAVI_BUN_PATH: process.env.NAVI_BUN_PATH ?? null,
       NAVI_CLAUDE_CODE_PATH: process.env.NAVI_CLAUDE_CODE_PATH ?? null,
+      NAVI_BUNDLED_CLAUDE_CODE_PATH: process.env.NAVI_BUNDLED_CLAUDE_CODE_PATH ?? null,
       BUN_PATH: process.env.BUN_PATH ?? null,
       BUN_EXECUTABLE: process.env.BUN_EXECUTABLE ?? null,
       BUN_INSTALL: process.env.BUN_INSTALL ?? null,
@@ -431,8 +435,8 @@ interface UntilDoneState {
   infiniteMode?: boolean;         // Use full infinite loop with verifier
   loopId?: string;                // Loop manager ID for persistence
   definitionOfDone?: string[];    // User-defined completion criteria
-  contextResetThreshold?: number; // Default 0.7 (70%)
-  verifierModel?: "haiku" | "sonnet";
+  contextResetThreshold?: number; // Defaults to the workspace-aware threshold
+  verifierModel?: string;
   lastTokenCount?: number;        // Track context usage
   contextWindow?: number;         // Project's context window size
 }
@@ -568,10 +572,10 @@ export function enableInfiniteLoop(
       "No obvious errors or bugs",
     ],
     workerModel: options.model,
-    verifierModel: options.verifierModel ?? "claude-3-5-haiku-20241022",
+    verifierModel: options.verifierModel ?? DEFAULT_CLAUDE_LIGHT_MODEL,
     maxIterations: options.maxIterations ?? 100, // Effectively infinite
     maxCost: options.maxCost ?? 50,
-    contextResetThreshold: options.contextResetThreshold ?? 0.7,
+    contextResetThreshold: options.contextResetThreshold ?? getDefaultContextResetThreshold(options.contextWindow),
   });
 
   // Start first iteration
@@ -589,9 +593,9 @@ export function enableInfiniteLoop(
     infiniteMode: true,
     loopId: loop.loopId,
     definitionOfDone: options.definitionOfDone,
-    contextResetThreshold: options.contextResetThreshold ?? 0.7,
-    verifierModel: options.verifierModel ?? "claude-3-5-haiku-20241022",
-    contextWindow: options.contextWindow ?? 200000,
+    contextResetThreshold: options.contextResetThreshold ?? getDefaultContextResetThreshold(options.contextWindow),
+    verifierModel: options.verifierModel ?? DEFAULT_CLAUDE_LIGHT_MODEL,
+    contextWindow: getEffectiveContextWindow(options.contextWindow ?? DEFAULT_CONTEXT_WINDOW),
   });
 
   console.log(`[InfiniteLoop] Started loop ${loop.loopId} for session ${sessionId}`);
@@ -928,7 +932,7 @@ function cleanupProcessScopedState(proc: ChildProcess, sessionId?: string) {
  * For Claude backend: uses query-worker subprocess with Claude SDK
  * For Codex/Gemini: uses adapter system directly (no multi-session tools)
  */
-function startChildSessionQuery(
+async function startChildSessionQuery(
   childSessionId: string,
   config: {
     prompt: string;
@@ -1007,6 +1011,10 @@ function startChildSessionQuery(
 
   // Resolve and inject auth for child session (inherit from parent settings, not OAuth default)
   const authResult = resolveNaviClaudeAuth(config.model);
+  if (authResult.mode === "none") {
+    console.error(`[MultiSession] Child session ${childSessionId} blocked: ${authResult.error}`);
+    return;
+  }
 
   if (authResult.overrides.apiKey) {
     workerEnv.NAVI_ANTHROPIC_API_KEY = authResult.overrides.apiKey;
@@ -1291,7 +1299,7 @@ function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefin
         // Start the child query in the background
         // We use setTimeout to not block the parent's spawn response
         setTimeout(() => {
-          startChildSessionQuery(child.id, {
+          void startChildSessionQuery(child.id, {
             prompt: initialPrompt,
             cwd: workingDirectory,
             model: resolvedModel,
@@ -2090,7 +2098,8 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         error: (msg as any).error,
       };
 
-    case "user":
+    case "user": {
+      const userFlags = getSdkUserMessageFlags(msg);
       return {
         type: "user",
         uiSessionId,
@@ -2098,10 +2107,12 @@ function formatMessage(msg: SDKMessage, uiSessionId?: string): any {
         parentToolUseId: msg.parent_tool_use_id || null,
         uuid,
         timestamp,
-        isSynthetic: (msg as any).isSynthetic,
-        toolUseResult: (msg as any).tool_use_result,
-        isReplay: (msg as any).isReplay,
+        isSynthetic: userFlags.isSynthetic,
+        isCompactSummary: userFlags.isCompactSummary,
+        toolUseResult: userFlags.toolUseResult,
+        isReplay: userFlags.isReplay,
       };
+    }
 
     case "result":
       return {
@@ -2595,6 +2606,14 @@ The user will explicitly approve the plan before any execution begins.
   delete workerEnv.NAVI_ANTHROPIC_BASE_URL;
 
   const authResult = resolveNaviClaudeAuth(model);
+  if (authResult.mode === "none") {
+    safeSend(ws, {
+      type: "error",
+      uiSessionId: sessionId,
+      error: authResult.error || "No Claude authentication available",
+    });
+    return;
+  }
 
   if (authResult.overrides.apiKey) {
     workerEnv.NAVI_ANTHROPIC_API_KEY = authResult.overrides.apiKey;
@@ -2885,7 +2904,7 @@ The user will explicitly approve the plan before any execution begins.
                   // Continue to send "done" message below
                 } else {
                   // Check context usage - reset at 70% threshold
-                  const contextWindow = untilDoneState.contextWindow || 200000;
+                  const contextWindow = getEffectiveContextWindow(untilDoneState.contextWindow);
                   const contextPercent = currentTokens / contextWindow;
                   const needsContextReset = contextPercent >= (untilDoneState.contextResetThreshold || 0.7);
 

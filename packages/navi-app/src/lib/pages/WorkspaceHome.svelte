@@ -143,12 +143,11 @@
   const totalNeedsAttention = $derived(
     $attentionItems.totalNeedsApproval + $attentionItems.totalNeedsInput + $attentionItems.totalNeedsReview
   );
+
 </script>
 
 <div class="flex-1 overflow-hidden bg-white dark:bg-slate-950">
   <div class="flex h-full flex-col">
-
-    <!-- Compact header bar -->
     <div class="flex items-center justify-between border-b border-slate-200/80 px-5 py-3 dark:border-white/8">
       <div class="flex items-center gap-3">
         <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-accent-600 text-white">
@@ -159,7 +158,6 @@
         <div class="text-sm font-semibold text-slate-900 dark:text-white">Workspaces</div>
         <span class="text-xs text-slate-400 dark:text-slate-500">{projects.length}</span>
 
-        <!-- Inline status -->
         {#if $attentionItems.totalRunning > 0}
           <div class="ml-2 flex items-center gap-1.5 rounded-full bg-cyan-50 px-2.5 py-1 text-[11px] font-medium text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-400">
             <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500"></span>
@@ -185,12 +183,9 @@
       </button>
     </div>
 
-    <!-- Board -->
     {#if projectRows.length > 0}
       <div class="flex-1 overflow-auto">
         <div style="min-width: 1000px;">
-
-          <!-- Column headers (sticky) -->
           <div class="sticky top-0 z-20 grid border-b border-slate-200/80 bg-slate-50/95 backdrop-blur-sm dark:border-white/8 dark:bg-slate-900/95" style="grid-template-columns: 240px repeat(5, minmax(0, 1fr));">
             <div class="px-4 py-2.5">
               <span class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">Project</span>
@@ -198,7 +193,7 @@
             {#each lanes as lane}
               {@const total = laneTotals.get(lane.id) ?? 0}
               <div class="flex items-center gap-2 px-3 py-2.5">
-                <span class={`h-2 w-2 rounded-full ${lane.dot} ${lane.animate ? 'animate-pulse' : ''}`}></span>
+                <span class={`h-2 w-2 rounded-full ${lane.dot} ${lane.animate ? "animate-pulse" : ""}`}></span>
                 <span class="text-[10px] font-semibold uppercase tracking-wider {lane.text}">{lane.label}</span>
                 {#if total > 0}
                   <span class="ml-auto rounded bg-slate-200/60 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-white/8 dark:text-slate-400">{total}</span>
@@ -207,19 +202,16 @@
             {/each}
           </div>
 
-          <!-- Rows -->
           {#each projectRows as row}
             {@const isCollapsed = collapsedRows.has(row.project.id)}
 
             <div class="grid border-b border-slate-100 dark:border-white/5" style="grid-template-columns: 240px repeat(5, minmax(0, 1fr));">
-
-              <!-- Project cell (sticky left) -->
               <div class="sticky left-0 z-10 border-r border-slate-100 bg-white px-3 py-3 dark:border-white/5 dark:bg-slate-950">
                 <div class="flex items-start gap-2">
                   <button
                     onclick={() => toggleRow(row.project.id)}
                     class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                    title={isCollapsed ? 'Expand' : 'Collapse'}
+                    title={isCollapsed ? "Expand" : "Collapse"}
                   >
                     <svg class="h-3 w-3 transition-transform {isCollapsed ? '-rotate-90' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
@@ -238,7 +230,7 @@
                     {#if !isCollapsed}
                       <div class="mt-2 flex items-center gap-1.5">
                         <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-white/8 dark:text-slate-400">
-                          {row.totalSessions} chat{row.totalSessions === 1 ? '' : 's'}
+                          {row.totalSessions} chat{row.totalSessions === 1 ? "" : "s"}
                         </span>
                         <span class="text-[10px] text-slate-300 dark:text-slate-600">
                           <RelativeTime timestamp={row.latestTimestamp} />
@@ -259,7 +251,6 @@
                 </div>
               </div>
 
-              <!-- Lane cells -->
               {#each lanes as lane}
                 {@const sessions = row.cells.get(lane.id) ?? []}
                 {@const cellKey = `${row.project.id}:${lane.id}`}
@@ -269,7 +260,6 @@
 
                 <div class="border-r border-slate-100/60 px-2 py-2 last:border-r-0 dark:border-white/[0.03]">
                   {#if isCollapsed}
-                    <!-- Collapsed: just count -->
                     <div class="flex h-full items-center justify-center">
                       {#if sessions.length > 0}
                         <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium {lane.text} dark:bg-white/6">{sessions.length}</span>
@@ -284,7 +274,7 @@
                           onclick={() => onSelectSession(session)}
                           class="group/s flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-slate-50 dark:hover:bg-white/5"
                         >
-                          <span class={`h-1.5 w-1.5 shrink-0 rounded-full ${lane.dot} ${lane.animate ? 'animate-pulse' : ''}`}></span>
+                          <span class={`h-1.5 w-1.5 shrink-0 rounded-full ${lane.dot} ${lane.animate ? "animate-pulse" : ""}`}></span>
                           <span class="min-w-0 flex-1 truncate text-[12px] text-slate-700 group-hover/s:text-slate-900 dark:text-slate-300 dark:group-hover/s:text-white">{session.title}</span>
                           <span class="shrink-0 text-[10px] text-slate-300 dark:text-slate-600">
                             <RelativeTime timestamp={session.updated_at} />
@@ -300,7 +290,7 @@
                           <svg class="h-3 w-3 {isExpanded ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                           </svg>
-                          {isExpanded ? 'less' : `${sessions.length - COLLAPSED_LIMIT} more`}
+                          {isExpanded ? "less" : `${sessions.length - COLLAPSED_LIMIT} more`}
                         </button>
                       {/if}
                     </div>
@@ -316,7 +306,6 @@
         </div>
       </div>
     {:else}
-      <!-- Empty state -->
       <div class="flex flex-1 flex-col items-center justify-center px-6 text-center">
         <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-accent-100 dark:bg-accent-500/10">
           <svg class="h-6 w-6 text-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -339,7 +328,6 @@
   </div>
 </div>
 
-<!-- New Task Modal -->
 {#if newTaskModal}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -363,7 +351,7 @@
         bind:value={newTaskTitle}
         placeholder="What needs to be done?"
         class="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none transition-colors focus:border-accent-400 focus:ring-2 focus:ring-accent-400/20 dark:border-white/10 dark:bg-slate-800 dark:text-white dark:placeholder-slate-500 dark:focus:border-accent-500"
-        onkeydown={(e) => { if (e.key === 'Enter') createTask(); }}
+        onkeydown={(e) => { if (e.key === "Enter") createTask(); }}
       />
 
       <div class="mt-4 flex justify-end gap-2">

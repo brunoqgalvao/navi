@@ -1,15 +1,16 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { backendsApi, type BackendId, type BackendInfo } from "$lib/api";
+  import { DEFAULT_CLAUDE_MODEL, getAnthropicModelShortLabel } from "../../../shared/anthropic-models";
 
   interface Props {
-    value?: string | null; // Now "backend:model" format e.g. "claude:claude-sonnet-4-20250514"
+    value?: string | null; // Now "backend:model" format e.g. "claude:claude-opus-4-7"
     onchange?: (backend: BackendId, model: string) => void;
     class?: string;
   }
 
   let {
-    value = $bindable("claude:claude-sonnet-4-20250514"),
+    value = $bindable(`claude:${DEFAULT_CLAUDE_MODEL}`),
     onchange,
     class: className = "",
   }: Props = $props();
@@ -79,6 +80,11 @@
   });
 
   function formatModelName(model: string): string {
+    const anthropicLabel = getAnthropicModelShortLabel(model);
+    if (anthropicLabel) {
+      return anthropicLabel;
+    }
+
     // Make model names more readable
     return model
       .replace(/^claude-/, "")

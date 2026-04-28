@@ -10,8 +10,8 @@
 
   let { config }: Props = $props();
 
-  const url = config.url || "";
-  const height = config.height || 300;
+  const url = $derived(config.url || "");
+  const height = $derived(config.height || 300);
 
   let iframeError = $state(false);
 
@@ -29,6 +29,7 @@
     <span class="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{url}</span>
     <button
       onclick={openInNewTab}
+      aria-label="Open preview in a new tab"
       class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
       title="Open in new tab"
     >

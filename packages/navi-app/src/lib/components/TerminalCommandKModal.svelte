@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { getServerUrl } from "../config";
 
   interface Props {
@@ -25,8 +24,8 @@
     anchorY = 0,
   }: Props = $props();
 
-  let containerRef: HTMLDivElement;
-  let inputRef: HTMLInputElement;
+  let containerRef = $state<HTMLDivElement | undefined>();
+  let inputRef = $state<HTMLInputElement | undefined>();
   let prompt = $state("");
   let generatedCommand = $state("");
   let explanation = $state("");
@@ -159,8 +158,7 @@
 
 {#if open}
   <!-- Invisible backdrop to catch clicks outside -->
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="backdrop" onclick={handleClose}></div>
+  <button type="button" class="backdrop" onclick={handleClose} aria-label="Close command helper"></button>
 
   <!-- Inline tooltip -->
   <div
@@ -228,6 +226,9 @@
     position: fixed;
     inset: 0;
     z-index: 999;
+    padding: 0;
+    border: 0;
+    background: transparent;
   }
 
   .command-tooltip {

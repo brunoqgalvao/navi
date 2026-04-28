@@ -3,6 +3,7 @@ import { availableModels, costStore, sessionStatus, currentSession as session, s
 import { get } from "svelte/store";
 import type { Session } from "../api";
 import { showError } from "../errorHandler";
+import { DEFAULT_CLAUDE_MODEL } from "../../../shared/anthropic-models";
 
 export interface DataLoaderCallbacks {
   setDefaultProjectsDir: (dir: string) => void;
@@ -28,11 +29,13 @@ export async function loadConfig() {
   }
 }
 
-// Get the default model (Opus 4.5 preferred, or first available)
+// Get the default model (prefer the latest curated Claude default, or first available)
 export function getDefaultModel(): string {
   const models = get(availableModels);
   if (models.length === 0) return "";
-  const opus = models.find(m => m.value === "opus" || m.value.includes("opus"));
+  const preferred = models.find((model) => model.value === DEFAULT_CLAUDE_MODEL);
+  if (preferred) return preferred.value;
+  const opus = models.find((model) => model.value.includes("opus"));
   return opus?.value || models[0].value;
 }
 
@@ -42,9 +45,7 @@ export async function loadModels() {
     availableModels.set(models);
     const sessionState = get(session);
     if (models.length > 0 && !sessionState.selectedModel) {
-      // Prefer Opus 4.5 as default, fall back to first available
-      const opus = models.find(m => m.value === "opus" || m.value.includes("opus"));
-      session.setSelectedModel(opus?.value || models[0].value);
+      session.setSelectedModel(getDefaultModel());
     }
 
     // Also load backend-specific models

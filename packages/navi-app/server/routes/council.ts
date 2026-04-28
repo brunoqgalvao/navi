@@ -11,6 +11,11 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { execSync } from "child_process";
+import {
+  CLAUDE_HAIKU_4_5,
+  CLAUDE_OPUS_4_7,
+  CLAUDE_SONNET_4_6,
+} from "../../shared/anthropic-models";
 
 // ============================================================================
 // Types
@@ -53,9 +58,9 @@ const KEYMANAGER_PATH =
 const DEFAULT_COUNCIL: CouncilMember[] = [
   {
     id: "claude-sonnet",
-    name: "Claude Sonnet",
+    name: "Claude Sonnet 4.6",
     provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
+    model: CLAUDE_SONNET_4_6,
     icon: "🟣",
     color: "#8B5CF6",
   },
@@ -82,25 +87,25 @@ const AVAILABLE_MEMBERS: CouncilMember[] = [
   // Anthropic
   {
     id: "claude-opus",
-    name: "Claude Opus 4.5",
+    name: "Claude Opus 4.7",
     provider: "anthropic",
-    model: "claude-opus-4-5-20251101",
+    model: CLAUDE_OPUS_4_7,
     icon: "🟣",
     color: "#7C3AED",
   },
   {
     id: "claude-sonnet",
-    name: "Claude Sonnet 4",
+    name: "Claude Sonnet 4.6",
     provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
+    model: CLAUDE_SONNET_4_6,
     icon: "🟣",
     color: "#8B5CF6",
   },
   {
     id: "claude-haiku",
-    name: "Claude Haiku",
+    name: "Claude Haiku 4.5",
     provider: "anthropic",
-    model: "claude-3-5-haiku-latest",
+    model: CLAUDE_HAIKU_4_5,
     icon: "🟣",
     color: "#A78BFA",
   },

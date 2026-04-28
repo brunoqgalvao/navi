@@ -24,8 +24,10 @@ import {
   shouldStopLoop,
   type LoopState,
 } from "../services/loop-manager";
+import { getDefaultContextResetThreshold, getEffectiveContextWindow } from "../utils/context-window";
 import { enableInfiniteLoop, disableUntilDone } from "../websocket/handler";
 import { projects } from "../db";
+import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 
 export async function handleLoopRoutes(
   url: URL,
@@ -60,7 +62,9 @@ export async function handleLoopRoutes(
 
       // Get project's context window
       const project = projects.get(projectId);
-      const contextWindow = project?.context_window || 200000;
+      const contextWindow = getEffectiveContextWindow(project?.context_window);
+      const contextResetThresholdValue =
+        contextResetThreshold ?? getDefaultContextResetThreshold(contextWindow);
 
       // Start the infinite loop
       const loop = enableInfiniteLoop(sessionId, prompt, projectId, {
@@ -68,8 +72,8 @@ export async function handleLoopRoutes(
         maxIterations: maxIterations ?? 100,
         maxCost: maxCost ?? 50,
         definitionOfDone,
-        contextResetThreshold: contextResetThreshold ?? 0.7,
-        verifierModel: verifierModel ?? "haiku",
+        contextResetThreshold: contextResetThresholdValue,
+        verifierModel: verifierModel ?? DEFAULT_CLAUDE_LIGHT_MODEL,
         contextWindow,
       });
 

@@ -1,7 +1,7 @@
-import { spawn } from "child_process";
+import { execFile, spawn } from "child_process";
 import { json, error as errorResponse } from "../utils/response";
 import { globalSettings } from "../db";
-import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
+import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions, resolveClaudeCodeExecutable } from "../utils/claude-code";
 import { getSDK } from "../utils/sdk-loader";
 import { createHash, randomBytes } from "crypto";
 
@@ -10,8 +10,15 @@ import { createHash, randomBytes } from "crypto";
 // ============================================
 
 const AGENTMAIL_API_BASE = "https://api.agentmail.to/v0";
-const AUTH_STATUS_TIMEOUT_MS = 2000;
+const AUTH_STATUS_TIMEOUT_MS = 6000;
 const AUTH_INTERRUPT_TIMEOUT_MS = 500;
+const CLI_AUTH_STATUS_TIMEOUT_MS = 2000;
+
+type ClaudeCliAuthStatus = {
+  loggedIn: boolean;
+  authMethod: string | null;
+  apiProvider: string | null;
+};
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -30,6 +37,42 @@ async function interruptQuietly(q: { interrupt: () => Promise<void> }) {
   try {
     await withTimeout(q.interrupt(), AUTH_INTERRUPT_TIMEOUT_MS);
   } catch {}
+}
+
+async function getClaudeCliAuthStatus(claudePath: string): Promise<ClaudeCliAuthStatus | null> {
+  return new Promise((resolve) => {
+    execFile(
+      claudePath,
+      ["auth", "status", "--json"],
+      {
+        timeout: CLI_AUTH_STATUS_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+      },
+      (_error, stdout, stderr) => {
+        const output = `${stdout || ""}${stderr || ""}`.trim();
+        if (!output) {
+          resolve(null);
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(output) as Partial<ClaudeCliAuthStatus>;
+          if (typeof parsed.loggedIn !== "boolean") {
+            resolve(null);
+            return;
+          }
+
+          resolve({
+            loggedIn: parsed.loggedIn,
+            authMethod: typeof parsed.authMethod === "string" ? parsed.authMethod : null,
+            apiProvider: typeof parsed.apiProvider === "string" ? parsed.apiProvider : null,
+          });
+        } catch {
+          resolve(null);
+        }
+      }
+    );
+  });
 }
 
 // In-memory user store (replace with DB later)
@@ -135,56 +178,49 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       });
     }
 
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const execAsync = promisify(exec);
-
-    let claudeInstalled = false;
-    let claudePath = "";
-
-    const pathsToTry = [
-      "which claude",
-      "command -v claude",
-    ];
-
-    for (const cmd of pathsToTry) {
-      try {
-        const { stdout } = await execAsync(cmd);
-        claudePath = stdout.trim();
-        if (claudePath) {
-          claudeInstalled = true;
-          break;
-        }
-      } catch {}
-    }
+    const resolvedClaudePath = resolveClaudeCodeExecutable();
+    let claudeInstalled = !!resolvedClaudePath;
+    let claudePath = resolvedClaudePath ?? "";
 
     const storedApiKey = globalSettings.get("anthropicApiKey") as string | null;
     const hasApiKey = !!storedApiKey;
 
     let hasOAuth = false;
-    try {
-      const { query } = await getSDK();
-      const q = query({
-        prompt: "",
-        options: {
-          cwd: process.cwd(),
-          env: buildClaudeCodeEnv(process.env),
-          ...getClaudeCodeRuntimeOptions(),
-        },
-      });
-      try {
-        const models = await withTimeout(q.supportedModels(), AUTH_STATUS_TIMEOUT_MS);
-        if (models && models.length > 0) {
-          hasOAuth = true;
-          claudeInstalled = true;
+    let claudeCliAuthMethod: string | null = null;
+    let claudeCliApiProvider: string | null = null;
+
+    if (claudeInstalled && claudePath) {
+      const cliAuthStatus = await getClaudeCliAuthStatus(claudePath);
+      if (cliAuthStatus) {
+        hasOAuth = cliAuthStatus.loggedIn;
+        claudeCliAuthMethod = cliAuthStatus.authMethod;
+        claudeCliApiProvider = cliAuthStatus.apiProvider;
+      } else {
+        try {
+          const { query } = await getSDK();
+          const q = query({
+            prompt: "",
+            options: {
+              cwd: process.cwd(),
+              env: buildClaudeCodeEnv(process.env),
+              ...getClaudeCodeRuntimeOptions(),
+            },
+          });
+          try {
+            const models = await withTimeout(q.supportedModels(), AUTH_STATUS_TIMEOUT_MS);
+            if (models && models.length > 0) {
+              hasOAuth = true;
+              claudeInstalled = true;
+            }
+          } catch {
+            hasOAuth = false;
+          } finally {
+            await interruptQuietly(q);
+          }
+        } catch {
+          hasOAuth = false;
         }
-      } catch (e: any) {
-        hasOAuth = false;
-      } finally {
-        await interruptQuietly(q);
       }
-    } catch (e: any) {
-      hasOAuth = false;
     }
 
     const preferredAuth = globalSettings.get("preferredAuth") as "oauth" | "api_key" | null;
@@ -217,6 +253,8 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       hasApiKey,
       apiKeyPreview,
       hasOAuth,
+      claudeCliAuthMethod,
+      claudeCliApiProvider,
       preferredAuth,
       hasZaiKey,
       zaiKeyPreview,
@@ -292,7 +330,8 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
 
   if (url.pathname === "/api/auth/login" && method === "POST") {
     return new Promise((resolve) => {
-      const loginProcess = spawn("claude", ["login"], {
+      const claudePath = resolveClaudeCodeExecutable() ?? "claude";
+      const loginProcess = spawn(claudePath, ["auth", "login"], {
         stdio: ["inherit", "pipe", "pipe"],
       });
 
@@ -320,7 +359,7 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
         loginProcess.kill();
         resolve(json({
           success: false,
-          error: "Login requires interactive terminal. Please run 'claude login' in your terminal.",
+          error: "Login requires interactive terminal. Please run 'claude auth login' in your terminal.",
           requiresTerminal: true
         }, 400));
       }, 2000);

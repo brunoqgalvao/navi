@@ -37,7 +37,7 @@
   const effectiveBranch = $derived(branch || "main");
 
   // Convert direct URL to proxy URL for iframe (injects branch indicator)
-  // Direct URL: http://localhost:4001 -> Proxy URL: http://localhost:3001/api/preview/proxy/4001/
+  // Direct URL: http://localhost:4001 -> Proxy URL: http://localhost:3021/api/preview/proxy/4001/
   const proxyUrl = $derived(() => {
     if (!currentUrl) return null;
     try {

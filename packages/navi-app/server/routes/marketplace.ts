@@ -22,6 +22,7 @@ interface SearchResult {
 
 interface RunSkillsCliOptions {
   cwd?: string;
+  timeoutMs?: number;
 }
 
 interface InstallCommandDetails {
@@ -34,13 +35,68 @@ interface InstallCommandDetails {
  */
 async function runSkillsCli(args: string[], options: RunSkillsCliOptions = {}): Promise<string> {
   return new Promise((resolve, reject) => {
+    const timeoutMs = options.timeoutMs ?? 30000;
+    let settled = false;
+    let timedOut = false;
     const proc = spawn("npx", ["-y", "skills", ...args], {
       cwd: options.cwd,
-      timeout: 30000,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        CI: "1",
+        NO_UPDATE_NOTIFIER: "1",
+        npm_config_yes: "true",
+        npm_config_update_notifier: "false",
+        npm_config_audit: "false",
+        npm_config_fund: "false",
+      },
     });
 
     let stdout = "";
     let stderr = "";
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      fn();
+    };
+
+    const killProcess = () => {
+      if (!proc.pid) return;
+
+      if (process.platform !== "win32") {
+        try {
+          process.kill(-proc.pid, "SIGTERM");
+          return;
+        } catch {
+          // Fall back to killing the direct process below.
+        }
+      }
+
+      try {
+        proc.kill("SIGTERM");
+      } catch {
+        // Best effort only.
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      const command = ["npx", "-y", "skills", ...args].join(" ");
+      const output = `${stdout}\n${stderr}`.trim();
+      killProcess();
+      finish(() => {
+        reject(
+          new Error(
+            output
+              ? `skills CLI timed out after ${timeoutMs}ms while running \`${command}\`.\n\n${output}`
+              : `skills CLI timed out after ${timeoutMs}ms while running \`${command}\`.`
+          )
+        );
+      });
+    }, timeoutMs);
 
     proc.stdout?.on("data", (data) => {
       stdout += data.toString();
@@ -51,15 +107,23 @@ async function runSkillsCli(args: string[], options: RunSkillsCliOptions = {}): 
     });
 
     proc.on("close", (code) => {
-      if (code === 0) {
-        resolve(stdout);
-      } else {
-        reject(new Error(stderr || `Command failed with code ${code}`));
+      if (timedOut) {
+        return;
       }
+
+      finish(() => {
+        if (code === 0) {
+          resolve(stdout);
+        } else {
+          reject(new Error(stderr || stdout || `Command failed with code ${code}`));
+        }
+      });
     });
 
     proc.on("error", (err) => {
-      reject(err);
+      finish(() => {
+        reject(err);
+      });
     });
   });
 }
@@ -443,6 +507,7 @@ export async function handleMarketplaceRoutes(
       });
       const output = await runSkillsCli(installDetails.args, {
         cwd: installGlobal ? undefined : projectPath,
+        timeoutMs: 60000,
       });
 
       // After install, trigger a scan to import into Navi's library

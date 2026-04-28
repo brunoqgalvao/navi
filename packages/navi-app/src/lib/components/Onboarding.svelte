@@ -24,6 +24,13 @@
   let error = $state("");
   let isLoading = $state(false);
   let settingPreferred = $state(false);
+  const claudeLoginCommand = "claude auth login";
+
+  function notifyClaudeAuthUpdated() {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("navi:claude-auth-updated"));
+    }
+  }
 
   async function checkAuthStatus() {
     step = "checking";
@@ -57,6 +64,7 @@
       if (authStatus) {
         authStatus = { ...authStatus, authMethod: method, preferredAuth: method };
       }
+      notifyClaudeAuthUpdated();
       step = "complete";
     } catch (e) {
       console.error("Failed to set preferred auth:", e);
@@ -78,6 +86,7 @@
       await api.auth.setApiKey(apiKey.trim());
       authStatus = await api.auth.status();
       if (authStatus.authenticated) {
+        notifyClaudeAuthUpdated();
         if (authStatus.hasOAuth) {
           step = "choose-auth";
         } else {
@@ -98,6 +107,7 @@
     try {
       authStatus = await api.auth.status();
       if (authStatus.hasOAuth) {
+        notifyClaudeAuthUpdated();
         if (authStatus.hasApiKey) {
           step = "choose-auth";
         } else {
@@ -324,7 +334,7 @@
             </svg>
           </div>
           <h2 class="text-xl font-semibold text-gray-900">Choose Auth Method</h2>
-          <p class="text-sm text-gray-500">You have both OAuth and API key configured</p>
+          <p class="text-sm text-gray-500">You have both Claude login and API key configured</p>
         </div>
 
         <div class="space-y-2">
@@ -340,7 +350,7 @@
                 </svg>
               </div>
               <div class="flex-1 min-w-0">
-                <div class="font-medium text-gray-900 text-sm">Anthropic OAuth</div>
+                <div class="font-medium text-gray-900 text-sm">Claude Login</div>
                 <div class="text-xs text-gray-500">Use your subscription</div>
               </div>
             </div>
@@ -387,7 +397,7 @@
                   </svg>
                 </div>
                 <div class="flex-1 min-w-0">
-                  <div class="font-medium text-gray-900 text-sm">Login with Anthropic</div>
+                  <div class="font-medium text-gray-900 text-sm">Sign in with Claude</div>
                   <div class="text-xs text-gray-500">Use your account subscription</div>
                 </div>
                 <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -550,16 +560,18 @@
         </button>
 
         <div class="space-y-2">
-          <h2 class="text-xl font-semibold text-gray-900">Login with Anthropic</h2>
+          <h2 class="text-xl font-semibold text-gray-900">Sign in with Claude</h2>
           <p class="text-sm text-gray-500">Run this in your terminal:</p>
         </div>
 
         <div class="bg-gray-900 rounded-xl p-4 font-mono text-sm">
           <div class="flex items-center justify-between">
-            <code class="text-green-400">claude login</code>
+            <code class="text-green-400">{claudeLoginCommand}</code>
             <button
-              onclick={() => navigator.clipboard.writeText("claude login")}
+              onclick={() => navigator.clipboard.writeText(claudeLoginCommand)}
               class="text-gray-500 hover:text-white p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+              title="Copy to clipboard"
+              aria-label="Copy Claude login command"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
@@ -590,7 +602,7 @@
           <h2 class="text-xl font-semibold text-gray-900">You're all set!</h2>
           <p class="text-sm text-gray-500">
             {#if authStatus?.authMethod === "oauth"}
-              Connected via Anthropic
+              Connected via Claude login
             {:else}
               API key configured
             {/if}

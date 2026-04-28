@@ -43,8 +43,8 @@ const IS_PREVIEW_MODE = typeof import.meta !== "undefined"
 
 // Use environment-injected ports or defaults
 // Note: In preview mode, Vite proxy handles routing to the server
-export const DEV_SERVER_PORT = ENV_SERVER_PORT || 3001;
-export const DEV_PTY_PORT = ENV_PTY_PORT || 3002;
+export const DEV_SERVER_PORT = ENV_SERVER_PORT || 3021;
+export const DEV_PTY_PORT = ENV_PTY_PORT || 3022;
 export const BUNDLED_SERVER_PORT = 3011;
 export const BUNDLED_PTY_PORT = 3012;
 const PORT_SCAN_RANGE = 10;
@@ -152,8 +152,8 @@ export function getPtyWsUrl(): string {
   // PTY is not proxied in preview mode - use internal port
   if (IS_PREVIEW_MODE && typeof window !== "undefined") {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    // PTY runs on 3002 inside the container
-    return `${protocol}//${window.location.hostname}:3002`;
+    // PTY runs on 3022 inside the container
+    return `${protocol}//${window.location.hostname}:3022`;
   }
   const port = getPtyServerPort();
   return `ws://localhost:${port}`;
@@ -161,7 +161,7 @@ export function getPtyWsUrl(): string {
 
 export function getPtyApiUrl(): string {
   if (IS_PREVIEW_MODE && typeof window !== "undefined") {
-    return `http://${window.location.hostname}:3002`;
+    return `http://${window.location.hostname}:3022`;
   }
   const port = getPtyServerPort();
   return `http://localhost:${port}`;

@@ -14,7 +14,7 @@
 
   let statuses = $state<ServiceStatus[]>([]);
 
-  const services = config.services || [];
+  const services = $derived(config.services || []);
 
   async function checkAllServices() {
     // Initialize all as checking
@@ -58,6 +58,7 @@
     <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Service Status</span>
     <button
       onclick={checkAllServices}
+      aria-label="Refresh service status"
       class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
       title="Refresh"
     >

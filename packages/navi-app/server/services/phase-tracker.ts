@@ -9,6 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { sessions, messages, type Message } from "../db";
 import { registerQueryHook, type QueryHookContext } from "./query-hooks";
 import { resolveNaviClaudeAuth } from "../utils/navi-auth";
+import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -86,7 +87,7 @@ async function classifyPhase(recentMessages: Message[]): Promise<ConversationPha
 
   try {
     const response = await client.messages.create({
-      model: "claude-3-5-haiku-20241022",
+      model: DEFAULT_CLAUDE_LIGHT_MODEL,
       max_tokens: 20,
       system: CLASSIFICATION_PROMPT,
       messages: [

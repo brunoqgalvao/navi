@@ -148,7 +148,8 @@ export NAVI_LOG_DIR=~/Desktop
 | Variable | Description |
 |----------|-------------|
 | `NAVI_BUN_SIDECAR_PATH` | Override Bun binary location |
-| `NAVI_CLAUDE_CODE_PATH` | Override Claude SDK CLI path |
+| `NAVI_BUNDLED_CLAUDE_CODE_PATH` | Bundled Claude SDK CLI fallback path from Tauri |
+| `NAVI_CLAUDE_CODE_PATH` | Resolved Claude CLI path passed to workers |
 | `NAVI_LOG_DIR` | Custom log directory |
 | `NAVI_LOG_FILE` | Custom log file path |
 

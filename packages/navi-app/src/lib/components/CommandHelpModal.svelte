@@ -35,6 +35,9 @@
 
     // Tools
     { name: "council", description: "Ask multiple LLMs and compare responses side-by-side", argsHint: "[question]", category: "tools", isBuiltIn: true },
+    { name: "loop", description: "Open the long-running loop runner for the current prompt", category: "tools", isBuiltIn: true },
+    { name: "batch", description: "Fan out worktree-backed sessions for multiple scoped tasks", category: "tools", isBuiltIn: true },
+    { name: "agent", description: "Open the agent builder or prefill an @agent prompt", category: "tools", isBuiltIn: true },
 
     // Feedback
     { name: "bug", description: "Report a bug or issue", category: "feedback", isBuiltIn: true },

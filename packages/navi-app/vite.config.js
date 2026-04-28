@@ -78,18 +78,18 @@ export default defineConfig({
     },
     // In preview mode, proxy API and WebSocket requests to the backend server
     // This allows the frontend to use relative URLs that work in any environment
-    // Note: Server runs on 3001 by default, we keep it consistent
+    // Note: Server runs on 3021 by default, we keep it consistent
     proxy: isPreviewMode ? {
       "/api": {
-        target: "http://localhost:3001",
+        target: "http://localhost:3021",
         changeOrigin: true,
       },
       "/ws": {
-        target: "ws://localhost:3001",
+        target: "ws://localhost:3021",
         ws: true,
       },
       "/health": {
-        target: "http://localhost:3001",
+        target: "http://localhost:3021",
         changeOrigin: true,
       },
     } : undefined,

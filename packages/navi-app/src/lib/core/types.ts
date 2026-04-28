@@ -42,6 +42,7 @@ export type ExtensionId =
   | "preview"
   | "context"         // Session context visibility
   | "inbox"           // Workspace inbox
+  | "shared-inbox"    // Cross-project shared inbox
   | "email"           // Navi's email inbox
   | "channels"        // WhatsApp, Telegram & messaging integrations
   | "browser-preview"; // Browser-use live preview
@@ -60,6 +61,7 @@ export type PanelMode =
   | "preview-unified"
   | "context"         // Context sidebar view
   | "inbox"           // Workspace inbox view
+  | "shared-inbox"    // Cross-project shared inbox view
   | "email"           // Email inbox view
   | "channels"        // WhatsApp, Telegram & messaging inbox
   | "browser-preview"; // Browser-use preview

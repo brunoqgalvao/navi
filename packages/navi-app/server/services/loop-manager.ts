@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -276,7 +277,7 @@ export function createLoop(config: {
     startedAt: Date.now(),
     status: "running",
     workerModel: config.workerModel,
-    verifierModel: config.verifierModel ?? "claude-3-5-haiku-20241022",
+    verifierModel: config.verifierModel ?? DEFAULT_CLAUDE_LIGHT_MODEL,
   };
 
   activeLoops.set(loopId, state);
@@ -631,6 +632,7 @@ The \`updatedContext\` field is **CRITICAL**. Include:
  */
 export function generateHandoffPrompt(state: LoopState): string {
   const statusMd = generateStatusMd(state);
+  const thresholdPercent = Math.round(state.contextResetThreshold * 100);
 
   // Build DoD checklist with clearer formatting
   const dodChecklist = state.definitionOfDone
@@ -681,7 +683,7 @@ ${statusMd}
 5. **Before finishing**, write a summary of what you did for the next iteration
 
 ## ⚠️ Important Reminders
-- The context reset happened because we hit 70% of the context window
+- The context reset happened because we hit the configured ${thresholdPercent}% context threshold
 - Your work is being automatically verified after each iteration
 - If you're stuck, explain why so the verifier can help
 

@@ -20,11 +20,12 @@
   import EmailPanel from "../features/email/EmailPanel.svelte";
   import { ChannelsPanel } from "../features/channel-inbox/components";
   import InboxPanel from "../features/inbox/components/InboxPanel.svelte";
+  import SharedInboxPanel from "../features/inbox/components/SharedInboxPanel.svelte";
   import { ContextPanel } from "../features/context";
   import AuthGate from "../components/AuthGate.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "channels" | "inbox";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "channels" | "inbox" | "shared-inbox";
 
   interface Props {
     mode: PanelMode;
@@ -47,6 +48,7 @@
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
     onNavigateToSession?: (sessionId: string, prompt?: string, autoSend?: boolean) => void;
+    onNavigateToProject?: (projectId: string) => void;
     /** Callback when preview panel wants to ask Claude for help */
     onPreviewAskClaude?: (message: string) => void;
     /** Callback when user inspects an element in browser preview */
@@ -74,6 +76,7 @@
     onTerminalRef,
     onTerminalSendToClaude,
     onNavigateToSession,
+    onNavigateToProject,
     onPreviewAskClaude,
     onElementInspected,
   }: Props = $props();
@@ -327,6 +330,14 @@
           {projectId}
           currentSessionId={sessionId}
           onOpenSession={(nextSessionId) => onNavigateToSession?.(nextSessionId)}
+        />
+      </div>
+    {:else if mode === "shared-inbox"}
+      <!-- Shared inbox - cross-project follow-ups -->
+      <div class="flex-1 flex flex-col w-full overflow-hidden">
+        <SharedInboxPanel
+          onOpenSession={(nextSessionId) => onNavigateToSession?.(nextSessionId)}
+          onOpenProject={(nextProjectId) => onNavigateToProject?.(nextProjectId)}
         />
       </div>
     {/if}

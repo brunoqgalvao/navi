@@ -18,10 +18,10 @@
  *   navi-integrations drive read <id>                # Read file content
  *
  * Environment:
- *   NAVI_SERVER_URL - URL of the Navi server (default: http://localhost:3001)
+ *   NAVI_SERVER_URL - URL of the Navi server (default: http://localhost:3021)
  */
 
-const NAVI_SERVER = process.env.NAVI_SERVER_URL || "http://localhost:3001";
+const NAVI_SERVER = process.env.NAVI_SERVER_URL || "http://localhost:3021";
 
 interface TokenResponse {
   access_token: string;
@@ -510,7 +510,7 @@ Google Drive:
   navi-integrations drive read <id>                Read file content
 
 Environment:
-  NAVI_SERVER_URL    Navi server URL (default: http://localhost:3001)
+  NAVI_SERVER_URL    Navi server URL (default: http://localhost:3021)
 `);
     return;
   }

@@ -13,6 +13,10 @@ export async function handleInboxItemRoutes(
   method: string,
   req: Request
 ): Promise<Response | null> {
+  if (url.pathname === "/api/inbox" && method === "GET") {
+    return json(inboxItems.listAll())
+  }
+
   const projectInboxMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/inbox$/)
   if (projectInboxMatch) {
     const projectId = projectInboxMatch[1]

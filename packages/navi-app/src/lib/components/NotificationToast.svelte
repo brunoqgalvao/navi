@@ -2,6 +2,7 @@
   import { activeNotifications, notifications, type Notification } from "../stores";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
+  import ClaudeAuthBadge from "./ClaudeAuthBadge.svelte";
 
   const typeStyles: Record<string, { accent: string; icon: string; glow: string }> = {
     info: {
@@ -110,4 +111,6 @@
       </div>
     </div>
   {/each}
+
+  <ClaudeAuthBadge />
 </div>

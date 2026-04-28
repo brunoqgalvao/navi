@@ -2,6 +2,7 @@ import { json, corsHeaders } from "../utils/response";
 import { spawn, type ChildProcess } from "child_process";
 import { homedir } from "os";
 import WebSocket from "ws";
+import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 
 // Terminal constants
 const TERMINAL_MAX_BUFFER_LINES = 500;
@@ -9,8 +10,8 @@ const PTY_SERVER_RECONNECT_INTERVAL_MS = 3000;
 const PTY_SERVER_CREATION_TIMEOUT_MS = 5000;
 const TERMINAL_DEFAULT_COLS = 80;
 const TERMINAL_DEFAULT_ROWS = 24;
-const DEFAULT_PTY_SERVER_WS_URL = "ws://localhost:3002";
-const DEFAULT_PTY_SERVER_HTTP_URL = "http://localhost:3002";
+const DEFAULT_PTY_SERVER_WS_URL = "ws://localhost:3022";
+const DEFAULT_PTY_SERVER_HTTP_URL = "http://localhost:3022";
 
 // Stale process timeout (30 minutes of inactivity)
 const STALE_PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
@@ -966,7 +967,7 @@ ${context ? `Recent terminal output for context:\n\`\`\`\n${context.slice(-2000)
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
+          model: DEFAULT_CLAUDE_LIGHT_MODEL,
           max_tokens: 512,
           system: systemPrompt,
           messages: [{ role: "user", content: prompt }],
@@ -1006,7 +1007,7 @@ ${context ? `Recent terminal output for context:\n\`\`\`\n${context.slice(-2000)
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-3-haiku-20240307",
+        model: DEFAULT_CLAUDE_LIGHT_MODEL,
         max_tokens: 512,
         system: systemPrompt,
         messages: [{ role: "user", content: prompt }],

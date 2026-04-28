@@ -10,8 +10,9 @@
 
 import { json } from "../utils/response";
 import { globalSettings } from "../db";
+import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 
-const HAIKU_MODEL = "claude-3-5-haiku-20241022";
+const HAIKU_MODEL = DEFAULT_CLAUDE_LIGHT_MODEL;
 const API_URL = "https://api.anthropic.com/v1/messages";
 
 interface AnalyzeRequest {

@@ -57,11 +57,11 @@
 
   let checkingDashboard = $state(true);
   let hasDashboard = $state(false);
-  let landingView = $state<"overview" | "canvas">("canvas");
+  let landingView = $state<"overview" | "canvas">("overview");
 
   function loadLandingView(): "overview" | "canvas" {
-    if (typeof window === "undefined") return "canvas";
-    return localStorage.getItem(LANDING_VIEW_KEY) === "overview" ? "overview" : "canvas";
+    if (typeof window === "undefined") return "overview";
+    return localStorage.getItem(LANDING_VIEW_KEY) === "canvas" ? "canvas" : "overview";
   }
 
   function setLandingView(nextView: "overview" | "canvas") {
@@ -122,37 +122,35 @@
 </script>
 
 <div class="flex h-full flex-col pt-4">
-  {#if landingView !== "canvas"}
-    <div class="px-4 pr-52 pt-1 md:px-6 md:pr-56">
-      <div class="flex w-full flex-wrap items-center justify-between gap-3">
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-xl font-semibold text-gray-900">{projectName}</h1>
-            <span class="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-gray-500">
-              Workspace
-            </span>
-          </div>
-        </div>
-
-        <div class="inline-flex rounded-full border border-gray-200 bg-white p-1 shadow-sm">
-          <button
-            type="button"
-            class="rounded-full px-4 py-2 text-xs font-medium text-gray-600 transition-colors hover:text-gray-900"
-            onclick={() => setLandingView("canvas")}
-          >
-            Canvas
-          </button>
-          <button
-            type="button"
-            class="rounded-full bg-gray-900 px-4 py-2 text-xs font-medium text-white shadow-sm transition-colors"
-            onclick={() => setLandingView("overview")}
-          >
-            Overview
-          </button>
+  <div class="px-4 pr-52 pt-1 md:px-6 md:pr-56">
+    <div class="flex w-full flex-wrap items-center justify-between gap-3">
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-xl font-semibold text-gray-900">{projectName}</h1>
+          <span class="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-gray-500">
+            Workspace
+          </span>
         </div>
       </div>
+
+      <div class="inline-flex rounded-full border border-gray-200 bg-white p-1 shadow-sm">
+        <button
+          type="button"
+          class="rounded-full px-4 py-2 text-xs font-medium transition-colors {landingView === 'overview' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'}"
+          onclick={() => setLandingView("overview")}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          class="rounded-full px-4 py-2 text-xs font-medium transition-colors {landingView === 'canvas' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'}"
+          onclick={() => setLandingView("canvas")}
+        >
+          Canvas
+        </button>
+      </div>
     </div>
-  {/if}
+  </div>
 
   <div class="flex-1 min-h-0">
     {#if landingView === "canvas"}

@@ -30,6 +30,7 @@ import {
   type CreateSkillInput,
   type SkillWithStatus,
 } from "../skills";
+import { DEFAULT_CLAUDE_FAST_MODEL, DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 
 type SkillDocumentScope = "library" | "global" | "project";
 
@@ -266,7 +267,7 @@ ${content.slice(0, 8000)}`;
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-3-5-haiku-20241022",
+        model: DEFAULT_CLAUDE_LIGHT_MODEL,
         max_tokens: 2000,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
@@ -1487,7 +1488,7 @@ Generate comprehensive instructions for this skill that can be reused in future 
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: DEFAULT_CLAUDE_FAST_MODEL,
           max_tokens: 4000,
           system: systemPrompt,
           messages: [{ role: "user", content: userPrompt }],

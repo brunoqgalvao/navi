@@ -48108,7 +48108,7 @@ The deliverable will be sent to your parent, who will incorporate it into their 
     })
   ]
 });
-var NAVI_API_BASE = process.env.NAVI_API_URL || "http://localhost:3001";
+var NAVI_API_BASE = process.env.NAVI_API_URL || "http://localhost:3021";
 async function fetchNaviApi(path3) {
   try {
     const res = await fetch(`${NAVI_API_BASE}${path3}`);

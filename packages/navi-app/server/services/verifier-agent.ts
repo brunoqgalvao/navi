@@ -19,6 +19,7 @@ import {
   verifyDodItems,
   updateLoopContext,
 } from "./loop-manager";
+import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // VERIFIER EXECUTION
@@ -48,9 +49,23 @@ export async function runVerifier(
   const prompt = generateVerifierPrompt(state);
 
   // Use the specified model, or default to haiku if none specified
-  const model = state.verifierModel || "claude-3-5-haiku-20241022";
+  const model = state.verifierModel || DEFAULT_CLAUDE_LIGHT_MODEL;
 
-  const { overrides } = resolveNaviClaudeAuth(model);
+  const auth = resolveNaviClaudeAuth(model);
+  if (auth.mode === "none") {
+    return {
+      decision: {
+        complete: false,
+        confidence: 0,
+        reason: auth.error || "No Claude authentication available",
+        shouldContinue: true,
+        verifiedItems: [],
+      },
+      tokensUsed: 0,
+      costUsd: 0,
+      rawOutput: "",
+    };
+  }
   const { query } = await getSDK();
 
   let rawOutput = "";
@@ -73,7 +88,7 @@ export async function runVerifier(
         ],
         maxTurns: 10, // Allow multiple tool calls for thorough verification
         model,
-        env: buildClaudeCodeEnv(process.env, overrides),
+        env: buildClaudeCodeEnv(process.env, auth.overrides),
         ...getClaudeCodeRuntimeOptions(),
       },
     });

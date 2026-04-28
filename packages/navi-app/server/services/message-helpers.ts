@@ -1,3 +1,5 @@
+import { shouldDisplayOrPersistUserMessage } from "../../shared/sdk-user-message";
+
 export function hasMessageContent(content: unknown): boolean {
   if (Array.isArray(content)) return content.length > 0;
   if (typeof content === "string") return content.trim().length > 0;
@@ -17,10 +19,12 @@ export function shouldPersistUserMessage(data: any): boolean {
     return false;
   }
 
-  const hasToolResult = isToolResultContent(data.content);
-  const result = data.isSynthetic || data.toolUseResult || hasToolResult;
-
-  return result;
+  return shouldDisplayOrPersistUserMessage({
+    content: data.content,
+    isCompactSummary: data.isCompactSummary,
+    isSynthetic: data.isSynthetic,
+    toolUseResult: data.toolUseResult,
+  });
 }
 
 export function safeSend(ws: any, payload: unknown) {

@@ -630,7 +630,7 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 sidecar_command = sidecar_command.env("TAURI_RESOURCE_DIR", resource_dir.to_string_lossy().to_string());
                 let cli_path = resource_dir.join("resources").join("claude-agent-sdk").join("cli.js");
-                sidecar_command = sidecar_command.env("NAVI_CLAUDE_CODE_PATH", cli_path.to_string_lossy().to_string());
+                sidecar_command = sidecar_command.env("NAVI_BUNDLED_CLAUDE_CODE_PATH", cli_path.to_string_lossy().to_string());
 
                 if let Some(contents_dir) = resource_dir.parent() {
                     let bun_path = contents_dir.join("MacOS").join("bun");

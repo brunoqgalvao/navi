@@ -4,9 +4,20 @@ import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude
 import { resolveNaviClaudeAuth, formatAuthForLog } from "../utils/navi-auth";
 import { describePath, writeDebugLog } from "../utils/logging";
 import { getSDK } from "../utils/sdk-loader";
+import { getCuratedAnthropicModels, mergeAnthropicModelOptions } from "../../shared/anthropic-models";
 
 const MODELS_TIMEOUT_MS = 5000;
 const MODELS_INTERRUPT_TIMEOUT_MS = 500;
+const MODELS_CACHE_TTL_MS = 30000;
+
+type ModelInfo = {
+  value: string;
+  displayName: string;
+  description: string;
+  provider?: string;
+};
+
+let modelsCache: { key: string; expiresAt: number; data: ModelInfo[] } | null = null;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -23,15 +34,33 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   });
 }
 
+function shouldIgnoreInterruptError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.includes("ProcessTransport is not ready for writing");
+}
+
 async function interruptWithTimeout(q: { interrupt: () => Promise<void> }) {
   try {
     await withTimeout(q.interrupt(), MODELS_INTERRUPT_TIMEOUT_MS, "interrupt");
   } catch (e) {
+    if (shouldIgnoreInterruptError(e)) return;
     logModelsDiagnostics("interrupt_error", {
       message: e instanceof Error ? e.message : String(e),
       name: e instanceof Error ? e.name : null,
     });
   }
+}
+
+function getFallbackClaudeModels(): ModelInfo[] {
+  return getCuratedAnthropicModels();
+}
+
+function getConfiguredZaiModels(): ModelInfo[] {
+  const zaiApiKey = globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY;
+  return zaiApiKey ? [
+    { value: "glm-4.7", displayName: "GLM-4.7", description: "Z.AI flagship coding model", provider: "zai" },
+    { value: "glm-4.5-air", displayName: "GLM-4.5 Air", description: "Fast, lightweight model", provider: "zai" },
+  ] : [];
 }
 
 export async function handleConfigRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
@@ -51,7 +80,7 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
 
   // Navi API URL endpoint - used by skills and external tools to discover the API
   if (url.pathname === "/api/navi-url") {
-    const port = process.env.PORT || Bun.env.PORT || "3001";
+    const port = process.env.PORT || Bun.env.PORT || "3021";
     const apiUrl = `http://localhost:${port}`;
     return json({ apiUrl, port: parseInt(port, 10) });
   }
@@ -248,6 +277,20 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
 
   if (url.pathname === "/api/models") {
     const authResult = resolveNaviClaudeAuth();
+    const zaiModels = getConfiguredZaiModels();
+    const cacheKey = JSON.stringify({
+      authMode: authResult.mode,
+      hasZai: zaiModels.length > 0,
+    });
+
+    if (modelsCache && modelsCache.key === cacheKey && modelsCache.expiresAt > Date.now()) {
+      logModelsDiagnostics("cache_hit", {
+        auth: formatAuthForLog(authResult),
+        modelCount: modelsCache.data.length,
+      });
+      return json(modelsCache.data);
+    }
+
     logModelsDiagnostics("start", {
       auth: formatAuthForLog(authResult),
       cwd: process.cwd(),
@@ -278,35 +321,32 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
         modelCount: Array.isArray(sdkModels) ? sdkModels.length : null,
       });
 
-      // Add provider info to Claude models and ensure Sonnet is included
-      const claudeModels = sdkModels.map((m: any) => ({ ...m, provider: "anthropic" }));
+      // Anthropic's SDK-reported aliases can lag current model releases.
+      // Normalize them against Navi's curated latest model catalog so new
+      // releases stay selectable even before supportedModels() catches up.
+      const claudeModels = mergeAnthropicModelOptions(
+        sdkModels.map((model: any) => ({ ...model, provider: "anthropic" }))
+      );
 
-      // Check if sonnet is missing and add it
-      const hasSonnet = claudeModels.some((m: any) => m.value === "sonnet" || m.value.includes("sonnet"));
-      if (!hasSonnet) {
-        claudeModels.push({
-          value: "sonnet",
-          displayName: "Sonnet",
-          description: "Sonnet 4 · Best balance of speed and capability · $3/$15 per Mtok",
-          provider: "anthropic"
-        });
-      }
-
-      // Add Z.AI models if API key is configured
-      const zaiApiKey = globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY;
-      const zaiModels = zaiApiKey ? [
-        { value: "glm-4.7", displayName: "GLM-4.7", description: "Z.AI flagship coding model", provider: "zai" },
-        { value: "glm-4.5-air", displayName: "GLM-4.5 Air", description: "Fast, lightweight model", provider: "zai" },
-      ] : [];
-
-      return json([...claudeModels, ...zaiModels]);
+      const models = [...claudeModels, ...zaiModels];
+      modelsCache = {
+        key: cacheKey,
+        expiresAt: Date.now() + MODELS_CACHE_TTL_MS,
+        data: models,
+      };
+      return json(models);
     } catch (e) {
-      logModelsDiagnostics("error", {
+      logModelsDiagnostics("fallback", {
         message: e instanceof Error ? e.message : String(e),
         name: e instanceof Error ? e.name : null,
-        stack: e instanceof Error ? e.stack : null,
       });
-      return json({ error: "Failed to fetch models" }, 500);
+      const models = [...getFallbackClaudeModels(), ...zaiModels];
+      modelsCache = {
+        key: cacheKey,
+        expiresAt: Date.now() + MODELS_CACHE_TTL_MS,
+        data: models,
+      };
+      return json(models);
     } finally {
       if (q) {
         await interruptWithTimeout(q);

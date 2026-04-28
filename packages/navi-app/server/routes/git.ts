@@ -322,7 +322,7 @@ NO explanations, NO code references, NO file names. Just the feature description
 
       const systemPrompt = "You are an expert at understanding code changes and explaining them in terms of features and functionality. Focus on WHAT changes, not HOW. Be concise.";
 
-      const response = await fetch("http://localhost:3001/api/ephemeral", {
+      const response = await fetch("http://localhost:3021/api/ephemeral", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -426,7 +426,7 @@ IMPORTANT: Output ONLY the list of commit lines, one per line. No explanations, 
       const systemPrompt = "You are an expert at writing git commit messages following the Conventional Commits specification. Output ONLY the commit message, nothing else. No markdown, no quotes, no explanations.";
 
       // Use ephemeral chat endpoint internally
-      const response = await fetch("http://localhost:3001/api/ephemeral", {
+      const response = await fetch("http://localhost:3021/api/ephemeral", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

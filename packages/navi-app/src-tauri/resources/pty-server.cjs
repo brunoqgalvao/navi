@@ -72,7 +72,7 @@ function loadModule(moduleName) {
 const { WebSocketServer } = loadModule('ws');
 const pty = loadModule('node-pty');
 
-const PREFERRED_PORT = parseInt(process.env.PTY_PORT || '3002', 10);
+const PREFERRED_PORT = parseInt(process.env.PTY_PORT || '3022', 10);
 let PORT = PREFERRED_PORT;
 
 function isPortAvailable(port) {

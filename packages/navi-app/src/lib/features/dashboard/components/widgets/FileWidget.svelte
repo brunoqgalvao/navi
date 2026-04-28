@@ -19,10 +19,10 @@
   let error = $state<string | null>(null);
   let collapsed = $state(false);
 
-  const filePath = config.path || "";
-  const collapsible = config.collapsible ?? false;
-  const isMarkdown = filePath.endsWith(".md");
-  const fileName = filePath.split("/").pop() || filePath;
+  const filePath = $derived(config.path || "");
+  const collapsible = $derived(config.collapsible ?? false);
+  const isMarkdown = $derived(filePath.endsWith(".md"));
+  const fileName = $derived(filePath.split("/").pop() || filePath);
 
   async function loadFile() {
     if (!filePath) {
@@ -65,6 +65,7 @@
       {#if collapsible}
         <button
           onclick={() => (collapsed = !collapsed)}
+          aria-label={collapsed ? "Expand file content" : "Collapse file content"}
           class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
         >
           {collapsed ? "▶" : "▼"}
@@ -74,6 +75,7 @@
     </div>
     <button
       onclick={loadFile}
+      aria-label="Refresh file content"
       class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
       title="Refresh"
     >

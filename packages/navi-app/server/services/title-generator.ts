@@ -1,4 +1,5 @@
 import { sessions, globalSettings } from "../db";
+import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 
 export async function generateChatTitle(userPrompt: string, assistantContent: any[], sessionId: string) {
   const autoTitleEnabled = process.env.AUTO_TITLE !== "false";
@@ -53,7 +54,7 @@ export async function generateChatTitle(userPrompt: string, assistantContent: an
             "anthropic-version": "2023-06-01",
           },
           body: JSON.stringify({
-            model: "claude-3-haiku-20240307",
+            model: DEFAULT_CLAUDE_LIGHT_MODEL,
             max_tokens: 20,
             system: systemPrompt,
             messages: [{ role: "user", content: userContent }],
