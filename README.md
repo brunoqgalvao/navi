@@ -16,6 +16,9 @@ A local-first GUI for AI coding agents. Sessions, multi-agent orchestration, ter
 # Install
 curl -fsSL https://raw.githubusercontent.com/brunoqgalvao/navi/main/scripts/install-cli.sh | bash
 
+# Install and start automatically at login (macOS)
+curl -fsSL https://raw.githubusercontent.com/brunoqgalvao/navi/main/scripts/install-cli.sh | bash -s -- --start-at-login
+
 # Run
 navi
 
@@ -23,7 +26,7 @@ navi
 navi update
 ```
 
-The install script downloads a lightweight tarball (~7MB) from the latest release. If the tarball isn't available, it falls back to a sparse git clone of just the app source.
+The install script downloads a lightweight tarball (~7MB) from the latest release. If the tarball isn't available, it falls back to a sparse git clone of just the app source. On macOS, interactive installs ask whether Navi should start automatically at login. You can also pass `--start-at-login` or `--no-start-at-login`, or set `NAVI_START_AT_LOGIN=yes|no|ask`.
 
 ### Manual Install (no curl)
 

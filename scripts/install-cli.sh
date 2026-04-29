@@ -10,6 +10,42 @@ BUN_BIN_DIR="$BUN_HOME_DIR/bin"
 APP_DIR="$INSTALL_DIR/navi-app"
 WRAPPER_PATH="$BUN_BIN_DIR/navi"
 SOURCE_DIR="${NAVI_SOURCE_DIR:-}"
+START_AT_LOGIN="${NAVI_START_AT_LOGIN:-ask}"
+
+usage() {
+  cat <<EOF
+Usage: install-cli.sh [options]
+
+Options:
+  --start-at-login     Install and start the macOS LaunchAgent after install
+  --no-start-at-login  Skip LaunchAgent setup
+  -h, --help           Show this help
+
+Environment:
+  NAVI_START_AT_LOGIN=yes|no|ask  Control LaunchAgent setup (default: ask)
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --start-at-login|--login-item|--launch-agent)
+      START_AT_LOGIN="yes"
+      ;;
+    --no-start-at-login|--no-login-item|--no-launch-agent)
+      START_AT_LOGIN="no"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -23,6 +59,98 @@ app_is_complete() {
   [ -f "$APP_DIR/src/main.ts" ] && \
   [ -f "$APP_DIR/src/App.svelte" ]
 }
+
+is_macos() {
+  [ "$(uname -s 2>/dev/null || echo "")" = "Darwin" ]
+}
+
+is_truthy() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|y|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_falsey() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    0|false|no|n|off) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+can_prompt() {
+  [ -z "${CI:-}" ] && [ -r /dev/tty ] && [ -w /dev/tty ]
+}
+
+should_start_at_login() {
+  local choice
+  choice="$(printf '%s' "$START_AT_LOGIN" | tr '[:upper:]' '[:lower:]')"
+
+  if is_truthy "$choice"; then
+    return 0
+  fi
+
+  if is_falsey "$choice"; then
+    return 1
+  fi
+
+  case "$choice" in
+    ""|ask|prompt)
+      if ! is_macos || ! can_prompt; then
+        return 1
+      fi
+
+      local reply
+      printf "  Start Navi automatically at login? [y/N] " >/dev/tty
+      read -r reply </dev/tty || reply=""
+      is_truthy "$reply"
+      ;;
+    *)
+      echo "  Error: NAVI_START_AT_LOGIN must be yes, no, or ask." >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_start_at_login() {
+  local choice
+  choice="$(printf '%s' "$START_AT_LOGIN" | tr '[:upper:]' '[:lower:]')"
+  if is_truthy "$choice" || is_falsey "$choice"; then
+    return 0
+  fi
+  case "$choice" in
+    ""|ask|prompt) return 0 ;;
+    *)
+      echo "  Error: NAVI_START_AT_LOGIN must be yes, no, or ask." >&2
+      exit 1
+      ;;
+  esac
+}
+
+install_start_at_login() {
+  if ! is_macos; then
+    echo "  Start at login is only supported on macOS right now. Skipping."
+    return 0
+  fi
+
+  if ! command -v launchctl >/dev/null 2>&1; then
+    echo "  launchctl was not found, so start at login could not be enabled." >&2
+    return 0
+  fi
+
+  echo ""
+  echo "  Setting Navi to start at login..."
+  if "$WRAPPER_PATH" service install --dev; then
+    echo ""
+    echo "  Navi will start automatically at login."
+  else
+    echo ""
+    echo "  Navi installed, but start-at-login setup failed." >&2
+    echo "  Retry later with: $WRAPPER_PATH service install --dev" >&2
+  fi
+}
+
+validate_start_at_login
 
 require_cmd bun
 require_cmd node
@@ -134,10 +262,15 @@ mkdir -p "$BUN_BIN_DIR"
 cat >"$WRAPPER_PATH" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+export NAVI_APP_DIR="$APP_DIR"
 exec bun "$APP_DIR/bin/navi.ts" "\$@"
 EOF
 
 chmod +x "$WRAPPER_PATH"
+
+if should_start_at_login; then
+  install_start_at_login
+fi
 
 echo ""
 echo "  Navi v${VERSION:-unknown} installed!"
@@ -155,4 +288,8 @@ case ":$PATH:" in
     echo "  Then run: navi"
     ;;
 esac
+if is_macos; then
+  echo ""
+  echo "  Start at login: $WRAPPER_PATH service install --dev"
+fi
 echo ""
