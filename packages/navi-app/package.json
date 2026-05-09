@@ -7,8 +7,10 @@
     "dev": "vite",
     "dev:all": "concurrently \"bun run server\" \"bun run pty\" \"bun run dev\"",
     "dev:nowatch": "bun run build && concurrently \"bun run server\" \"bun run pty\" \"bun run preview\"",
-    "start": "node scripts/run-with-bun.mjs run bin/navi.ts",
-    "server": "node scripts/run-with-bun.mjs run server/index.ts",
+    "postinstall": "node scripts/repair-sharp.mjs",
+    "repair:sharp": "node scripts/repair-sharp.mjs",
+    "start": "node scripts/repair-sharp.mjs && node scripts/run-with-bun.mjs run bin/navi.ts",
+    "server": "node scripts/repair-sharp.mjs && node scripts/run-with-bun.mjs run server/index.ts",
     "pty": "node server/pty-server.cjs",
     "build": "vite build",
     "preview": "vite preview",
@@ -95,6 +97,7 @@
   },
   "trustedDependencies": [
     "@anthropic-ai/claude-code",
-    "esbuild"
+    "esbuild",
+    "sharp"
   ]
 }

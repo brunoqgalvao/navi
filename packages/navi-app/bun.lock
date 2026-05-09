@@ -78,6 +78,7 @@
   },
   "trustedDependencies": [
     "@anthropic-ai/claude-code",
+    "sharp",
     "esbuild",
   ],
   "packages": {
