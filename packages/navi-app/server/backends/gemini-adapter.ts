@@ -5,7 +5,13 @@
  * Uses `gemini --output-format stream-json` for structured streaming output.
  */
 
-import { spawn, ChildProcess } from "child_process";
+import { spawn, execFileSync, ChildProcess } from "child_process";
+import { dirname } from "path";
+import {
+  buildEnvWithPrependedPath,
+  resolveCliExecutable,
+  resolveNodeExecutable,
+} from "../utils/cli-resolver";
 import type {
   BackendAdapter,
   BackendInfo,
@@ -14,6 +20,46 @@ import type {
   PermissionResponse,
   NormalizedContentBlock,
 } from "./types";
+
+type GeminiRunCommand = {
+  command: string;
+  args: string[];
+  displayPath: string;
+  env: NodeJS.ProcessEnv;
+};
+
+export function resolveGeminiExecutable(): string | null {
+  return resolveCliExecutable({
+    command: "gemini",
+    envVarNames: ["NAVI_GEMINI_PATH", "GEMINI_CLI_PATH", "GEMINI_PATH", "GEMINI_EXECUTABLE"],
+    packageName: "@google/gemini-cli",
+    packageBinPath: "bundle/gemini.js",
+  });
+}
+
+function buildGeminiRunCommand(args: string[]): GeminiRunCommand | null {
+  const geminiPath = resolveGeminiExecutable();
+  if (!geminiPath) return null;
+
+  if (!/\.[cm]?js$/i.test(geminiPath)) {
+    return {
+      command: geminiPath,
+      args,
+      displayPath: geminiPath,
+      env: process.env,
+    };
+  }
+
+  const nodePath = resolveNodeExecutable();
+  if (!nodePath) return null;
+
+  return {
+    command: nodePath,
+    args: [geminiPath, ...args],
+    displayPath: geminiPath,
+    env: buildEnvWithPrependedPath(process.env, [dirname(nodePath)]),
+  };
+}
 
 export class GeminiAdapter implements BackendAdapter {
   readonly id = "gemini" as const;
@@ -54,22 +100,16 @@ export class GeminiAdapter implements BackendAdapter {
 
   async detect(): Promise<BackendInfo> {
     try {
-      const { execSync } = await import("child_process");
-
-      let geminiPath: string | undefined;
-      const pathsToTry = ["which gemini", "command -v gemini"];
-
-      for (const cmd of pathsToTry) {
-        try {
-          geminiPath = execSync(cmd, { encoding: "utf-8" }).trim();
-          if (geminiPath) break;
-        } catch {}
-      }
+      const runCommand = buildGeminiRunCommand(["--version"]);
+      const geminiPath = runCommand?.displayPath;
 
       let version: string | undefined;
-      if (geminiPath) {
+      if (runCommand) {
         try {
-          version = execSync("gemini --version", { encoding: "utf-8" }).trim();
+          version = execFileSync(runCommand.command, runCommand.args, {
+            encoding: "utf-8",
+            env: runCommand.env,
+          }).trim();
         } catch {}
       }
 
@@ -125,8 +165,11 @@ export class GeminiAdapter implements BackendAdapter {
     }
 
     // Gemini 3 specific: thinking level
-    if (backendOpts.thinkingLevel) {
-      args.push("--thinking-level", backendOpts.thinkingLevel as string);
+    const thinkingLevel = this.normalizeThinkingLevel(
+      backendOpts.thinkingLevel ?? backendOpts.reasoningEffort
+    );
+    if (thinkingLevel) {
+      args.push("--thinking-level", thinkingLevel);
     }
 
     // Gemini 3 specific: media resolution for vision
@@ -154,12 +197,23 @@ export class GeminiAdapter implements BackendAdapter {
       tools: ["Read", "Write", "Edit", "Bash", "WebFetch", "WebSearch"],
     };
 
+    const runCommand = buildGeminiRunCommand(args);
+    if (!runCommand) {
+      yield {
+        type: "error",
+        sessionId: options.sessionId,
+        error:
+          "Gemini CLI could not be launched from Navi. Run `bun install` in the Navi app directory and make sure Node.js is installed.",
+      };
+      return;
+    }
+
     // Spawn gemini process
-    this.childProcess = spawn("gemini", args, {
+    this.childProcess = spawn(runCommand.command, runCommand.args, {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: {
-        ...process.env,
+        ...runCommand.env,
         // Ensure API key is available
         GEMINI_API_KEY: process.env.GEMINI_API_KEY,
         GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
@@ -290,6 +344,18 @@ export class GeminiAdapter implements BackendAdapter {
       this.childProcess.kill("SIGTERM");
       this.childProcess = null;
     }
+  }
+
+  private normalizeThinkingLevel(value: unknown): "low" | "medium" | "high" | undefined {
+    if (typeof value !== "string") return undefined;
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "xhigh") return "high";
+
+    const allowedThinkingLevels: readonly string[] = this.gemini3Options.thinkingLevel;
+    return allowedThinkingLevels.includes(normalized)
+      ? (normalized as "low" | "medium" | "high")
+      : undefined;
   }
 
   /**

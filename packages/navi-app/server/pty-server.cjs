@@ -66,6 +66,44 @@ function loadModule(moduleName) {
   }
 }
 
+function getNodePtyDirs() {
+  const dirs = [];
+
+  try {
+    dirs.push(path.dirname(require.resolve('node-pty/package.json')));
+  } catch {}
+
+  dirs.push(path.join(__dirname, 'pty-node_modules', 'node-pty'));
+
+  return [...new Set(dirs)];
+}
+
+function ensureExecutable(filePath) {
+  if (!fs.existsSync(filePath)) return;
+
+  try {
+    const stats = fs.statSync(filePath);
+    if ((stats.mode & 0o111) === 0) {
+      fs.chmodSync(filePath, (stats.mode & ~0o777) | 0o755);
+    }
+  } catch (e) {
+    console.warn(`[PTY] Failed to make ${filePath} executable:`, e.message);
+  }
+}
+
+function ensureNodePtySpawnHelperExecutable() {
+  if (process.platform === 'win32') return;
+
+  const platformDir = `${process.platform}-${process.arch}`;
+  for (const nodePtyDir of getNodePtyDirs()) {
+    ensureExecutable(path.join(nodePtyDir, 'prebuilds', platformDir, 'spawn-helper'));
+    ensureExecutable(path.join(nodePtyDir, 'build', 'Release', 'spawn-helper'));
+    ensureExecutable(path.join(nodePtyDir, 'build', 'Debug', 'spawn-helper'));
+  }
+}
+
+ensureNodePtySpawnHelperExecutable();
+
 const { WebSocketServer } = loadModule('ws');
 const pty = loadModule('node-pty');
 

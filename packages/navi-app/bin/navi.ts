@@ -203,6 +203,7 @@ async function handleService(serviceArgs: string[]) {
 
   function buildPlist(opts: { bunPath: string; script: string; cwd: string }): string {
     const bunDir = dirname(opts.bunPath);
+    const nodePath = process.env.NAVI_NODE_PATH || "";
     const pathEntries = [
       bunDir,
       "/opt/homebrew/bin",
@@ -252,6 +253,8 @@ async function handleService(serviceArgs: string[]) {
     <string>${HOME}</string>
     <key>NAVI_BUN_PATH</key>
     <string>${opts.bunPath}</string>
+    <key>NAVI_NODE_PATH</key>
+    <string>${nodePath}</string>
     <key>NAVI_MANAGED_BY</key>
     <string>launchd</string>
   </dict>

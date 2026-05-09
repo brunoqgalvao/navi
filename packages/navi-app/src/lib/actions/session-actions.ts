@@ -14,7 +14,7 @@ import {
 } from "../stores";
 import { streamingStore } from "../handlers";
 import { get } from "svelte/store";
-import { getDefaultModel } from "./data-loaders";
+import { getDefaultModelForBackend } from "./data-loaders";
 import { showError, showSuccess } from "../errorHandler";
 
 // Default page size for progressive message loading
@@ -48,7 +48,7 @@ export function startNewChat(): void {
   currentSession.setPending(true);
 
   // Set default model for new chat
-  const defaultModel = getDefaultModel();
+  const defaultModel = getDefaultModelForBackend(get(defaultBackend));
   currentSession.setSelectedModel(defaultModel);
 
   // Clear any input text
@@ -78,7 +78,9 @@ export async function createNewChat(title?: string, backend?: BackendId): Promis
     currentSession.setSession(newSession.id, newSession.claude_session_id);
     // Store the backend for this session
     sessionBackendStore.set(newSession.id, selectedBackend);
-    // Keep the selected model
+    if (!get(currentSession).selectedModel) {
+      currentSession.setSelectedModel(getDefaultModelForBackend(selectedBackend));
+    }
     sessionMessages.setMessages(newSession.id, []);
     callbacks?.loadRecentChats();
     return newSession.id;
@@ -123,7 +125,7 @@ export async function createNewChatWithWorktree(description: string, backend?: B
     sessionBackendStore.set(result.session.id, selectedBackend);
 
     // Set default model for new chat
-    const defaultModel = getDefaultModel();
+    const defaultModel = getDefaultModelForBackend(selectedBackend);
     currentSession.setSelectedModel(defaultModel);
     sessionMessages.setMessages(result.session.id, []);
     callbacks?.loadRecentChats();
@@ -179,8 +181,8 @@ export async function selectSession(s: Session) {
     currentSession.setSelectedModel(s.model);
     sessionModels.setModel(s.id, s.model);
   } else {
-    // No model set - use default (Opus)
-    const defaultModel = getDefaultModel();
+    // No model set - use the default for the session's backend.
+    const defaultModel = getDefaultModelForBackend(s.backend || get(defaultBackend));
     currentSession.setSelectedModel(defaultModel);
   }
   sessionStatus.markSeen(s.id);

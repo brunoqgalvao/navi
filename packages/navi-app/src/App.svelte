@@ -199,7 +199,7 @@
     extractHistoryContextForQuery,
     hasPrunedContext,
     hasRollbackContext,
-    getDefaultModel,
+    getDefaultModelForBackend,
   } from "./lib/actions";
 
   let sidecarProcess: any = null;
@@ -2129,7 +2129,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     session.setCost(s.total_cost_usd || 0);
     session.setUsage(s.input_tokens || 0, s.output_tokens || 0);
 
-    // Restore model for this session from cache or DB, default to Opus
+    // Restore model for this session from cache or DB, defaulting by backend.
     const cachedModel = $sessionModels.get(s.id);
     if (cachedModel) {
       session.setSelectedModel(cachedModel);
@@ -2137,8 +2137,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       session.setSelectedModel(s.model);
       sessionModels.setModel(s.id, s.model);
     } else {
-      // No model set - use default (Opus)
-      const defaultModel = getDefaultModel();
+      const defaultModel = getDefaultModelForBackend(s.backend || $defaultBackend);
       session.setSelectedModel(defaultModel);
     }
 
@@ -3944,7 +3943,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     {currentMessages}
     {sidebarCollapsed}
     {sidebarWidth}
-    bind:modelSelection
     folders={workspaceFolders}
     onSelectProject={selectProject}
     onSelectSession={selectSession}
@@ -3987,26 +3985,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         api.sessions.reorder(currentProject.id, order).catch(() => {
           sidebarSessions = previousSessions;
         });
-      }
-    }}
-    onModelSelect={handleModelSelect}
-    backend={$session.sessionId ? (sessionBackendStore.get($session.sessionId, $sessionBackendStore) || $defaultBackend) : $defaultBackend}
-    onBackendChange={async (newBackend) => {
-      if ($session.sessionId) {
-        sessionBackendStore.set($session.sessionId, newBackend);
-        // Persist to database
-        try {
-          await api.sessions.update($session.sessionId, { backend: newBackend });
-        } catch (e) {
-          console.error("Failed to persist backend:", e);
-        }
-      }
-      defaultBackend.set(newBackend);
-      // Auto-select the default model for the new backend
-      const models = getBackendModelsFormatted(newBackend, get(backendModels));
-      if (models.length > 0) {
-        modelSelection = models[0].value;
-        handleModelSelect(models[0].value);
       }
     }}
     onTitleApply={handleTitleSuggestionApply}
@@ -4448,6 +4426,8 @@ Please walk me through the setup step by step. When I have the credentials, save
                       isBuiltIn: false,
                     }))}
                     backend={$session.sessionId ? (sessionBackendStore.get($session.sessionId, $sessionBackendStore) || $defaultBackend) : $defaultBackend}
+                    selectedModel={modelSelection || $session.selectedModel}
+                    backendModels={$backendModels}
                     onBackendChange={(newBackend) => {
                       // Only allow backend change for new chats
                       if ($session.isPending || !$session.sessionId || currentMessages.length === 0) {
@@ -4460,6 +4440,7 @@ Please walk me through the setup step by step. When I have the credentials, save
                         }
                       }
                     }}
+                    onModelSelect={handleModelSelect}
                     reasoningEffort={$session.sessionId ? sessionReasoningEffort.get($session.sessionId, $sessionReasoningEffort) : $defaultReasoningEffort}
                     onReasoningEffortChange={(effort) => {
                       if ($session.sessionId) {

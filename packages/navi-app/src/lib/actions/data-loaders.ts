@@ -1,5 +1,5 @@
 import { api, costsApi, backendsApi, type BackendId } from "../api";
-import { availableModels, costStore, sessionStatus, currentSession as session, showArchivedWorkspaces, backendModels } from "../stores";
+import { availableModels, costStore, sessionStatus, currentSession as session, showArchivedWorkspaces, backendModels, defaultBackend, getBackendModelsFormatted } from "../stores";
 import { get } from "svelte/store";
 import type { Session } from "../api";
 import { showError } from "../errorHandler";
@@ -39,17 +39,28 @@ export function getDefaultModel(): string {
   return opus?.value || models[0].value;
 }
 
+export function getDefaultModelForBackend(backend?: BackendId): string {
+  const selectedBackend = backend || get(defaultBackend);
+  const models = getBackendModelsFormatted(selectedBackend, get(backendModels));
+
+  if (models.length > 0) {
+    return models[0].value;
+  }
+
+  return selectedBackend === "claude" ? getDefaultModel() : "";
+}
+
 export async function loadModels() {
   try {
     const models = await api.models.list();
     availableModels.set(models);
-    const sessionState = get(session);
-    if (models.length > 0 && !sessionState.selectedModel) {
-      session.setSelectedModel(getDefaultModel());
-    }
-
-    // Also load backend-specific models
     await loadBackendModels();
+
+    const sessionState = get(session);
+    const defaultModel = getDefaultModelForBackend();
+    if (defaultModel && !sessionState.selectedModel) {
+      session.setSelectedModel(defaultModel);
+    }
   } catch (e) {
     showError({ title: "Models Error", message: "Failed to load available models", error: e });
   }

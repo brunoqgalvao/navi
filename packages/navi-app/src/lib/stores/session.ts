@@ -563,8 +563,8 @@ export const sessionBackendStore = createBackendStore();
 // Default backend for new sessions
 export const defaultBackend = writable<BackendId>("claude");
 
-// Reasoning effort per session (low, medium, high)
-export type ReasoningEffort = "low" | "medium" | "high";
+// Reasoning effort per session (low, medium, high, extra high)
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 function createReasoningEffortStore() {
   const { subscribe, update } = writable<Map<string, ReasoningEffort>>(new Map());
 

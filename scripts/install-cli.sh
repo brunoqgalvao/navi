@@ -82,6 +82,152 @@ can_prompt() {
   [ -z "${CI:-}" ] && [ -r /dev/tty ] && [ -w /dev/tty ]
 }
 
+app_uses_sharp() {
+  [ -f "$APP_DIR/package.json" ] && grep -q '"sharp"' "$APP_DIR/package.json"
+}
+
+sharp_can_load() {
+  (
+    cd "$APP_DIR"
+    bun -e 'import sharp from "sharp"; if (!sharp?.versions?.vips) process.exit(1)'
+  ) >/dev/null 2>&1
+}
+
+sharp_runtime_platform() {
+  (
+    cd "$APP_DIR"
+    bun -e 'console.log(require("sharp/lib/libvips").runtimePlatformArch())'
+  )
+}
+
+link_sharp_libvips() {
+  local runtime libvips_dir nested_parent nested_dir
+  runtime="$(sharp_runtime_platform 2>/dev/null || true)"
+  if [ -z "$runtime" ]; then
+    return 0
+  fi
+
+  libvips_dir="$APP_DIR/node_modules/@img/sharp-libvips-$runtime"
+  nested_parent="$APP_DIR/node_modules/sharp/node_modules/@img"
+  nested_dir="$nested_parent/sharp-libvips-$runtime"
+
+  if [ -d "$libvips_dir" ] && [ -d "$nested_parent" ] && [ ! -e "$nested_dir" ] && [ ! -L "$nested_dir" ]; then
+    (
+      cd "$nested_parent"
+      ln -s "../../../@img/sharp-libvips-$runtime" "sharp-libvips-$runtime"
+    )
+  fi
+}
+
+repair_sharp_optional_dependencies() {
+  if ! app_uses_sharp || sharp_can_load; then
+    return 0
+  fi
+
+  echo "  Repairing sharp optional dependencies..."
+  link_sharp_libvips
+  if sharp_can_load; then
+    return 0
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "  Error: sharp did not load after bun install, and npm is unavailable for repair." >&2
+    return 1
+  fi
+
+  if ! (
+    cd "$APP_DIR"
+    npm install --include=optional --legacy-peer-deps --no-audit --no-fund sharp --silent
+  ); then
+    (
+      cd "$APP_DIR"
+      npm install --include=optional --legacy-peer-deps --no-audit --no-fund sharp
+    )
+  fi
+
+  link_sharp_libvips
+
+  if ! sharp_can_load; then
+    echo "  Error: sharp still cannot load after optional dependency repair." >&2
+    return 1
+  fi
+}
+
+resolve_installed_claude_code() {
+  (
+    cd "$APP_DIR"
+    bun -e 'import { resolveClaudeCodeExecutable } from "./server/utils/claude-code.ts"; const path = resolveClaudeCodeExecutable(); if (path) console.log(path);'
+  ) 2>/dev/null || true
+}
+
+resolve_installed_codex_cli() {
+  (
+    cd "$APP_DIR"
+    bun -e 'import { resolveCodexExecutable } from "./server/backends/codex-adapter.ts"; const path = resolveCodexExecutable(); if (path) console.log(path);'
+  ) 2>/dev/null || true
+}
+
+resolve_installed_gemini_cli() {
+  (
+    cd "$APP_DIR"
+    bun -e 'import { resolveGeminiExecutable } from "./server/backends/gemini-adapter.ts"; const path = resolveGeminiExecutable(); if (path) console.log(path);'
+  ) 2>/dev/null || true
+}
+
+print_cli_status() {
+  local label="$1"
+  local executable_path="$2"
+  local version_output
+
+  if [ -z "$executable_path" ]; then
+    echo "  $label: not found"
+    return 0
+  fi
+
+  version_output="$("$executable_path" --version 2>/dev/null | head -n 1 || true)"
+  if [ -n "$version_output" ]; then
+    echo "  $label: $executable_path ($version_output)"
+  else
+    echo "  $label: $executable_path"
+  fi
+}
+
+check_agent_cli_installations() {
+  echo "  Checking bundled agent CLIs..."
+  print_cli_status "Claude Code" "$(resolve_installed_claude_code | tail -n 1)"
+  print_cli_status "Codex" "$(resolve_installed_codex_cli | tail -n 1)"
+  print_cli_status "Gemini" "$(resolve_installed_gemini_cli | tail -n 1)"
+}
+
+check_claude_code_auth() {
+  local claude_path auth_status
+
+  echo "  Checking Claude Code auth..."
+  claude_path="$(resolve_installed_claude_code | tail -n 1)"
+
+  if [ -z "$claude_path" ]; then
+    echo "  Claude Code: not found. Install Claude Code or add an Anthropic API key in Navi Settings."
+    return 0
+  fi
+
+  echo "  Claude Code: $claude_path"
+
+  auth_status="$("$claude_path" auth status --json 2>/dev/null || "$claude_path" auth status 2>/dev/null || true)"
+  if printf '%s' "$auth_status" | grep -q '"loggedIn"[[:space:]]*:[[:space:]]*true'; then
+    echo "  Claude login: active"
+    return 0
+  fi
+
+  if printf '%s' "$auth_status" | grep -qi 'logged in'; then
+    echo "  Claude login: active"
+    return 0
+  fi
+
+  echo "  Claude login: not active yet."
+  echo "  Run: $claude_path auth login"
+  echo "  Or set an Anthropic API key in Navi Settings."
+}
+
 should_start_at_login() {
   local choice
   choice="$(printf '%s' "$START_AT_LOGIN" | tr '[:upper:]' '[:lower:]')"
@@ -154,6 +300,7 @@ validate_start_at_login
 
 require_cmd bun
 require_cmd node
+NODE_EXECUTABLE_PATH="$(command -v node)"
 
 echo ""
 echo "  Installing Navi..."
@@ -255,6 +402,9 @@ fi
 # Install dependencies
 echo "  Installing dependencies..."
 (cd "$APP_DIR" && bun install --silent 2>/dev/null || bun install)
+repair_sharp_optional_dependencies
+check_agent_cli_installations
+check_claude_code_auth
 
 # Create wrapper script
 mkdir -p "$BUN_BIN_DIR"
@@ -263,6 +413,7 @@ cat >"$WRAPPER_PATH" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export NAVI_APP_DIR="$APP_DIR"
+export NAVI_NODE_PATH="\${NAVI_NODE_PATH:-$NODE_EXECUTABLE_PATH}"
 exec bun "$APP_DIR/bin/navi.ts" "\$@"
 EOF
 

@@ -5,10 +5,18 @@
  * Uses `codex exec --json` for structured streaming output.
  */
 
-import { spawn, ChildProcess } from "child_process";
+import { spawn, execFileSync, ChildProcess } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
+import {
+  buildEnvWithPrependedPath,
+  firstExisting,
+  getNaviAppRootCandidates,
+  resolveCliExecutable,
+  resolveExplicitExecutable,
+  resolveNodeExecutable,
+} from "../utils/cli-resolver";
 import type {
   BackendAdapter,
   BackendInfo,
@@ -20,7 +28,7 @@ import type {
 
 const DEFAULT_CODEX_MODEL = "gpt-5.2-codex";
 // The Codex CLI only accepts these values for model_reasoning_effort (any model)
-const COMPATIBLE_CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high"]);
+const COMPATIBLE_CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
 const BASE_CODEX_MODELS = [
   // Current Codex-focused models
   "gpt-5.2-codex",
@@ -59,6 +67,13 @@ type CodexExecutionPlan = {
   };
 };
 
+type CodexRunCommand = {
+  command: string;
+  args: string[];
+  displayPath: string;
+  env: NodeJS.ProcessEnv;
+};
+
 function getCodexConfigPath(): string {
   return join(homedir(), ".codex", "config.toml");
 }
@@ -94,6 +109,112 @@ export function buildCodexModelCatalog(configuredModel?: string): string[] {
   }
 
   return models;
+}
+
+export function resolveCodexExecutable(): string | null {
+  const envVarNames = ["NAVI_CODEX_PATH", "CODEX_PATH", "CODEX_EXECUTABLE"];
+
+  return (
+    resolveExplicitExecutable(envVarNames) ||
+    resolveCodexNativeExecutable() ||
+    resolveCliExecutable({
+      command: "codex",
+      packageName: "@openai/codex",
+      packageBinPath: "bin/codex.js",
+    })
+  );
+}
+
+function getCodexTargetTriple(): string | null {
+  if (process.platform === "darwin") {
+    if (process.arch === "arm64") return "aarch64-apple-darwin";
+    if (process.arch === "x64") return "x86_64-apple-darwin";
+  }
+
+  if (process.platform === "linux") {
+    if (process.arch === "arm64") return "aarch64-unknown-linux-musl";
+    if (process.arch === "x64") return "x86_64-unknown-linux-musl";
+  }
+
+  if (process.platform === "win32") {
+    if (process.arch === "arm64") return "aarch64-pc-windows-msvc";
+    if (process.arch === "x64") return "x86_64-pc-windows-msvc";
+  }
+
+  return null;
+}
+
+function getCodexPlatformPackageName(): string | null {
+  if (process.platform === "darwin") {
+    if (process.arch === "arm64") return "@openai/codex-darwin-arm64";
+    if (process.arch === "x64") return "@openai/codex-darwin-x64";
+  }
+
+  if (process.platform === "linux") {
+    if (process.arch === "arm64") return "@openai/codex-linux-arm64";
+    if (process.arch === "x64") return "@openai/codex-linux-x64";
+  }
+
+  if (process.platform === "win32") {
+    if (process.arch === "arm64") return "@openai/codex-win32-arm64";
+    if (process.arch === "x64") return "@openai/codex-win32-x64";
+  }
+
+  return null;
+}
+
+function resolveCodexNativeExecutable(): string | null {
+  const targetTriple = getCodexTargetTriple();
+  const packageName = getCodexPlatformPackageName();
+  if (!targetTriple || !packageName) return null;
+
+  const binaryName = process.platform === "win32" ? "codex.exe" : "codex";
+  return firstExisting(
+    getNaviAppRootCandidates().map((root) =>
+      join(
+        root,
+        "node_modules",
+        ...packageName.split("/").filter(Boolean),
+        "vendor",
+        targetTriple,
+        "codex",
+        binaryName
+      )
+    )
+  );
+}
+
+function getCodexExtraPathDirs(codexPath: string): string[] {
+  const targetTriple = getCodexTargetTriple();
+  if (!targetTriple || !codexPath.includes(`${targetTriple}/codex/`)) return [];
+
+  const archRoot = dirname(dirname(codexPath));
+  const pathDir = join(archRoot, "path");
+  return existsSync(pathDir) ? [pathDir] : [];
+}
+
+function buildCodexRunCommand(args: string[]): CodexRunCommand | null {
+  const codexPath = resolveCodexExecutable();
+  if (!codexPath) return null;
+
+  const extraPathDirs = getCodexExtraPathDirs(codexPath);
+  if (codexPath.endsWith(".js")) {
+    const nodePath = resolveNodeExecutable();
+    if (!nodePath) return null;
+    return {
+      command: nodePath,
+      args: [codexPath, ...args],
+      displayPath: codexPath,
+      env: buildEnvWithPrependedPath(process.env, [dirname(nodePath), ...extraPathDirs]),
+    };
+  }
+
+  return {
+    command: codexPath,
+    args,
+    displayPath: codexPath,
+    env: buildEnvWithPrependedPath(process.env, extraPathDirs),
+  };
 }
 
 export function buildCodexExecPlan(
@@ -173,23 +294,15 @@ export class CodexAdapter implements BackendAdapter {
 
   async detect(): Promise<BackendInfo> {
     try {
-      const { execSync } = await import("child_process");
-
-      let codexPath: string | undefined;
-      const pathsToTry = ["which codex", "command -v codex"];
-
-      for (const cmd of pathsToTry) {
-        try {
-          codexPath = execSync(cmd, { encoding: "utf-8" }).trim();
-          if (codexPath) break;
-        } catch {}
-      }
+      const runCommand = buildCodexRunCommand(["--version"]);
+      const codexPath = runCommand?.displayPath;
 
       let version: string | undefined;
-      if (codexPath) {
+      if (runCommand) {
         try {
-          const versionOutput = execSync("codex --version", {
+          const versionOutput = execFileSync(runCommand.command, runCommand.args, {
             encoding: "utf-8",
+            env: runCommand.env,
           }).trim();
           // Parse "codex-cli 0.77.0" -> "0.77.0"
           const match = versionOutput.match(/[\d.]+/);
@@ -217,6 +330,7 @@ export class CodexAdapter implements BackendAdapter {
 
   async *query(options: QueryOptions): AsyncGenerator<NormalizedEvent> {
     const plan = buildCodexExecPlan(options, this.defaultModel);
+    const runCommand = buildCodexRunCommand(plan.args);
 
     // Emit init event
     yield {
@@ -246,12 +360,22 @@ export class CodexAdapter implements BackendAdapter {
       };
     }
 
+    if (!runCommand) {
+      yield {
+        type: "error",
+        sessionId: options.sessionId,
+        error:
+          "Codex CLI could not be launched from Navi. Run `bun install` in the Navi app directory and make sure Node.js is installed.",
+      };
+      return;
+    }
+
     // Spawn codex process
-    this.childProcess = spawn("codex", plan.args, {
+    this.childProcess = spawn(runCommand.command, runCommand.args, {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: {
-        ...process.env,
+        ...runCommand.env,
         // Ensure API key is available
         OPENAI_API_KEY: process.env.OPENAI_API_KEY,
       },

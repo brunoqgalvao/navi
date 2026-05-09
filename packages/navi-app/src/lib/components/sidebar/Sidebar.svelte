@@ -1,12 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
-  import { currentSession as session, isConnected, availableModels, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems, backendModels, getBackendModelsFormatted, type BackendId, channelsEnabled } from "../../stores";
+  import { currentSession as session, isConnected, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems, channelsEnabled } from "../../stores";
   import { api, agentsApi, type Agent as ProjectAgent, type InboxItem, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult, type Workflow, type WorkflowGate, type WorkflowSchedule } from "../../api";
   import { getApiBase } from "../../config";
   import { getEffectiveContextWindow } from "../../context-window";
-  import ModelSelector from "../ModelSelector.svelte";
-  import BackendSelector from "../BackendSelector.svelte";
   import StarButton from "../StarButton.svelte";
   import TitleSuggestion from "../TitleSuggestion.svelte";
   import RelativeTime from "../RelativeTime.svelte";
@@ -32,7 +30,6 @@
     currentMessages: ChatMessage[];
     sidebarCollapsed: boolean;
     sidebarWidth: number;
-    modelSelection: string;
     folders: WorkspaceFolder[];
     onSelectProject: (project: Project) => void;
     onSelectSession: (session: Session) => void;
@@ -61,10 +58,6 @@
     onToggleSessionBacklog: (session: Session, e: Event) => void;
     onProjectReorder: (order: string[]) => void;
     onSessionReorder: (order: string[]) => void;
-    onModelSelect: (model: string) => void;
-    // Backend selection
-    backend?: BackendId;
-    onBackendChange?: (backend: BackendId) => void;
     onTitleApply: (title: string) => void;
     onStartResizing: (e: MouseEvent) => void;
     isResizing?: boolean;
@@ -136,7 +129,6 @@
     currentMessages,
     sidebarCollapsed,
     sidebarWidth,
-    modelSelection = $bindable(),
     folders,
     onSelectProject,
     onSelectSession,
@@ -165,9 +157,6 @@
     onToggleSessionBacklog,
     onProjectReorder,
     onSessionReorder,
-    onModelSelect,
-    backend = "claude",
-    onBackendChange,
     onTitleApply,
     onStartResizing,
     isResizing = false,
@@ -2558,18 +2547,6 @@
   </div>
 
   <div class={`${sidebarCollapsed ? 'px-2' : 'px-4'} py-3 border-t border-gray-200 bg-gray-50/50 space-y-2`}>
-    {#if $session.sessionId && !sidebarCollapsed}
-      <!-- Model selector row (backend is locked, shown in ChatInput) -->
-      {@const backendModelsFiltered = getBackendModelsFormatted(backend, $backendModels)}
-      <div class="w-32">
-        <ModelSelector
-          models={backendModelsFiltered}
-          bind:selectedModel={modelSelection}
-          onSelect={onModelSelect}
-        />
-      </div>
-    {/if}
-
     {#if $session.inputTokens > 0 && !sidebarCollapsed}
       {@const contextWindow = getEffectiveContextWindow(currentProject?.context_window)}
       {@const usagePercent = Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100))}

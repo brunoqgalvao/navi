@@ -170,10 +170,13 @@
     useExecMode = true;
     isLoading = false;
     isConnected = false;
+    error = null;
 
     if (ws) {
-      if (terminalId) {
-        ws.send(JSON.stringify({ type: "kill", terminalId }));
+      if (terminalId && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "kill", terminalId }));
+        } catch {}
       }
       ws.close();
       ws = null;
@@ -427,8 +430,10 @@
     terminal?.writeln(`\x1b[33mPTY error: ${reason}. Reconnecting...\x1b[0m`);
 
     if (ws) {
-      if (terminalId) {
-        ws.send(JSON.stringify({ type: "kill", terminalId }));
+      if (terminalId && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "kill", terminalId }));
+        } catch {}
       }
       ws.close();
       ws = null;
@@ -618,13 +623,33 @@
 
   function connectPtyWebSocket(mode: "create" | "attach", termId?: string) {
     const wsUrl = getPtyWsUrl();
-    ws = new WebSocket(wsUrl);
+    const ptyWs = new WebSocket(wsUrl);
+    let createTimeout: ReturnType<typeof setTimeout> | null = null;
+    ws = ptyWs;
 
-    ws.onopen = () => {
+    function clearCreateTimeout() {
+      if (createTimeout) {
+        clearTimeout(createTimeout);
+        createTimeout = null;
+      }
+    }
+
+    function fallbackToExec(reason: string) {
+      if (ws !== ptyWs || useExecMode) return;
+      clearCreateTimeout();
+      initExecMode(reason);
+    }
+
+    createTimeout = setTimeout(() => {
+      fallbackToExec("PTY server did not respond. Switching to command mode.");
+    }, 3000);
+
+    ptyWs.onopen = () => {
+      if (ws !== ptyWs) return;
       isConnected = true;
       if (mode === "create") {
         const { cols, rows } = getCreateSize();
-        ws!.send(JSON.stringify({
+        ptyWs.send(JSON.stringify({
           type: "create",
           cwd: cwd || undefined,
           cols,
@@ -633,21 +658,24 @@
           name,
         }));
       } else if (mode === "attach" && termId) {
-        ws!.send(JSON.stringify({
+        ptyWs.send(JSON.stringify({
           type: "attach",
           terminalId: termId,
         }));
       }
     };
 
-    ws.onmessage = (event) => {
+    ptyWs.onmessage = (event) => {
+      if (ws !== ptyWs) return;
       try {
         const data = JSON.parse(event.data);
 
         if (data.type === "created") {
+          clearCreateTimeout();
           terminalId = data.terminalId;
           onTerminalIdChange?.(data.terminalId);
         } else if (data.type === "attached") {
+          clearCreateTimeout();
         } else if (data.type === "output" && terminal) {
           terminal.write(data.data);
           captureOutput(data.data);
@@ -664,6 +692,8 @@
           console.error("[TerminalPanel] PTY error:", data.message);
           if (data.message?.toLowerCase().includes("terminal not found")) {
             recoverPty(data.message);
+          } else {
+            fallbackToExec(`PTY failed: ${data.message || "Unknown terminal error"}`);
           }
         }
       } catch (e) {
@@ -671,13 +701,18 @@
       }
     };
 
-    ws.onclose = () => {
+    ptyWs.onclose = () => {
+      clearCreateTimeout();
+      if (ws !== ptyWs) return;
       isConnected = false;
+      if (!terminalId) {
+        fallbackToExec("PTY WebSocket closed before the terminal started.");
+      }
     };
 
-    ws.onerror = () => {
-      error = "PTY WebSocket connection failed";
-      isConnected = false;
+    ptyWs.onerror = () => {
+      if (ws !== ptyWs) return;
+      fallbackToExec("PTY WebSocket connection failed. Switching to command mode.");
     };
   }
 
@@ -807,8 +842,10 @@
     }
     // Don't kill terminal on destroy - it persists for workspace
     // Just detach from it
-    if (ws && terminalId) {
-      ws.send(JSON.stringify({ type: "detach", terminalId }));
+    if (ws && terminalId && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "detach", terminalId }));
+      } catch {}
       ws.close();
       ws = null;
     }

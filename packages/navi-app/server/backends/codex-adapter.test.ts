@@ -57,21 +57,21 @@ describe("codex adapter helpers", () => {
       createOptions({
         model: "gpt-5.4",
         backendOptions: {
-          reasoningEffort: "xhigh",
+          reasoningEffort: "extreme",
         },
       }),
       "gpt-5.4"
     );
 
     expect(plan.adjustedReasoningEffort).toEqual({
-      from: "xhigh",
+      from: "extreme",
       to: "high",
     });
     expect(plan.args).toContain('model_reasoning_effort="high"');
   });
 
   test("accepts valid reasoning effort values without clamping", () => {
-    for (const effort of ["minimal", "low", "medium", "high"]) {
+    for (const effort of ["minimal", "low", "medium", "high", "xhigh"]) {
       const plan = buildCodexExecPlan(
         createOptions({
           model: "gpt-5.4",

@@ -1,9 +1,14 @@
-import { existsSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { delimiter, dirname, extname, join } from "path";
-import { spawn as spawnChildProcess } from "node:child_process";
+import { spawn as spawnChildProcess, spawnSync } from "node:child_process";
 import { fileURLToPath } from "url";
 import { resolveBunExecutable } from "./bun";
+import {
+  firstExisting as firstExistingCli,
+  getNaviAppRootCandidates,
+  resolveNodeExecutable,
+} from "./cli-resolver";
 import { describePath, writeDebugLog } from "./logging";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,6 +67,7 @@ export function buildClaudeCodeRuntimeOptions(inputs: {
     return {
       pathToClaudeCodeExecutable: claudePath,
       spawnClaudeCodeProcess: ({ args, cwd, env, signal }) => {
+        const nodePath = resolveNodeExecutable() ?? "node";
         const bridgeEnv = { ...env };
         delete bridgeEnv.CLAUDE_CODE_ENTRYPOINT;
 
@@ -81,7 +87,7 @@ export function buildClaudeCodeRuntimeOptions(inputs: {
         }
 
         return spawnChildProcess(
-          "node",
+          nodePath,
           ["-e", NATIVE_CLAUDE_INLINE_BRIDGE_SCRIPT, claudePath, ...sanitizedArgs],
           {
             cwd,
@@ -156,12 +162,99 @@ export function getNaviAuthOverridesFromEnv(env: NodeJS.ProcessEnv): ClaudeAuthE
 export function resolveClaudeCodeExecutable(): string | null {
   return (
     resolveClaudeCodeFromExplicitOverride() ||
+    resolveClaudeCodeFromNaviPackage() ||
     resolveClaudeCodeFromCommonPaths() ||
     resolveClaudeCodeFromPathEnv() ||
     resolveClaudeCodeFromBundledOverride() ||
     resolveClaudeCodeFromResources() ||
     resolveClaudeCodeFromNodeModules()
   );
+}
+
+function detectMuslRuntime(): boolean {
+  if (process.platform !== "linux") return false;
+  const report =
+    typeof process.report?.getReport === "function"
+      ? process.report.getReport()
+      : null;
+  return report != null && report.header?.glibcVersionRuntime === undefined;
+}
+
+function getClaudeCodePlatformPackage(): { packageName: string; binName: string } | null {
+  let cpu = process.arch;
+
+  if (process.platform === "darwin" && cpu === "x64") {
+    const result = spawnSync("sysctl", ["-n", "sysctl.proc_translated"], {
+      encoding: "utf-8",
+    });
+    if (result.stdout?.trim() === "1") {
+      cpu = "arm64";
+    }
+  }
+
+  const suffix =
+    process.platform === "linux"
+      ? `${process.platform}-${cpu}${detectMuslRuntime() ? "-musl" : ""}`
+      : `${process.platform}-${cpu}`;
+
+  const supported = new Set([
+    "darwin-arm64",
+    "darwin-x64",
+    "linux-arm64",
+    "linux-arm64-musl",
+    "linux-x64",
+    "linux-x64-musl",
+    "win32-arm64",
+    "win32-x64",
+  ]);
+
+  if (!supported.has(suffix)) return null;
+
+  return {
+    packageName: `@anthropic-ai/claude-code-${suffix}`,
+    binName: process.platform === "win32" ? "claude.exe" : "claude",
+  };
+}
+
+function isClaudeCodePlaceholder(path: string): boolean {
+  try {
+    const stats = statSync(path);
+    if (stats.size > 4096) return false;
+    return readFileSync(path, "utf-8").includes("native binary not installed");
+  } catch {
+    return false;
+  }
+}
+
+function resolveClaudeCodeFromNaviPackage(): string | null {
+  const roots = getNaviAppRootCandidates();
+  const platformPackage = getClaudeCodePlatformPackage();
+
+  if (platformPackage) {
+    const nativePath = firstExistingCli(
+      roots.map((root) =>
+        join(
+          root,
+          "node_modules",
+          ...platformPackage.packageName.split("/").filter(Boolean),
+          platformPackage.binName
+        )
+      )
+    );
+    if (nativePath) return nativePath;
+  }
+
+  const wrapperPath = firstExistingCli(
+    roots.map((root) =>
+      join(root, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
+    )
+  );
+
+  if (wrapperPath && !isClaudeCodePlaceholder(wrapperPath)) {
+    return wrapperPath;
+  }
+
+  return null;
 }
 
 export function getClaudeCodeCommonSearchBases(homeCandidates?: Array<string | null | undefined>): string[] {

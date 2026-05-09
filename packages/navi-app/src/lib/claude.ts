@@ -593,7 +593,7 @@ export class ClaudeClient {
     agentId?: string;
     // Backend selection (claude, codex, gemini)
     backend?: "claude" | "codex" | "gemini";
-    // Reasoning effort (low, medium, high)
+    // Reasoning effort (low, medium, high, xhigh)
     reasoningEffort?: string;
     // Plan mode - Claude plans before acting
     planMode?: boolean;

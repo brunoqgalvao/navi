@@ -156,7 +156,7 @@ function scanCodexConfig(configPath: string, configContent: string, issues: Back
   const reasoningEffort = extractTomlStringValue(configContent, "model_reasoning_effort");
   if (
     reasoningEffort &&
-    !["low", "medium", "high"].includes(reasoningEffort)
+    !["minimal", "low", "medium", "high", "xhigh"].includes(reasoningEffort)
   ) {
     issues.push({
       level: "warning",
