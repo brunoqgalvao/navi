@@ -915,7 +915,8 @@
   let showEmail = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  let rightPanelMode = $state<"preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "inbox" | "email" | "channels">("preview");
+  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "inbox" | "shared-inbox" | "email" | "channels";
+  let rightPanelMode = $state<RightPanelMode>("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
@@ -1447,8 +1448,8 @@
     document.addEventListener("click", handleGlobalClick);
 
     // Handle integration setup chat requests from Settings
-    const handleSetupChat = async (event: CustomEvent) => {
-      const { providerId, providerName, setupGuide } = event.detail;
+    const handleSetupChat = async (event: Event) => {
+      const { providerName, setupGuide } = (event as CustomEvent).detail;
 
       // Close settings modal if open
       showSettings = false;
@@ -1477,13 +1478,13 @@ Please walk me through the setup step by step. When I have the credentials, save
       await tick();
 
       // Trigger send - use sendMessage which is the actual handler
-      sendMessage(initialMessage);
+      await sendMessage();
     };
-    document.addEventListener("open-setup-chat", handleSetupChat as EventListener);
+    document.addEventListener("open-setup-chat", handleSetupChat);
 
     return () => {
       document.removeEventListener("click", handleGlobalClick);
-      document.removeEventListener("open-setup-chat", handleSetupChat as EventListener);
+      document.removeEventListener("open-setup-chat", handleSetupChat);
       unsubscribeHash();
       cleanupErrorHandlers();
     };
@@ -2346,18 +2347,18 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function openSessionInNewWindow(sess: Session) {
-    if (!selectedProject) return;
+    if (!currentProject) return;
 
     if (!isTauri()) {
       // In browser mode, open in a new browser tab
-      window.open(`#/project/${selectedProject.id}/chat/${sess.id}`, '_blank');
+      window.open(`#/project/${currentProject.id}/chat/${sess.id}`, '_blank');
       return;
     }
 
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("open_session_in_new_window", {
-        projectId: selectedProject.id,
+        projectId: currentProject.id,
         sessionId: sess.id,
         sessionTitle: sess.title || "Chat"
       });
@@ -3438,8 +3439,7 @@ Please walk me through the setup step by step. When I have the credentials, save
    * Handle extension toolbar clicks - toggles the corresponding panel
    */
   function handleExtensionClick(mode: string) {
-    type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "inbox" | "email" | "channels";
-    const panelMode = mode as PanelMode;
+    const panelMode = mode as RightPanelMode;
 
     // Check if we're already showing this panel - if so, close it
     const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showInbox || showChannels || showEmail;
@@ -3474,6 +3474,9 @@ Please walk me through the setup step by step. When I have the credentials, save
         break;
       case "inbox":
         openInboxPanel();
+        break;
+      case "shared-inbox":
+        showInbox = true;
         break;
       case "channels":
         showChannels = true;
@@ -4504,7 +4507,7 @@ Please walk me through the setup step by step. When I have the credentials, save
         else if (mode === "kanban") showKanban = true;
         else if (mode === "preview-unified") showPreview = true;
         else if (mode === "context") showContext = true;
-        else if (mode === "inbox") showInbox = true;
+        else if (mode === "inbox" || mode === "shared-inbox") showInbox = true;
         else if (mode === "channels") showChannels = true;
       }}
       onClose={closeRightPanel}
@@ -4659,7 +4662,7 @@ Please walk me through the setup step by step. When I have the credentials, save
         showCanvasMode = false;
         const project = sidebarProjects.find(p => p.id === projectId);
         if (project) {
-          goToProject(project);
+          selectProject(project);
         }
       }}
     />
@@ -4795,6 +4798,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       sessionId={$session.sessionId}
       projectId={$session.projectId}
       prompt={infiniteLoopPendingPrompt}
+      {contextWindow}
       onClose={() => {
         showInfiniteLoopConfig = false;
         infiniteLoopPendingPrompt = "";

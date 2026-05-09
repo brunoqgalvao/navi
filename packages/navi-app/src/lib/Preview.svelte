@@ -602,7 +602,7 @@
       await api.fs.write(filePath, editedContent);
       content = editedContent;
       hasUnsavedChanges = false;
-      showSuccess({ title: "Saved", message: filePath.split('/').pop() || "File saved" });
+      showSuccess("Saved", filePath.split('/').pop() || "File saved");
     } catch (e: any) {
       showError({ title: "Save failed", message: e.message || "Failed to save file" });
     } finally {

@@ -113,7 +113,7 @@
     status ? status.status.staged + status.status.modified + status.status.untracked : 0
   );
 
-  const statusText = $derived(() => {
+  const statusText = $derived.by(() => {
     if (!status) return "";
     const parts: string[] = [];
     if (status.commits.length > 0) {
@@ -145,7 +145,6 @@
       } else if (result.error) {
         previewError = result.error;
         // If container runtime not available, suggest native mode
-      }
       }
     } catch (e: any) {
       previewError = e.message;
@@ -226,7 +225,7 @@
   }
 
   // Preview button tooltip
-  const previewTooltip = $derived(() => {
+  const previewTooltip = $derived.by(() => {
     if (previewLoading) return "Loading...";
     if (previewStatus === "running") {
       return previewMode === "container"
@@ -247,7 +246,7 @@
   <div class="header-left">
     <WorktreeBadge {branch} {baseBranch} changesCount={totalChanges} size="md" />
     {#if !loading}
-      <span class="status-text">{statusText()}</span>
+      <span class="status-text">{statusText}</span>
     {/if}
   </div>
 
@@ -262,7 +261,7 @@
       class:container={previewMode === "container"}
       onclick={togglePreview}
       disabled={previewLoading}
-      title={previewTooltip()}
+      title={previewTooltip}
     >
       {#if previewLoading}
         <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

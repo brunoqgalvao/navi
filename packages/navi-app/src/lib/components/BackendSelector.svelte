@@ -38,7 +38,7 @@
   });
 
   // Parse current value
-  const parsed = $derived(() => {
+  const parsed = $derived.by(() => {
     if (!value) return { backendId: "claude" as BackendId, model: "" };
     const [backendId, ...modelParts] = value.split(":");
     return {
@@ -48,8 +48,8 @@
   });
 
   // Get currently selected backend info
-  const selectedBackend = $derived(backends.find((b) => b.id === parsed().backendId));
-  const selectedModel = $derived(parsed().model || selectedBackend?.models?.[0] || "");
+  const selectedBackend = $derived(backends.find((b) => b.id === parsed.backendId));
+  const selectedModel = $derived(parsed.model || selectedBackend?.models?.[0] || "");
 
   // Build options list: group by backend, with models underneath
   type Option = {
@@ -60,7 +60,7 @@
     installed: boolean;
   };
 
-  const options = $derived<Option[]>(() => {
+  const options = $derived.by(() => {
     const result: Option[] = [];
     for (const backend of backends) {
       const meta = backendMeta[backend.id];
@@ -109,10 +109,10 @@
   }
 
   $effect(() => {
-    if (isOpen) {
-      document.addEventListener("click", handleClickOutside);
-      return () => document.removeEventListener("click", handleClickOutside);
-    }
+    if (!isOpen) return () => {};
+
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
   });
 </script>
 
@@ -124,7 +124,7 @@
   {:else}
     <!-- Dropdown trigger -->
     {#if true}
-      {@const meta = backendMeta[parsed().backendId]}
+      {@const meta = backendMeta[parsed.backendId]}
       <button
         type="button"
         onclick={() => (isOpen = !isOpen)}
@@ -178,7 +178,7 @@
 
           <!-- Models -->
           {#each models as model, i}
-            {@const isSelected = parsed().backendId === backend.id && selectedModel === model}
+            {@const isSelected = parsed.backendId === backend.id && selectedModel === model}
             <button
               type="button"
               onclick={() => handleSelect({ backendId: backend.id, model, label: "", installed: backend.installed })}
