@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   buildClaudeCodeRuntimeOptions,
+  getClaudeCodeCommonSearchBases,
   isScriptClaudeCodeExecutable,
 } from "./claude-code";
 
@@ -71,5 +72,19 @@ describe("buildClaudeCodeRuntimeOptions", () => {
       executable: "node",
       pathToClaudeCodeExecutable: "/tmp/claude-agent-sdk/cli.js",
     });
+  });
+});
+
+describe("getClaudeCodeCommonSearchBases", () => {
+  test("includes Claude Code's self-managed local install before generic user bins", () => {
+    const result = getClaudeCodeCommonSearchBases(["/Users/test"]);
+
+    expect(result.slice(0, 5)).toEqual([
+      "/Users/test/.claude/local",
+      "/Users/test/.claude/local/node_modules/.bin",
+      "/Users/test/.npm-global/bin",
+      "/Users/test/.local/bin",
+      "/Users/test/bin",
+    ]);
   });
 });

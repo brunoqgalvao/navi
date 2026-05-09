@@ -164,6 +164,35 @@ export function resolveClaudeCodeExecutable(): string | null {
   );
 }
 
+export function getClaudeCodeCommonSearchBases(homeCandidates?: Array<string | null | undefined>): string[] {
+  const homes = new Set<string>();
+  const candidates = homeCandidates ?? [
+    (() => {
+      try {
+        return homedir();
+      } catch {
+        return null;
+      }
+    })(),
+    process.env.HOME,
+    process.env.USERPROFILE,
+  ];
+
+  for (const home of candidates) {
+    if (home) homes.add(expandHome(home));
+  }
+
+  const homeBases = Array.from(homes).flatMap((home) => [
+    join(home, ".claude", "local"),
+    join(home, ".claude", "local", "node_modules", ".bin"),
+    join(home, ".npm-global", "bin"),
+    join(home, ".local", "bin"),
+    join(home, "bin"),
+  ]);
+
+  return [...homeBases, "/usr/local/bin", "/opt/homebrew/bin"];
+}
+
 function logClaudeRuntimeDiagnostics(
   runtimeOptions: ClaudeCodeRuntimeOptions,
   bunPath: string | null,
@@ -266,20 +295,7 @@ function resolveClaudeCodeFromPathEnv(): string | null {
 }
 
 function resolveClaudeCodeFromCommonPaths(): string | null {
-  const homes = new Set<string>();
-  try {
-    homes.add(homedir());
-  } catch {}
-  if (process.env.HOME) homes.add(expandHome(process.env.HOME));
-  if (process.env.USERPROFILE) homes.add(expandHome(process.env.USERPROFILE));
-
-  const homeBases = Array.from(homes).flatMap((home) => [
-    join(home, ".npm-global", "bin"),
-    join(home, ".local", "bin"),
-    join(home, "bin"),
-  ]);
-  const basePaths = [...homeBases, "/usr/local/bin", "/opt/homebrew/bin"];
-
+  const basePaths = getClaudeCodeCommonSearchBases();
   const candidates = basePaths.flatMap((base) => CLAUDE_EXECUTABLE_NAMES.map((name) => join(base, name)));
   return firstExisting(candidates);
 }
