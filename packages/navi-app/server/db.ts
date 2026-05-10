@@ -1,5 +1,5 @@
 import initSqlJs, { type Database } from "sql.js";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, renameSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { sanitizePersistedMessageContent } from "./services/message-storage";
@@ -14,6 +14,12 @@ if (!existsSync(DATA_DIR)) {
 
 let db: Database;
 let loadedDbMtimeMs: number | null = null;
+let writesBlockedByExternalChange = false;
+let externalChangeWarningLogged = false;
+
+function isDbReadOnly() {
+  return process.env.NAVI_DB_READONLY === "1" || process.env.NAVI_DB_READONLY === "true";
+}
 
 export async function initDb() {
   const SQL = await initSqlJs();
@@ -818,7 +824,15 @@ export async function initDb() {
 }
 
 export function saveDb() {
+  if (isDbReadOnly()) {
+    return;
+  }
+
   if (db) {
+    if (writesBlockedByExternalChange) {
+      return;
+    }
+
     // Check if file on disk is newer than what we loaded
     if (loadedDbMtimeMs !== null && existsSync(DB_PATH)) {
       const currentMtimeMs = statSync(DB_PATH).mtimeMs;
@@ -826,23 +840,27 @@ export function saveDb() {
         const ageMs = Date.now() - loadedDbMtimeMs;
         const diskAgeMs = Date.now() - currentMtimeMs;
 
-        console.warn(`[DB] Save prevented: file on disk is newer than loaded data`);
-        console.warn(`[DB] Loaded data age: ${Math.round(ageMs / 1000)}s ago, Disk file age: ${Math.round(diskAgeMs / 1000)}s ago`);
-        console.warn(`[DB] This likely means another process has updated the database.`);
-        console.warn(`[DB] Skipping save to prevent data loss. Reload the app to get latest data.`);
+        if (!externalChangeWarningLogged) {
+          console.warn(`[DB] Save prevented: file on disk is newer than loaded data`);
+          console.warn(`[DB] Loaded data age: ${Math.round(ageMs / 1000)}s ago, Disk file age: ${Math.round(diskAgeMs / 1000)}s ago`);
+          console.warn(`[DB] This likely means another process has updated the database.`);
+          console.warn(`[DB] Further saves from this process are blocked to prevent data loss. Restart Navi to reload the latest data.`);
+          externalChangeWarningLogged = true;
+        }
 
-        // Update our loaded time to prevent spamming this warning
-        loadedDbMtimeMs = currentMtimeMs;
+        writesBlockedByExternalChange = true;
         return;
       }
     }
 
     const data = db.export();
     const buffer = Buffer.from(data);
-    writeFileSync(DB_PATH, buffer);
+    const tmpPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmpPath, buffer);
+    renameSync(tmpPath, DB_PATH);
 
     // Update the loaded time after successful save
-    loadedDbMtimeMs = Date.now();
+    loadedDbMtimeMs = statSync(DB_PATH).mtimeMs;
   }
 }
 

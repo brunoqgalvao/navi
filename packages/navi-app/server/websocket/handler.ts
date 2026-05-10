@@ -1004,6 +1004,7 @@ async function startChildSessionQuery(
       : join(dirname(fileURLToPath(import.meta.url)), "../query-worker.js");
 
   const workerEnv = { ...process.env };
+  workerEnv.NAVI_DB_READONLY = "1";
   delete workerEnv.ANTHROPIC_API_KEY;
   delete workerEnv.ANTHROPIC_BASE_URL;
   delete workerEnv.NAVI_ANTHROPIC_API_KEY;
@@ -2600,6 +2601,7 @@ The user will explicitly approve the plan before any execution begins.
   });
 
   const workerEnv = { ...process.env };
+  workerEnv.NAVI_DB_READONLY = "1";
   delete workerEnv.ANTHROPIC_API_KEY;
   delete workerEnv.ANTHROPIC_BASE_URL;
   delete workerEnv.NAVI_ANTHROPIC_API_KEY;

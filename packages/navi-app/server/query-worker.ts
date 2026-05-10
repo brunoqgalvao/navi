@@ -12,6 +12,11 @@ import { agentLoader, type ResolvedAgent, type AgentBundle } from "./services/ag
 import { buildSystemPromptAppend } from "./services/system-prompt-append";
 import { getSdkUserMessageFlags } from "../shared/sdk-user-message";
 
+// Query workers run in separate Bun processes while the main server owns the
+// SQL.js snapshot on disk. Keep worker DB access read-only to avoid stale
+// whole-file rewrites of ~/.claude-code-ui/data.db.
+process.env.NAVI_DB_READONLY = "1";
+
 interface SkillInfo {
   name: string;
   description: string;

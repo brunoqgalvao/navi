@@ -93,6 +93,7 @@ export class ClaudeAdapter implements BackendAdapter {
         NAVI_BUN_PATH: bunPath,
         BUN_PATH: bunPath,
         BUN_EXECUTABLE: bunPath,
+        NAVI_DB_READONLY: "1",
         NAVI_AUTH_MODE: process.env.NAVI_AUTH_MODE || "api_key",
         NAVI_AUTH_SOURCE: process.env.NAVI_AUTH_SOURCE || "global_settings",
       },
