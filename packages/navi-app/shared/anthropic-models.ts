@@ -18,23 +18,33 @@ type ModelOptionLike = {
   provider?: string;
 };
 
+export const CLAUDE_OPUS_4_8 = "claude-opus-4-8";
 export const CLAUDE_OPUS_4_7 = "claude-opus-4-7";
 export const CLAUDE_SONNET_4_6 = "claude-sonnet-4-6";
 export const CLAUDE_HAIKU_4_5 = "claude-haiku-4-5";
 
-export const DEFAULT_CLAUDE_MODEL = CLAUDE_OPUS_4_7;
+export const DEFAULT_CLAUDE_MODEL = CLAUDE_OPUS_4_8;
 export const DEFAULT_CLAUDE_FAST_MODEL = CLAUDE_SONNET_4_6;
 export const DEFAULT_CLAUDE_LIGHT_MODEL = CLAUDE_HAIKU_4_5;
 
 const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
   {
-    value: CLAUDE_OPUS_4_7,
-    displayName: "Claude Opus 4.7",
-    shortLabel: "Opus 4.7",
+    value: CLAUDE_OPUS_4_8,
+    displayName: "Claude Opus 4.8",
+    shortLabel: "Opus 4.8",
     description: "Most capable for complex work",
     provider: "anthropic",
     aliases: ["default", "opus"],
     order: 0,
+  },
+  {
+    value: CLAUDE_OPUS_4_7,
+    displayName: "Claude Opus 4.7",
+    shortLabel: "Opus 4.7",
+    description: "Previous Opus snapshot",
+    provider: "anthropic",
+    aliases: [],
+    order: 1,
   },
   {
     value: CLAUDE_SONNET_4_6,
@@ -43,7 +53,7 @@ const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
     description: "Best balance of speed and capability",
     provider: "anthropic",
     aliases: ["sonnet"],
-    order: 1,
+    order: 2,
   },
   {
     value: CLAUDE_HAIKU_4_5,
@@ -52,7 +62,7 @@ const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
     description: "Fastest for quick answers",
     provider: "anthropic",
     aliases: ["haiku"],
-    order: 2,
+    order: 3,
   },
 ];
 
