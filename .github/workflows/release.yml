@@ -13,20 +13,51 @@ env:
   # need to be set in GitHub Secrets for updater signing to work
 
 jobs:
-  # Get version from package.json
+  # Get version from package.json. Auto-bumps the patch if the version was
+  # already released, so devs don't have to remember to bump on every push.
+  # Manual bumps in package.json (e.g. for minor/major releases) are honored
+  # whenever the new version doesn't have a release yet.
   get-version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-      - name: Get version
+      - name: Determine version (auto-bump if already released)
         id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=$(jq -r '.version' packages/navi-app/package.json)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Using version: $VERSION"
+          set -euo pipefail
+          CURRENT=$(jq -r '.version' packages/navi-app/package.json)
+          echo "package.json version: $CURRENT"
+
+          if gh release view "v$CURRENT" >/dev/null 2>&1; then
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+            NEW="${MAJOR}.${MINOR}.$((PATCH + 1))"
+            echo "v$CURRENT already released — auto-bumping to v$NEW"
+
+            jq --arg v "$NEW" '.version = $v' packages/navi-app/package.json > packages/navi-app/package.json.tmp
+            mv packages/navi-app/package.json.tmp packages/navi-app/package.json
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add packages/navi-app/package.json
+            git commit -m "chore: auto-bump version to $NEW [skip ci]"
+            git push origin HEAD:main
+
+            echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$CURRENT has no release yet — using as-is"
+            echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          fi
 
   # Build CLI tarball (lightweight, no git/tauri needed)
   build-cli:
@@ -34,6 +65,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Package CLI tarball
         run: |

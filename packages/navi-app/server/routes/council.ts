@@ -14,6 +14,7 @@ import { execSync } from "child_process";
 import {
   CLAUDE_HAIKU_4_5,
   CLAUDE_OPUS_4_7,
+  CLAUDE_OPUS_4_8,
   CLAUDE_SONNET_4_6,
 } from "../../shared/anthropic-models";
 
@@ -85,6 +86,14 @@ const DEFAULT_COUNCIL: CouncilMember[] = [
 // Available council members to choose from
 const AVAILABLE_MEMBERS: CouncilMember[] = [
   // Anthropic
+  {
+    id: "claude-opus-4-8",
+    name: "Claude Opus 4.8",
+    provider: "anthropic",
+    model: CLAUDE_OPUS_4_8,
+    icon: "🟣",
+    color: "#6D28D9",
+  },
   {
     id: "claude-opus",
     name: "Claude Opus 4.7",
