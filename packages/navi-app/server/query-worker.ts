@@ -353,7 +353,18 @@ interface WorkerInput {
   }>;
   // Enabled skill slugs for this project (undefined = load all skills)
   enabledSkillSlugs?: string[];
+  // Reasoning effort tier ("low" | "medium" | "high" | "xhigh" | "max")
+  // Mapped to the SDK's maxThinkingTokens budget.
+  reasoningEffort?: string;
 }
+
+const REASONING_EFFORT_TO_THINKING_TOKENS: Record<string, number> = {
+  low: 4_000,
+  medium: 16_000,
+  high: 32_000,
+  xhigh: 64_000,
+  max: 128_000,
+};
 
 const pendingPermissions = new Map<string, (result: { approved: boolean; approveAll?: boolean }) => void>();
 const pendingQuestions = new Map<string, (result: { answers: Record<string, string | string[]> }) => void>();
@@ -1606,7 +1617,15 @@ function isImageTooLargeError(error: unknown): boolean {
 }
 
 async function runQuery(input: WorkerInput): Promise<boolean> {
-  const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs } = input;
+  const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs, reasoningEffort } = input;
+  const maxThinkingTokens = reasoningEffort
+    ? REASONING_EFFORT_TO_THINKING_TOKENS[reasoningEffort.toLowerCase()]
+    : undefined;
+  if (reasoningEffort) {
+    console.error(
+      `[Worker] Reasoning effort: ${reasoningEffort} → maxThinkingTokens: ${maxThinkingTokens ?? "default"}`
+    );
+  }
   currentSessionIdForNaviContext = sessionId;
 
   // Debug: Log multiSession state
@@ -2008,6 +2027,7 @@ Example clarifying questions:
           settingSources: ['user', 'project', 'local'] as const,
           systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
           includePartialMessages: true,
+          ...(maxThinkingTokens !== undefined && { maxThinkingTokens }),
           mcpServers,
           // Pass SDK subagents (for Task tool spawning)
           // This includes: all Navi Agents + their defined subagents

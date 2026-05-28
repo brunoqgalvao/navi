@@ -167,6 +167,9 @@ export async function handleSessionRoutes(
       if (body.backend !== undefined) {
         sessions.updateBackend(body.backend, id);
       }
+      if (body.reasoningEffort !== undefined) {
+        sessions.updateReasoningEffort(body.reasoningEffort, id);
+      }
       if (
         body.agentId !== undefined ||
         body.workflowId !== undefined ||

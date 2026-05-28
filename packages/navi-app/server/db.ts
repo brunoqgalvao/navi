@@ -233,6 +233,11 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN e2b_sandbox_id TEXT");
   } catch {}
 
+  // Per-session reasoning effort tier ("low" | "medium" | "high" | "xhigh" | "max")
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT");
+  } catch {}
+
   // Multi-backend support (claude, codex, gemini)
   try {
     db.run("ALTER TABLE sessions ADD COLUMN backend TEXT DEFAULT 'claude'");
@@ -958,6 +963,8 @@ export interface Session {
   e2b_sandbox_id: string | null;
   // Multi-backend support
   backend: "claude" | "codex" | "gemini" | null;
+  // Per-session reasoning effort tier
+  reasoning_effort: "low" | "medium" | "high" | "xhigh" | "max" | null;
   // Agent workspace links
   agent_id: string | null;
   workflow_id: string | null;
@@ -1876,6 +1883,8 @@ export const sessions = {
     run("UPDATE sessions SET model = ? WHERE id = ?", [model, id]),
   updateBackend: (backend: string, id: string) =>
     run("UPDATE sessions SET backend = ? WHERE id = ?", [backend, id]),
+  updateReasoningEffort: (effort: string | null, id: string) =>
+    run("UPDATE sessions SET reasoning_effort = ?, updated_at = ? WHERE id = ?", [effort, Date.now(), id]),
   updateBackendSessionState: (
     backendSessionId: string | null,
     backendSessionMetadata: string | null,

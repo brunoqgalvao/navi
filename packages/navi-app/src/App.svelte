@@ -2150,6 +2150,11 @@ Please walk me through the setup step by step. When I have the credentials, save
     // If session doesn't have a backend, check the map directly to see if we have a cached value
     // (The get() method returns "claude" as default, which could be wrong for a codex session)
 
+    // Restore reasoning effort tier from DB if persisted
+    if (s.reasoning_effort) {
+      sessionReasoningEffort.set(s.id, s.reasoning_effort as ReasoningEffort);
+    }
+
     sessionStatus.markSeen(s.id);
 
     // Track in navigation history
@@ -2178,6 +2183,9 @@ Please walk me through the setup step by step. When I have the credentials, save
         // Always update backend from fresh session data (trust DB over cache)
         if (freshSession.backend) {
           sessionBackendStore.set(s.id, freshSession.backend as BackendId);
+        }
+        if (freshSession.reasoning_effort) {
+          sessionReasoningEffort.set(s.id, freshSession.reasoning_effort as ReasoningEffort);
         }
       }
     } catch {}
@@ -4464,6 +4472,7 @@ Please walk me through the setup step by step. When I have the credentials, save
                     onReasoningEffortChange={(effort) => {
                       if ($session.sessionId) {
                         sessionReasoningEffort.set($session.sessionId, effort);
+                        api.sessions.update($session.sessionId, { reasoningEffort: effort }).catch(() => {});
                       }
                       defaultReasoningEffort.set(effort);
                     }}

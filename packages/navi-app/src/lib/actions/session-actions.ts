@@ -9,8 +9,10 @@ import {
   sessionBackendStore,
   defaultBackend,
   loadingMessagesSessions,
+  sessionReasoningEffort,
   type ChatMessage,
   type BackendId,
+  type ReasoningEffort,
 } from "../stores";
 import { streamingStore } from "../handlers";
 import { get } from "svelte/store";
@@ -183,6 +185,9 @@ export async function selectSession(s: Session) {
     const defaultModel = getDefaultModel();
     currentSession.setSelectedModel(defaultModel);
   }
+  if (s.reasoning_effort) {
+    sessionReasoningEffort.set(s.id, s.reasoning_effort as ReasoningEffort);
+  }
   sessionStatus.markSeen(s.id);
 
   // Refresh session data
@@ -195,6 +200,9 @@ export async function selectSession(s: Session) {
       if (freshSession.model && !cachedModel) {
         currentSession.setSelectedModel(freshSession.model);
         sessionModels.setModel(s.id, freshSession.model);
+      }
+      if (freshSession.reasoning_effort) {
+        sessionReasoningEffort.set(s.id, freshSession.reasoning_effort as ReasoningEffort);
       }
     }
   } catch (e) {

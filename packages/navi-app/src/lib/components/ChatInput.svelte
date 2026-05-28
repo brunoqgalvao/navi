@@ -1582,11 +1582,13 @@
 
       <!-- Reasoning Effort Toggle -->
       {#if onReasoningEffortChange}
-        {@const effortLevels: ReasoningEffort[] = ["low", "medium", "high"]}
+        {@const effortLevels: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"]}
         {@const effortMeta = {
           low: { label: "Lo", color: "text-sky-600 dark:text-sky-400", bgColor: "bg-sky-100 dark:bg-sky-900/30", desc: "Low" },
           medium: { label: "Med", color: "text-amber-600 dark:text-amber-400", bgColor: "bg-amber-100 dark:bg-amber-900/30", desc: "Medium" },
           high: { label: "Hi", color: "text-rose-600 dark:text-rose-400", bgColor: "bg-rose-100 dark:bg-rose-900/30", desc: "High" },
+          xhigh: { label: "X-Hi", color: "text-fuchsia-600 dark:text-fuchsia-400", bgColor: "bg-fuchsia-100 dark:bg-fuchsia-900/30", desc: "Extra High" },
+          max: { label: "Max", color: "text-purple-700 dark:text-purple-300", bgColor: "bg-purple-200 dark:bg-purple-900/50", desc: "Max" },
         }}
         {@const meta_effort = effortMeta[reasoningEffort]}
         <Tooltip text="Reasoning: {meta_effort.desc}" position="top">
