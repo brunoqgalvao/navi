@@ -165,6 +165,14 @@ Tables (~10): `projects`, `sessions` (incl. parent/root/depth for hierarchy), `m
 - Agent tree view for multi-agent sessions (hierarchy, status, bubbled permissions).
 - **Ported from old repo (proven code):** chat message rendering + markdown/code highlighting, xterm terminal setup, unified diff viewer, file browser. Ported file-by-file with imports rewired to new stores/protocol — port estimate treated as soft.
 
+## 7.1 Git integration scope
+
+v1: status, branch list/switch/create, unified diff (working tree + staged), commit, log — per project, via `git` CLI wrapped in the server's `git` route. Optional **worktree isolation for child agents**: `spawn_agent` accepts `isolation: 'worktree'`, creating a temporary worktree so parallel agents don't clobber each other's working tree (auto-removed if unchanged). Push/pull/merge UI deferred to v2 — the terminal covers them meanwhile.
+
+## 7.2 Terminal
+
+`packages/pty` (ported Node PTY server) exposes a WS endpoint; the UI uses the ported xterm.js setup. Terminals are **per-project** (default cwd = project path), persist across UI reloads while the server lives, with a small per-project tab list. No terminal sharing or replay in v1.
+
 ## 8. Error handling
 
 - All adapter errors normalize to `GatewayEvent:error` with user-readable message + raw detail.
@@ -184,15 +192,15 @@ Tables (~10): `projects`, `sessions` (incl. parent/root/depth for hierarchy), `m
 **Phase 0 — Spike (validates the bets before building on them):**
 A terminal REPL (`packages/gateway/examples/repl.ts`) driving all three adapters. Exit criteria: streaming chat + a permission round-trip + resume on each backend, and one cross-backend `spawn_agent` via MCP (Claude parent → Codex child). If Gemini permissions can't round-trip via ACP, it ships as `permissions: 'modes-only'` — decided here, not discovered in production.
 
-**Phase 1 — Gateway hardening:** full event normalization, capabilities, usage schema, fixtures + canary, MCP spawn guard rails.
+**Phase 1 — Gateway hardening:** full event normalization, capabilities, usage schema, fixtures + canary, MCP spawn guard rails. *Exit: all adapter fixture suites green; canary passes against live CLIs; REPL exercises every GatewayEvent type.*
 
-**Phase 2 — Server + data:** schema/migrations, WS protocol, session lifecycle over gateway, PTY + git + skills routes (ported).
+**Phase 2 — Server + data:** schema/migrations, WS protocol, session lifecycle over gateway, PTY + git + skills routes (ported). *Exit: route + scheduler-clock tests green; a WS client can run a full session on each backend with messages persisted.*
 
-**Phase 3 — UI core:** shell, chat (ported rendering), terminal, git panel, skills editor, backend picker.
+**Phase 3 — UI core:** shell, chat (ported rendering), terminal, git panel, skills editor, backend picker. *Exit: daily-drivable for single-session work on all three backends.*
 
-**Phase 4 — Workflows:** engine + durability + editor UI + run history.
+**Phase 4 — Workflows:** engine + durability + editor UI + run history. *Exit: a cron workflow survives a server restart and a chained workflow fires; failures notify.*
 
-**Phase 5 — Multi-agent UI + polish:** agent tree, bubbled permissions, cost ceilings, retention job, Playwright smoke, old-app retirement checklist.
+**Phase 5 — Multi-agent UI + polish:** agent tree, bubbled permissions, cost ceilings, retention job, Playwright smoke, old-app retirement checklist. *Exit: Playwright smoke green; cross-backend spawn usable from the UI; new app replaces old for daily use.*
 
 Each phase ends with working, tested software; UI work never begins on an unproven gateway.
 
