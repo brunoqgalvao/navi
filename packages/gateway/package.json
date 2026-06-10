@@ -1,0 +1,22 @@
+{
+  "name": "@navi/agent-gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "bun test",
+    "repl": "bun run examples/repl.ts",
+    "canary": "bun run scripts/canary.ts",
+    "gen:codex-protocol": "codex app-server generate-ts --out src/adapters/codex-protocol.gen.ts"
+  },
+  "dependencies": {
+    "zod": "^3.24.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.170",
+    "@openai/codex-sdk": "^0.139.0",
+    "@agentclientprotocol/sdk": "0.25.0",
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}
