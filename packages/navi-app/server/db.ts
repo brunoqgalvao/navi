@@ -4,6 +4,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { sanitizePersistedMessageContent } from "./services/message-storage";
 import { DEFAULT_CONTEXT_WINDOW } from "./utils/context-window";
+import { isCompactSummaryContent } from "../shared/sdk-user-message";
 
 const DATA_DIR = join(homedir(), ".claude-code-ui");
 const DB_PATH = join(DATA_DIR, "data.db");
@@ -237,6 +238,11 @@ export async function initDb() {
   } catch {}
   try {
     db.run("ALTER TABLE sessions ADD COLUMN e2b_sandbox_id TEXT");
+  } catch {}
+
+  // Per-session reasoning effort tier ("low" | "medium" | "high" | "xhigh" | "max")
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT");
   } catch {}
 
   // Multi-backend support (claude, codex, gemini)
@@ -819,6 +825,11 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_message_comments_resolved ON message_comments(resolved);
   `);
 
+  const purgedCompactSummaries = purgeCompactSummaryMessages();
+  if (purgedCompactSummaries > 0) {
+    console.log(`[DB] Removed ${purgedCompactSummaries} compact summary message(s) from persisted chat history`);
+  }
+
   saveDb()
   return db;
 }
@@ -976,6 +987,8 @@ export interface Session {
   e2b_sandbox_id: string | null;
   // Multi-backend support
   backend: "claude" | "codex" | "gemini" | null;
+  // Per-session reasoning effort tier
+  reasoning_effort: "low" | "medium" | "high" | "xhigh" | "max" | null;
   // Agent workspace links
   agent_id: string | null;
   workflow_id: string | null;
@@ -1066,6 +1079,22 @@ export interface Message {
   parent_tool_use_id?: string | null;
   is_synthetic?: number;
   is_final?: number;
+}
+
+function parseStoredMessageContent(content: string): unknown {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return content;
+  }
+}
+
+function isStoredCompactSummaryMessage(message: Pick<Message, "role" | "content">): boolean {
+  return message.role === "user" && isCompactSummaryContent(parseStoredMessageContent(message.content));
+}
+
+function filterStoredTranscriptMessages<T extends Pick<Message, "role" | "content">>(rows: T[]): T[] {
+  return rows.filter((row) => !isStoredCompactSummaryMessage(row));
 }
 
 function queryAll<T>(sql: string, params: any[] = []): T[] {
@@ -1180,6 +1209,42 @@ export function compactStoredMessages(options: { sessionIds?: string[] } = {}): 
     bytesSaved,
     vacuumed,
   };
+}
+
+export function purgeCompactSummaryMessages(): number {
+  const candidates = queryAll<Message>(
+    `SELECT *
+     FROM messages
+     WHERE role = 'user'
+       AND (
+         is_synthetic = 1
+         OR content LIKE ?
+         OR content LIKE ?
+         OR content LIKE ?
+         OR content LIKE ?
+       )`,
+    [
+      '"This session is being continued from a previous conversation that ran out of context.%',
+      '"This conversation is being continued from a previous conversation that ran out of context.%',
+      '%This session is being continued from a previous conversation that ran out of context.%',
+      '%This conversation is being continued from a previous conversation that ran out of context.%',
+    ]
+  ).filter(isStoredCompactSummaryMessage);
+
+  if (candidates.length === 0) {
+    return 0;
+  }
+
+  const messageIds = candidates.map((message) => message.id);
+  const placeholders = messageIds.map(() => "?").join(", ");
+
+  db.run(`DELETE FROM messages WHERE id IN (${placeholders})`, messageIds);
+  db.run(
+    `DELETE FROM search_index WHERE id IN (${placeholders})`,
+    messageIds.map((id) => `msg_${id}`)
+  );
+
+  return messageIds.length;
 }
 
 export interface ProjectWithStats extends Project {
@@ -1894,6 +1959,8 @@ export const sessions = {
     run("UPDATE sessions SET model = ? WHERE id = ?", [model, id]),
   updateBackend: (backend: string, id: string) =>
     run("UPDATE sessions SET backend = ? WHERE id = ?", [backend, id]),
+  updateReasoningEffort: (effort: string | null, id: string) =>
+    run("UPDATE sessions SET reasoning_effort = ?, updated_at = ? WHERE id = ?", [effort, Date.now(), id]),
   updateBackendSessionState: (
     backendSessionId: string | null,
     backendSessionMetadata: string | null,
@@ -2142,18 +2209,22 @@ export const cloudExecutions = {
 
 export const messages = {
   listBySession: (sessionId: string) =>
-    queryAll<Message>("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC", [sessionId]),
+    filterStoredTranscriptMessages(
+      queryAll<Message>("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC", [sessionId])
+    ),
   listBySessionPaginated: (sessionId: string, limit: number, offset: number) =>
-    queryAll<Message>(
-      "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-      [sessionId, limit, offset]
+    filterStoredTranscriptMessages(
+      queryAll<Message>(
+        "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+        [sessionId, limit, offset]
+      )
     ),
   countBySession: (sessionId: string): number => {
-    const result = queryOne<{ count: number }>(
-      "SELECT COUNT(*) as count FROM messages WHERE session_id = ?",
+    const rows = queryAll<Message>(
+      "SELECT * FROM messages WHERE session_id = ?",
       [sessionId]
     );
-    return result?.count ?? 0;
+    return filterStoredTranscriptMessages(rows).length;
   },
   get: (id: string) => queryOne<Message>("SELECT * FROM messages WHERE id = ?", [id]),
   create: (
@@ -2220,10 +2291,10 @@ export const messages = {
     run("DELETE FROM messages WHERE session_id = ? AND timestamp > ?", [sessionId, timestamp]),
   // Get latest message preview for a session (for child session cards)
   getLatestPreview: (sessionId: string): { role: string; preview: string; timestamp: number } | null => {
-    const msg = queryOne<Message>(
-      "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1",
+    const msg = filterStoredTranscriptMessages(queryAll<Message>(
+      "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 10",
       [sessionId]
-    );
+    ))[0];
     if (!msg) return null;
 
     try {

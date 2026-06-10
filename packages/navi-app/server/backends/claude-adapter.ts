@@ -68,12 +68,19 @@ export class ClaudeAdapter implements BackendAdapter {
   async *query(options: QueryOptions): AsyncGenerator<NormalizedEvent> {
     const workerPath = path.join(__dirname, "..", "query-worker.ts");
 
+    const backendOpts = options.backendOptions || {};
+    const reasoningEffort =
+      typeof backendOpts.reasoningEffort === "string" && backendOpts.reasoningEffort.trim()
+        ? backendOpts.reasoningEffort.trim()
+        : undefined;
+
     const inputJson = JSON.stringify({
       prompt: options.prompt,
       cwd: options.cwd,
       resume: options.resume,
       model: options.model,
       sessionId: options.sessionId,
+      reasoningEffort,
       permissionSettings: {
         autoAcceptAll: options.permissionMode === "auto",
         requireConfirmation:

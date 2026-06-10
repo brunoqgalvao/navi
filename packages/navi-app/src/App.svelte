@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, planMode, autoCompactEnabled, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId, type ReasoningEffort } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, planMode, autoCompactEnabled, autoCompactMethod, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId, type ReasoningEffort, type AutoCompactMethod } from "./lib/stores";
   import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill, type Workflow, type WorkflowGate, type WorkflowSchedule } from "./lib/api";
   import { mcpApi, type McpServer } from "./lib/features/mcp";
@@ -12,6 +12,7 @@
   import { initBrowserEmail } from "./lib/features/browser-email-init";
   import { parseHash, onHashChange } from "./lib/router";
   import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
+  import { getDefaultContextResetThresholdPercent, getEffectiveSessionContextWindow } from "./lib/context-window";
   import { setupGlobalErrorHandlers, pendingErrorReport, showError, showSuccess, type ErrorReport } from "./lib/errorHandler";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
@@ -713,7 +714,7 @@
         notifications.add({
           type: "warning",
           title: "Context limit reached",
-          message: "Pruning old outputs and retrying with a more concise approach...",
+          message: "Pruning tool outputs and retrying with a more concise approach...",
         });
 
         // Prune tool results to make space
@@ -1153,10 +1154,15 @@
   let queuedCount = $derived($session.sessionId ? $messageQueue.filter(m => m.sessionId === $session.sessionId).length : 0);
   let showOnboarding = $derived(!$onboardingComplete);
 
-  const AUTO_COMPACT_THRESHOLD_PERCENT = 80;
-
   // Context usage percentage for current session
-  const contextWindow = $derived(currentProject?.context_window || 200000);
+  const currentContextBackend = $derived($session.sessionId ? (sessionBackendStore.get($session.sessionId, $sessionBackendStore) || $defaultBackend) : $defaultBackend);
+  const currentContextModel = $derived(modelSelection || $session.selectedModel || currentSessionData?.model || "");
+  const contextWindow = $derived(getEffectiveSessionContextWindow({
+    projectContextWindow: currentProject?.context_window,
+    backend: currentContextBackend,
+    model: currentContextModel,
+  }));
+  const autoCompactThresholdPercent = $derived(getDefaultContextResetThresholdPercent(contextWindow));
   const usagePercent = $derived(contextWindow > 0 ? Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100)) : 0);
   let activeSkills = $state<Skill[]>([]);
   let mcpServers = $state<McpServer[]>([]);
@@ -1166,22 +1172,70 @@
     return sessionBackendStore.get(sessionId, get(sessionBackendStore)) || get(defaultBackend);
   }
 
+  const autoReducingSessions = new Set<string>();
+  const autoCompactMethodDetails: Record<AutoCompactMethod, { inProgress: string; overflow: string }> = {
+    compact: {
+      inProgress: "Context usage is high. Asking Claude to summarize the conversation before continuing.",
+      overflow: "Auto-compact is enabled. Asking Claude to summarize the conversation before continuing.",
+    },
+    prune: {
+      inProgress: "Context usage is high. Pruning tool outputs before continuing.",
+      overflow: "Auto-compact is enabled. Pruning tool outputs before continuing.",
+    },
+    "prune-then-compact": {
+      inProgress: "Context usage is high. Pruning noisy tool outputs, then asking Claude to compact.",
+      overflow: "Auto-compact is enabled. Pruning noisy tool outputs, then asking Claude to compact.",
+    },
+  };
+
+  function updateUsageAfterPrune(sessionId: string, tokensSaved: number) {
+    if (sessionId !== get(session).sessionId || tokensSaved <= 0) return;
+    const current = get(session);
+    session.setUsage(Math.max(0, current.inputTokens - tokensSaved), current.outputTokens);
+  }
+
+  async function runAutoCompactMethod(sessionId: string, method: AutoCompactMethod) {
+    if (method === "compact") {
+      sendCommand("/compact");
+      return;
+    }
+
+    autoReducingSessions.add(sessionId);
+    try {
+      const pruneResult = await pruneToolResults(sessionId);
+      updateUsageAfterPrune(sessionId, pruneResult.tokensSaved);
+
+      if (method === "prune-then-compact") {
+        sendCommand("/compact");
+        return;
+      }
+
+      processMessageQueue(sessionId);
+    } finally {
+      autoReducingSessions.delete(sessionId);
+    }
+  }
+
   function maybeAutoCompactSession(sessionId: string, reason: "threshold" | "overflow"): boolean {
     if (sessionId !== $session.sessionId) return false;
     if (!get(autoCompactEnabled)) return false;
     if (getSessionBackend(sessionId) !== "claude") return false;
     if (get(compactingSessionsStore).has(sessionId)) return false;
-    if (reason === "threshold" && usagePercent < AUTO_COMPACT_THRESHOLD_PERCENT) return false;
+    if (autoReducingSessions.has(sessionId)) return false;
+    if (reason === "threshold" && usagePercent < autoCompactThresholdPercent) return false;
+
+    const method = get(autoCompactMethod);
+    const methodDetails = autoCompactMethodDetails[method];
 
     notifications.add({
       type: reason === "overflow" ? "warning" : "info",
       title: reason === "overflow" ? "Context limit reached" : "Auto-compact",
       message: reason === "overflow"
-        ? "Auto-compact is enabled. Asking Claude to summarize the conversation before continuing."
-        : "Context usage is high. Asking Claude to summarize the conversation before continuing.",
+        ? methodDetails.overflow
+        : methodDetails.inProgress,
     });
 
-    sendCommand("/compact");
+    void runAutoCompactMethod(sessionId, method);
     return true;
   }
 
@@ -2150,6 +2204,11 @@ Please walk me through the setup step by step. When I have the credentials, save
     // If session doesn't have a backend, check the map directly to see if we have a cached value
     // (The get() method returns "claude" as default, which could be wrong for a codex session)
 
+    // Restore reasoning effort tier from DB if persisted
+    if (s.reasoning_effort) {
+      sessionReasoningEffort.set(s.id, s.reasoning_effort as ReasoningEffort);
+    }
+
     sessionStatus.markSeen(s.id);
 
     // Track in navigation history
@@ -2178,6 +2237,9 @@ Please walk me through the setup step by step. When I have the credentials, save
         // Always update backend from fresh session data (trust DB over cache)
         if (freshSession.backend) {
           sessionBackendStore.set(s.id, freshSession.backend as BackendId);
+        }
+        if (freshSession.reasoning_effort) {
+          sessionReasoningEffort.set(s.id, freshSession.reasoning_effort as ReasoningEffort);
         }
       }
     } catch {}
@@ -2718,6 +2780,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       sessionId,
       claudeSessionId: $session.claudeSessionId || undefined,
       model: $session.selectedModel || undefined,
+      contextWindow,
       historyContext: historyCtx,
       backend,
     });
@@ -2860,6 +2923,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       sessionId: currentSessionId,
       claudeSessionId: $session.claudeSessionId || undefined,
       model: $session.selectedModel || undefined,
+      contextWindow,
       historyContext: historyCtx,
       backend,
     });
@@ -2974,6 +3038,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       sessionId: currentSessionId,
       claudeSessionId: backend === "claude" ? ($session.claudeSessionId || undefined) : undefined,
       model: $session.selectedModel || undefined,
+      contextWindow,
       historyContext: historyCtx,
       agentId,
       backend,
@@ -3074,6 +3139,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       sessionId: targetSessionId,
       claudeSessionId: backend === "claude" ? ($session.claudeSessionId || undefined) : undefined,
       model: $session.selectedModel || undefined,
+      contextWindow,
       historyContext: historyCtx,
       backend,
       reasoningEffort: effort,
@@ -3121,6 +3187,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       sessionId: targetSessionId,
       claudeSessionId: backend === "claude" ? ($session.claudeSessionId || undefined) : undefined,
       model: $session.selectedModel || undefined,
+      contextWindow,
       historyContext: historyCtx,
       backend,
       reasoningEffort: effort,
@@ -3944,6 +4011,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     {recentChats}
     {currentProject}
     {currentMessages}
+    {contextWindow}
     {sidebarCollapsed}
     {sidebarWidth}
     folders={workspaceFolders}
@@ -4363,12 +4431,13 @@ Please walk me through the setup step by step. When I have the credentials, save
                 {/if}
 
                 <!-- Context Warning - attached to top of input -->
-                {#if $session.sessionId && (usagePercent >= 80 || hasPrunedContext($session.sessionId) || hasRollbackContext($session.sessionId) || $compactingSessionsStore.has($session.sessionId))}
+                {#if $session.sessionId && (usagePercent >= autoCompactThresholdPercent || hasPrunedContext($session.sessionId) || hasRollbackContext($session.sessionId) || $compactingSessionsStore.has($session.sessionId))}
                 <div class="mb-0">
                     <ContextWarning
                         {usagePercent}
+                        warningThresholdPercent={autoCompactThresholdPercent}
                         inputTokens={$session.inputTokens}
-                        contextWindow={currentProject?.context_window || 200000}
+                        {contextWindow}
                         isPruned={hasPrunedContext($session.sessionId)}
                         isRollback={hasRollbackContext($session.sessionId)}
                         isCompacting={$compactingSessionsStore.has($session.sessionId)}
@@ -4448,6 +4517,7 @@ Please walk me through the setup step by step. When I have the credentials, save
                     onReasoningEffortChange={(effort) => {
                       if ($session.sessionId) {
                         sessionReasoningEffort.set($session.sessionId, effort);
+                        api.sessions.update($session.sessionId, { reasoningEffort: effort }).catch(() => {});
                       }
                       defaultReasoningEffort.set(effort);
                     }}

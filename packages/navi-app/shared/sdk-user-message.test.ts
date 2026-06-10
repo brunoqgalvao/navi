@@ -37,4 +37,41 @@ describe("sdk user message helpers", () => {
       })
     ).toBe(false);
   });
+
+  test("does not display or persist compact summaries", () => {
+    expect(
+      shouldDisplayOrPersistUserMessage({
+        content: COMPACT_SUMMARY,
+        isCompactSummary: true,
+        isSynthetic: true,
+      })
+    ).toBe(false);
+  });
+
+  test("detects compact summaries inside text blocks", () => {
+    const content = [{ type: "text", text: COMPACT_SUMMARY }];
+
+    expect(isCompactSummaryContent(content)).toBe(true);
+    expect(
+      shouldDisplayOrPersistUserMessage({
+        content,
+        isSynthetic: true,
+      })
+    ).toBe(false);
+  });
+
+  test("displays and persists SDK tool-result user messages", () => {
+    expect(
+      shouldDisplayOrPersistUserMessage({
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_123",
+            content: "done",
+          },
+        ],
+        isSynthetic: true,
+      })
+    ).toBe(true);
+  });
 });

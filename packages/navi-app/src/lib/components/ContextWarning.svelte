@@ -9,6 +9,7 @@
 
   interface Props {
     usagePercent: number;
+    warningThresholdPercent?: number;
     inputTokens: number;
     contextWindow: number;
     isPruned?: boolean;
@@ -21,6 +22,7 @@
 
   let {
     usagePercent,
+    warningThresholdPercent = 80,
     inputTokens,
     contextWindow,
     isPruned = false,
@@ -37,7 +39,7 @@
     {
       id: "prune-tool-results",
       name: "Prune tool outputs",
-      description: "Truncate old file reads & bash outputs to save tokens",
+      description: "Truncate file reads & bash outputs to save tokens",
       icon: "✂️",
       action: () => {
         onPruneToolResults();
@@ -106,7 +108,7 @@
     </svg>
     <span>Pruned ({usagePercent}%)</span>
   </div>
-{:else if usagePercent >= 80}
+{:else if usagePercent >= warningThresholdPercent}
   <div class="context-warning-container relative inline-block">
     <button
       onclick={() => showOptions = !showOptions}

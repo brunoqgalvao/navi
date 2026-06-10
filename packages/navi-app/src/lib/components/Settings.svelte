@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, costsApi, containerPreviewApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project, type ContainerPreview } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
+  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
@@ -49,6 +49,24 @@
   let apiTabLoaded = $state(false);
   let autoTitleEnabled = $state(true);
   let telemetryEnabled = $state(isTelemetryEnabled());
+
+  const autoCompactMethods: { id: AutoCompactMethod; label: string; description: string }[] = [
+    {
+      id: "compact",
+      label: "Compact",
+      description: "Use Claude Code /compact for a conversation summary",
+    },
+    {
+      id: "prune",
+      label: "Prune",
+      description: "Trim tool outputs and keep working",
+    },
+    {
+      id: "prune-then-compact",
+      label: "Both",
+      description: "Prune noisy outputs, then ask Claude to compact",
+    },
+  ];
 
   let showOpenAIInput = $state(false);
   let openAIKeyInput = $state("");
@@ -1288,9 +1306,23 @@
                   </div>
 
                   {#if $autoCompactEnabled}
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
-                      When context usage gets high, Claude will automatically summarize the conversation to free up space. This persists to your Claude settings.
-                    </p>
+                    <div class="mt-3 space-y-3">
+                      <div class="grid grid-cols-3 gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
+                        {#each autoCompactMethods as method}
+                          <button
+                            type="button"
+                            onclick={() => autoCompactMethod.set(method.id)}
+                            class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors {$autoCompactMethod === method.id ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+                            title={method.description}
+                          >
+                            {method.label}
+                          </button>
+                        {/each}
+                      </div>
+                      <p class="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
+                        Auto-compact uses the selected method when context reaches the model-aware threshold. The enabled setting persists to Claude settings; the method is Navi-local.
+                      </p>
+                    </div>
                   {:else}
                     <p class="text-sm text-amber-600 dark:text-amber-400 mt-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
                       With auto-compact disabled, long conversations will hit the context limit and require manual compaction.

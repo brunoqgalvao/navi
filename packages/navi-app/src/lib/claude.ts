@@ -588,12 +588,13 @@ export class ClaudeClient {
     workingDirectory?: string;
     allowedTools?: string[];
     model?: string;
+    contextWindow?: number;
     historyContext?: string;
     // Agent selection (e.g., "coder", "img3d")
     agentId?: string;
     // Backend selection (claude, codex, gemini)
     backend?: "claude" | "codex" | "gemini";
-    // Reasoning effort (low, medium, high, xhigh)
+    // Reasoning effort (low, medium, high, xhigh, max)
     reasoningEffort?: string;
     // Plan mode - Claude plans before acting
     planMode?: boolean;

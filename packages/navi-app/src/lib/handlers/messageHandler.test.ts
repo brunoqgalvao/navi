@@ -16,7 +16,7 @@ describe("createMessageHandler", () => {
     sessionMessages.set(new Map());
   });
 
-  test("stores compact summary user messages even without SDK metadata", () => {
+  test("ignores compact summary user messages even without SDK metadata", () => {
     const handler = createMessageHandler({
       callbacks: {},
       getCurrentSessionId: () => SESSION_ID,
@@ -31,10 +31,7 @@ describe("createMessageHandler", () => {
     });
 
     const stored = get(sessionMessages).get(SESSION_ID) || [];
-    expect(stored).toHaveLength(1);
-    expect(stored[0]?.role).toBe("user");
-    expect(stored[0]?.content).toBe(COMPACT_SUMMARY);
-    expect(stored[0]?.isSynthetic).toBe(true);
+    expect(stored).toHaveLength(0);
   });
 
   test("ignores ordinary plain user messages", () => {
@@ -52,5 +49,35 @@ describe("createMessageHandler", () => {
     });
 
     expect(get(sessionMessages).get(SESSION_ID) || []).toHaveLength(0);
+  });
+
+  test("stores SDK tool-result user messages", () => {
+    const handler = createMessageHandler({
+      callbacks: {},
+      getCurrentSessionId: () => SESSION_ID,
+      getProjectId: () => "project-1",
+    });
+
+    const content = [
+      {
+        type: "tool_result" as const,
+        tool_use_id: "toolu_123",
+        content: "done",
+      },
+    ];
+
+    handler.handle({
+      type: "user",
+      uiSessionId: SESSION_ID,
+      content,
+      parentToolUseId: null,
+      isSynthetic: true,
+    });
+
+    const stored = get(sessionMessages).get(SESSION_ID) || [];
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.role).toBe("user");
+    expect(stored[0]?.content).toBe(content);
+    expect(stored[0]?.isSynthetic).toBe(true);
   });
 });

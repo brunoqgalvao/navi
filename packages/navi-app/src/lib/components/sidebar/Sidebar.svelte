@@ -4,7 +4,6 @@
   import { currentSession as session, isConnected, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems, channelsEnabled } from "../../stores";
   import { api, agentsApi, type Agent as ProjectAgent, type InboxItem, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult, type Workflow, type WorkflowGate, type WorkflowSchedule } from "../../api";
   import { getApiBase } from "../../config";
-  import { getEffectiveContextWindow } from "../../context-window";
   import StarButton from "../StarButton.svelte";
   import TitleSuggestion from "../TitleSuggestion.svelte";
   import RelativeTime from "../RelativeTime.svelte";
@@ -28,6 +27,7 @@
     recentChats: Session[];
     currentProject: Project | null;
     currentMessages: ChatMessage[];
+    contextWindow: number;
     sidebarCollapsed: boolean;
     sidebarWidth: number;
     folders: WorkspaceFolder[];
@@ -127,6 +127,7 @@
     recentChats,
     currentProject,
     currentMessages,
+    contextWindow,
     sidebarCollapsed,
     sidebarWidth,
     folders,
@@ -2548,7 +2549,6 @@
 
   <div class={`${sidebarCollapsed ? 'px-2' : 'px-4'} py-3 border-t border-gray-200 bg-gray-50/50 space-y-2`}>
     {#if $session.inputTokens > 0 && !sidebarCollapsed}
-      {@const contextWindow = getEffectiveContextWindow(currentProject?.context_window)}
       {@const usagePercent = Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100))}
       <div class="space-y-1">
         <div class="flex items-center justify-between text-[10px] text-gray-500">

@@ -92,7 +92,7 @@
     backendModels?: Record<BackendId, ModelInfo[]>;
     onBackendChange?: (backend: BackendId) => void;
     onModelSelect?: (model: string) => void;
-    // Reasoning effort (low, medium, high, xhigh)
+    // Reasoning effort (low, medium, high, xhigh, max)
     reasoningEffort?: ReasoningEffort;
     onReasoningEffortChange?: (effort: ReasoningEffort) => void;
     // Slash commands from SDK

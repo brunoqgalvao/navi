@@ -90,6 +90,7 @@ export {
   resourceMonitorEnabled,
   canvasModeEnabled,
   autoCompactEnabled,
+  autoCompactMethod,
   newChatView,
   showArchivedWorkspaces,
   chatSortOrder,
@@ -110,7 +111,7 @@ export {
 // References store
 export { textReferences, terminalReferences, chatReferences } from "./references";
 
-export type { UIScaleLevel, FileBrowserState, ProjectStatusInfo, ThemeMode, ChatSortOrder } from "./ui";
+export type { UIScaleLevel, FileBrowserState, ProjectStatusInfo, ThemeMode, ChatSortOrder, AutoCompactMethod } from "./ui";
 
 // Cost stores
 export { costStore } from "./costs";

@@ -49,7 +49,7 @@
               <span class="text-xl">✂️</span>
               <div>
                 <p class="font-medium text-gray-900 group-hover:text-blue-700">Prune tool outputs</p>
-                <p class="text-xs text-gray-500">Truncate old file reads & command outputs</p>
+                <p class="text-xs text-gray-500">Truncate file reads & command outputs</p>
               </div>
             </div>
           </button>

@@ -62,6 +62,7 @@
     { value: "medium", label: "Medium" },
     { value: "high", label: "High" },
     { value: "xhigh", label: "Extra High" },
+    { value: "max", label: "Max" },
   ];
 
   const currentModels = $derived(backendModels[backend] || []);
@@ -71,9 +72,13 @@
   });
   const panelBackend = $derived(activeBackend || backend);
   const panelModels = $derived(backendModels[panelBackend] || []);
-  const supportsReasoning = $derived(backend !== "claude");
+  const supportsReasoning = $derived(true);
   const effectiveReasoningEffort = $derived(
-    backend === "gemini" && reasoningEffort === "xhigh" ? "high" : reasoningEffort
+    backend === "gemini" && (reasoningEffort === "xhigh" || reasoningEffort === "max")
+      ? "high"
+      : backend === "codex" && reasoningEffort === "max"
+        ? "xhigh"
+        : reasoningEffort
   );
 
   function compactModelLabel(model: ModelInfo | string | null | undefined): string {
@@ -109,7 +114,20 @@
   }
 
   function isReasoningOptionDisabled(value: ReasoningEffort): boolean {
-    return backend === "gemini" && value === "xhigh";
+    if (backend === "gemini") {
+      return value === "xhigh" || value === "max";
+    }
+    if (backend === "codex") {
+      return value === "max";
+    }
+    return false;
+  }
+
+  function reasoningDisabledTitle(value: ReasoningEffort): string | undefined {
+    if (!isReasoningOptionDisabled(value)) return undefined;
+    if (backend === "gemini") return "Gemini supports up to High";
+    if (backend === "codex") return "Codex supports up to Extra High";
+    return undefined;
   }
 
   function openMenu(event: MouseEvent) {
@@ -226,7 +244,7 @@
               onclick={(event) => selectReasoning(option.value, event)}
               disabled={disabledReasoning}
               class="flex h-9 w-full items-center justify-between rounded-xl px-3 text-left text-[15px] transition-[background-color,color,transform] duration-150 active:scale-[0.96] {isSelected ? 'bg-gray-100 text-gray-950 dark:bg-gray-700/70 dark:text-white' : 'text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800'} {disabledReasoning ? 'cursor-not-allowed opacity-40' : ''}"
-              title={disabledReasoning ? "Gemini supports up to High" : undefined}
+              title={reasoningDisabledTitle(option.value)}
             >
               <span>{option.label}</span>
               {#if isSelected}

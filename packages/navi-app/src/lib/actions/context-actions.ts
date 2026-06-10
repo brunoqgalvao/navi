@@ -113,7 +113,7 @@ function markToolResultsAsPruned(sessionId: string, prunedToolUseIds: string[]):
  * This function:
  * - Calls the server to prune tool results in ~/.claude/projects/PROJECT/SESSION.jsonl
  * - Keeps recent messages (last N turns) with full tool results intact
- * - Prunes older tool results to short summaries
+ * - Prunes tool results to short summaries
  * - Marks affected messages in the UI as pruned (for visual indicator)
  */
 export async function pruneToolResults(sessionId: string): Promise<{ success: boolean; prunedCount: number; tokensSaved: number; sessionReset: boolean }> {
@@ -128,11 +128,11 @@ export async function pruneToolResults(sessionId: string): Promise<{ success: bo
       maxPrunedLength: TOOL_RESULT_PRUNED_MAX_LENGTH,
     });
 
-    if (!result.success) {
+    if (!result.success || result.prunedCount <= 0) {
       notifications.add({
         type: "warning",
         title: "Nothing to prune",
-        message: "No large tool results found or no Claude session exists",
+        message: "No large tool outputs found in the current Claude session",
       });
       return { success: false, prunedCount: 0, tokensSaved: 0, sessionReset: false };
     }

@@ -130,7 +130,7 @@ export interface ClientMessage {
   agentId?: string;
   // Backend selection (claude, codex, gemini)
   backend?: "claude" | "codex" | "gemini";
-  // Reasoning effort for non-Claude backends
+  // Reasoning effort for backend runs
   reasoningEffort?: string;
   // Plan mode - Claude plans before acting, no execution until approved
   planMode?: boolean;
@@ -2398,7 +2398,7 @@ function convertNormalizedEventToUI(event: NormalizedEvent, sessionId?: string):
 }
 
 export function handleQueryWithProcess(ws: any, data: ClientMessage) {
-  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext, agentId, backend, planMode } = data;
+  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, contextWindow, historyContext, agentId, backend, planMode, reasoningEffort } = data;
 
   // Determine which backend to use (default: claude)
   const effectiveBackend: BackendId = backend ||
@@ -2582,6 +2582,8 @@ The user will explicitly approve the plan before any execution begins.
     cwd: workingDirectory,
     resume: effectiveResumeId,
     model,
+    contextWindow,
+    reasoningEffort,
     allowedTools: allowedTools || permissionSettings.allowedTools,
     sessionId,
     agentId, // Selected agent (e.g., "coder", "img3d")

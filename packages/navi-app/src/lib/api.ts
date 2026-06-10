@@ -171,6 +171,8 @@ export interface Session {
   deliverable?: string | null;
   // Multi-backend support
   backend?: BackendId | null;
+  // Per-session reasoning effort tier
+  reasoning_effort?: "low" | "medium" | "high" | "xhigh" | "max" | null;
   // Folder grouping
   folder_id?: string | null;
   // Agent workspace links
@@ -626,6 +628,7 @@ export const api = {
         title?: string;
         model?: string;
         backend?: BackendId;
+        reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | null;
         agentId?: string | null;
         workflowId?: string | null;
         workItemId?: string | null;

@@ -20,9 +20,17 @@ const RESOURCE_MONITOR_ENABLED_KEY = "claude-code-ui-resource-monitor-enabled";
 const CHAT_SORT_ORDER_KEY = "claude-code-ui-chat-sort-order";
 const CANVAS_MODE_ENABLED_KEY = "claude-code-ui-canvas-mode-enabled";
 const AUTO_COMPACT_ENABLED_KEY = "claude-code-ui-auto-compact-enabled";
+const AUTO_COMPACT_METHOD_KEY = "claude-code-ui-auto-compact-method";
 
 // Chat sort order type
 export type ChatSortOrder = "manual" | "recent";
+export type AutoCompactMethod = "compact" | "prune" | "prune-then-compact";
+
+const AUTO_COMPACT_METHODS: AutoCompactMethod[] = ["compact", "prune", "prune-then-compact"];
+
+function isAutoCompactMethod(value: string | null): value is AutoCompactMethod {
+  return !!value && AUTO_COMPACT_METHODS.includes(value as AutoCompactMethod);
+}
 
 // Onboarding store
 function createOnboardingStore() {
@@ -347,6 +355,23 @@ function createAutoCompactEnabledStore() {
       }
       set(value);
       syncToBackend(value);
+    },
+  };
+}
+
+// Auto-compact method store (Navi-local behavior; Claude settings only own enabled/disabled)
+function createAutoCompactMethodStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(AUTO_COMPACT_METHOD_KEY) : null;
+  const initial: AutoCompactMethod = isAutoCompactMethod(stored) ? stored : "compact";
+  const { subscribe, set } = writable<AutoCompactMethod>(initial);
+
+  return {
+    subscribe,
+    set: (value: AutoCompactMethod) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(AUTO_COMPACT_METHOD_KEY, value);
+      }
+      set(value);
     },
   };
 }
@@ -768,6 +793,7 @@ export const deployToCloudEnabled = createDeployToCloudEnabledStore();
 export const resourceMonitorEnabled = createResourceMonitorEnabledStore();
 export const canvasModeEnabled = createCanvasModeEnabledStore();
 export const autoCompactEnabled = createAutoCompactEnabledStore();
+export const autoCompactMethod = createAutoCompactMethodStore();
 export const newChatView = createNewChatViewStore();
 export const showArchivedWorkspaces = createShowArchivedStore();
 export const chatSortOrder = createChatSortOrderStore();

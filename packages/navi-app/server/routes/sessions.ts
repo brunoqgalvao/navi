@@ -167,6 +167,9 @@ export async function handleSessionRoutes(
       if (body.backend !== undefined) {
         sessions.updateBackend(body.backend, id);
       }
+      if (body.reasoningEffort !== undefined) {
+        sessions.updateReasoningEffort(body.reasoningEffort, id);
+      }
       if (
         body.agentId !== undefined ||
         body.workflowId !== undefined ||
@@ -693,7 +696,7 @@ export async function handleSessionRoutes(
 
     try {
       const body = await req.json().catch(() => ({}));
-      const preserveRecentCount = body.preserveRecentCount ?? 5;
+      const preserveRecentCount = body.preserveRecentCount ?? 0;
       const maxPrunedLength = body.maxPrunedLength ?? 200;
 
       const result = await pruneClaudeSessionArtifacts({
@@ -708,9 +711,11 @@ export async function handleSessionRoutes(
       }
 
       const tokensSaved = Math.round(result.charsSaved / 4);
+      const success = result.prunedCount > 0;
 
       return json({
-        success: true,
+        success,
+        error: success ? undefined : "No large tool outputs found to prune",
         prunedCount: result.prunedCount,
         tokensSaved,
         prunedToolUseIds: result.prunedToolUseIds,
