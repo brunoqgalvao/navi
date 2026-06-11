@@ -2,7 +2,7 @@ import { json, corsHeaders } from "../utils/response";
 import { getActiveProcesses } from "../websocket/handler";
 import { getExecProcesses, getPtyTerminals } from "./terminal";
 import { sessions } from "../db";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
 export interface ProcessInfo {
   id: string;
@@ -16,16 +16,18 @@ export interface ProcessInfo {
   command?: string;
 }
 
-// Get child processes of a given PID using ps command (works on macOS and Linux)
-function getChildProcesses(parentPid: number): Array<{ pid: number; ppid: number; command: string }> {
-  try {
-    // Use ps to find all processes and filter by parent PID
-    const output = execSync(
-      `ps -eo pid,ppid,comm --no-headers 2>/dev/null || ps -eo pid,ppid,comm`,
-      { encoding: "utf-8", timeout: 5000 }
-    );
+type ProcessRow = { pid: number; ppid: number; command: string };
 
-    const children: Array<{ pid: number; ppid: number; command: string }> = [];
+// Snapshot the process table once per request. Calling ps recursively is expensive
+// enough to crash Bun under polling load.
+function getProcessSnapshot(): ProcessRow[] {
+  try {
+    const output = execFileSync("ps", ["-eo", "pid,ppid,comm"], {
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+
+    const processes: ProcessRow[] = [];
     const lines = output.trim().split("\n");
 
     for (const line of lines) {
@@ -35,29 +37,48 @@ function getChildProcesses(parentPid: number): Array<{ pid: number; ppid: number
         const ppid = parseInt(parts[1], 10);
         const command = parts.slice(2).join(" ");
 
-        if (ppid === parentPid && pid !== parentPid) {
-          children.push({ pid, ppid, command });
+        if (Number.isFinite(pid) && Number.isFinite(ppid) && pid !== ppid) {
+          processes.push({ pid, ppid, command });
         }
       }
     }
 
-    return children;
+    return processes;
   } catch (e) {
-    console.error("Failed to get child processes:", e);
+    console.error("Failed to get process snapshot:", e);
     return [];
   }
 }
 
+export function indexProcessesByParent(processes: ProcessRow[]): Map<number, ProcessRow[]> {
+  const byParent = new Map<number, ProcessRow[]>();
+  for (const proc of processes) {
+    const children = byParent.get(proc.ppid);
+    if (children) {
+      children.push(proc);
+    } else {
+      byParent.set(proc.ppid, [proc]);
+    }
+  }
+  return byParent;
+}
+
 // Recursively get all descendant processes
-function getAllDescendants(parentPid: number, visited = new Set<number>()): Array<{ pid: number; ppid: number; command: string }> {
+export function getAllDescendants(
+  parentPid: number,
+  processesByParent: Map<number, ProcessRow[]>,
+  visited = new Set<number>()
+): ProcessRow[] {
   if (visited.has(parentPid)) return [];
   visited.add(parentPid);
 
-  const children = getChildProcesses(parentPid);
-  const allDescendants = [...children];
+  const children = processesByParent.get(parentPid) || [];
+  const allDescendants: ProcessRow[] = [];
 
   for (const child of children) {
-    const grandchildren = getAllDescendants(child.pid, visited);
+    if (visited.has(child.pid)) continue;
+    allDescendants.push(child);
+    const grandchildren = getAllDescendants(child.pid, processesByParent, visited);
     allDescendants.push(...grandchildren);
   }
 
@@ -68,7 +89,7 @@ function getAllDescendants(parentPid: number, visited = new Set<number>()): Arra
 function killProcessTree(pid: number, signal: string = "SIGTERM") {
   try {
     // First kill all children recursively
-    const descendants = getAllDescendants(pid);
+    const descendants = getAllDescendants(pid, indexProcessesByParent(getProcessSnapshot()));
     for (const desc of descendants.reverse()) {
       try {
         process.kill(desc.pid, signal as any);
@@ -92,6 +113,9 @@ export async function handleProcessRoutes(
   if (url.pathname === "/api/processes" && method === "GET") {
     const includeChildren = url.searchParams.get("children") !== "false";
     const processes: ProcessInfo[] = [];
+    const processesByParent = includeChildren
+      ? indexProcessesByParent(getProcessSnapshot())
+      : null;
 
     // Query worker processes (Claude Agent SDK)
     const activeProcesses = getActiveProcesses();
@@ -110,7 +134,7 @@ export async function handleProcessRoutes(
 
       // Get child processes of this query worker (Bash commands, etc.)
       if (includeChildren && parentPid) {
-        const children = getAllDescendants(parentPid);
+        const children = getAllDescendants(parentPid, processesByParent!);
         for (const child of children) {
           // Skip internal processes (bun, node internals)
           if (child.command.includes("bun") || child.command.includes("node")) continue;
