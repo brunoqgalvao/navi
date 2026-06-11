@@ -1,5 +1,4 @@
 import { json } from "../utils/response";
-import { globalSettings } from "../db";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
 import { resolveNaviClaudeAuth } from "../utils/navi-auth";
 import { getSDK } from "../utils/sdk-loader";
@@ -65,64 +64,67 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
         output_tokens: data.usage?.completion_tokens || 0,
       };
       costUsd = (usage.input_tokens * 0.00015 + usage.output_tokens * 0.0006) / 1000;
-    } else if (globalSettings.get("anthropicApiKey") && !useTools) {
-      const storedApiKey = globalSettings.get("anthropicApiKey")!;
-
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": storedApiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: normalizedClaudeModel,
-          max_tokens: maxTokens,
-          system: systemPrompt || undefined,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error?.message || "Anthropic API error");
-      }
-
-      const data = await res.json();
-      result = data.content?.[0]?.text || "";
-      usage = {
-        input_tokens: data.usage?.input_tokens || 0,
-        output_tokens: data.usage?.output_tokens || 0,
-      };
-      costUsd = (usage.input_tokens * 0.00025 + usage.output_tokens * 0.00125) / 1000;
     } else {
-      const auth = resolveNaviClaudeAuth(normalizedClaudeModel);
-      if (auth.mode === "none") {
-        throw new Error(auth.error || "No Claude authentication available");
-      }
-      const { query } = await getSDK();
-      const q = query({
-        prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
-        options: {
-          cwd: projectPath || process.cwd(),
-          allowedTools: useTools ? ["Read", "Glob", "Grep", "Bash"] : [],
-          maxTurns: useTools ? 5 : 1,
-          model: normalizedClaudeModel,
-          env: buildClaudeCodeEnv(process.env, auth.overrides),
-          ...getClaudeCodeRuntimeOptions(),
-        },
-      });
+      const claudeAuth = resolveNaviClaudeAuth(normalizedClaudeModel);
 
-      for await (const msg of q) {
-        if (msg.type === "assistant") {
-          const textBlock = msg.message.content.find((b: any) => b.type === "text");
-          if (textBlock) {
-            result = textBlock.text;
-          }
+      if ((claudeAuth.mode === "api_key" || claudeAuth.mode === "zai") && claudeAuth.overrides.apiKey && !useTools) {
+        const baseUrl = (claudeAuth.overrides.baseUrl || "https://api.anthropic.com").replace(/\/$/, "");
+
+        const res = await fetch(`${baseUrl}/v1/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": claudeAuth.overrides.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: normalizedClaudeModel,
+            max_tokens: maxTokens,
+            system: systemPrompt || undefined,
+            messages: [{ role: "user", content: prompt }],
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error?.message || "Anthropic API error");
         }
-        if (msg.type === "result") {
-          usage = msg.usage || usage;
-          costUsd = msg.total_cost_usd || 0;
+
+        const data = await res.json();
+        result = data.content?.[0]?.text || "";
+        usage = {
+          input_tokens: data.usage?.input_tokens || 0,
+          output_tokens: data.usage?.output_tokens || 0,
+        };
+        costUsd = (usage.input_tokens * 0.00025 + usage.output_tokens * 0.00125) / 1000;
+      } else {
+        if (claudeAuth.mode === "none") {
+          throw new Error(claudeAuth.error || "No Claude authentication available");
+        }
+        const { query } = await getSDK();
+        const q = query({
+          prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
+          options: {
+            cwd: projectPath || process.cwd(),
+            allowedTools: useTools ? ["Read", "Glob", "Grep", "Bash"] : [],
+            maxTurns: useTools ? 5 : 1,
+            model: normalizedClaudeModel,
+            env: buildClaudeCodeEnv(process.env, claudeAuth.overrides),
+            ...getClaudeCodeRuntimeOptions(),
+          },
+        });
+
+        for await (const msg of q) {
+          if (msg.type === "assistant") {
+            const textBlock = msg.message.content.find((b: any) => b.type === "text");
+            if (textBlock) {
+              result = textBlock.text;
+            }
+          }
+          if (msg.type === "result") {
+            usage = msg.usage || usage;
+            costUsd = msg.total_cost_usd || 0;
+          }
         }
       }
     }
