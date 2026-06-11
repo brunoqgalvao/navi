@@ -1,14 +1,6 @@
 import { json } from "../utils/response";
 import { globalSettings, DEFAULT_TOOLS, DANGEROUS_TOOLS } from "../db";
-import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions } from "../utils/claude-code";
-import { resolveNaviClaudeAuth, formatAuthForLog } from "../utils/navi-auth";
-import { describePath, writeDebugLog } from "../utils/logging";
-import { getSDK } from "../utils/sdk-loader";
-import { getCuratedAnthropicModels, mergeAnthropicModelOptions } from "../../shared/anthropic-models";
-
-const MODELS_TIMEOUT_MS = 5000;
-const MODELS_INTERRUPT_TIMEOUT_MS = 500;
-const MODELS_CACHE_TTL_MS = 30000;
+import { getCuratedAnthropicModels } from "../../shared/anthropic-models";
 
 type ModelInfo = {
   value: string;
@@ -16,40 +8,6 @@ type ModelInfo = {
   description: string;
   provider?: string;
 };
-
-let modelsCache: { key: string; expiresAt: number; data: ModelInfo[] } | null = null;
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
-      error.name = "TimeoutError";
-      reject(error);
-    }, timeoutMs);
-  });
-
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    if (timeoutId) clearTimeout(timeoutId);
-  });
-}
-
-function shouldIgnoreInterruptError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return error.message.includes("ProcessTransport is not ready for writing");
-}
-
-async function interruptWithTimeout(q: { interrupt: () => Promise<void> }) {
-  try {
-    await withTimeout(q.interrupt(), MODELS_INTERRUPT_TIMEOUT_MS, "interrupt");
-  } catch (e) {
-    if (shouldIgnoreInterruptError(e)) return;
-    logModelsDiagnostics("interrupt_error", {
-      message: e instanceof Error ? e.message : String(e),
-      name: e instanceof Error ? e.name : null,
-    });
-  }
-}
 
 function getFallbackClaudeModels(): ModelInfo[] {
   return getCuratedAnthropicModels();
@@ -276,82 +234,8 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
   }
 
   if (url.pathname === "/api/models") {
-    const authResult = resolveNaviClaudeAuth();
     const zaiModels = getConfiguredZaiModels();
-    const cacheKey = JSON.stringify({
-      authMode: authResult.mode,
-      hasZai: zaiModels.length > 0,
-    });
-
-    if (modelsCache && modelsCache.key === cacheKey && modelsCache.expiresAt > Date.now()) {
-      logModelsDiagnostics("cache_hit", {
-        auth: formatAuthForLog(authResult),
-        modelCount: modelsCache.data.length,
-      });
-      return json(modelsCache.data);
-    }
-
-    logModelsDiagnostics("start", {
-      auth: formatAuthForLog(authResult),
-      cwd: process.cwd(),
-      execPath: process.execPath,
-      argv0: process.argv?.[0] ?? null,
-    });
-
-    const runtimeOptions = getClaudeCodeRuntimeOptions();
-    logModelsDiagnostics("runtime", {
-      runtimeOptions,
-      executable: describePath(runtimeOptions.executable),
-      claudeCode: describePath(runtimeOptions.pathToClaudeCodeExecutable),
-    });
-
-    let q: any = null;
-    try {
-      const { query } = await getSDK();
-      q = query({
-        prompt: "",
-        options: {
-          cwd: process.cwd(),
-          env: buildClaudeCodeEnv(process.env, authResult.overrides),
-          ...runtimeOptions,
-        },
-      });
-      const sdkModels = await withTimeout(q.supportedModels(), MODELS_TIMEOUT_MS, "supportedModels");
-      logModelsDiagnostics("success", {
-        modelCount: Array.isArray(sdkModels) ? sdkModels.length : null,
-      });
-
-      // Anthropic's SDK-reported aliases can lag current model releases.
-      // Normalize them against Navi's curated latest model catalog so new
-      // releases stay selectable even before supportedModels() catches up.
-      const claudeModels = mergeAnthropicModelOptions(
-        sdkModels.map((model: any) => ({ ...model, provider: "anthropic" }))
-      );
-
-      const models = [...claudeModels, ...zaiModels];
-      modelsCache = {
-        key: cacheKey,
-        expiresAt: Date.now() + MODELS_CACHE_TTL_MS,
-        data: models,
-      };
-      return json(models);
-    } catch (e) {
-      logModelsDiagnostics("fallback", {
-        message: e instanceof Error ? e.message : String(e),
-        name: e instanceof Error ? e.name : null,
-      });
-      const models = [...getFallbackClaudeModels(), ...zaiModels];
-      modelsCache = {
-        key: cacheKey,
-        expiresAt: Date.now() + MODELS_CACHE_TTL_MS,
-        data: models,
-      };
-      return json(models);
-    } finally {
-      if (q) {
-        await interruptWithTimeout(q);
-      }
-    }
+    return json([...getFallbackClaudeModels(), ...zaiModels]);
   }
 
   return null;
@@ -376,10 +260,4 @@ function getDefaultClaudeMdContent(): string {
 - Focus on what changed, not explanations
 - One word answers when appropriate
 `;
-}
-
-function logModelsDiagnostics(stage: string, payload: Record<string, unknown>) {
-  const message = `[Models] ${stage}: ${JSON.stringify(payload)}`;
-  console.error(message);
-  writeDebugLog(message);
 }
