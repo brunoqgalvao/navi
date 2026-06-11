@@ -4,6 +4,7 @@ export type PriceEntry = {
   inPerMTok: number;
   outPerMTok: number;
   cacheReadPerMTok?: number;
+  cacheWritePerMTok?: number;
 };
 
 /**
@@ -13,9 +14,9 @@ export type PriceEntry = {
  */
 export const PRICE_TABLE: Record<string, PriceEntry> = {
   // Anthropic Claude
-  "claude-opus-4-1":    { inPerMTok: 15.0,  outPerMTok: 75.0,  cacheReadPerMTok: 1.5  },
-  "claude-sonnet-4-6":  { inPerMTok: 3.0,   outPerMTok: 15.0,  cacheReadPerMTok: 0.3  },
-  "claude-haiku-4-5":   { inPerMTok: 0.8,   outPerMTok: 4.0,   cacheReadPerMTok: 0.08 },
+  "claude-opus-4-1":    { inPerMTok: 15.0,  outPerMTok: 75.0,  cacheReadPerMTok: 1.5,   cacheWritePerMTok: 18.75 },
+  "claude-sonnet-4-6":  { inPerMTok: 3.0,   outPerMTok: 15.0,  cacheReadPerMTok: 0.3,   cacheWritePerMTok: 3.75 },
+  "claude-haiku-4-5":   { inPerMTok: 0.8,   outPerMTok: 4.0,   cacheReadPerMTok: 0.08,  cacheWritePerMTok: 1.0 },
 
   // OpenAI Codex / o-series
   "gpt-5.2-codex":      { inPerMTok: 10.0,  outPerMTok: 30.0  },
@@ -30,7 +31,8 @@ export const PRICE_TABLE: Record<string, PriceEntry> = {
  * Find the best matching price entry: exact match first, then longest prefix.
  */
 function findEntry(model: string): PriceEntry | undefined {
-  if (PRICE_TABLE[model]) return PRICE_TABLE[model];
+  const exact = PRICE_TABLE[model];
+  if (exact) return exact;
 
   let bestKey: string | undefined;
   for (const key of Object.keys(PRICE_TABLE)) {
@@ -40,7 +42,8 @@ function findEntry(model: string): PriceEntry | undefined {
       }
     }
   }
-  return bestKey ? PRICE_TABLE[bestKey] : undefined;
+  const bestMatch = bestKey ? PRICE_TABLE[bestKey] : undefined;
+  return bestMatch;
 }
 
 export type NormalizeInput = {
@@ -66,6 +69,10 @@ export function normalizeUsage(model: string, raw: NormalizeInput): Usage {
       if (raw.cacheReadTokens !== undefined && entry.cacheReadPerMTok !== undefined) {
         costUsd += (raw.cacheReadTokens / 1e6) * entry.cacheReadPerMTok;
       }
+
+      if (raw.cacheWriteTokens !== undefined && entry.cacheWritePerMTok !== undefined) {
+        costUsd += (raw.cacheWriteTokens / 1e6) * entry.cacheWritePerMTok;
+      }
     }
   }
 
@@ -76,6 +83,6 @@ export function normalizeUsage(model: string, raw: NormalizeInput): Usage {
     ...(raw.cacheWriteTokens !== undefined ? { cacheWriteTokens: raw.cacheWriteTokens } : {}),
     ...(costUsd !== undefined ? { costUsd } : {}),
     model,
-    raw,
+    raw: { ...raw },
   };
 }

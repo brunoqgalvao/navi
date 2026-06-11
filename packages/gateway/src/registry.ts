@@ -25,7 +25,7 @@ export class BackendRegistry {
 
   async detectInstalled(opts?: { refresh?: boolean }): Promise<Map<BackendId, DetectResult>> {
     if (this._cache !== null && !opts?.refresh) {
-      return this._cache;
+      return new Map(this._cache);
     }
 
     const results = new Map<BackendId, DetectResult>();
@@ -47,6 +47,6 @@ export class BackendRegistry {
     );
 
     this._cache = results;
-    return results;
+    return new Map(results);
   }
 }

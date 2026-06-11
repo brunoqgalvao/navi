@@ -90,6 +90,21 @@ describe("normalizeUsage", () => {
     expect(result.costUsd).toBeCloseTo(expected, 8);
   });
 
+  test("cache write tokens are priced when table entry has cacheWritePerMTok", () => {
+    // Find a model that has cacheWritePerMTok in the table
+    const modelWithCacheWrite = Object.entries(PRICE_TABLE).find(([, v]) => v.cacheWritePerMTok != null);
+    expect(modelWithCacheWrite).toBeDefined();
+    const [modelId, entry] = modelWithCacheWrite!;
+
+    const result = normalizeUsage(modelId, {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheWriteTokens: 1_000_000,
+    });
+    const expected = entry.cacheWritePerMTok!;
+    expect(result.costUsd).toBeCloseTo(expected, 8);
+  });
+
   test("PRICE_TABLE is exported and contains expected model keys", () => {
     const expectedKeys = [
       "claude-opus-4-1",

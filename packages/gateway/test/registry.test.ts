@@ -131,4 +131,71 @@ describe("BackendRegistry", () => {
     expect(entry!.fixHint).toMatch(/detect failed/);
     expect(entry!.fixHint).toMatch(/binary not found/);
   });
+
+  test("detectInstalled returns a defensive copy; mutating it does not affect subsequent calls", async () => {
+    const registry = new BackendRegistry();
+    registry.register(makeBackend("claude", { installed: true, authed: true }));
+
+    const results1 = await registry.detectInstalled();
+    results1.set("fake-backend", { installed: true, authed: true });
+    results1.delete("claude");
+
+    const results2 = await registry.detectInstalled();
+    expect(results2.has("claude")).toBe(true);
+    expect(results2.has("fake-backend")).toBe(false);
+  });
+
+  test("mixed result: one backend succeeds, one rejects; both appear in results and cache is populated", async () => {
+    let successDetectCount = 0;
+    let failDetectCount = 0;
+
+    const successBackend: AgentBackend = {
+      id: "success-backend",
+      capabilities: makeBackend("success-backend").capabilities,
+      async detect(): Promise<DetectResult> {
+        successDetectCount++;
+        return { installed: true, authed: true, version: "1.0" };
+      },
+      createSession: makeBackend("success-backend").createSession,
+      resumeSession: makeBackend("success-backend").resumeSession,
+    };
+
+    const failBackend: AgentBackend = {
+      id: "fail-backend",
+      capabilities: makeBackend("fail-backend").capabilities,
+      async detect(): Promise<DetectResult> {
+        failDetectCount++;
+        throw new Error("setup failed");
+      },
+      createSession: makeBackend("fail-backend").createSession,
+      resumeSession: makeBackend("fail-backend").resumeSession,
+    };
+
+    const registry = new BackendRegistry();
+    registry.register(successBackend);
+    registry.register(failBackend);
+
+    const results = await registry.detectInstalled();
+
+    // Both entries should exist
+    expect(results.has("success-backend")).toBe(true);
+    expect(results.has("fail-backend")).toBe(true);
+
+    // Success entry has correct data
+    expect(results.get("success-backend")).toEqual({ installed: true, authed: true, version: "1.0" });
+
+    // Fail entry has installed:false and fixHint
+    const failEntry = results.get("fail-backend");
+    expect(failEntry).toBeDefined();
+    expect(failEntry!.installed).toBe(false);
+    expect(failEntry!.authed).toBe(false);
+    expect(failEntry!.fixHint).toMatch(/detect failed/);
+    expect(failEntry!.fixHint).toMatch(/setup failed/);
+
+    // Cache should be populated: second call should not re-probe
+    const results2 = await registry.detectInstalled();
+    expect(successDetectCount).toBe(1);
+    expect(failDetectCount).toBe(1);
+    expect(results2.get("success-backend")).toEqual({ installed: true, authed: true, version: "1.0" });
+  });
 });
