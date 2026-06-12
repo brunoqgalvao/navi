@@ -26,3 +26,21 @@ export { CodexBackend, CodexSession } from "./adapters/codex.js";
 export { GeminiBackend, GeminiSession } from "./adapters/gemini.js";
 
 export { createDefaultRegistry } from "./default-registry.js";
+
+export { AgentTree } from "./spawn/tree.js";
+export type {
+  AgentStatus,
+  AgentNode,
+  SpawnOptions,
+  SpawnResult,
+  AgentInfo,
+  AgentResult,
+  AgentTreeOptions,
+} from "./spawn/tree.js";
+
+export {
+  createSpawnMcpServer,
+  startSpawnControlServer,
+  spawnServerConfigFor,
+} from "./spawn/mcp-server.js";
+export type { ControlServer } from "./spawn/mcp-server.js";
