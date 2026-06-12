@@ -25,7 +25,6 @@ import { handleAnalyticsRoutes } from "./routes/analytics";
 import { handleDeployRoutes } from "./routes/deploy";
 import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
 import { handleExtensionRoutes } from "./routes/extensions";
-import { handleKanbanRoutes } from "./routes/kanban";
 // Message Comments (Google Docs-style inline annotations) @experimental
 import { handleCommentRoutes } from "./routes/comments";
 import { handleWorktreeRoutes } from "./routes/worktrees";
@@ -556,10 +555,6 @@ const server = Bun.serve({
 
     // Extension routes
     response = await handleExtensionRoutes(url, method, req);
-    if (response) return response;
-
-    // Kanban routes
-    response = await handleKanbanRoutes(url, method, req);
     if (response) return response;
 
     // Message Comments routes (Google Docs-style) @experimental

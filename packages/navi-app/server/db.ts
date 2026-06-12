@@ -465,33 +465,6 @@ export async function initDb() {
     // Column already exists
   }
 
-  // Kanban cards table - agentic task board
-  db.run(`
-    CREATE TABLE IF NOT EXISTS kanban_cards (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      session_id TEXT,
-      title TEXT NOT NULL,
-      spec TEXT,
-      status TEXT DEFAULT 'spec',
-      status_message TEXT,
-      blocked INTEGER DEFAULT 0,
-      sort_order INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_kanban_cards_project ON kanban_cards(project_id);
-    CREATE INDEX IF NOT EXISTS idx_kanban_cards_session ON kanban_cards(session_id);
-    CREATE INDEX IF NOT EXISTS idx_kanban_cards_status ON kanban_cards(status);
-  `);
-
-  // Migration: add blocked column if not exists
-  try {
-    db.run("ALTER TABLE kanban_cards ADD COLUMN blocked INTEGER DEFAULT 0");
-  } catch {}
-
   // Command settings table - per-workspace/global command configuration
   db.run(`
     CREATE TABLE IF NOT EXISTS command_settings (
@@ -830,8 +803,18 @@ export async function initDb() {
     console.log(`[DB] Removed ${purgedCompactSummaries} compact summary message(s) from persisted chat history`);
   }
 
+  dropLegacyTables();
   saveDb()
   return db;
+}
+
+// One-shot cleanup of tables owned by features removed in the 2026-06 refocus.
+// No migration framework exists (rebuild-spec §6 owns that); DROP IF EXISTS is idempotent.
+const LEGACY_TABLES = ["kanban_cards"];
+function dropLegacyTables() {
+  for (const table of LEGACY_TABLES) {
+    try { db.run(`DROP TABLE IF EXISTS ${table}`); } catch (e) { console.error(`drop ${table}:`, e); }
+  }
 }
 
 export function saveDb() {
@@ -3092,144 +3075,6 @@ export const extensionSettings = {
 
   deleteByProject: (projectId: string) =>
     run("DELETE FROM extension_settings WHERE project_id = ?", [projectId]),
-};
-
-// Kanban Cards
-export type KanbanStatus = "backlog" | "spec" | "execute" | "review" | "done" | "archived";
-
-export interface KanbanCard {
-  id: string;
-  project_id: string;
-  session_id: string | null;
-  title: string;
-  spec: string | null;
-  status: KanbanStatus;
-  status_message: string | null;
-  blocked: number; // 0 or 1 - card-level blocked state
-  sort_order: number;
-  created_at: number;
-  updated_at: number;
-}
-
-export interface KanbanCardWithSession extends KanbanCard {
-  session_title?: string;
-}
-
-export const kanbanCards = {
-  listByProject: (projectId: string, includeArchived = false) =>
-    queryAll<KanbanCardWithSession>(
-      `SELECT k.*, s.title as session_title
-       FROM kanban_cards k
-       LEFT JOIN sessions s ON k.session_id = s.id
-       WHERE k.project_id = ? ${includeArchived ? "" : "AND k.status != 'archived'"}
-       ORDER BY k.sort_order ASC, k.created_at DESC`,
-      [projectId]
-    ),
-
-  listByStatus: (projectId: string, status: KanbanStatus) =>
-    queryAll<KanbanCardWithSession>(
-      `SELECT k.*, s.title as session_title
-       FROM kanban_cards k
-       LEFT JOIN sessions s ON k.session_id = s.id
-       WHERE k.project_id = ? AND k.status = ?
-       ORDER BY k.sort_order ASC`,
-      [projectId, status]
-    ),
-
-  get: (id: string) =>
-    queryOne<KanbanCard>("SELECT * FROM kanban_cards WHERE id = ?", [id]),
-
-  getBySession: (sessionId: string) =>
-    queryOne<KanbanCard>("SELECT * FROM kanban_cards WHERE session_id = ?", [sessionId]),
-
-  create: (card: Omit<KanbanCard, "created_at" | "updated_at">) => {
-    const now = Date.now();
-    run(
-      `INSERT INTO kanban_cards (id, project_id, session_id, title, spec, status, status_message, blocked, sort_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        card.id,
-        card.project_id,
-        card.session_id,
-        card.title,
-        card.spec,
-        card.status,
-        card.status_message,
-        card.blocked ?? 0,
-        card.sort_order,
-        now,
-        now,
-      ]
-    );
-  },
-
-  update: (id: string, updates: Partial<Omit<KanbanCard, "id" | "project_id" | "created_at">>) => {
-    const fields: string[] = [];
-    const values: any[] = [];
-    for (const [key, value] of Object.entries(updates)) {
-      // Skip undefined values and protected fields
-      if (value === undefined) continue;
-      if (key !== "id" && key !== "project_id" && key !== "created_at") {
-        fields.push(`${key} = ?`);
-        values.push(value);
-      }
-    }
-    fields.push("updated_at = ?");
-    values.push(Date.now());
-    values.push(id);
-    if (fields.length > 1) {
-      run(`UPDATE kanban_cards SET ${fields.join(", ")} WHERE id = ?`, values);
-    }
-  },
-
-  updateStatus: (id: string, status: KanbanStatus, statusMessage?: string | null) => {
-    run(
-      "UPDATE kanban_cards SET status = ?, status_message = ?, updated_at = ? WHERE id = ?",
-      [status, statusMessage ?? null, Date.now(), id]
-    );
-  },
-
-  setBlocked: (id: string, blocked: boolean, statusMessage?: string | null) => {
-    run(
-      "UPDATE kanban_cards SET blocked = ?, status_message = ?, updated_at = ? WHERE id = ?",
-      [blocked ? 1 : 0, statusMessage ?? null, Date.now(), id]
-    );
-  },
-
-  linkSession: (id: string, sessionId: string) => {
-    run(
-      "UPDATE kanban_cards SET session_id = ?, updated_at = ? WHERE id = ?",
-      [sessionId, Date.now(), id]
-    );
-  },
-
-  unlinkSession: (sessionId: string) => {
-    run(
-      "UPDATE kanban_cards SET session_id = NULL, updated_at = ? WHERE session_id = ?",
-      [Date.now(), sessionId]
-    );
-  },
-
-  reorder: (cardIds: string[]) => {
-    const now = Date.now();
-    for (let i = 0; i < cardIds.length; i++) {
-      run(
-        "UPDATE kanban_cards SET sort_order = ?, updated_at = ? WHERE id = ?",
-        [i, now, cardIds[i]]
-      );
-    }
-  },
-
-  delete: (id: string) => run("DELETE FROM kanban_cards WHERE id = ?", [id]),
-
-  deleteByProject: (projectId: string) =>
-    run("DELETE FROM kanban_cards WHERE project_id = ?", [projectId]),
-
-  archive: (id: string) =>
-    run(
-      "UPDATE kanban_cards SET status = 'archived', updated_at = ? WHERE id = ?",
-      [Date.now(), id]
-    ),
 };
 
 // ============================================================================

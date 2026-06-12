@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, kanbanCards, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb, clarificationRequests, draftDeliverables, workflowRuns, workflows, type DraftDeliverable } from "../db";
+import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb, clarificationRequests, draftDeliverables, workflowRuns, workflows, type DraftDeliverable } from "../db";
 import { executeInCloud, type CloudExecutionStage } from "../services/e2b-executor";
 import { sessionManager, type SessionEvent } from "../services/session-manager";
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
@@ -676,41 +676,6 @@ function sendToSession(sessionId: string | undefined, payload: unknown) {
 }
 
 /**
- * Update kanban card when agent starts working
- */
-function setKanbanCardExecuting(sessionId: string, statusMessage?: string) {
-  const card = kanbanCards.getBySession(sessionId);
-  if (card) {
-    kanbanCards.updateStatus(card.id, "execute", statusMessage);
-    kanbanCards.setBlocked(card.id, false);
-    broadcastKanbanUpdate(card.id);
-  }
-}
-
-/**
- * Set kanban card blocked flag (permission/input needed)
- */
-function setKanbanCardBlocked(sessionId: string, statusMessage?: string) {
-  const card = kanbanCards.getBySession(sessionId);
-  if (card) {
-    kanbanCards.setBlocked(card.id, true, statusMessage);
-    broadcastKanbanUpdate(card.id);
-  }
-}
-
-/**
- * Update kanban card to review status when agent completes
- */
-function setKanbanCardReview(sessionId: string, statusMessage?: string) {
-  const card = kanbanCards.getBySession(sessionId);
-  if (card) {
-    kanbanCards.updateStatus(card.id, "review", statusMessage);
-    kanbanCards.setBlocked(card.id, false);
-    broadcastKanbanUpdate(card.id);
-  }
-}
-
-/**
  * Get enabled skill slugs for a project
  * Returns slugs of skills enabled globally + skills enabled specifically for this project
  */
@@ -732,16 +697,6 @@ function getEnabledSkillSlugs(projectId: string): string[] {
   }
 
   return slugs;
-}
-
-/**
- * Broadcast kanban card update to all clients
- */
-function broadcastKanbanUpdate(cardId: string) {
-  broadcastToClients({
-    type: "kanban_card_updated",
-    card: kanbanCards.get(cardId),
-  });
 }
 
 /**
@@ -2739,8 +2694,6 @@ The user will explicitly approve the plan before any execution begins.
           if (sessionId) {
             pendingPermissions.set(msg.requestId, { sessionId, payload });
             pendingRequestProcesses.set(msg.requestId, child);
-            // Update kanban card to blocked (waiting for permission)
-            setKanbanCardBlocked(sessionId, `Needs permission: ${msg.toolName}`);
           }
           sendToSession(sessionId, payload);
         } else if (msg.type === "ask_user_question") {
@@ -2761,8 +2714,6 @@ The user will explicitly approve the plan before any execution begins.
               msg.requestId,
               JSON.stringify(msg.questions)
             );
-            // Update kanban card to blocked (waiting for user input)
-            setKanbanCardBlocked(sessionId, "Needs input from user");
           }
           sendToSession(sessionId, payload);
         }
@@ -3127,8 +3078,6 @@ The user will explicitly approve the plan before any execution begins.
 
           sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
           if (sessionId) {
-            // Update kanban card to waiting_review (agent completed, needs user review)
-            setKanbanCardReview(sessionId, "Ready for review");
             cleanupProcessScopedState(child, sessionId);
             // Clear any pending questions for this session (memory + database)
             for (const [reqId, req] of pendingQuestions) {
@@ -3168,8 +3117,6 @@ The user will explicitly approve the plan before any execution begins.
             error: msg.error,
           });
           if (sessionId) {
-            // Update kanban card to blocked on error
-            setKanbanCardBlocked(sessionId, `Error: ${msg.error}`);
             cleanupProcessScopedState(child, sessionId);
 
             const workflow = workflowForSession(sessionId);
@@ -3440,14 +3387,6 @@ export async function handleCloudQuery(ws: any, data: ClientMessage) {
       error: result.error,
     });
 
-    // Update kanban card
-    if (result.success) {
-      const costStr = result.estimatedCostUsd > 0 ? ` (~$${result.estimatedCostUsd.toFixed(4)})` : "";
-      setKanbanCardReview(sessionId, `Cloud execution completed${costStr}`);
-    } else {
-      setKanbanCardReview(sessionId, `Cloud execution failed: ${result.error}`);
-    }
-
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[${sessionId}] Cloud execution error:`, errorMessage);
@@ -3462,7 +3401,6 @@ export async function handleCloudQuery(ws: any, data: ClientMessage) {
       error: errorMessage,
     });
 
-    setKanbanCardReview(sessionId, `Cloud error: ${errorMessage}`);
   } finally {
     activeCloudExecutions.delete(sessionId);
   }
@@ -3480,10 +3418,6 @@ export function createWebSocketHandlers() {
         const data: ClientMessage = JSON.parse(message.toString());
 
         if (data.type === "query" && data.prompt) {
-          // Update kanban card to in_progress when query starts
-          if (data.sessionId) {
-            setKanbanCardExecuting(data.sessionId, data.executionMode === "cloud" ? "Running in cloud..." : "Agent working...");
-          }
           // Route to cloud or local execution based on mode
           if (data.executionMode === "cloud") {
             handleCloudQuery(ws, data);
@@ -3616,10 +3550,6 @@ export function createWebSocketHandlers() {
               }
             }
 
-            if (responseSent && data.approved && pending.sessionId) {
-              setKanbanCardExecuting(pending.sessionId, "Permission granted");
-            }
-
             clearPendingPermission(data.permissionRequestId);
           }
         } else if (data.type === "question_response" && data.questionRequestId) {
@@ -3648,10 +3578,6 @@ export function createWebSocketHandlers() {
                   responseSent = true;
                 } catch {}
               }
-            }
-
-            if (responseSent) {
-              setKanbanCardExecuting(pending.sessionId, "User responded");
             }
 
             // Remove from memory and database

@@ -15,7 +15,7 @@ import type { ComponentType, SvelteComponent } from "svelte";
  * Extensions are sidebar panels that provide dedicated UI for specific features.
  * They appear as tabs in the right sidebar and can be enabled/disabled per project.
  *
- * Examples: Files, Git, Terminal, Preview, Kanban
+ * Examples: Files, Git, Terminal, Preview
  */
 export interface Extension {
   id: ExtensionId;
@@ -38,7 +38,6 @@ export type ExtensionId =
   | "git"
   | "terminal"
   | "processes"
-  | "kanban"
   | "preview"
   | "context"         // Session context visibility
   | "inbox"           // Workspace inbox
@@ -57,7 +56,6 @@ export type PanelMode =
   | "git"
   | "terminal"
   | "processes"
-  | "kanban"
   | "preview-unified"
   | "context"         // Context sidebar view
   | "inbox"           // Workspace inbox view

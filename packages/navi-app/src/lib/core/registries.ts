@@ -225,16 +225,6 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     defaultEnabled: false,
     defaultOrder: 4,
   },
-  kanban: {
-    id: "kanban",
-    name: "Kanban",
-    icon: "layout-kanban",
-    description: "Agentic task board",
-    panelMode: "kanban",
-    requiresProject: true,
-    defaultEnabled: true,
-    defaultOrder: 5,
-  },
   preview: {
     id: "preview",
     name: "Preview",

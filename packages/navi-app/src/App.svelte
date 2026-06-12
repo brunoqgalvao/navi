@@ -909,14 +909,13 @@
   let showBrowser = $state(false);
   let showGitPanel = $state(false);
   let showTerminal = $state(false);
-  let showKanban = $state(false);
   let showContext = $state(false);
   let showInbox = $state(false);
   let showChannels = $state(false);
   let showEmail = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "inbox" | "shared-inbox" | "email" | "channels";
+  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context" | "inbox" | "shared-inbox" | "email" | "channels";
   let rightPanelMode = $state<RightPanelMode>("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
@@ -1027,9 +1026,6 @@
     } else if (e.key === ',') {
       e.preventDefault();
       showSettings = true;
-    } else if (e.key === 't') {
-      e.preventDefault();
-      toggleKanban();
     } else if (e.key === 'd') {
       e.preventDefault();
       if (showSessionsDashboard) {
@@ -3400,7 +3396,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     showBrowser = false;
     showGitPanel = false;
     showTerminal = false;
-    showKanban = false;
     showContext = false;
     showInbox = false;
     showChannels = false;
@@ -3424,15 +3419,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     } else {
       showTerminal = true;
       rightPanelMode = "terminal";
-    }
-  }
-
-  function toggleKanban() {
-    if (showKanban && rightPanelMode === "kanban") {
-      showKanban = false;
-    } else {
-      showKanban = true;
-      rightPanelMode = "kanban";
     }
   }
 
@@ -3514,7 +3500,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const panelMode = mode as RightPanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showInbox || showChannels || showEmail;
+    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels || showEmail;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -3534,9 +3520,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         break;
       case "terminal":
         showTerminal = true;
-        break;
-      case "kanban":
-        showKanban = true;
         break;
       case "preview-unified":
         showPreview = true;
@@ -4558,7 +4541,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   <!-- End Chat + Council Split Container -->
 
   <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context / Email) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showInbox || showChannels || showEmail}
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels || showEmail}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -4579,7 +4562,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         else if (mode === "browser") showBrowser = true;
         else if (mode === "git") showGitPanel = true;
         else if (mode === "terminal") showTerminal = true;
-        else if (mode === "kanban") showKanban = true;
         else if (mode === "preview-unified") showPreview = true;
         else if (mode === "context") showContext = true;
         else if (mode === "inbox" || mode === "shared-inbox") showInbox = true;
