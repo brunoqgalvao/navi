@@ -27,6 +27,13 @@ export { GeminiBackend, GeminiSession } from "./adapters/gemini.js";
 
 export { createDefaultRegistry } from "./default-registry.js";
 
+export {
+  loadSkillIndex,
+  buildSkillsContext,
+  registerUseSkillTool,
+} from "./skills.js";
+export type { SkillIndexEntry } from "./skills.js";
+
 export { AgentTree } from "./spawn/tree.js";
 export type {
   AgentStatus,
