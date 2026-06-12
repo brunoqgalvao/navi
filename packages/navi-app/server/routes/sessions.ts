@@ -25,6 +25,48 @@ function extractTextFromStoredContent(content: string): string {
   }
 }
 
+// Recall-aware extraction: agentic sessions store most of their state in tool_use /
+// tool_result blocks, which extractTextFromStoredContent drops. For recall (inspect
+// scope=last/search/full) we render tool activity as text so recent context and
+// search are not blank in tool-heavy sessions.
+function extractRecallTextFromStoredContent(content: string): string {
+  try {
+    const parsed = JSON.parse(content);
+    if (typeof parsed === "string") {
+      return parsed;
+    }
+    if (!Array.isArray(parsed)) {
+      return "";
+    }
+    return parsed
+      .map((block: any) => {
+        if (block?.type === "text" && typeof block.text === "string") {
+          return block.text;
+        }
+        if (block?.type === "tool_use") {
+          const input = block.input ? JSON.stringify(block.input) : "";
+          return `[tool] ${block.name || "unknown"} ${input.slice(0, 300)}`.trim();
+        }
+        if (block?.type === "tool_result") {
+          const inner = Array.isArray(block.content)
+            ? block.content
+                .filter((c: any) => c?.type === "text" && typeof c.text === "string")
+                .map((c: any) => c.text)
+                .join("\n")
+            : typeof block.content === "string"
+              ? block.content
+              : "";
+          return inner ? `[tool result] ${inner.slice(0, 500)}` : "";
+        }
+        return "";
+      })
+      .filter((text: string) => text.length > 0)
+      .join("\n");
+  } catch {
+    return content;
+  }
+}
+
 function truncateForHandoff(text: string, maxLength: number): string {
   const normalized = text.trim();
   if (normalized.length <= maxLength) {
@@ -543,9 +585,12 @@ export async function handleSessionRoutes(
 
     // Helper to extract text from message content
     if (scope === "summary") {
-      // Return first user message + last assistant message as summary
-      const firstUser = allMessages.find(m => m.role === "user");
-      const lastAssistant = [...allMessages].reverse().find(m => m.role === "assistant");
+      // Return first user message + last assistant message as summary,
+      // skipping tool-only rows that have no narrative text.
+      const hasNarrativeText = (m: { content: string }) =>
+        extractTextFromStoredContent(m.content).trim().length > 0;
+      const firstUser = allMessages.find(m => m.role === "user" && hasNarrativeText(m));
+      const lastAssistant = [...allMessages].reverse().find(m => m.role === "assistant" && hasNarrativeText(m));
 
       return json({
         metadata,
@@ -557,13 +602,18 @@ export async function handleSessionRoutes(
     }
 
     if (scope === "last") {
-      // Return last N messages
-      const recentMessages = allMessages.slice(-lastN).map(m => ({
-        id: m.id,
-        role: m.role,
-        text: extractTextFromStoredContent(m.content),
-        timestamp: m.timestamp,
-      }));
+      // Return last N messages with recallable content (tool-only rows render
+      // as tool summaries; rows with no extractable content are skipped so a
+      // tool-heavy session doesn't return N blanks).
+      const recentMessages = allMessages
+        .map(m => ({
+          id: m.id,
+          role: m.role,
+          text: extractRecallTextFromStoredContent(m.content).trim(),
+          timestamp: m.timestamp,
+        }))
+        .filter(m => m.text.length > 0)
+        .slice(-lastN);
 
       return json({
         metadata,
@@ -572,17 +622,19 @@ export async function handleSessionRoutes(
     }
 
     if (scope === "search" && searchQuery) {
-      // Search within this chat's messages
+      // Search within this chat's messages, including tool calls/results where
+      // most agentic session state actually lives.
       const query = searchQuery.toLowerCase();
       const matches = allMessages
-        .filter(m => extractTextFromStoredContent(m.content).toLowerCase().includes(query))
-        .slice(0, 10)
         .map(m => ({
           id: m.id,
           role: m.role,
-          text: extractTextFromStoredContent(m.content).slice(0, 300),
+          text: extractRecallTextFromStoredContent(m.content),
           timestamp: m.timestamp,
-        }));
+        }))
+        .filter(m => m.text.toLowerCase().includes(query))
+        .slice(0, 10)
+        .map(m => ({ ...m, text: m.text.slice(0, 300) }));
 
       return json({
         metadata,

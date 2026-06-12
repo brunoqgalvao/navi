@@ -1224,7 +1224,12 @@
     if (autoReducingSessions.has(sessionId)) return false;
     if (reason === "threshold" && usagePercent < autoCompactThresholdPercent) return false;
 
-    const method = get(autoCompactMethod);
+    // Once the context has already overflowed, a bare /compact request overflows
+    // too — pruning tool outputs first is the only way compaction can fit.
+    const configuredMethod = get(autoCompactMethod);
+    const method = reason === "overflow" && configuredMethod === "compact"
+      ? "prune-then-compact"
+      : configuredMethod;
     const methodDetails = autoCompactMethodDetails[method];
 
     notifications.add({
@@ -4854,7 +4859,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     open={showContextOverflowModal}
     onClose={() => showContextOverflowModal = false}
     onPrune={() => pruneToolResults($session.sessionId || '')}
-    onCompact={() => sendCommand("/compact")}
+    onCompact={() => { void runAutoCompactMethod($session.sessionId || '', "prune-then-compact"); }}
     onNewChat={() => {
       startNewChatAction();
       showContextOverflowModal = false;
