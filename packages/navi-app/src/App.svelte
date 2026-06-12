@@ -4429,10 +4429,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     onClose={() => { showNewProjectModal = false; newProjectTargetFolderId = null; projectCreationMode = "quick"; }}
     onCreate={createProject}
     onPickDirectory={pickDirectory}
-    onCreateAgent={async (name, description) => {
-      showNewProjectModal = false;
-      projectCreationMode = "quick";
-    }}
     onCreateFromTemplate={async (templateId, name) => {
       await createProjectFromTemplate(templateId, name);
     }}
