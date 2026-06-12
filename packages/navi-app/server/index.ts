@@ -17,7 +17,6 @@ import { handleMessageRoutes } from "./routes/messages";
 import { handleSkillRoutes } from "./routes/skills";
 import { handleMarketplaceRoutes } from "./routes/marketplace";
 import { handleAgentRoutes } from "./routes/agents";
-import { handleAgentBuilderRoutes } from "./routes/agent-builder";
 import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal";
 import { handleProxyRoutes } from "./routes/proxy";
 import { handleProcessRoutes } from "./routes/processes";
@@ -492,10 +491,6 @@ const server = Bun.serve({
 
     // Agent routes
     response = await handleAgentRoutes(url, method, req);
-    if (response) return response;
-
-    // Agent builder routes
-    response = await handleAgentBuilderRoutes(url, method, req);
     if (response) return response;
 
     // Terminal routes

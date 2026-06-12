@@ -143,7 +143,6 @@
   import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
   import { ExperimentalAgentsPanel, SelfHealingWidget } from "./lib/components/agents";
-  import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
   import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
   import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
@@ -354,11 +353,8 @@
   let modelSelection = $state("");
   let lastSessionModel = $state("");
   let showSettings = $state(false);
-  let showAgentBuilder = $state(false);
   let showExperimentalAgents = $state(false);
 
-  // Derived agents list for sidebar (combine agents + skills from stores)
-  let sidebarAgents = $derived([...$agentLibrary, ...$skillLibraryForBuilder].slice(0, 10));
   let settingsInitialTab = $state<"api" | "permissions" | "claude-md" | "skills" | "features" | "analytics" | "mcp" | undefined>(undefined);
   let showProjectSettings = $state(false);
   let projectSettingsInitialTab = $state<"instructions" | "model" | "permissions" | "skills" | undefined>(undefined);
@@ -1327,7 +1323,6 @@
         loadModelsAction(),
         loadPermissionsAction(),
         loadCostsAction(),
-        loadLibrary(), // Load agents for sidebar
         loadMcpServers(), // Load MCP server states
       ]);
 
@@ -4015,14 +4010,8 @@ Please walk me through the setup step by step. When I have the credentials, save
     onOpenProjectInNewWindow={openProjectInNewWindow}
     onOpenSessionInNewWindow={openSessionInNewWindow}
     onOpenHomeInNewWindow={openHomeInNewWindow}
-    onOpenAgentBuilder={() => showAgentBuilder = true}
     onGoToProjectDashboard={() => session.setSession(null)}
     onOpenInbox={openInboxPanel}
-    agents={sidebarAgents}
-    onSelectAgent={(agent) => {
-      openAgent(agent as AgentDefinition);
-      showAgentBuilder = true;
-    }}
     bind:titleSuggestionRef
   />
 
@@ -4519,13 +4508,8 @@ Please walk me through the setup step by step. When I have the credentials, save
     onCreate={createProject}
     onPickDirectory={pickDirectory}
     onCreateAgent={async (name, description) => {
-      const agent = await createAgent(name, description, "agent");
-      if (agent) {
-        showNewProjectModal = false;
-        projectCreationMode = "quick";
-        openAgent(agent);
-        showAgentBuilder = true;
-      }
+      showNewProjectModal = false;
+      projectCreationMode = "quick";
     }}
     onCreateFromTemplate={async (templateId, name) => {
       await createProjectFromTemplate(templateId, name);
@@ -4603,12 +4587,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   </Modal>
 
   <Settings open={showSettings} onClose={() => { showSettings = false; settingsInitialTab = undefined; loadMcpServers(); }} initialTab={settingsInitialTab} />
-
-  {#if showAgentBuilder}
-    <div class="fixed inset-0 z-50 bg-white">
-      <AgentBuilder onClose={() => showAgentBuilder = false} />
-    </div>
-  {/if}
 
   <FeedbackModal
     open={showFeedbackModal}

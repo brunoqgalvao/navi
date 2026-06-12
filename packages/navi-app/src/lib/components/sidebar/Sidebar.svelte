@@ -111,11 +111,8 @@
     onOpenProjectInNewWindow: (project: Project) => void;
     onOpenSessionInNewWindow: (session: Session) => void;
     onOpenHomeInNewWindow: () => void;
-    onOpenAgentBuilder?: () => void;
     onGoToProjectDashboard?: () => void;
     onOpenInbox?: () => void;
-    agents?: { id: string; name: string; type: "agent" | "skill"; description?: string }[];
-    onSelectAgent?: (agent: { id: string; name: string; type: "agent" | "skill"; description?: string }) => void;
     titleSuggestionRef?: TitleSuggestion | null;
   }
 
@@ -187,11 +184,8 @@
     onOpenProjectInNewWindow,
     onOpenSessionInNewWindow,
     onOpenHomeInNewWindow,
-    onOpenAgentBuilder,
     onGoToProjectDashboard,
     onOpenInbox,
-    agents = [],
-    onSelectAgent,
     titleSuggestionRef = $bindable(null),
   }: Props = $props();
 
@@ -205,7 +199,6 @@
   });
 
   // Agent section collapsed state
-  let agentsSectionCollapsed = $state(true);
   let projectAgents = $state<ProjectAgent[]>([]);
   let loadingProjectAgents = $state(false);
   let projectInboxItems = $state<InboxItem[]>([]);
@@ -1792,52 +1785,6 @@
           </div>
         {/if}
 
-        <!-- Agents Section -->
-        {#if onSelectAgent}
-          <div class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
-            <button
-              onclick={() => agentsSectionCollapsed = !agentsSectionCollapsed}
-              class="w-full flex items-center justify-between px-2 mb-1 group"
-            >
-              <h3 class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
-                <svg class="w-3 h-3 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                Agents
-              </h3>
-              <svg class="w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform {agentsSectionCollapsed ? '' : 'rotate-180'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-            </button>
-
-            {#if !agentsSectionCollapsed}
-              <div class="space-y-0.5">
-                {#if agents.length === 0}
-                  <p class="text-[11px] text-gray-400 dark:text-gray-500 italic px-2 py-2">No agents yet</p>
-                {:else}
-                  {#each agents as agent}
-                    <button
-                      onclick={() => onSelectAgent(agent)}
-                      class="w-full text-left px-2 py-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-700 dark:hover:text-indigo-400 transition-colors flex items-center gap-2"
-                    >
-                      {#if agent.type === "skill"}
-                        <svg class="w-3 h-3 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                      {:else}
-                        <svg class="w-3 h-3 text-indigo-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                      {/if}
-                      <span class="text-[12px] font-medium truncate">{agent.name}</span>
-                    </button>
-                  {/each}
-                {/if}
-                {#if onOpenAgentBuilder}
-                  <button
-                    onclick={onOpenAgentBuilder}
-                    class="w-full text-left px-2 py-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-400 transition-colors flex items-center gap-2 text-[11px]"
-                  >
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-                    View all agents...
-                  </button>
-                {/if}
-              </div>
-            {/if}
-          </div>
-        {/if}
       </div>
     {:else}
       <div class="px-3 flex-1 flex flex-col min-h-0 overflow-hidden">
