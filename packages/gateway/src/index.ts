@@ -23,3 +23,4 @@ export { normalizeUsage, PRICE_TABLE, type PriceEntry, type NormalizeInput } fro
 
 export { ClaudeBackend, ClaudeSession } from "./adapters/claude.js";
 export { CodexBackend, CodexSession } from "./adapters/codex.js";
+export { GeminiBackend, GeminiSession } from "./adapters/gemini.js";
