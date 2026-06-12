@@ -149,7 +149,6 @@
   import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
   import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
   import EscalationBanner from "./lib/features/session-hierarchy/components/EscalationBanner.svelte";
-  import { CanvasView } from "./lib/features/canvas-mode";
   import { fetchCommands, type CustomCommand } from "./lib/features/commands";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
@@ -357,7 +356,6 @@
   let lastSessionModel = $state("");
   let showSettings = $state(false);
   let showAgentBuilder = $state(false);
-  let showCanvasMode = $state(false);
   let showExperimentalAgents = $state(false);
 
   // Derived agents list for sidebar (combine agents + skills from stores)
@@ -371,7 +369,6 @@
   let isResolvingMergeConflicts = $state(false);
   let mergeConflictInfo = $state<{ branch: string; baseBranch: string; fileCount: number; snapshotId: string } | null>(null);
   let sidebarCollapsed = $state(false);
-  let isCanvasMode = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
   let linkContextMenu = $state<{ url: string; x: number; y: number } | null>(null);
@@ -1028,10 +1025,6 @@
       } else if (e.key === 'F' || e.key === 'f') {
         e.preventDefault();
         spawnQuickAgent('healer-agent');
-      } else if (e.key === 'C' || e.key === 'c') {
-        // Canvas Mode toggle (Cmd/Ctrl + Shift + C)
-        e.preventDefault();
-        showCanvasMode = !showCanvasMode;
       }
     }
   }
@@ -2130,8 +2123,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function selectSession(s: Session, skipHistory = false) {
-    isCanvasMode = false;
-
     const prevSessionId = $session.sessionId;
     if (prevSessionId && inputText.trim()) {
       sessionDrafts.setDraft(prevSessionId, inputText);
@@ -3451,10 +3442,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
   }
 
-  function handleCanvasToggle(isCanvas: boolean) {
-    isCanvasMode = isCanvas;
-  }
-
   function openInboxPanel() {
     showInbox = true;
     rightPanelMode = "inbox";
@@ -4064,13 +4051,13 @@ Please walk me through the setup step by step. When I have the credentials, save
   <!-- Chat Area -->
   <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-900 relative overflow-hidden">
 
-    <!-- Navigation History (top-left) - hidden in canvas mode -->
-    <div class="absolute top-3 left-3 z-20 bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm {isCanvasMode ? 'hidden' : ''}">
+    <!-- Navigation History (top-left) -->
+    <div class="absolute top-3 left-3 z-20 bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
       <NavHistoryButton onNavigate={handleNavHistoryNavigate} />
     </div>
 
-    <!-- Toolbar Buttons - hidden in canvas mode -->
-    {#if currentProject && !isCanvasMode}
+    <!-- Toolbar Buttons -->
+    {#if currentProject}
     <div class="absolute top-3 right-3 z-20 flex gap-1">
       {#if $advancedMode}
       <button
@@ -4115,9 +4102,9 @@ Please walk me through the setup step by step. When I have the credentials, save
       />
     {:else}
 
-        <!-- Header (Mobile/Simplified) - hidden in canvas mode -->
+        <!-- Header (Mobile/Simplified) -->
 
-        <header class="h-14 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 bg-white/95 dark:bg-gray-800/95 md:hidden z-10 sticky top-0 {isCanvasMode ? '!hidden' : ''}">
+        <header class="h-14 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 bg-white/95 dark:bg-gray-800/95 md:hidden z-10 sticky top-0">
 
             <button onclick={() => session.setProject(null)} class="text-gray-500 dark:text-gray-400">
 
@@ -4212,7 +4199,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                   rightPanelMode = "files";
                 }}
                 onShowClaudeMd={() => showClaudeMdModal = true}
-                onCanvasToggle={handleCanvasToggle}
               />
             {/if}
           {:else}
@@ -4345,9 +4331,9 @@ Please walk me through the setup step by step. When I have the credentials, save
 
         </div>
 
-        <!-- Scroll to Bottom Button - hidden in canvas mode -->
+        <!-- Scroll to Bottom Button -->
         <div
-          class="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 transition-all duration-300 ease-out {isCanvasMode ? 'hidden' : ''} {!userIsNearBottom && currentMessages.length > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}"
+          class="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 transition-all duration-300 ease-out {!userIsNearBottom && currentMessages.length > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}"
         >
           <button
             onclick={jumpToBottom}
@@ -4365,8 +4351,7 @@ Please walk me through the setup step by step. When I have the credentials, save
           </button>
         </div>
 
-        <!-- Input Area - hidden in canvas mode -->
-        {#if !isCanvasMode}
+        <!-- Input Area -->
         <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent dark:from-gray-900 dark:via-gray-900" data-tour="chat-input">
 
             <div class="w-full max-w-3xl pointer-events-auto relative">
@@ -4479,7 +4464,6 @@ Please walk me through the setup step by step. When I have the credentials, save
             </div>
 
         </div>
-        {/if}
 
     {/if}
 
@@ -4641,22 +4625,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     </div>
   {/if}
 
-  {#if showCanvasMode}
-    <CanvasView
-      onClose={() => showCanvasMode = false}
-      onSessionSelect={(sessionId, projectId) => {
-        showCanvasMode = false;
-        goToSessionById(projectId, sessionId);
-      }}
-      onProjectSelect={(projectId) => {
-        showCanvasMode = false;
-        const project = sidebarProjects.find(p => p.id === projectId);
-        if (project) {
-          selectProject(project);
-        }
-      }}
-    />
-  {/if}
   <FeedbackModal
     open={showFeedbackModal}
     onClose={() => {

@@ -88,7 +88,6 @@ export {
   loopModeEnabled,
   deployToCloudEnabled,
   resourceMonitorEnabled,
-  canvasModeEnabled,
   autoCompactEnabled,
   autoCompactMethod,
   newChatView,
