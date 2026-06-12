@@ -24,7 +24,6 @@
     onSuggestionClick?: (suggestion: string) => void;
     onSelectSession?: (session: Session) => void;
     onOpenSession?: (sessionId: string) => void;
-    onArchiveSession?: (session: Session) => void;
     onNewSession?: () => void;
     onPreviewFile?: (path: string) => void;
     onOpenFiles?: () => void;
@@ -43,7 +42,6 @@
     onSuggestionClick,
     onSelectSession,
     onOpenSession,
-    onArchiveSession,
     onNewSession,
     onPreviewFile,
     onOpenFiles,

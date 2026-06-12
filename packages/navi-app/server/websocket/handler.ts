@@ -3545,7 +3545,6 @@ export function createWebSocketHandlers() {
               if (active?.process.stdin) {
                 try {
                   active.process.stdin.write(response + "\n");
-                  responseSent = true;
                 } catch {}
               }
             }
@@ -3575,7 +3574,6 @@ export function createWebSocketHandlers() {
               if (active?.process.stdin) {
                 try {
                   active.process.stdin.write(response + "\n");
-                  responseSent = true;
                 } catch {}
               }
             }

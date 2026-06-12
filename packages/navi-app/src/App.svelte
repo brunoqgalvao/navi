@@ -2495,11 +2495,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
   }
 
-  async function archiveSessionFromCanvas(sess: Session) {
-    if (sess.archived) return;
-    await setSessionArchived(sess, true);
-  }
-
   async function archiveAllNonStarred() {
     if (!currentProject) return;
     try {
@@ -4191,7 +4186,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                   selectSession(sess as Session);
                 }}
                 onOpenSession={selectSessionById}
-                onArchiveSession={archiveSessionFromCanvas}
                 onNewSession={startNewChatAction}
                 onPreviewFile={openPreview}
                 onOpenFiles={() => {
@@ -4470,7 +4464,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   </main>
 
   </div>
-  <!-- End Chat + Split Container -->
+  <!-- End Chat Container -->
 
   <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context / Email) -->
   {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels || showEmail}
