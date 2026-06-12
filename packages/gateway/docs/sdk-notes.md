@@ -136,7 +136,7 @@ and avoids partial-JSON tool input reconstruction.
 ```ts
 { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number; ... }
 ```
-→ Emit `usage` (via `normalizeUsage`) + `done`.
+→ Emit `usage` (via `normalizeUsage`) + `done`. We drop the result message's `result` string because the same text was already emitted as text-delta events.
 
 ### SDKUserMessage / SDKUserMessageReplay
 Emitted for replayed conversation history on resume. We skip these (they're echo, not output).

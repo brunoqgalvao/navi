@@ -637,4 +637,109 @@ describe("ClaudeSession permission pending-map", () => {
     expect(doneEvt).toBeDefined();
     expect(doneEvt!.reason).toBe("complete");
   });
+
+  // ── Fix 3: session reuse after cancel ────────────────────────────────────────
+
+  test("send→cancel→send again on same session → second turn completes with done{reason:'complete'}", async () => {
+    // First fakeQuery: blocks until abort, then throws AbortError
+    let queryCallCount = 0;
+
+    function makeFakeQuery() {
+      return async function* fakeQuery(params: { prompt: string; options?: Record<string, unknown> }) {
+        queryCallCount++;
+        const callIndex = queryCallCount;
+
+        if (callIndex === 1) {
+          // First call: yield init, then block until abort
+          const abortController = params.options?.abortController as AbortController | undefined;
+          yield makeSystemInit();
+          await new Promise<void>((resolve) => {
+            if (abortController?.signal.aborted) {
+              resolve();
+              return;
+            }
+            abortController?.signal.addEventListener("abort", () => resolve(), { once: true });
+            setTimeout(resolve, 2000); // safety timeout
+          });
+          throw new DOMException("Aborted", "AbortError");
+        } else {
+          // Second call: complete normally
+          yield makeSystemInit();
+          yield makeAssistantMsg([{ type: "text", text: "hello again", citations: null }]);
+          yield makeResultSuccess();
+        }
+      };
+    }
+
+    const session = new ClaudeSession(
+      "gw-reuse-1",
+      { cwd: "/tmp", permissionMode: "prompt" },
+      undefined,
+      makeFakeQuery() as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query
+    );
+
+    // --- First turn: cancel mid-stream ---
+    const firstEvents: GatewayEvent[] = [];
+    const firstSend = (async () => {
+      for await (const evt of session.send({ text: "first" })) {
+        firstEvents.push(evt);
+        if (evt.type === "session-meta") {
+          await session.cancel();
+        }
+      }
+    })();
+    await firstSend;
+
+    const firstDone = firstEvents.find((e) => e.type === "done") as
+      | Extract<GatewayEvent, { type: "done" }>
+      | undefined;
+    expect(firstDone).toBeDefined();
+    expect(firstDone!.reason).toBe("cancelled");
+
+    // --- Second turn: same session, normal completion ---
+    const secondEvents: GatewayEvent[] = [];
+    for await (const evt of session.send({ text: "second" })) {
+      secondEvents.push(evt);
+    }
+
+    const secondDone = secondEvents.find((e) => e.type === "done") as
+      | Extract<GatewayEvent, { type: "done" }>
+      | undefined;
+    expect(secondDone).toBeDefined();
+    expect(secondDone!.reason).toBe("complete");
+    // No error event on second turn
+    expect(secondEvents.some((e) => e.type === "error")).toBe(false);
+  });
+
+  // ── Fix 4: respondToPermission with unknown requestId is a no-op ─────────────
+
+  test("respondToPermission with unknown/stale requestId → silent no-op (no throw)", async () => {
+    async function* fakeQuery(params: { prompt: string; options?: Record<string, unknown> }) {
+      yield makeSystemInit();
+      yield makeResultSuccess();
+    }
+
+    const session = new ClaudeSession(
+      "gw-noop-1",
+      { cwd: "/tmp", permissionMode: "prompt" },
+      undefined,
+      fakeQuery as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query
+    );
+
+    const events: GatewayEvent[] = [];
+    for await (const evt of session.send({ text: "hello" })) {
+      events.push(evt);
+    }
+
+    // After send completes, call respondToPermission with a bogus id — must not throw
+    expect(() => {
+      session.respondToPermission("totally-unknown-id", "allow");
+    }).not.toThrow();
+
+    // Also test after a cancel() clears pending permissions
+    await session.cancel();
+    expect(() => {
+      session.respondToPermission("cleared-after-cancel-id", "deny");
+    }).not.toThrow();
+  });
 });

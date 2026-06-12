@@ -196,7 +196,7 @@ export function makePermissionResult(
  * end() signals completion.
  */
 class EventChannel {
-  private _queue: Array<GatewayEvent | { __done: true } | { __error: unknown }> = [];
+  private _queue: Array<GatewayEvent | { __done: true }> = [];
   private _waiter: (() => void) | undefined;
 
   private _notify(): void {
@@ -283,10 +283,16 @@ export class ClaudeSession implements AgentSession {
 
   async cancel(): Promise<void> {
     this._cancelled = true;
+    this._pendingPermissions.clear();
     this._abortController?.abort();
   }
 
   async *send(input: UserInput): AsyncIterable<GatewayEvent> {
+    // Reset cancellation flag so a prior cancel() does not mislabel errors in
+    // subsequent turns as "cancelled".
+    this._cancelled = false;
+    // Abandon any leftover permission resolvers from a cancelled prior turn.
+    this._pendingPermissions.clear();
     this._abortController = new AbortController();
     const channel = new EventChannel();
 

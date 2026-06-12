@@ -36,6 +36,11 @@ export type UserInput = { text: string };
 
 export interface AgentSession {
   readonly id: string;
+  /**
+   * Backend-native session id for resume, populated after the first
+   * session-meta event. Undefined until the backend emits that event.
+   */
+  readonly backendSessionId: string | undefined;
   send(input: UserInput): AsyncIterable<GatewayEvent>;
   respondToPermission(requestId: string, decision: PermissionDecision): void;
   cancel(): Promise<void>;

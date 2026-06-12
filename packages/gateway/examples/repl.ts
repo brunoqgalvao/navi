@@ -24,9 +24,9 @@
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
-import { ClaudeBackend, ClaudeSession } from "../src/adapters/claude.js";
+import { ClaudeBackend } from "../src/adapters/claude.js";
 import type { GatewayEvent } from "../src/events.js";
-import type { SessionOptions } from "../src/types.js";
+import type { AgentSession, SessionOptions } from "../src/types.js";
 
 // ── CLI arg parsing ───────────────────────────────────────────────────────────
 
@@ -89,9 +89,9 @@ const sessionOpts: SessionOptions = {
   permissionMode: "prompt",
 };
 
-const session = resumeId
-  ? (backend.resumeSession(resumeId, sessionOpts) as ClaudeSession)
-  : (backend.createSession(sessionOpts) as ClaudeSession);
+const session: AgentSession = resumeId
+  ? backend.resumeSession(resumeId, sessionOpts)
+  : backend.createSession(sessionOpts);
 
 // ── Script mode ───────────────────────────────────────────────────────────────
 
@@ -192,11 +192,7 @@ function handleEvent(evt: GatewayEvent, opts: HandlerOptions): void {
       break;
 
     case "text-delta":
-      if (opts.scriptMode) {
-        process.stdout.write(evt.text);
-      } else {
-        process.stdout.write(evt.text);
-      }
+      process.stdout.write(evt.text);
       break;
 
     case "thinking-delta":
@@ -264,7 +260,7 @@ function handleEvent(evt: GatewayEvent, opts: HandlerOptions): void {
 
 async function handleEventInteractive(
   evt: GatewayEvent,
-  sess: ClaudeSession,
+  sess: AgentSession,
   ask: (q: string) => Promise<string>,
   rl: readline.Interface
 ): Promise<void> {
