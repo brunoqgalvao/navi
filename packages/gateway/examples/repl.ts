@@ -97,9 +97,21 @@ const sessionOpts: SessionOptions = {
   permissionMode: "prompt",
 };
 
-const session: AgentSession = resumeId
-  ? backend.resumeSession(resumeId, sessionOpts)
-  : backend.createSession(sessionOpts);
+let session: AgentSession;
+if (resumeId) {
+  if (!backend.capabilities().resume) {
+    console.error(
+      red(
+        `[repl] Backend '${backendId}' does not support session resume (capabilities.resume=false). ` +
+        `Use --backend with a backend that supports resume, or omit --resume to start a new session.`
+      )
+    );
+    process.exit(1);
+  }
+  session = backend.resumeSession(resumeId, sessionOpts);
+} else {
+  session = backend.createSession(sessionOpts);
+}
 
 // ── Script mode ───────────────────────────────────────────────────────────────
 

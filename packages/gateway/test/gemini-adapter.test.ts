@@ -295,8 +295,20 @@ describe("permissionRequestToEvent", () => {
 describe("stopReasonToDoneReason", () => {
   test("end_turn → complete", () => { expect(stopReasonToDoneReason("end_turn")).toBe("complete"); });
   test("max_tokens → complete", () => { expect(stopReasonToDoneReason("max_tokens")).toBe("complete"); });
+  test("max_turn_requests → complete", () => { expect(stopReasonToDoneReason("max_turn_requests")).toBe("complete"); });
+  test("refusal → complete (agent refused — successful agentic decision, not a system error)", () => {
+    // "refusal" means the agent chose to decline the request; it will have emitted
+    // a text message explaining why. Mapping to "complete" is correct because the
+    // session ran successfully to a terminal state — the refusal is content, not failure.
+    expect(stopReasonToDoneReason("refusal")).toBe("complete");
+  });
   test("cancelled → cancelled", () => { expect(stopReasonToDoneReason("cancelled")).toBe("cancelled"); });
-  test("unknown → complete", () => { expect(stopReasonToDoneReason("something_else")).toBe("complete"); });
+  test("unknown stop reason → error (fail loud, not silent complete)", () => {
+    // Unknown values must surface as errors so unexpected protocol changes are noticed.
+    expect(stopReasonToDoneReason("something_totally_unknown")).toBe("error");
+    expect(stopReasonToDoneReason("tool_error")).toBe("error");
+    expect(stopReasonToDoneReason("")).toBe("error");
+  });
 });
 
 // ── Fake transport for GeminiSession tests ───────────────────────────────────
@@ -951,6 +963,236 @@ describe("GeminiSession", () => {
     const doneEvt = events.find((e) => e.type === "done") as Extract<GatewayEvent, { type: "done" }> | undefined;
     expect(doneEvt?.reason).toBe("cancelled");
   });
+
+  test("unknown stopReason → error event + done{error}", async () => {
+    const { spawnFn, proc } = makeFakeSpawn();
+    const session = new GeminiSession("gw-unknown-stop", { cwd: "/tmp", permissionMode: "prompt" }, spawnFn);
+    const events: GatewayEvent[] = [];
+
+    const sendPromise = (async () => {
+      for await (const evt of session.send({ text: "hi" })) {
+        events.push(evt);
+      }
+    })();
+
+    await runFakeTurn(proc, { stopReason: "some_future_unknown_reason" });
+    await sendPromise;
+
+    const errorEvt = events.find((e) => e.type === "error") as Extract<GatewayEvent, { type: "error" }> | undefined;
+    expect(errorEvt).toBeDefined();
+    expect(errorEvt!.message).toContain("some_future_unknown_reason");
+
+    const doneEvt = events.find((e) => e.type === "done") as Extract<GatewayEvent, { type: "done" }> | undefined;
+    expect(doneEvt).toBeDefined();
+    expect(doneEvt!.reason).toBe("error");
+  });
+
+  test("cancel() while permission-request is outstanding → done{cancelled}, no error, pending permission resolved as deny", async () => {
+    const { spawnFn, proc } = makeFakeSpawn();
+    const session = new GeminiSession("gw-cancel-perm", { cwd: "/tmp", permissionMode: "prompt" }, spawnFn);
+    const events: GatewayEvent[] = [];
+    let permRequestSeen = false;
+
+    const sendPromise = (async () => {
+      for await (const evt of session.send({ text: "do something" })) {
+        events.push(evt);
+        if (evt.type === "permission-request" && !permRequestSeen) {
+          permRequestSeen = true;
+          // Cancel while the permission promise is still unresolved
+          await session.cancel();
+        }
+      }
+    })();
+
+    // Drive initialize and session/new
+    await new Promise((r) => setTimeout(r, 15));
+    const written = getWritten(proc);
+
+    const initReq = written.find((w) => w.method === "initialize");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: initReq!.id, result: { protocolVersion: 1, agentCapabilities: {} } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const w2 = getWritten(proc);
+    const newSess = w2.find((w) => w.method === "session/new");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: newSess!.id, result: { sessionId: "acp-cancel-perm" } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    // session/prompt is now outstanding — send a permission request
+    proc._push(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "srv-perm-cancel",
+        method: "session/request_permission",
+        params: {
+          sessionId: "acp-cancel-perm",
+          options: [
+            { optionId: "proceed_always", name: "Allow All", kind: "allow_always" },
+            { optionId: "proceed_once",   name: "Allow",     kind: "allow_once"  },
+            { optionId: "cancel",         name: "Reject",    kind: "reject_once" },
+          ],
+          toolCall: {
+            toolCallId: "write_file-pending",
+            status: "pending",
+            title: "write_file",
+            content: [],
+            locations: [],
+            kind: "file",
+          },
+        },
+      })
+    );
+
+    await new Promise((r) => setTimeout(r, 20));
+    // cancel() fires inside the for-await when permission-request event is seen
+
+    await sendPromise;
+
+    // The stream must end with done{cancelled} and no error event
+    expect(permRequestSeen).toBe(true);
+    const doneEvt = events.find((e) => e.type === "done") as Extract<GatewayEvent, { type: "done" }> | undefined;
+    expect(doneEvt).toBeDefined();
+    expect(doneEvt!.reason).toBe("cancelled");
+    expect(events.some((e) => e.type === "error")).toBe(false);
+
+    // The server permission response must have been sent as cancelled
+    const writtenAll = getWritten(proc);
+    const permResp = writtenAll.find((w) => w.id === "srv-perm-cancel") as
+      | { result?: { outcome?: { outcome?: string } } }
+      | undefined;
+    expect(permResp).toBeDefined();
+    expect(permResp!.result?.outcome?.outcome).toBe("cancelled");
+  });
+
+  test("acceptEdits mode: file/edit tool auto-accepted without permission-request event", async () => {
+    const { spawnFn, proc } = makeFakeSpawn();
+    const session = new GeminiSession("gw-ae-file", { cwd: "/tmp", permissionMode: "acceptEdits" }, spawnFn);
+    const events: GatewayEvent[] = [];
+
+    const sendPromise = (async () => {
+      for await (const evt of session.send({ text: "write something" })) {
+        events.push(evt);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 15));
+    const written = getWritten(proc);
+
+    const initReq = written.find((w) => w.method === "initialize");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: initReq!.id, result: { protocolVersion: 1, agentCapabilities: {} } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const w2 = getWritten(proc);
+    const newSess = w2.find((w) => w.method === "session/new");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: newSess!.id, result: { sessionId: "acp-ae" } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    // File tool permission request — should be auto-accepted
+    proc._push(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "srv-ae-file",
+        method: "session/request_permission",
+        params: {
+          sessionId: "acp-ae",
+          options: [
+            { optionId: "proceed_once", name: "Allow", kind: "allow_once" },
+            { optionId: "cancel", name: "Reject", kind: "reject_once" },
+          ],
+          toolCall: {
+            toolCallId: "write_file-111",
+            status: "pending",
+            title: "write_file",
+            content: [],
+            locations: [],
+            kind: "file",
+          },
+        },
+      })
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    // No permission-request event surfaced for file/edit tools
+    expect(events.some((e) => e.type === "permission-request")).toBe(false);
+
+    const writtenAll = getWritten(proc);
+    const fileResp = writtenAll.find((w) => w.id === "srv-ae-file") as
+      | { result?: { outcome?: { outcome?: string } } }
+      | undefined;
+    expect(fileResp).toBeDefined();
+    expect(fileResp!.result?.outcome?.outcome).toBe("selected");
+
+    // Complete the turn
+    const w3 = getWritten(proc);
+    const promptReq = w3.find((w) => w.method === "session/prompt");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: promptReq!.id, result: { stopReason: "end_turn" } }));
+    await sendPromise;
+    expect(events.some((e) => e.type === "done")).toBe(true);
+  });
+
+  test("acceptEdits mode: non-edit tool (shell) still surfaces permission-request", async () => {
+    const { spawnFn, proc } = makeFakeSpawn();
+    const session = new GeminiSession("gw-ae-shell", { cwd: "/tmp", permissionMode: "acceptEdits" }, spawnFn);
+    const events: GatewayEvent[] = [];
+
+    const sendPromise = (async () => {
+      for await (const evt of session.send({ text: "run something" })) {
+        events.push(evt);
+        if (evt.type === "permission-request") {
+          session.respondToPermission(evt.requestId, "allow");
+        }
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 15));
+    const written = getWritten(proc);
+
+    const initReq = written.find((w) => w.method === "initialize");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: initReq!.id, result: { protocolVersion: 1, agentCapabilities: {} } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const w2 = getWritten(proc);
+    const newSess = w2.find((w) => w.method === "session/new");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: newSess!.id, result: { sessionId: "acp-ae-shell" } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Shell tool permission request — must NOT be auto-accepted, must surface event
+    proc._push(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "srv-ae-shell",
+        method: "session/request_permission",
+        params: {
+          sessionId: "acp-ae-shell",
+          options: [
+            { optionId: "proceed_once", name: "Allow", kind: "allow_once" },
+            { optionId: "cancel", name: "Reject", kind: "reject_once" },
+          ],
+          toolCall: {
+            toolCallId: "shell-111",
+            status: "pending",
+            title: "shell",
+            content: [],
+            locations: [],
+            kind: "shell",
+          },
+        },
+      })
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    // permission-request event must be emitted for shell tool
+    expect(events.some((e) => e.type === "permission-request")).toBe(true);
+    const permEvt = events.find((e) => e.type === "permission-request") as
+      | Extract<GatewayEvent, { type: "permission-request" }>
+      | undefined;
+    expect(permEvt!.tool).toBe("shell");
+
+    // Complete the turn
+    const w3 = getWritten(proc);
+    const promptReq = w3.find((w) => w.method === "session/prompt");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: promptReq!.id, result: { stopReason: "end_turn" } }));
+    await sendPromise;
+  });
 });
 
 // ── GeminiBackend tests ───────────────────────────────────────────────────────
@@ -979,11 +1221,12 @@ describe("GeminiBackend", () => {
     expect(s1.id).toBeTruthy();
   });
 
-  test("resumeSession creates new session (resume: false)", () => {
+  test("resumeSession throws because capabilities.resume=false", () => {
     const backend = new GeminiBackend();
-    const s = backend.resumeSession("old-session-id", { cwd: "/tmp", permissionMode: "prompt" });
-    // backendSessionId is undefined until first send (new session, not restored)
-    expect(s.backendSessionId).toBeUndefined();
-    expect(s.id).toBeTruthy();
+    // resume: false — no session/load or session/resume in gemini ACP 0.24.4.
+    // Callers must check capabilities().resume before calling resumeSession.
+    expect(() =>
+      backend.resumeSession("old-session-id", { cwd: "/tmp", permissionMode: "prompt" })
+    ).toThrow(/capabilities\.resume=false/);
   });
 });

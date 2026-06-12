@@ -267,6 +267,19 @@ export function permissionRequestToEvent(
 
 /**
  * Map stopReason from session/prompt response to gateway done reason.
+ *
+ * Mapping rationale:
+ * - "end_turn"          → complete  (normal completion)
+ * - "max_tokens"        → complete  (token limit hit, but output was produced; caller
+ *                                    can tell via context length, not an error)
+ * - "max_turn_requests" → complete  (turn depth limit, similar to max_tokens)
+ * - "refusal"           → complete  (the agent chose to decline — this is a successful
+ *                                    agentic decision, not a transport/system error;
+ *                                    the agent will have emitted a text message explaining
+ *                                    the refusal so the consumer already has the signal)
+ * - "cancelled"         → cancelled (explicit user/client cancel)
+ * - anything else       → error     (unknown stop reasons are not silently swallowed;
+ *                                    fail loud so unexpected protocol values surface)
  */
 export function stopReasonToDoneReason(
   stopReason: AcpStopReason
@@ -280,6 +293,8 @@ export function stopReasonToDoneReason(
     case "cancelled":
       return "cancelled";
     default:
-      return "complete";
+      // Unknown stop reason — map to error so callers notice unexpected values
+      // rather than silently completing. This is intentional "fail loud" behaviour.
+      return "error";
   }
 }

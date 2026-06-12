@@ -484,10 +484,12 @@ export class GeminiBackend implements AgentBackend {
     return new GeminiSession(randomUUID(), opts);
   }
 
-  resumeSession(_backendSessionId: string, opts: SessionOptions): AgentSession {
-    // resume: false — session/load and session/resume not supported in 0.24.4.
-    // Create a new session; conversation history is NOT restored.
-    // This is documented in capabilities().resume = false.
-    return new GeminiSession(randomUUID(), opts);
+  resumeSession(_backendSessionId: string, _opts: SessionOptions): AgentSession {
+    // resume: false — session/load and session/resume both return -32601 in 0.24.4.
+    // We throw explicitly so callers do not silently lose conversation history.
+    // Check capabilities().resume before calling this method.
+    throw new Error(
+      "gemini backend does not support session resume (capabilities.resume=false); create a new session instead"
+    );
   }
 }

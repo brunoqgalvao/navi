@@ -879,6 +879,100 @@ describe("CodexSession", () => {
     expect(textEvt?.text).toBe("done!");
   });
 
+  test("acceptEdits mode: fileChange auto-accepted without permission-request event; commandExecution still surfaced", async () => {
+    const { spawnFn, proc } = makeFakeSpawn();
+
+    const session = new CodexSession(
+      "gw-sess-ae",
+      { cwd: "/tmp", permissionMode: "acceptEdits" },
+      undefined,
+      spawnFn
+    );
+
+    const events: GatewayEvent[] = [];
+
+    const sendPromise = (async () => {
+      for await (const evt of session.send({ text: "make changes" })) {
+        events.push(evt);
+        if (evt.type === "permission-request") {
+          // Approve commands when prompted
+          session.respondToPermission(evt.requestId, "allow");
+        }
+      }
+    })();
+
+    // Drive to turn/start
+    await new Promise((r) => setTimeout(r, 10));
+    const written = getWritten(proc);
+
+    const initReq = written.find((w) => w.method === "initialize");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: initReq!.id, result: { userAgent: "test", codexHome: "/tmp", platformFamily: "unix", platformOs: "macos" } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const w2 = getWritten(proc);
+    const threadReq = w2.find((w) => w.method === "thread/start");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: threadReq!.id, result: { thread: { id: "t-ae" }, model: "gpt-5.2-codex", cwd: "/tmp" } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const w3 = getWritten(proc);
+    const turnReq = w3.find((w) => w.method === "turn/start");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: turnReq!.id, result: { turn: { id: "turn-ae" } } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Send a fileChange approval request — should be auto-accepted (acceptEdits policy)
+    proc._push(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "srv-fc-ae",
+      method: "item/fileChange/requestApproval",
+      params: {
+        threadId: "t-ae", turnId: "turn-ae", itemId: "fc-1",
+        reason: null, grantRoot: "/tmp/workspace",
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 15));
+
+    // No permission-request event for the fileChange
+    expect(events.some((e) => e.type === "permission-request")).toBe(false);
+
+    const writtenAll = getWritten(proc);
+    const fcResp = writtenAll.find((w) => w.id === "srv-fc-ae") as { result?: { decision?: string } } | undefined;
+    expect(fcResp).toBeDefined();
+    expect(fcResp!.result?.decision).toBe("accept");
+
+    // Now send a commandExecution approval request — must surface permission-request
+    proc._push(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "srv-cmd-ae",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "t-ae", turnId: "turn-ae", itemId: "cmd-ae-1",
+        startedAtMs: 0, command: "ls /workspace", cwd: "/tmp", reason: null, approvalId: null,
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // permission-request must be emitted for commands even in acceptEdits mode
+    const permEvt = events.find((e) => e.type === "permission-request") as
+      | Extract<GatewayEvent, { type: "permission-request" }>
+      | undefined;
+    expect(permEvt).toBeDefined();
+    expect(permEvt!.tool).toBe("commandExecution");
+
+    // Complete the turn
+    proc._push(JSON.stringify({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: "t-ae", turn: { id: "turn-ae", status: "completed", items: [], itemsView: "all", error: null, startedAt: null, completedAt: null, durationMs: null } },
+    }));
+    await new Promise((r) => setTimeout(r, 5));
+    proc._close();
+
+    await sendPromise;
+
+    const doneEvt = events.find((e) => e.type === "done") as Extract<GatewayEvent, { type: "done" }> | undefined;
+    expect(doneEvt?.reason).toBe("complete");
+  });
+
   test("respondToPermission with unknown id is a silent no-op", async () => {
     const { spawnFn, proc } = makeFakeSpawn();
 
