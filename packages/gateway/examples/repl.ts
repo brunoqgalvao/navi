@@ -24,12 +24,10 @@
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
-import { ClaudeBackend } from "../src/adapters/claude.js";
-import { CodexBackend } from "../src/adapters/codex.js";
-import { GeminiBackend } from "../src/adapters/gemini.js";
 import type { AgentBackend } from "../src/types.js";
 import type { GatewayEvent } from "../src/events.js";
 import type { AgentSession, SessionOptions } from "../src/types.js";
+import { createDefaultRegistry } from "../src/default-registry.js";
 
 // ── CLI arg parsing ───────────────────────────────────────────────────────────
 
@@ -77,11 +75,11 @@ function green(s: string): string {
 
 // ── Session setup ─────────────────────────────────────────────────────────────
 
-const BACKENDS: Record<string, AgentBackend> = {
-  claude: new ClaudeBackend(),
-  codex: new CodexBackend(),
-  gemini: new GeminiBackend(),
-};
+const _defaultRegistry = createDefaultRegistry();
+const _allBackends = _defaultRegistry.getAll();
+const BACKENDS: Record<string, AgentBackend> = Object.fromEntries(
+  _allBackends.map((b) => [b.id, b])
+);
 
 const backend = BACKENDS[backendId];
 if (!backend) {
