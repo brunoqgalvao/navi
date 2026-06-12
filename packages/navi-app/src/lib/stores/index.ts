@@ -80,7 +80,6 @@ export {
   advancedMode,
   debugMode,
   dashboardEnabled,
-  channelsEnabled,
   loopModeEnabled,
   deployToCloudEnabled,
   resourceMonitorEnabled,

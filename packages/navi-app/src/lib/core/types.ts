@@ -42,7 +42,6 @@ export type ExtensionId =
   | "context"         // Session context visibility
   | "inbox"           // Workspace inbox
   | "shared-inbox"    // Cross-project shared inbox
-  | "channels"        // WhatsApp, Telegram & messaging integrations
   | "browser-preview"; // Browser-use live preview
 
 /**
@@ -59,7 +58,6 @@ export type PanelMode =
   | "context"         // Context sidebar view
   | "inbox"           // Workspace inbox view
   | "shared-inbox"    // Cross-project shared inbox view
-  | "channels"        // WhatsApp, Telegram & messaging inbox
   | "browser-preview"; // Browser-use preview
 
 // =============================================================================

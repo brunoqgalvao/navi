@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
-  import { currentSession as session, isConnected, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems, channelsEnabled } from "../../stores";
+  import { currentSession as session, isConnected, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems } from "../../stores";
   import { api, agentsApi, type Agent as ProjectAgent, type InboxItem, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult, type Workflow, type WorkflowGate, type WorkflowSchedule } from "../../api";
   import { getApiBase } from "../../config";
   import StarButton from "../StarButton.svelte";
@@ -13,9 +13,6 @@
   import WorktreeBadge from "../WorktreeBadge.svelte";
   import type { ChatMessage } from "../../stores";
   import { blockedSessionsStore, blockedCount } from "../../features/session-hierarchy";
-  import { channels, currentChannelId, type Channel } from "../../features/channels";
-  import ChannelList from "../../features/channels/components/ChannelList.svelte";
-  import CreateChannelModal from "../../features/channels/components/CreateChannelModal.svelte";
   import Tooltip from "../Tooltip.svelte";
   import SessionChildren from "./SessionChildren.svelte";
   import WorkflowEditorModal from "./WorkflowEditorModal.svelte";
@@ -206,24 +203,10 @@
   let refreshingProjectInbox = $state(false);
   let projectInboxError = $state<string | null>(null);
 
-  // Channels state
-  let channelsSectionCollapsed = $state(false);
-  let showCreateChannelModal = $state(false);
-
   // Sessions dropdown for collapsed sidebar
   let sessionsDropdownOpen = $state(false);
 
-  function handleSelectChannel(channel: Channel) {
-    currentChannelId.set(channel.id);
-  }
-
-  function handleChannelCreated(channelId: string) {
-    currentChannelId.set(channelId);
-  }
-
-  // Load channels on mount
   onMount(() => {
-    channels.load();
     const handleProjectAgentsUpdated = (event: Event) => {
       const customEvent = event as CustomEvent<{ projectId?: string }>;
       const updatedProjectId = customEvent.detail?.projectId;
@@ -1423,61 +1406,6 @@
         {/if}
       </div>
     {:else if !currentProject}
-      <!-- Channels Section (Experimental) -->
-      {#if $channelsEnabled}
-      <div class="px-3 mb-4">
-        <div class="flex items-center justify-between mb-2 mt-2 px-2">
-          <button
-            onclick={() => channelsSectionCollapsed = !channelsSectionCollapsed}
-            class="flex items-center gap-1 text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
-          >
-            <svg class="w-3 h-3 transition-transform {channelsSectionCollapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-            </svg>
-            Channels
-          </button>
-          <button
-            onclick={() => showCreateChannelModal = true}
-            class="p-1 text-gray-400 dark:text-gray-500 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-colors"
-            title="Create channel"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
-        </div>
-
-        {#if !channelsSectionCollapsed}
-          <div class="space-y-0.5 px-2">
-            {#each $channels as channel}
-              <button
-                onclick={() => handleSelectChannel(channel)}
-                class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors
-                  {$currentChannelId === channel.id
-                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
-              >
-                <span class="text-purple-400 dark:text-purple-500 font-medium">#</span>
-                <span class="truncate text-[12px]">{channel.name}</span>
-              </button>
-            {/each}
-
-            {#if $channels.length === 0}
-              <div class="px-2 py-3 text-center">
-                <p class="text-[11px] text-gray-400 dark:text-gray-500">No channels yet</p>
-                <button
-                  onclick={() => showCreateChannelModal = true}
-                  class="mt-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline"
-                >
-                  Create your first channel
-                </button>
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
-      {/if}
-
       <!-- Workspaces Section -->
       <div class="px-3" data-tour="workspaces">
         <div class="flex items-center justify-between mb-2 mt-2 px-2">
@@ -2577,13 +2505,6 @@
     {/if}
   </div>
 </aside>
-
-<!-- Create Channel Modal -->
-<CreateChannelModal
-  bind:open={showCreateChannelModal}
-  onClose={() => showCreateChannelModal = false}
-  onCreated={handleChannelCreated}
-/>
 
 <WorkflowEditorModal
   open={showWorkflowEditor}

@@ -265,16 +265,6 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     defaultEnabled: true,
     defaultOrder: 9,
   },
-  channels: {
-    id: "channels",
-    name: "Channels",
-    icon: "message-circle",
-    description: "WhatsApp, Telegram & messaging integrations",
-    panelMode: "channels",
-    requiresProject: false,
-    defaultEnabled: true,
-    defaultOrder: 8,
-  },
   "browser-preview": {
     id: "browser-preview",
     name: "Browser",
