@@ -23,13 +23,20 @@ import type { GatewayEvent, PermissionDecision } from "../src/events.js";
 
 type EventScript = GatewayEvent[] | ((sessionId: string) => GatewayEvent[]);
 
-function makeSession(id: string, script: EventScript): AgentSession {
-  const pendingPermissions = new Map<string, (decision: PermissionDecision) => void>();
+interface FakeSession extends AgentSession {
+  respondToPermissionCalls: Array<{ requestId: string; decision: PermissionDecision }>;
+}
 
-  const session: AgentSession = {
+function makeSession(id: string, script: EventScript): FakeSession {
+  const pendingPermissions = new Map<string, (decision: PermissionDecision) => void>();
+  const respondToPermissionCalls: Array<{ requestId: string; decision: PermissionDecision }> = [];
+
+  const session: FakeSession = {
     id,
     backendSessionId: undefined,
+    respondToPermissionCalls,
     respondToPermission(requestId, decision) {
+      respondToPermissionCalls.push({ requestId, decision });
       const resolve = pendingPermissions.get(requestId);
       if (resolve) {
         pendingPermissions.delete(requestId);
@@ -48,8 +55,8 @@ function makeSession(id: string, script: EventScript): AgentSession {
           // Wait for respondToPermission to be called (or just continue if not awaited)
           await new Promise<void>((resolve) => {
             pendingPermissions.set(evt.requestId, () => resolve());
-            // Auto-timeout after 50ms so tests don't hang
-            setTimeout(resolve, 50);
+            // Auto-timeout after 100ms so tests don't hang
+            setTimeout(resolve, 100);
           });
         } else {
           yield evt;
@@ -66,12 +73,22 @@ interface FakeBackendOpts {
   defaultScript?: GatewayEvent[];
 }
 
-function makeFakeBackend(opts: FakeBackendOpts = {}): AgentBackend {
-  const backendId = opts.id ?? "claude";
-  const sessionIds: string[] = [];
+interface FakeBackend extends AgentBackend {
+  createdSessions: FakeSession[];
+  createdSessionOpts: SessionOptions[];
+  _scriptFn?: (id: string) => GatewayEvent[];
+  _defaultScript?: GatewayEvent[];
+}
 
-  const backend: AgentBackend = {
+function makeFakeBackend(opts: FakeBackendOpts = {}): FakeBackend {
+  const backendId = opts.id ?? "claude";
+  const createdSessions: FakeSession[] = [];
+  const createdSessionOpts: SessionOptions[] = [];
+
+  const backend: FakeBackend = {
     id: backendId,
+    createdSessions,
+    createdSessionOpts,
     capabilities(): Capabilities {
       return {
         streaming: true,
@@ -86,15 +103,15 @@ function makeFakeBackend(opts: FakeBackendOpts = {}): AgentBackend {
     async detect(): Promise<DetectResult> {
       return { installed: true, authed: true, version: "fake-1.0" };
     },
-    createSession(opts: SessionOptions): AgentSession {
+    createSession(sessionOpts: SessionOptions): AgentSession {
       const id = randomUUID();
-      sessionIds.push(id);
-      const script: EventScript = opts.scriptFn
-        ? opts.scriptFn(id)
-        : backend._scriptFn
-          ? backend._scriptFn(id)
-          : (backend._defaultScript ?? successScript(id));
-      return makeSession(id, script);
+      createdSessionOpts.push(sessionOpts);
+      const script: EventScript = backend._scriptFn
+        ? backend._scriptFn(id)
+        : (backend._defaultScript ?? successScript(id));
+      const session = makeSession(id, script);
+      createdSessions.push(session);
+      return session;
     },
     resumeSession(_backendSessionId: string, _opts: SessionOptions): AgentSession {
       throw new Error("fake backend does not support resume");
@@ -102,7 +119,7 @@ function makeFakeBackend(opts: FakeBackendOpts = {}): AgentBackend {
     // Internal for test setup
     _scriptFn: opts.scriptFn,
     _defaultScript: opts.defaultScript,
-  } as AgentBackend & { _scriptFn?: (id: string) => GatewayEvent[]; _defaultScript?: GatewayEvent[] };
+  };
 
   return backend;
 }
@@ -374,6 +391,97 @@ describe("AgentTree", () => {
     }
 
     await waitForAgent(tree, childId, 3000);
+  });
+
+  test("permission round-trip: respondToPermission routes back to originating session and run completes", async () => {
+    const backend = makeFakeBackend({ id: "claude", scriptFn: permissionScript });
+    const registry = makeRegistry(backend);
+
+    const rootEvents: GatewayEvent[] = [];
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "prompt",
+      cwd: "/tmp",
+      onRootEvent: (e) => rootEvents.push(e),
+    });
+
+    const { childId } = tree.spawnAgent({ backend: "claude", task: "needs permission" });
+
+    // Wait for the permission-request event to bubble up
+    await new Promise<void>((resolve) => {
+      const check = setInterval(() => {
+        if (rootEvents.some((e) => e.type === "permission-request")) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 10);
+      setTimeout(() => { clearInterval(check); resolve(); }, 500);
+    });
+
+    const permEvt = rootEvents.find((e) => e.type === "permission-request");
+    expect(permEvt).toBeDefined();
+    expect(permEvt?.type).toBe("permission-request");
+
+    // Capture the requestId and respond via the tree
+    const requestId = (permEvt as Extract<GatewayEvent, { type: "permission-request" }>).requestId;
+    tree.respondToPermission(requestId, "allow");
+
+    // The child run should complete now
+    await waitForAgent(tree, childId, 3000);
+    expect(tree.getAgentResult(childId).status).toBe("done");
+
+    // The child's session should have received the decision
+    const childSession = backend.createdSessions[0] as FakeSession;
+    expect(childSession).toBeDefined();
+    expect(childSession.respondToPermissionCalls.length).toBeGreaterThan(0);
+    expect(childSession.respondToPermissionCalls[0]?.requestId).toBe(requestId);
+    expect(childSession.respondToPermissionCalls[0]?.decision).toBe("allow");
+  });
+
+  test("permissionMode inheritance: child inherits parent's effective permissionMode", async () => {
+    const backend = makeFakeBackend({ id: "claude" });
+    const registry = makeRegistry(backend);
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "prompt",
+      cwd: "/tmp",
+    });
+
+    // Spawn root with explicit permissionMode "acceptEdits"
+    const { childId: parentId } = tree.spawnAgent({
+      backend: "claude",
+      task: "parent task",
+      permissionMode: "acceptEdits",
+    });
+
+    // Spawn child WITHOUT explicit permissionMode — should inherit "acceptEdits"
+    const { childId } = tree.spawnAgent({
+      backend: "claude",
+      task: "child task",
+      parentId,
+    });
+
+    await waitForAgent(tree, parentId);
+    await waitForAgent(tree, childId);
+
+    // The parent session (index 0) should have received "acceptEdits"
+    expect(backend.createdSessionOpts[0]?.permissionMode).toBe("acceptEdits");
+    // The child session (index 1) should also have received "acceptEdits" (inherited)
+    expect(backend.createdSessionOpts[1]?.permissionMode).toBe("acceptEdits");
+  });
+
+  test("permissionMode: root spawn without explicit mode receives defaultPermissionMode", async () => {
+    const backend = makeFakeBackend({ id: "claude" });
+    const registry = makeRegistry(backend);
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "prompt",
+      cwd: "/tmp",
+    });
+
+    tree.spawnAgent({ backend: "claude", task: "root task" });
+
+    // Give it a moment to call createSession
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(backend.createdSessionOpts[0]?.permissionMode).toBe("prompt");
   });
 
   test("getAgentResult returns running while agent is still running", async () => {

@@ -34,6 +34,7 @@ export interface AgentNode {
   errorMessage?: string;
   session: AgentSession;
   childIds: Set<string>;
+  permissionMode: SessionOptions["permissionMode"];
 }
 
 export interface SpawnOptions {
@@ -136,17 +137,15 @@ export class AgentTree {
       }
     }
 
-    // Determine permission mode: inherit parent unless caller narrows it
+    // Determine permission mode: use explicit opt, else inherit from parent node,
+    // else fall back to the tree default.
     const permissionMode =
-      opts.permissionMode ??
-      parent?.session
-        ? (opts.permissionMode ?? this._defaultPermissionMode)
-        : this._defaultPermissionMode;
+      opts.permissionMode ?? parent?.permissionMode ?? this._defaultPermissionMode;
 
     const sessionOpts: SessionOptions = {
       cwd: opts.cwd ?? this._cwd,
       model: opts.model,
-      permissionMode: opts.permissionMode ?? this._defaultPermissionMode,
+      permissionMode,
     };
 
     const session = backend.createSession(sessionOpts);
@@ -163,6 +162,7 @@ export class AgentTree {
       textChunks: [],
       session,
       childIds: new Set(),
+      permissionMode,
     };
 
     this._agents.set(childId, node);

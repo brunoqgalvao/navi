@@ -19,7 +19,6 @@ import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { createDefaultRegistry } from "../src/default-registry.js";
 import { AgentTree } from "../src/spawn/tree.js";
 import { startSpawnControlServer, spawnServerConfigFor } from "../src/spawn/mcp-server.js";
-import type { ControlServer } from "../src/spawn/mcp-server.js";
 import type { GatewayEvent } from "../src/events.js";
 
 const CWD = process.env.NAVI_SPIKE_CWD ?? "/tmp/navi-spike-spawn";
@@ -47,12 +46,14 @@ const tree = new AgentTree(registry, {
 });
 
 // Start control server
-const ctrl = startSpawnControlServer(tree) as ControlServer & { _token: string };
+const ctrl = startSpawnControlServer(tree);
 console.log(`[spike] Control server on port ${ctrl.port}`);
 
 const controlUrl = `http://127.0.0.1:${ctrl.port}`;
-const mcpConfig = spawnServerConfigFor(controlUrl, ctrl._token);
-console.log(`[spike] MCP config: ${JSON.stringify(mcpConfig)}`);
+const mcpConfig = spawnServerConfigFor(controlUrl, ctrl.token);
+// Redact the bearer token from the log
+const mcpConfigLog = { ...mcpConfig, env: { ...mcpConfig.env, NAVI_SPAWN_TOKEN: "[REDACTED]" } };
+console.log(`[spike] MCP config: ${JSON.stringify(mcpConfigLog)}`);
 
 // ── Run Claude session ────────────────────────────────────────────────────────
 

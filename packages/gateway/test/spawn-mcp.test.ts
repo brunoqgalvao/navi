@@ -24,6 +24,8 @@ import type { GatewayEvent } from "../src/events.js";
 
 // ── FakeBackend (same pattern as tree tests) ──────────────────────────────────
 
+import type { PermissionDecision } from "../src/events.js";
+
 function makeSuccessSession(id: string, text = "task done"): AgentSession {
   return {
     id,
@@ -37,6 +39,48 @@ function makeSuccessSession(id: string, text = "task done"): AgentSession {
         sessionId: id,
         usage: { inputTokens: 10, outputTokens: 5, model: "fake", raw: {}, costUsd: 0.001 },
       };
+      yield { type: "done", sessionId: id, reason: "complete" };
+    },
+  };
+}
+
+interface RecordingSession extends AgentSession {
+  respondToPermissionCalls: Array<{ requestId: string; decision: PermissionDecision }>;
+}
+
+function makePermissionSession(id: string, requestId: string): RecordingSession {
+  const pendingPermissions = new Map<string, (decision: PermissionDecision) => void>();
+  const respondToPermissionCalls: Array<{ requestId: string; decision: PermissionDecision }> = [];
+
+  return {
+    id,
+    backendSessionId: undefined,
+    respondToPermissionCalls,
+    respondToPermission(reqId, decision) {
+      respondToPermissionCalls.push({ requestId: reqId, decision });
+      const resolve = pendingPermissions.get(reqId);
+      if (resolve) {
+        pendingPermissions.delete(reqId);
+        resolve(decision);
+      }
+    },
+    async cancel() {},
+    async *send(_input: UserInput): AsyncIterable<GatewayEvent> {
+      yield {
+        type: "permission-request",
+        sessionId: id,
+        requestId,
+        tool: "bash",
+        description: "run a command",
+        input: { command: "ls" },
+        options: ["allow", "allow-session", "deny"],
+      };
+      // Wait for permission response
+      await new Promise<void>((resolve) => {
+        pendingPermissions.set(requestId, () => resolve());
+        setTimeout(resolve, 200);
+      });
+      yield { type: "text-delta", sessionId: id, text: "permission handled" };
       yield { type: "done", sessionId: id, reason: "complete" };
     },
   };
@@ -233,6 +277,82 @@ describe("createSpawnMcpServer (in-process)", () => {
       await mcpServer.server.close();
     }
   });
+
+  test("respond_to_permission tool routes decision to originating child session via InMemoryTransport", async () => {
+    const permRequestId = "perm-req-mcp-test";
+    let capturedSession: RecordingSession | undefined;
+
+    // Build a backend that produces a permission-requesting session
+    const permBackend: AgentBackend = {
+      id: "claude",
+      capabilities(): Capabilities {
+        return {
+          streaming: true,
+          thinkingStream: false,
+          permissions: "callback",
+          resume: false,
+          mcp: false,
+          skills: "injected",
+          models: [],
+        };
+      },
+      async detect(): Promise<DetectResult> {
+        return { installed: true, authed: true, version: "fake-1.0" };
+      },
+      createSession(_opts: SessionOptions): AgentSession {
+        const id = randomUUID();
+        const session = makePermissionSession(id, permRequestId);
+        capturedSession = session;
+        return session;
+      },
+      resumeSession() { throw new Error("no resume"); },
+    };
+
+    const registry = new BackendRegistry();
+    registry.register(permBackend);
+
+    const rootEvents: Array<GatewayEvent> = [];
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "prompt",
+      cwd: "/tmp",
+      onRootEvent: (e) => rootEvents.push(e),
+    });
+
+    const { client, cleanup } = await makeInProcessClient(tree);
+
+    try {
+      // Spawn an agent that will emit a permission-request
+      const spawnResult = await client.callTool({
+        name: "spawn_agent",
+        arguments: { backend: "claude", task: "task needing permission" },
+      });
+      expect(spawnResult.isError).toBeFalsy();
+
+      // Wait for the permission-request to bubble up to onRootEvent
+      await waitFor(() => rootEvents.some((e) => e.type === "permission-request"), 1000);
+
+      const permEvt = rootEvents.find((e) => e.type === "permission-request");
+      expect(permEvt).toBeDefined();
+
+      // Call the respond_to_permission MCP tool through InMemoryTransport
+      const respondResult = await client.callTool({
+        name: "respond_to_permission",
+        arguments: { requestId: permRequestId, decision: "allow" },
+      });
+      expect(respondResult.isError).toBeFalsy();
+      const respondContent = (respondResult.content as Array<{ type: string; text: string }>)[0];
+      const respondParsed = JSON.parse(respondContent!.text);
+      expect(respondParsed.ok).toBe(true);
+
+      // The originating session should have received the decision
+      expect(capturedSession).toBeDefined();
+      await waitFor(() => (capturedSession?.respondToPermissionCalls.length ?? 0) > 0, 1000);
+      expect(capturedSession!.respondToPermissionCalls[0]?.requestId).toBe(permRequestId);
+      expect(capturedSession!.respondToPermissionCalls[0]?.decision).toBe("allow");
+    } finally {
+      await cleanup();
+    }
+  });
 });
 
 // ── HTTP control server tests ─────────────────────────────────────────────────
@@ -263,13 +383,13 @@ describe("startSpawnControlServer", () => {
 
   test("POST /list returns agent list with valid token", async () => {
     const { tree } = makeTreeWithFakeBackend();
-    const ctrl = startSpawnControlServer(tree) as ReturnType<typeof startSpawnControlServer> & { _token: string };
+    const ctrl = startSpawnControlServer(tree);
     try {
       const res = await fetch(`http://127.0.0.1:${ctrl.port}/list`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${ctrl._token}`,
+          authorization: `Bearer ${ctrl.token}`,
         },
         body: "{}",
       });
@@ -283,13 +403,13 @@ describe("startSpawnControlServer", () => {
 
   test("POST /spawn creates an agent", async () => {
     const { tree } = makeTreeWithFakeBackend();
-    const ctrl = startSpawnControlServer(tree) as ReturnType<typeof startSpawnControlServer> & { _token: string };
+    const ctrl = startSpawnControlServer(tree);
     try {
       const res = await fetch(`http://127.0.0.1:${ctrl.port}/spawn`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${ctrl._token}`,
+          authorization: `Bearer ${ctrl.token}`,
         },
         body: JSON.stringify({ backend: "claude", task: "control server task" }),
       });
@@ -303,10 +423,10 @@ describe("startSpawnControlServer", () => {
 
   test("POST /result returns agent result", async () => {
     const { tree } = makeTreeWithFakeBackend();
-    const ctrl = startSpawnControlServer(tree) as ReturnType<typeof startSpawnControlServer> & { _token: string };
+    const ctrl = startSpawnControlServer(tree);
     const headers = {
       "content-type": "application/json",
-      authorization: `Bearer ${ctrl._token}`,
+      authorization: `Bearer ${ctrl.token}`,
     };
 
     try {
@@ -337,13 +457,13 @@ describe("startSpawnControlServer", () => {
 
   test("unknown route returns 404", async () => {
     const { tree } = makeTreeWithFakeBackend();
-    const ctrl = startSpawnControlServer(tree) as ReturnType<typeof startSpawnControlServer> & { _token: string };
+    const ctrl = startSpawnControlServer(tree);
     try {
       const res = await fetch(`http://127.0.0.1:${ctrl.port}/nonexistent`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${ctrl._token}`,
+          authorization: `Bearer ${ctrl.token}`,
         },
         body: "{}",
       });

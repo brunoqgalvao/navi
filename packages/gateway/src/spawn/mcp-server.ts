@@ -199,6 +199,7 @@ export function createSpawnMcpServer(tree: AgentTree): McpServer {
 export interface ControlServer {
   port: number;
   stop: () => void;
+  token: string;
 }
 
 /**
@@ -294,9 +295,8 @@ export function startSpawnControlServer(tree: AgentTree, port?: number): Control
   return {
     port: resolvedPort,
     stop: () => server.stop(true),
-    // Expose token for spawnServerConfigFor
-    _token: token,
-  } as ControlServer & { _token: string };
+    token,
+  };
 }
 
 function json(data: unknown): Response {
