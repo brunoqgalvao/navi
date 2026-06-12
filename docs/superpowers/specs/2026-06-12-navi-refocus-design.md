@@ -15,23 +15,25 @@ Cut Navi (159k LoC) down to its core identity — a **multi-harness, multi-agent
 
 **Non-goals:** new features (closed list above; new features need a new spec), the greenfield rebuild itself, data migration changes beyond what cuts require, App.svelte rewrite (slims opportunistically as cuts remove its state; full restructure is the greenfield's job).
 
+Anything not named in either list (plugins, commands, context, non-proactive hooks, templates, …) is untouched by this effort.
+
 ## 2. Evidence base
 
-- Entanglement audit (2026-06-11): cut features total ~20k LoC of feature code + `navi-cloud`; **zero imports from keep features into cut features** — deletions are one-way safe. Highest-risk deletions: inbox (websocket message-loop surgery), channels (4 DB tables + Sidebar/App wiring), proactive-hooks (chat message flow hooks).
-- Preview audit: three parallel systems (native, container, port-manager) behind a 636-line proxy; port conflicts resolved by LLM calls (`port-fixer.ts`, `port-manager-preview.ts` — ~870 LoC, 1–2s nondeterministic latency in the hot path).
-- Workflow audit: three overlapping schedulers (cron-scheduler 624 LoC, loop-manager 736 LoC, workflows routes) with in-memory `setTimeout`/`setInterval` as source of truth — schedules die on restart.
+- Entanglement audit (2026-06-11): cut features total ~20k LoC of feature code + `navi-cloud`; imports from keep features into cut features are limited to **one known counterexample** — `services/workflow-scheduler.ts` imports `createProjectInboxItem` from inbox-service (Wave 4 must remove that call site). All other deletions are one-way safe. Highest-risk deletions: inbox (websocket message-loop surgery + the workflow-scheduler call site), channels (4 DB tables + Sidebar/App wiring), proactive-hooks (chat message flow hooks).
+- Preview audit: three parallel systems (native, container, port-manager) behind a 636-line proxy; port conflicts resolved by LLM calls (`services/port-fixer.ts` 561 + `services/port-manager-preview.ts` 748 + `routes/port-manager-preview.ts` 143 ≈ 1.45k LoC, 1–2s nondeterministic latency in the hot path).
+- Workflow audit: **four** overlapping schedulers (cron-scheduler 624 LoC, loop-manager 736 LoC, workflow-scheduler 464 LoC, plus the workflows routes) with in-memory `setTimeout`/`setInterval` as source of truth — schedules die on restart.
 - Session-layer bugs already found while dogfooding (both fixed 2026-06-12, commits `0778212`, `9e424da`): model selection clobbered to NULL on query completion; context recall blind to tool content; compact-after-overflow self-defeating. These confirm the session layer needs the systematic pass in Phase 3.
 
 ## 3. Phase 1 — Demolition
 
-Delete in waves, cleanest first. Each wave: delete code → drop its DB tables/columns via migration → `bun run check` → boot + smoke test → commit. Orphaned tables are dropped, never abandoned.
+Delete in waves, cleanest first. Each wave: delete code → drop its DB tables/columns → `bun run check` → boot + smoke test → commit. Orphaned tables are dropped, never abandoned. Note for planning: the current DB layer (sql.js) has no migration framework — column drops on SQLite mean table rebuilds; the Phase 1 plan defines the drop mechanism (a one-shot cleanup on boot is acceptable; a full migration framework is the rebuild's job).
 
 | Wave | Features | Surgery |
 |---|---|---|
 | 1 | kanban, council, sessions-board, canvas-mode, project-canvas | rm -rf + registration lines (index.ts, App.svelte, RightPanel) |
 | 2 | comments (+comment-responder), email (+AGENTMAIL refs in auth.ts) | ~20 LoC each |
 | 3 | agent-builder, experimental-agents + self-healing-builds, E2B/cloud-execution (incl. `execution_mode`, `cloud_repo_url`, `cloud_branch`, `e2b_sandbox_id` session columns) | App.svelte state, websocket handler ~100 LoC, column migration |
-| 4 | proactive-hooks, channels + channel-inbox + whatsapp-sync (4 tables), inbox (`createProjectInboxItem` / `processAssistantInboxDirectives` in the websocket message loop) | one commit per feature; smoke test after each |
+| 4 | proactive-hooks, channels + channel-inbox + whatsapp-sync (4 tables), inbox (`createProjectInboxItem` / `processAssistantInboxDirectives` in the websocket message loop, plus the call site in `services/workflow-scheduler.ts`) | one commit per feature; smoke test after each |
 | 5 | `packages/navi-cloud`, dashboard feature, managed OAuth integrations layer | package removal + feature folders |
 
 Wave 4 items each get their own commit and manual chat smoke test because they touch the live message path. Exit: cut features gone, typecheck green, app boots, chat/terminal/git/skills work, STATUS.md + CLAUDE.md updated to match reality.
@@ -61,7 +63,7 @@ Exit: lifecycle + hierarchy + recall tests green; cross-backend spawn demonstrat
 
 ## 6. Phase 4 — Workflow engine rebuild
 
-One `workflow-engine` service replaces cron-scheduler, loop-manager, and the current workflow routes (all three deleted at the end of this phase).
+One `workflow-engine` service replaces the four overlapping systems — `services/cron-scheduler.ts`, `services/loop-manager.ts`, `services/workflow-scheduler.ts`, and `routes/workflows.ts`/`routes/cron.ts`/`routes/loops.ts` — all deleted at the end of this phase.
 
 - **Durability:** `next_run_at` persisted in `workflows`; timers are projections of DB state, re-armed on boot. Boot reconciliation handles missed runs per workflow `catch_up` policy (`skip` default | `run-once`).
 - **Triggers v1:** `schedule` (cron/interval/once), `manual`, `workflow-completed` (chaining with cycle detection), `webhook` (`POST /hooks/:workflowId`, per-workflow token). `file-change` and `git-event` deferred.
@@ -74,7 +76,7 @@ Exit: a cron workflow survives server restart; a chained workflow fires; a faili
 
 ## 7. Phase 5 — Preview fix
 
-Subtraction first: keep **native-preview** (dev-server spawn, framework detection, log buffer) and **preview-proxy**; delete container-preview, port-manager-preview, and port-fixer (the LLM port logic).
+Subtraction first: keep **native-preview** (dev-server spawn, framework detection, log buffer) and **preview-proxy**; delete the container path (`routes/container-preview.ts` and the container manager inside `services/preview/` — the rest of that directory stays), `routes/port-manager-preview.ts` + `services/port-manager-preview.ts`, and `services/port-fixer.ts` (the LLM port logic).
 
 - **Deterministic ports:** allocate from a configured range, persist per-project assignments, detect conflicts with `lsof` and fail with an actionable error (which process, which port, suggested action) instead of LLM arbitration.
 - **Visible failure states:** dev-server crash → panel shows last log lines + restart button, never a blank iframe. Reserved-port list derived from runtime config, not hardcoded.
