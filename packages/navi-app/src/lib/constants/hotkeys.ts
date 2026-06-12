@@ -1,7 +1,6 @@
 export interface Hotkey {
   key: string;
   action: string;
-  category?: "general" | "experimental";
 }
 
 export const HOTKEYS: Hotkey[] = [

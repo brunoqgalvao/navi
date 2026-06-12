@@ -338,7 +338,7 @@
   let newProjectPath = $state("");
   let newProjectQuickName = $state("");
   let defaultProjectsDir = $state("");
-  let projectCreationMode = $state<"quick" | "browse" | "agent" | "template">("quick");
+  let projectCreationMode = $state<"quick" | "browse" | "template">("quick");
   let editingProject = $state<Project | null>(null);
   let editProjectName = $state("");
   let editProjectPath = $state("");
@@ -1004,7 +1004,6 @@
       e.preventDefault();
       showSettings = true;
     }
-
   }
 
   let pendingPermissionRequest = $state<{ requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string } | null>(null);
@@ -4666,7 +4665,7 @@ Please walk me through the setup step by step. When I have the credentials, save
         </div>
         <div class="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
           {#each HOTKEYS as hotkey}
-            <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors {hotkey.category === 'experimental' ? 'bg-amber-50' : ''}">
+            <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors">
               <span class="text-sm text-gray-600">{hotkey.action}</span>
               <kbd class="px-2 py-1 text-xs font-mono bg-gray-100 border border-gray-200 rounded text-gray-700">{hotkey.key}</kbd>
             </div>
@@ -4678,8 +4677,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       </div>
     </div>
   {/if}
-
-
 
   <!-- CLAUDE.md Modal -->
   {#if showClaudeMdModal}
