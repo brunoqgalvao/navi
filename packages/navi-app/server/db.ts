@@ -1979,7 +1979,9 @@ export const sessions = {
   updateConversationPhase: (phase: string, id: string) =>
     run("UPDATE sessions SET conversation_phase = ? WHERE id = ?", [phase, id]),
   updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, inputTokens: number, outputTokens: number, updated_at: number, id: string) =>
-    run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
+    // COALESCE: a query/result that doesn't know the model or resume id must not erase
+    // the persisted values (explicit clearing goes through clearBackendSessionState).
+    run("UPDATE sessions SET claude_session_id = COALESCE(?, claude_session_id), model = COALESCE(?, model), total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
         [claude_session_id, model, cost, turns, inputTokens, outputTokens, updated_at, id]),
   delete: (id: string) => run("DELETE FROM sessions WHERE id = ?", [id]),
   togglePin: (id: string, pinned: boolean) =>

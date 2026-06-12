@@ -2157,6 +2157,9 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
   const project = projectId ? projects.get(projectId) : null;
   const workingDirectory = project?.path || process.cwd();
   const needsAutoTitle = session?.title === "New Chat" || session?.title === "New conversation";
+  // Queries that omit a model (agent children, workflows, reconnected clients)
+  // fall back to the session's persisted selection instead of the backend default.
+  const effectiveModel = model || session?.model || undefined;
   const adapter = getAdapter(backendId);
   const resumeId =
     adapter.supportsResume && session?.backend_session_id
@@ -2213,7 +2216,7 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
           : prompt || "",
       cwd: workingDirectory,
       sessionId: sessionId || crypto.randomUUID(),
-      model,
+      model: effectiveModel,
       resume: resumeId,
       permissionMode: isAutoApprove ? "auto" : "confirm",
       backendOptions: reasoningEffort ? { reasoningEffort } : undefined,
@@ -2251,7 +2254,7 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
           const msgId = crypto.randomUUID();
           const now = Date.now();
           messages.create(msgId, sessionId, "assistant", JSON.stringify(event.content), now);
-          sessions.updateClaudeSession(null, model || null, 0, 1, 0, 0, now, sessionId);
+          sessions.updateClaudeSession(null, effectiveModel || null, 0, 1, 0, 0, now, sessionId);
         }
       }
     }
