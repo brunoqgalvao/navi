@@ -48,17 +48,9 @@ import { handleIntegrationsRoutes } from "./routes/integrations";
 import { handleCredentialsRoutes } from "./routes/credentials";
 // Backend adapters (Claude, Codex, Gemini)
 import { handleBackendRoutes } from "./routes/backends";
-// Project Memory (for proactive hooks)
-import { handleMemoryRoutes } from "./routes/memory";
-// Proactive Hooks (cheap Haiku analysis)
-import { handleProactiveHooksRoutes } from "./routes/proactive-hooks";
 import { handleHooksRoutes } from "./routes/hooks";
 // Browser-use automation
 import { handleBrowserRoutes } from "./routes/browser";
-// Channels (cross-workspace agent collaboration)
-import { handleChannelRoutes } from "./routes/channels";
-// Channel Inbox (WhatsApp, Telegram, Email integrations)
-import { handleChannelInboxRoutes } from "./routes/channel-inbox";
 // Plugin Management
 import { handlePluginRoutes } from "./routes/plugins";
 // MCP Server Settings
@@ -469,14 +461,6 @@ const server = Bun.serve({
     response = await handleMarketplaceRoutes(url, method, req);
     if (response) return response;
 
-    // Memory routes (project memory for proactive hooks)
-    response = await handleMemoryRoutes(url, method, req);
-    if (response) return response;
-
-    // Proactive hooks routes (cheap Haiku analysis)
-    response = await handleProactiveHooksRoutes(url, method, req);
-    if (response) return response;
-
     // Hooks routes (lifecycle hooks from .claude/hooks/)
     response = await handleHooksRoutes(url, method, req);
     if (response) return response;
@@ -507,14 +491,6 @@ const server = Bun.serve({
 
     // Browser routes (browser-use)
     response = await handleBrowserRoutes(url, method, req);
-    if (response) return response;
-
-    // Channels routes (cross-workspace agent collaboration)
-    response = await handleChannelRoutes(url, method, req);
-    if (response) return response;
-
-    // Channel Inbox routes (WhatsApp, Telegram, Email)
-    response = await handleChannelInboxRoutes(url, method, req);
     if (response) return response;
 
     // Background process routes

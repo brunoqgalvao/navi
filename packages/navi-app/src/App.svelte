@@ -97,17 +97,6 @@
   import InfiniteLoopConfig from "./lib/components/InfiniteLoopConfig.svelte";
   import InfiniteLoopStatus from "./lib/components/InfiniteLoopStatus.svelte";
 
-  // Proactive Hooks - AI-powered suggestions (skill scout, error detector, memory builder)
-  import {
-    setupProactiveHooks,
-    onUserMessage as hookOnUserMessage,
-    onAssistantMessage as hookOnAssistantMessage,
-    startSessionTracking,
-    stopSessionTracking,
-    buildHookContext,
-    SuggestionPanel,
-  } from "./lib/features/proactive-hooks";
-
   import ProjectSettings from "./lib/components/ProjectSettings.svelte";
   import SearchModal from "./lib/components/SearchModal.svelte";
   import QuickSessionsPanel from "./lib/components/QuickSessionsPanel.svelte";
@@ -133,10 +122,7 @@
   import ProjectEmptyState from "./lib/components/ProjectEmptyState.svelte";
   import ProjectLanding from "./lib/components/ProjectLanding.svelte";
   import NewProjectModal from "./lib/components/NewProjectModal.svelte";
-  // Channels
-  import { currentChannelId } from "./lib/features/channels";
-  import { channelsEnabled, resourceMonitorEnabled } from "./lib/stores";
-  import ChannelView from "./lib/features/channels/components/ChannelView.svelte";
+  import { resourceMonitorEnabled } from "./lib/stores";
   import ProjectPermissionsModal from "./lib/components/ProjectPermissionsModal.svelte";
   import FeedbackModal from "./lib/components/FeedbackModal.svelte";
   import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
@@ -581,15 +567,6 @@
         }
       }
 
-      // Trigger proactive hooks after assistant responds
-      if (reason === "done") {
-        const msgs = $sessionMessages.get(sessionId) || [];
-        const lastMsg = msgs[msgs.length - 1];
-        if (lastMsg && lastMsg.role === "assistant") {
-          const proj = currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null;
-          hookOnAssistantMessage(lastMsg, msgs, sessionId, proj);
-        }
-      }
     },
     onCompactStart: (sessionId) => {
       compactingSessionsStore.update(set => {
@@ -841,10 +818,9 @@
   let showTerminal = $state(false);
   let showContext = $state(false);
   let showInbox = $state(false);
-  let showChannels = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context" | "inbox" | "shared-inbox" | "channels";
+  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context" | "inbox" | "shared-inbox";
   let rightPanelMode = $state<RightPanelMode>("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
@@ -1254,11 +1230,6 @@
         loadCostsAction(),
         loadMcpServers(), // Load MCP server states
       ]);
-
-      // Initialize proactive hooks (skill scout, error detector, memory builder)
-      setupProactiveHooks().then(() => {
-        // Proactive hooks setup complete
-      });
 
       client = new ClaudeClient();
       client.connect().then(() => {
@@ -1696,9 +1667,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     // Clear session-specific UI state when switching projects
     pendingPermissionRequest = null;
     pendingQuestion = null;
-
-    // Close any open channel when selecting a workspace
-    currentChannelId.set(null);
 
     session.setProject(project.id);
     session.setSession(null);
@@ -2859,10 +2827,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     };
     sessionMessages.addMessage(currentSessionId, userMessage);
 
-    // Trigger proactive hooks on user message
-    const projectForHooks = currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null;
-    hookOnUserMessage(userMessage, get(sessionMessages).get(currentSessionId) || [], currentSessionId, projectForHooks);
-
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
 
@@ -2967,10 +2931,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       timestamp: new Date(),
     };
     sessionMessages.addMessage(targetSessionId, userMsg);
-
-    // Trigger proactive hooks
-    const projForHooks = currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null;
-    hookOnUserMessage(userMsg, get(sessionMessages).get(targetSessionId) || [], targetSessionId, projForHooks);
 
     loadingSessions.update(s => { s.add(targetSessionId); return new Set(s); });
     sessionStatus.setRunning(targetSessionId, $session.projectId!);
@@ -3234,7 +3194,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     showTerminal = false;
     showContext = false;
     showInbox = false;
-    showChannels = false;
     previewSource = "";
     terminalInitialCommand = "";
   }
@@ -3269,7 +3228,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const panelMode = mode as RightPanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels;
+    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -3301,9 +3260,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         break;
       case "shared-inbox":
         showInbox = true;
-        break;
-      case "channels":
-        showChannels = true;
         break;
     }
     rightPanelMode = panelMode;
@@ -3718,18 +3674,6 @@ Please walk me through the setup step by step. When I have the credentials, save
 
 <Confetti trigger={showConfetti} onComplete={() => showConfetti = false} />
 
-<!-- Proactive Hooks Suggestions (skill scout, error detector, memory builder) -->
-{#if $session.sessionId}
-  <SuggestionPanel
-    sessionId={$session.sessionId}
-    getContext={() => buildHookContext(
-      $session.sessionId!,
-      $sessionMessages.get($session.sessionId!) || [],
-      currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null
-    )}
-  />
-{/if}
-
 {#if showOnboarding}
   <Onboarding onComplete={handleOnboardingComplete} />
 {/if}
@@ -3893,12 +3837,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       />
     {/if}
 
-    {#if $channelsEnabled && $currentChannelId}
-      <!-- Channel View -->
-      <ChannelView
-        onClose={() => currentChannelId.set(null)}
-      />
-    {:else if !currentProject}
+    {#if !currentProject}
       <WorkspaceHome
         projects={sidebarProjects}
         {recentChats}
@@ -4254,7 +4193,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   <!-- End Chat Container -->
 
   <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels}
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -4278,7 +4217,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         else if (mode === "preview-unified") showPreview = true;
         else if (mode === "context") showContext = true;
         else if (mode === "inbox" || mode === "shared-inbox") showInbox = true;
-        else if (mode === "channels") showChannels = true;
       }}
       onClose={closeRightPanel}
       onStartResize={startResizingRight}
