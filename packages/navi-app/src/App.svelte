@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, planMode, autoCompactEnabled, autoCompactMethod, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId, type ReasoningEffort, type AutoCompactMethod } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, planMode, autoCompactEnabled, autoCompactMethod, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type BackendId, type ReasoningEffort, type AutoCompactMethod } from "./lib/stores";
   import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill, type Workflow, type WorkflowGate, type WorkflowSchedule } from "./lib/api";
   import { mcpApi, type McpServer } from "./lib/features/mcp";
@@ -117,7 +117,6 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
-  import CloudExecutionStatus from "./lib/components/CloudExecutionStatus.svelte";
   import WorkflowMonitorView from "./lib/features/workflows/components/WorkflowMonitorView.svelte";
   import ContextWarning from "./lib/components/ContextWarning.svelte";
   import MergeModal from "./lib/components/MergeModal.svelte";
@@ -401,59 +400,6 @@
   let untilDoneIteration = $derived(currentUntilDone?.iteration ?? 0);
   let isInfiniteLoopMode = $derived(!!currentUntilDone?.loopId);
   let untilDoneMaxIterations = 10; // Default max iterations
-
-  // Cloud execution state
-  let cloudBranches = $state<string[]>([]);
-  let currentExecutionSettings = $derived(
-    $session.sessionId ? executionModeStore.get($session.sessionId, get(executionModeStore)) : { mode: "local" as ExecutionMode }
-  );
-  let executionMode = $derived(currentExecutionSettings.mode);
-  let cloudBranch = $derived(currentExecutionSettings.branch || "main");
-
-  // Current cloud execution status for the active session
-  let currentCloudExecution = $derived(
-    $session.sessionId ? cloudExecutionStore.get($session.sessionId, get(cloudExecutionStore)) : undefined
-  );
-  let showCloudStatus = $derived(
-    currentCloudExecution && !["completed", "failed"].includes(currentCloudExecution.stage)
-  );
-
-  // Load branches when project changes and it's a git repo
-  async function loadCloudBranches() {
-    if (!currentProjectIsGitRepo || !currentProject?.path) {
-      cloudBranches = [];
-      return;
-    }
-    try {
-      const { getBranches } = await import("./lib/features/git/api");
-      const branchData = await getBranches(currentProject.path);
-      cloudBranches = [branchData.current, ...branchData.local.filter(b => b !== branchData.current)];
-    } catch (e) {
-      cloudBranches = ["main"];
-    }
-  }
-
-  function handleExecutionModeChange(mode: ExecutionMode) {
-    const sessionId = $session.sessionId;
-    if (sessionId) {
-      // Get git remote URL for cloud execution
-      const repoUrl = currentProjectIsGitRepo ? getGitRemoteUrl() : undefined;
-      executionModeStore.setMode(sessionId, mode, repoUrl, cloudBranch);
-    }
-  }
-
-  function handleCloudBranchChange(branch: string) {
-    const sessionId = $session.sessionId;
-    if (sessionId) {
-      executionModeStore.setBranch(sessionId, branch);
-    }
-  }
-
-  function getGitRemoteUrl(): string | undefined {
-    // TODO: Get actual remote URL from git status
-    // For now, return undefined - the cloud executor will need the repo URL passed explicitly
-    return undefined;
-  }
 
   const messageHandler = useMessageHandler({
     getCurrentSessionId: () => $session.sessionId,
@@ -1327,32 +1273,7 @@
       client.onMessage((msg) => {
         messageHandler.handleMessage(msg);
 
-        // Handle cloud execution messages
-        if (msg.type === "cloud_execution_started") {
-          cloudExecutionStore.start(
-            msg.uiSessionId || "",
-            msg.executionId,
-            msg.repoUrl,
-            msg.branch
-          );
-        } else if (msg.type === "cloud_stage") {
-          cloudExecutionStore.setStage(msg.uiSessionId || "", msg.stage, msg.message);
-        } else if (msg.type === "cloud_output") {
-          cloudExecutionStore.addOutput(msg.uiSessionId || "", msg.data);
-        } else if (msg.type === "cloud_result") {
-          cloudExecutionStore.complete(
-            msg.uiSessionId || "",
-            msg.success,
-            msg.duration,
-            msg.estimatedCostUsd,
-            msg.error
-          );
-          // Clear loading state
-          loadingSessions.update(s => { s.delete(msg.uiSessionId || ""); return new Set(s); });
-        } else if (msg.type === "cloud_error") {
-          cloudExecutionStore.complete(msg.uiSessionId || "", false, 0, 0, msg.error);
-          loadingSessions.update(s => { s.delete(msg.uiSessionId || ""); return new Set(s); });
-        } else if (msg.type === "background_process_event") {
+        if (msg.type === "background_process_event") {
           // Forward background process events to the store for real-time updates
           backgroundProcessEvents.emit(msg as any);
         }
@@ -1806,10 +1727,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     try {
       const gitStatus = await getGitStatus(project.path);
       currentProjectIsGitRepo = gitStatus.isGitRepo;
-      // Load branches for cloud execution if it's a git repo
-      if (gitStatus.isGitRepo) {
-        loadCloudBranches();
-      }
     } catch (e) {
       currentProjectIsGitRepo = false;
     }
@@ -2949,9 +2866,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
 
-    // Get execution mode settings for this session
-    const execSettings = executionModeStore.get(currentSessionId, get(executionModeStore));
-
     // Extract @agent mention from the beginning of the message (e.g., "@coder add feature")
     // Agent must be at the start of the message, followed by space
     const agentMatch = messageContent.match(/^@(\w+)\s+/);
@@ -2983,10 +2897,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       reasoningEffort: effort,
       // Plan mode - Claude plans before acting
       planMode: get(planMode),
-      // Cloud execution options
-      executionMode: execSettings.mode,
-      cloudRepoUrl: execSettings.repoUrl,
-      cloudBranch: execSettings.branch,
     });
 
     if ($sessionHistoryContext.get(currentSessionId)) {
@@ -4097,25 +4007,6 @@ Please walk me through the setup step by step. When I have the credentials, save
               />
             {/if}
           {:else}
-            <!-- Cloud Execution Status -->
-            {#if currentCloudExecution}
-              <div class="px-4 max-w-4xl mx-auto">
-                <CloudExecutionStatus
-                  executionId={currentCloudExecution.executionId}
-                  stage={currentCloudExecution.stage}
-                  stageMessage={currentCloudExecution.stageMessage}
-                  repoUrl={currentCloudExecution.repoUrl}
-                  branch={currentCloudExecution.branch}
-                  outputLines={currentCloudExecution.outputLines}
-                  duration={currentCloudExecution.duration}
-                  estimatedCostUsd={currentCloudExecution.estimatedCostUsd}
-                  success={currentCloudExecution.success}
-                  error={currentCloudExecution.error}
-                  onCancel={() => stopGeneration()}
-                />
-              </div>
-            {/if}
-
             <!-- Child session sticky header (forks + agents). Escalation controls only for agents. -->
             {#if currentSessionHierarchy()?.hasParent && $session.sessionId}
               <div class="sticky top-0 z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
@@ -4295,9 +4186,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                     isNewChat={$session.isPending || !$session.sessionId || currentMessages.length === 0}
                     worktreeBranch={currentSessionData?.worktree_branch}
                     worktreeBaseBranch={currentSessionData?.worktree_base_branch}
-                    {executionMode}
-                    {cloudBranch}
-                    {cloudBranches}
                     onSubmit={sendMessage}
                     onStop={stopGeneration}
                     onPreview={openPreview}
@@ -4307,8 +4195,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                     onToggleUntilDone={toggleUntilDone}
                     onOpenInfiniteLoop={() => openInfiniteLoopConfig(inputText)}
                     {isInfiniteLoopMode}
-                    onExecutionModeChange={handleExecutionModeChange}
-                    onCloudBranchChange={handleCloudBranchChange}
                     onCreateWithWorktree={async (description, message) => {
                       const newSessionId = await createNewChatWithWorktree(description);
                       if (newSessionId && message.trim()) {

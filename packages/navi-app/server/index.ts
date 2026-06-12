@@ -53,8 +53,6 @@ import { handleMemoryRoutes } from "./routes/memory";
 // Proactive Hooks (cheap Haiku analysis)
 import { handleProactiveHooksRoutes } from "./routes/proactive-hooks";
 import { handleHooksRoutes } from "./routes/hooks";
-// Cloud Execution (E2B sandboxes)
-import { handleCloudExecutionRoutes } from "./routes/cloud-execution";
 // Browser-use automation
 import { handleBrowserRoutes } from "./routes/browser";
 // Channels (cross-workspace agent collaboration)
@@ -505,10 +503,6 @@ const server = Bun.serve({
 
     // Deploy routes (Navi Cloud)
     response = await handleDeployRoutes(url, method, req);
-    if (response) return response;
-
-    // Cloud Execution routes (E2B)
-    response = await handleCloudExecutionRoutes(url, method, req);
     if (response) return response;
 
     // Browser routes (browser-use)

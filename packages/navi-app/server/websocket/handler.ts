@@ -3,8 +3,7 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, sessionHierarchy, sessionDecisions, cloudExecutions, enabledSkills, skills as skillsDb, clarificationRequests, draftDeliverables, workflowRuns, workflows, type DraftDeliverable } from "../db";
-import { executeInCloud, type CloudExecutionStage } from "../services/e2b-executor";
+import { projects, sessions, messages, globalSettings, searchIndex, costEntries, pendingQuestions as pendingQuestionsDb, sessionHierarchy, sessionDecisions, enabledSkills, skills as skillsDb, clarificationRequests, draftDeliverables, workflowRuns, workflows, type DraftDeliverable } from "../db";
 import { sessionManager, type SessionEvent } from "../services/session-manager";
 import { captureStreamEvent, mergeThinkingBlocks, deleteStreamCapture } from "../services/stream-capture";
 import { generateChatTitle } from "../services/title-generator";
@@ -145,10 +144,6 @@ export interface ClientMessage {
   data?: string;
   cols?: number;
   rows?: number;
-  // Cloud execution fields
-  executionMode?: "local" | "cloud";
-  cloudRepoUrl?: string;
-  cloudBranch?: string;
 }
 
 interface ActiveProcess {
@@ -177,9 +172,6 @@ function clearPendingQuestion(requestId: string, clearFromDb: boolean = false) {
     pendingQuestionsDb.deleteByRequestId(requestId);
   }
 }
-
-// Track active cloud executions (sessionId -> executionId)
-const activeCloudExecutions = new Map<string, { executionId: string; ws: any; aborted: boolean }>();
 
 // Track active adapter sessions (sessionId -> backendId) for non-Claude backends
 // This allows us to call adapter.cancel() on abort for Codex/Gemini sessions
@@ -309,13 +301,6 @@ export function cleanupSessionState(sessionId: string) {
     childSessionWorkers.delete(sessionId);
   }
 
-  // Clean active cloud executions
-  const cloudExec = activeCloudExecutions.get(sessionId);
-  if (cloudExec) {
-    cloudExec.aborted = true;
-    activeCloudExecutions.delete(sessionId);
-  }
-
   // Clean stream capture
   deleteStreamCapture(sessionId);
 }
@@ -417,7 +402,6 @@ export function getMemoryStats() {
     pendingEscalations: pendingEscalations.size,
     childSessionWorkers: childSessionWorkers.size,
     connectedClients: connectedClients.size,
-    activeCloudExecutions: activeCloudExecutions.size,
     activeAdapterSessions: activeAdapterSessions.size,
   };
 }
@@ -3194,218 +3178,6 @@ The user will explicitly approve the plan before any execution begins.
   });
 }
 
-/**
- * Detect git remote URL from a local repo path
- */
-async function detectGitRemoteUrl(repoPath: string): Promise<string | null> {
-  try {
-    const { execSync } = await import("child_process");
-
-    // Try to get origin remote URL
-    const output = execSync("git remote get-url origin 2>/dev/null || git remote get-url $(git remote | head -1) 2>/dev/null", {
-      cwd: repoPath,
-      encoding: "utf-8",
-      timeout: 5000,
-    }).trim();
-
-    if (!output) return null;
-
-    // Convert SSH URLs to HTTPS for cloning in sandbox
-    // git@github.com:user/repo.git -> https://github.com/user/repo.git
-    if (output.startsWith("git@")) {
-      const match = output.match(/^git@([^:]+):(.+)$/);
-      if (match) {
-        return `https://${match[1]}/${match[2]}`;
-      }
-    }
-
-    return output;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Handle cloud execution via E2B sandbox
- */
-export async function handleCloudQuery(ws: any, data: ClientMessage) {
-  const { prompt, projectId, sessionId, model, cloudBranch } = data;
-  let { cloudRepoUrl } = data;
-
-  if (!sessionId || !prompt) {
-    safeSend(ws, { type: "error", error: "Missing sessionId or prompt for cloud execution" });
-    return;
-  }
-
-  const project = projectId ? projects.get(projectId) : null;
-
-  // Auto-detect git remote URL if not provided
-  if (!cloudRepoUrl && project?.path) {
-    try {
-      const detectedUrl = await detectGitRemoteUrl(project.path);
-      if (detectedUrl) {
-        cloudRepoUrl = detectedUrl;
-      }
-    } catch (e) {
-      console.warn(`[${sessionId}] Failed to auto-detect git remote:`, e);
-    }
-  }
-
-  // Get API key from auth resolution
-  const authResult = resolveNaviClaudeAuth(model);
-  const apiKey = authResult.overrides.apiKey || process.env.ANTHROPIC_API_KEY;
-
-  if (!apiKey) {
-    safeSend(ws, {
-      type: "error",
-      uiSessionId: sessionId,
-      error: "No Anthropic API key available for cloud execution",
-    });
-    return;
-  }
-
-  // Check for E2B API key
-  if (!process.env.E2B_API_KEY) {
-    safeSend(ws, {
-      type: "error",
-      uiSessionId: sessionId,
-      error: "E2B_API_KEY not configured. Add it to your environment to enable cloud execution.",
-    });
-    return;
-  }
-
-  // Create execution record
-  const executionId = crypto.randomUUID();
-  cloudExecutions.create(executionId, sessionId, cloudRepoUrl || null, cloudBranch || null);
-
-  // Track this execution
-  activeCloudExecutions.set(sessionId, { executionId, ws, aborted: false });
-
-  // Save user message
-  const msgId = crypto.randomUUID();
-  const now = Date.now();
-  messages.create(msgId, sessionId, "user", JSON.stringify(prompt), now);
-  searchIndex.indexMessage(msgId, sessionId, JSON.stringify(prompt), now);
-
-  // Update session to cloud mode
-  sessions.setExecutionMode(sessionId, "cloud", cloudRepoUrl, cloudBranch);
-
-  // Send initial status
-  safeSend(ws, {
-    type: "cloud_execution_started",
-    uiSessionId: sessionId,
-    executionId,
-    repoUrl: cloudRepoUrl,
-    branch: cloudBranch,
-  });
-
-  // Accumulator for streamed output
-  let outputBuffer = "";
-
-  try {
-    const result = await executeInCloud(
-      {
-        sessionId,
-        projectId: projectId || "",
-        prompt,
-        repoUrl: cloudRepoUrl,
-        branch: cloudBranch,
-        model,
-        anthropicApiKey: apiKey,
-      },
-      // onOutput callback - stream to client
-      (output, stream) => {
-        const exec = activeCloudExecutions.get(sessionId);
-        if (exec?.aborted) return;
-
-        outputBuffer += output;
-
-        safeSend(ws, {
-          type: "cloud_output",
-          uiSessionId: sessionId,
-          executionId,
-          stream,
-          data: output,
-        });
-      },
-      // onStage callback - update status
-      (stage, message) => {
-        const exec = activeCloudExecutions.get(sessionId);
-        if (exec?.aborted) return;
-
-        cloudExecutions.updateStatus(executionId, stage as any, message);
-
-        safeSend(ws, {
-          type: "cloud_stage",
-          uiSessionId: sessionId,
-          executionId,
-          stage,
-          message,
-        });
-      }
-    );
-
-    // Store the output as an assistant message
-    if (outputBuffer.trim()) {
-      const assistantMsgId = crypto.randomUUID();
-      messages.create(
-        assistantMsgId,
-        sessionId,
-        "assistant",
-        JSON.stringify([{ type: "text", text: outputBuffer }]),
-        Date.now()
-      );
-    }
-
-    // Update execution record
-    const syncedFilePaths = result.syncedFiles?.map(f => f.path) || [];
-    if (result.success) {
-      cloudExecutions.complete(
-        executionId,
-        result.exitCode,
-        result.modifiedFiles || [],
-        syncedFilePaths,
-        result.duration,
-        result.estimatedCostUsd
-      );
-      sessions.setE2bSandboxId(sessionId, result.sandboxId);
-    } else {
-      cloudExecutions.fail(executionId, result.error || "Unknown error", result.duration, result.estimatedCostUsd);
-    }
-
-    // Send result to client
-    safeSend(ws, {
-      type: "cloud_result",
-      uiSessionId: sessionId,
-      executionId,
-      success: result.success,
-      exitCode: result.exitCode,
-      modifiedFiles: result.modifiedFiles,
-      syncedFiles: syncedFilePaths,
-      duration: result.duration,
-      estimatedCostUsd: result.estimatedCostUsd,
-      error: result.error,
-    });
-
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`[${sessionId}] Cloud execution error:`, errorMessage);
-
-    const estimatedCost = (Date.now() - now) * 0.05 / 3600000; // E2B cost estimate
-    cloudExecutions.fail(executionId, errorMessage, Date.now() - now, estimatedCost);
-
-    safeSend(ws, {
-      type: "cloud_error",
-      uiSessionId: sessionId,
-      executionId,
-      error: errorMessage,
-    });
-
-  } finally {
-    activeCloudExecutions.delete(sessionId);
-  }
-}
-
 export function createWebSocketHandlers() {
   return {
     open(ws: any) {
@@ -3418,12 +3190,7 @@ export function createWebSocketHandlers() {
         const data: ClientMessage = JSON.parse(message.toString());
 
         if (data.type === "query" && data.prompt) {
-          // Route to cloud or local execution based on mode
-          if (data.executionMode === "cloud") {
-            handleCloudQuery(ws, data);
-          } else {
-            handleQueryWithProcess(ws, data);
-          }
+          handleQueryWithProcess(ws, data);
         } else if (data.type === "abort" && data.sessionId) {
           console.log(`[Abort] Abort requested for session ${data.sessionId}`);
           let abortedSomething = false;
@@ -3434,15 +3201,6 @@ export function createWebSocketHandlers() {
             console.log(`[Abort] Killing local process for ${data.sessionId}`);
             active.process.kill("SIGTERM");
             activeProcesses.delete(data.sessionId);
-            abortedSomething = true;
-          }
-          // Handle cloud execution abort
-          const cloudExec = activeCloudExecutions.get(data.sessionId);
-          if (cloudExec) {
-            console.log(`[Abort] Cancelling cloud execution for ${data.sessionId}`);
-            cloudExec.aborted = true;
-            cloudExecutions.cancel(cloudExec.executionId);
-            activeCloudExecutions.delete(data.sessionId);
             abortedSomething = true;
           }
           // Cancel adapter session (Codex/Gemini backends)
