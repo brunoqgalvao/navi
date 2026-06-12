@@ -40,8 +40,6 @@ export type ExtensionId =
   | "processes"
   | "preview"
   | "context"         // Session context visibility
-  | "inbox"           // Workspace inbox
-  | "shared-inbox"    // Cross-project shared inbox
   | "browser-preview"; // Browser-use live preview
 
 /**
@@ -56,8 +54,6 @@ export type PanelMode =
   | "processes"
   | "preview-unified"
   | "context"         // Context sidebar view
-  | "inbox"           // Workspace inbox view
-  | "shared-inbox"    // Cross-project shared inbox view
   | "browser-preview"; // Browser-use preview
 
 // =============================================================================

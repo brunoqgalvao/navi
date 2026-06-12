@@ -650,33 +650,6 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_work_item_events_session ON work_item_events(session_id);
   `);
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS inbox_items (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT,
-      status TEXT NOT NULL DEFAULT 'open',
-      priority TEXT NOT NULL DEFAULT 'medium',
-      source_agent_id TEXT,
-      source_session_id TEXT,
-      work_item_id TEXT,
-      requires_response INTEGER DEFAULT 0,
-      response_options TEXT,
-      metadata TEXT DEFAULT '{}',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      resolved_at INTEGER,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-      FOREIGN KEY (source_session_id) REFERENCES sessions(id) ON DELETE SET NULL,
-      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE SET NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_inbox_items_project ON inbox_items(project_id, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_inbox_items_status ON inbox_items(project_id, status);
-    CREATE INDEX IF NOT EXISTS idx_inbox_items_work_item ON inbox_items(work_item_id);
-  `);
-
   const purgedCompactSummaries = purgeCompactSummaryMessages();
   if (purgedCompactSummaries > 0) {
     console.log(`[DB] Removed ${purgedCompactSummaries} compact summary message(s) from persisted chat history`);
@@ -689,7 +662,7 @@ export async function initDb() {
 
 // One-shot cleanup of tables owned by features removed in the 2026-06 refocus.
 // No migration framework exists (rebuild-spec §6 owns that); DROP IF EXISTS is idempotent.
-const LEGACY_TABLES = ["kanban_cards", "message_comments", "cloud_executions", "channel_messages", "channel_threads", "channel_workspaces", "channels"];
+const LEGACY_TABLES = ["kanban_cards", "message_comments", "cloud_executions", "channel_messages", "channel_threads", "channel_workspaces", "channels", "inbox_items"];
 function dropLegacyTables() {
   for (const table of LEGACY_TABLES) {
     try { db.run(`DROP TABLE IF EXISTS ${table}`); } catch (e) { console.error(`drop ${table}:`, e); }
@@ -901,35 +874,6 @@ export interface WorkItemEvent {
   content: string | null;
   metadata: string | null;
   created_at: number;
-}
-
-export type InboxItemStatus = "open" | "acknowledged" | "resolved" | "dismissed";
-export type InboxItemPriority = "low" | "medium" | "high" | "urgent";
-export type InboxItemKind = "report" | "question" | "attention" | "approval" | "delivery";
-
-export interface InboxItem {
-  id: string;
-  project_id: string;
-  kind: InboxItemKind;
-  title: string;
-  body: string | null;
-  status: InboxItemStatus;
-  priority: InboxItemPriority;
-  source_agent_id: string | null;
-  source_session_id: string | null;
-  work_item_id: string | null;
-  requires_response: number;
-  response_options: string | null;
-  metadata: string | null;
-  created_at: number;
-  updated_at: number;
-  resolved_at: number | null;
-}
-
-export interface InboxItemWithProject extends InboxItem {
-  project_name: string | null;
-  project_path: string | null;
-  project_archived: number | null;
 }
 
 export interface Message {
@@ -1545,108 +1489,6 @@ export const workItemEvents = {
         event.created_at,
       ]
     ),
-};
-
-export const inboxItems = {
-  listByProject: (projectId: string) =>
-    queryAll<InboxItem>(
-      "SELECT * FROM inbox_items WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC",
-      [projectId]
-    ),
-  listAll: () =>
-    queryAll<InboxItemWithProject>(
-      `SELECT
-        inbox_items.*,
-        projects.name AS project_name,
-        projects.path AS project_path,
-        projects.archived AS project_archived
-      FROM inbox_items
-      LEFT JOIN projects ON projects.id = inbox_items.project_id
-      ORDER BY inbox_items.updated_at DESC, inbox_items.created_at DESC`
-    ),
-  get: (id: string) => queryOne<InboxItem>("SELECT * FROM inbox_items WHERE id = ?", [id]),
-  create: (item: InboxItem) =>
-    run(
-      `INSERT INTO inbox_items (
-        id, project_id, kind, title, body, status, priority, source_agent_id, source_session_id,
-        work_item_id, requires_response, response_options, metadata, created_at, updated_at, resolved_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        item.id,
-        item.project_id,
-        item.kind,
-        item.title,
-        item.body,
-        item.status,
-        item.priority,
-        item.source_agent_id,
-        item.source_session_id,
-        item.work_item_id,
-        item.requires_response,
-        item.response_options,
-        item.metadata ?? "{}",
-        item.created_at,
-        item.updated_at,
-        item.resolved_at,
-      ]
-    ),
-  update: (
-    id: string,
-    updates: Partial<
-      Pick<
-        InboxItem,
-        | "kind"
-        | "title"
-        | "body"
-        | "status"
-        | "priority"
-        | "source_agent_id"
-        | "source_session_id"
-        | "work_item_id"
-        | "requires_response"
-        | "response_options"
-        | "metadata"
-        | "resolved_at"
-      >
-    >
-  ) => {
-    const existing = inboxItems.get(id);
-    if (!existing) return;
-    run(
-      `UPDATE inbox_items SET
-        kind = ?,
-        title = ?,
-        body = ?,
-        status = ?,
-        priority = ?,
-        source_agent_id = ?,
-        source_session_id = ?,
-        work_item_id = ?,
-        requires_response = ?,
-        response_options = ?,
-        metadata = ?,
-        resolved_at = ?,
-        updated_at = ?
-      WHERE id = ?`,
-      [
-        updates.kind ?? existing.kind,
-        updates.title ?? existing.title,
-        updates.body === undefined ? existing.body : updates.body,
-        updates.status ?? existing.status,
-        updates.priority ?? existing.priority,
-        updates.source_agent_id === undefined ? existing.source_agent_id : updates.source_agent_id,
-        updates.source_session_id === undefined ? existing.source_session_id : updates.source_session_id,
-        updates.work_item_id === undefined ? existing.work_item_id : updates.work_item_id,
-        updates.requires_response === undefined ? existing.requires_response : updates.requires_response,
-        updates.response_options === undefined ? existing.response_options : updates.response_options,
-        updates.metadata === undefined ? existing.metadata : updates.metadata,
-        updates.resolved_at === undefined ? existing.resolved_at : updates.resolved_at,
-        Date.now(),
-        id,
-      ]
-    );
-  },
-  delete: (id: string) => run("DELETE FROM inbox_items WHERE id = ?", [id]),
 };
 
 export const projects = {

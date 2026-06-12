@@ -145,26 +145,6 @@ export const DEFAULT_EXTENSIONS: Record<string, Extension> = {
     defaultEnabled: true,
     defaultOrder: 7,
   },
-  inbox: {
-    id: "inbox",
-    name: "Inbox",
-    icon: "inbox",
-    description: "Action requests from workflows, agents, and prompts",
-    panelMode: "inbox",
-    requiresProject: true,
-    defaultEnabled: true,
-    defaultOrder: 8,
-  },
-  "shared-inbox": {
-    id: "shared-inbox",
-    name: "Shared Inbox",
-    icon: "inbox",
-    description: "Follow-ups waiting across all workspaces",
-    panelMode: "shared-inbox",
-    requiresProject: false,
-    defaultEnabled: true,
-    defaultOrder: 9,
-  },
 };
 
 /**

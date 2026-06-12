@@ -817,10 +817,9 @@
   let showGitPanel = $state(false);
   let showTerminal = $state(false);
   let showContext = $state(false);
-  let showInbox = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context" | "inbox" | "shared-inbox";
+  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context";
   let rightPanelMode = $state<RightPanelMode>("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
@@ -3193,7 +3192,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     showGitPanel = false;
     showTerminal = false;
     showContext = false;
-    showInbox = false;
     previewSource = "";
     terminalInitialCommand = "";
   }
@@ -3216,11 +3214,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
   }
 
-  function openInboxPanel() {
-    showInbox = true;
-    rightPanelMode = "inbox";
-  }
-
   /**
    * Handle extension toolbar clicks - toggles the corresponding panel
    */
@@ -3228,7 +3221,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const panelMode = mode as RightPanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox;
+    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -3254,12 +3247,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         break;
       case "context":
         showContext = true;
-        break;
-      case "inbox":
-        openInboxPanel();
-        break;
-      case "shared-inbox":
-        showInbox = true;
         break;
     }
     rightPanelMode = panelMode;
@@ -3786,7 +3773,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     onOpenSessionInNewWindow={openSessionInNewWindow}
     onOpenHomeInNewWindow={openHomeInNewWindow}
     onGoToProjectDashboard={() => session.setSession(null)}
-    onOpenInbox={openInboxPanel}
     bind:titleSuggestionRef
   />
 
@@ -4193,7 +4179,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   <!-- End Chat Container -->
 
   <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox}
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -4216,7 +4202,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         else if (mode === "terminal") showTerminal = true;
         else if (mode === "preview-unified") showPreview = true;
         else if (mode === "context") showContext = true;
-        else if (mode === "inbox" || mode === "shared-inbox") showInbox = true;
       }}
       onClose={closeRightPanel}
       onStartResize={startResizingRight}
@@ -4226,21 +4211,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       onTerminalSendToClaude={handleTerminalSendToClaude}
       onPreviewAskClaude={handlePreviewAskClaude}
       onElementInspected={handleElementInspected}
-      onNavigateToSession={(sessionId, prompt, autoSend) => {
-        // Navigate to the session
-        session.setSession($session.projectId!, sessionId);
-        // Close the right panel to focus on the chat
-        closeRightPanel();
-        // If there's a prompt, set it and optionally auto-send
-        if (prompt) {
-          if (autoSend) {
-            // Use message queue to ensure message is sent even if WS isn't ready yet
-            messageQueue.add({ sessionId, text: prompt, attachments: [] });
-          } else {
-            inputText = prompt;
-          }
-        }
-      }}
     />
   {/if}
 

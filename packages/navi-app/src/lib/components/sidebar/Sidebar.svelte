@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
   import { currentSession as session, isConnected, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems } from "../../stores";
-  import { api, agentsApi, type Agent as ProjectAgent, type InboxItem, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult, type Workflow, type WorkflowGate, type WorkflowSchedule } from "../../api";
+  import { api, agentsApi, type Agent as ProjectAgent, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult, type Workflow, type WorkflowGate, type WorkflowSchedule } from "../../api";
   import { getApiBase } from "../../config";
   import StarButton from "../StarButton.svelte";
   import TitleSuggestion from "../TitleSuggestion.svelte";
@@ -109,7 +109,6 @@
     onOpenSessionInNewWindow: (session: Session) => void;
     onOpenHomeInNewWindow: () => void;
     onGoToProjectDashboard?: () => void;
-    onOpenInbox?: () => void;
     titleSuggestionRef?: TitleSuggestion | null;
   }
 
@@ -182,7 +181,6 @@
     onOpenSessionInNewWindow,
     onOpenHomeInNewWindow,
     onGoToProjectDashboard,
-    onOpenInbox,
     titleSuggestionRef = $bindable(null),
   }: Props = $props();
 
@@ -198,10 +196,6 @@
   // Agent section collapsed state
   let projectAgents = $state<ProjectAgent[]>([]);
   let loadingProjectAgents = $state(false);
-  let projectInboxItems = $state<InboxItem[]>([]);
-  let loadingProjectInbox = $state(false);
-  let refreshingProjectInbox = $state(false);
-  let projectInboxError = $state<string | null>(null);
 
   // Sessions dropdown for collapsed sidebar
   let sessionsDropdownOpen = $state(false);
@@ -231,96 +225,6 @@
       projectAgents = [];
     } finally {
       loadingProjectAgents = false;
-    }
-  }
-
-  function parseInboxMetadata(value: string | null): Record<string, unknown> {
-    if (!value) return {};
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
-    } catch {
-      return {};
-    }
-  }
-
-  function inboxPriorityRank(priority: InboxItem["priority"]): number {
-    switch (priority) {
-      case "urgent":
-        return 3;
-      case "high":
-        return 2;
-      case "medium":
-        return 1;
-      case "low":
-      default:
-        return 0;
-    }
-  }
-
-  function inboxKindLabel(kind: InboxItem["kind"]): string {
-    switch (kind) {
-      case "approval":
-        return "Approval";
-      case "attention":
-        return "Attention";
-      case "delivery":
-        return "Delivery";
-      case "question":
-        return "Question";
-      case "report":
-      default:
-        return "Report";
-    }
-  }
-
-  function inboxPriorityDotClass(priority: InboxItem["priority"]): string {
-    switch (priority) {
-      case "urgent":
-        return "bg-rose-500 shadow-[0_0_0_3px_rgba(244,63,94,0.14)]";
-      case "high":
-        return "bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.16)]";
-      case "low":
-        return "bg-slate-400 shadow-[0_0_0_3px_rgba(148,163,184,0.12)]";
-      case "medium":
-      default:
-        return "bg-sky-500 shadow-[0_0_0_3px_rgba(14,165,233,0.14)]";
-    }
-  }
-
-  function inboxSourceLabel(item: InboxItem): string | null {
-    const metadata = parseInboxMetadata(item.metadata);
-    if (typeof metadata.workflowName === "string" && metadata.workflowName.trim()) {
-      return metadata.workflowName;
-    }
-    if (typeof metadata.sessionTitle === "string" && metadata.sessionTitle.trim()) {
-      return metadata.sessionTitle;
-    }
-    return null;
-  }
-
-  async function loadProjectInbox(projectId: string, initialLoad: boolean) {
-    if (initialLoad) {
-      loadingProjectInbox = true;
-      projectInboxError = null;
-    } else {
-      refreshingProjectInbox = true;
-    }
-
-    try {
-      const items = await api.inbox.list(projectId);
-      if (currentProject?.id !== projectId) return;
-      projectInboxItems = items;
-      projectInboxError = null;
-    } catch (e) {
-      if (currentProject?.id !== projectId) return;
-      projectInboxError = e instanceof Error ? e.message : "Failed to load inbox";
-    } finally {
-      if (currentProject?.id !== projectId) return;
-      loadingProjectInbox = false;
-      refreshingProjectInbox = false;
     }
   }
 
@@ -389,27 +293,6 @@
     loadingProjectAgents = false;
   });
 
-  $effect(() => {
-    const projectId = currentProject?.id;
-    if (!projectId) {
-      projectInboxItems = [];
-      projectInboxError = null;
-      loadingProjectInbox = false;
-      refreshingProjectInbox = false;
-      return;
-    }
-
-    projectInboxItems = [];
-    projectInboxError = null;
-    refreshingProjectInbox = false;
-    void loadProjectInbox(projectId, true);
-    const timer = setInterval(() => {
-      void loadProjectInbox(projectId, false);
-    }, 5000);
-
-    return () => clearInterval(timer);
-  });
-
   let filteredSessions = $derived.by(() => {
     const query = sidebarSearchQuery.trim();
     const sortOrder = $chatSortOrder;
@@ -462,17 +345,6 @@
   // Use centralized attention store for running/needs-input items
   let runningChats = $derived($attentionItems.runningSessions.map(item => item.session));
   let needsInputChats = $derived($attentionItems.needsInput.map(item => item.session));
-  let activeProjectInboxItems = $derived.by(() =>
-    projectInboxItems
-      .filter((item) => item.status === "open" || item.status === "acknowledged")
-      .toSorted((a, b) => {
-        const priorityDelta = inboxPriorityRank(b.priority) - inboxPriorityRank(a.priority);
-        if (priorityDelta !== 0) return priorityDelta;
-        return b.created_at - a.created_at;
-      })
-  );
-  let visibleProjectInboxItems = $derived.by(() => activeProjectInboxItems.slice(0, 3));
-
   // Build map of parent session -> children (forks + agents)
   let childrenByParent = $derived.by(() => {
     const map = new Map<string, Session[]>();
@@ -1777,102 +1649,6 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
           </button>
         </div>
-
-        <button
-          onclick={() => onOpenInbox?.()}
-          class={`group mb-4 w-full overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${projectInboxError ? "border-rose-200 bg-rose-50/80 hover:border-rose-300 dark:border-rose-500/20 dark:bg-rose-500/10 dark:hover:border-rose-500/30" : activeProjectInboxItems.length > 0 ? "border-amber-200/80 bg-gradient-to-br from-amber-50 via-white to-rose-50 hover:border-amber-300 hover:shadow-sm dark:border-amber-500/20 dark:bg-gradient-to-br dark:from-amber-500/10 dark:via-gray-900 dark:to-rose-500/10 dark:hover:border-amber-500/30" : "border-gray-200 bg-gray-50/90 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800/40 dark:hover:border-gray-600"}`}
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class={`flex h-8 w-8 items-center justify-center rounded-xl ${activeProjectInboxItems.length > 0 ? "bg-white text-amber-600 shadow-sm dark:bg-gray-900/70 dark:text-amber-300" : "bg-white text-gray-500 shadow-sm dark:bg-gray-900/70 dark:text-gray-300"}`}>
-                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-10 4h6" />
-                  </svg>
-                </span>
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Inbox</span>
-                    {#if refreshingProjectInbox && !loadingProjectInbox}
-                      <span class="text-[10px] text-gray-400 dark:text-gray-500">syncing</span>
-                    {/if}
-                  </div>
-                  <p class="mt-0.5 text-[12px] text-gray-600 dark:text-gray-300">
-                    {activeProjectInboxItems.length > 0
-                      ? "Requests waiting on you"
-                      : "Agents and workflows can leave requests here"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div class="flex items-center gap-2 shrink-0">
-              <span class={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${activeProjectInboxItems.length > 0 ? "bg-white text-amber-700 shadow-sm dark:bg-gray-900/70 dark:text-amber-200" : "bg-white text-gray-500 shadow-sm dark:bg-gray-900/70 dark:text-gray-300"}`}>
-                {activeProjectInboxItems.length}
-              </span>
-              <svg class="h-4 w-4 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-500 dark:text-gray-600 dark:group-hover:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          </div>
-
-          {#if projectInboxError}
-            <p class="mt-3 rounded-xl border border-rose-200/80 bg-white/80 px-3 py-2 text-[11px] text-rose-600 dark:border-rose-500/20 dark:bg-gray-900/50 dark:text-rose-300">
-              {projectInboxError}
-            </p>
-          {:else if loadingProjectInbox}
-            <div class="mt-3 space-y-2">
-              {#each Array(2) as _, index}
-                <div class="animate-pulse rounded-xl border border-white/80 bg-white/70 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40" data-inbox-skeleton={index}>
-                  <div class="h-2.5 w-16 rounded bg-gray-200 dark:bg-gray-700"></div>
-                  <div class="mt-2 h-3 w-40 rounded bg-gray-200/80 dark:bg-gray-700/80"></div>
-                </div>
-              {/each}
-            </div>
-          {:else if visibleProjectInboxItems.length === 0}
-            <div class="mt-3 rounded-xl border border-dashed border-white/80 bg-white/70 px-3 py-3 text-[12px] text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400">
-              No open inbox items.
-            </div>
-          {:else}
-            <div class="mt-3 space-y-2">
-              {#each visibleProjectInboxItems as item (item.id)}
-                {@const sourceLabel = inboxSourceLabel(item)}
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-900/45">
-                  <div class="flex items-start gap-2.5">
-                    <span class={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${inboxPriorityDotClass(item.priority)}`}></span>
-                    <div class="min-w-0 flex-1">
-                      <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="rounded-full bg-gray-900 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-white dark:bg-gray-100 dark:text-gray-900">
-                          {inboxKindLabel(item.kind)}
-                        </span>
-                        {#if item.requires_response}
-                          <span class="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
-                            Reply
-                          </span>
-                        {/if}
-                        {#if sourceLabel}
-                          <span class="truncate text-[10px] text-gray-500 dark:text-gray-400">
-                            {sourceLabel}
-                          </span>
-                        {/if}
-                      </div>
-
-                      <div class="mt-1 truncate text-[12px] font-medium text-gray-800 dark:text-gray-100">
-                        {item.title}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              {/each}
-
-              {#if activeProjectInboxItems.length > visibleProjectInboxItems.length}
-                <div class="text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                  +{activeProjectInboxItems.length - visibleProjectInboxItems.length} more in inbox
-                </div>
-              {/if}
-            </div>
-          {/if}
-        </button>
 
         <div class="flex items-center justify-between mb-2 px-1">
           <h3 class="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Chats</h3>

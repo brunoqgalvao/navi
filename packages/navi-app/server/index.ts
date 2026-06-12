@@ -63,7 +63,6 @@ import { handleResourceRoutes } from "./routes/resources";
 import { handleCronRoutes } from "./routes/cron";
 import { handleWorkflowRoutes } from "./routes/workflows";
 import { handleWorkItemRoutes } from "./routes/work-items";
-import { handleInboxItemRoutes } from "./routes/inbox-items";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -392,9 +391,6 @@ const server = Bun.serve({
 
     // Agent workspace routes
     response = await handleWorkItemRoutes(url, method, req);
-    if (response) return response;
-
-    response = await handleInboxItemRoutes(url, method, req);
     if (response) return response;
 
     // Dashboard routes (isolated feature)

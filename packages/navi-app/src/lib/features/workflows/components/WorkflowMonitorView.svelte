@@ -1,7 +1,7 @@
 <script lang="ts">
   import RelativeTime from "$lib/components/RelativeTime.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
-  import { api, type InboxItem, type Workflow, type WorkflowRun } from "$lib/api";
+  import { api, type Workflow, type WorkflowRun } from "$lib/api";
   import { sessionHierarchyApi } from "$lib/features/session-hierarchy/api";
   import {
     parseDeliverable,
@@ -64,7 +64,6 @@
   let runs = $state<WorkflowRun[]>([]);
   let tree = $state<SessionTreeNode | null>(null);
   let artifacts = $state<SessionArtifact[]>([]);
-  let inboxItems = $state<InboxItem[]>([]);
   let expandedRuns = $state<Set<string>>(new Set());
 
   function normalizeWhitespace(text: string): string {
@@ -93,18 +92,6 @@
 
   function flattenTree(node: SessionTreeNode): SessionTreeNode[] {
     return [node, ...node.children.flatMap(flattenTree)];
-  }
-
-  function parseJsonRecord(value: string | null): Record<string, unknown> {
-    if (!value) return {};
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
-    } catch {
-      return {};
-    }
   }
 
   function formatSchedule(schedule: Workflow["schedule"]): string {
@@ -178,20 +165,6 @@
     }
   }
 
-  function toneForInboxPriority(priority: InboxItem["priority"]): string {
-    switch (priority) {
-      case "urgent":
-        return "border-rose-500/30 bg-rose-500/10 text-rose-200";
-      case "high":
-        return "border-amber-500/30 bg-amber-500/10 text-amber-200";
-      case "low":
-        return "border-gray-800 bg-gray-900/70 text-gray-300";
-      case "medium":
-      default:
-        return "border-blue-500/30 bg-blue-500/10 text-blue-200";
-    }
-  }
-
   function openSession(sessionId: string | null | undefined) {
     if (!sessionId) return;
     onSelectSession?.(sessionId);
@@ -218,17 +191,6 @@
     }
   }
 
-  async function updateInboxStatus(item: InboxItem, status: InboxItem["status"]) {
-    try {
-      const updated = await api.inbox.update(item.id, { status });
-      inboxItems = inboxItems.map((candidate) =>
-        candidate.id === updated.id ? updated : candidate
-      );
-    } catch (err) {
-      error = err instanceof Error ? err.message : "Failed to update inbox item";
-    }
-  }
-
   async function loadMonitorData(initialLoad: boolean) {
     if (!workflow?.id) return;
     if (initialLoad) {
@@ -238,17 +200,15 @@
     }
 
     try {
-      const [runResponse, treeResponse, artifactResponse, inboxResponse] = await Promise.all([
+      const [runResponse, treeResponse, artifactResponse] = await Promise.all([
         api.workflows.runs(workflow.id, 24),
         sessionHierarchyApi.getSessionTree(workflow.rootSessionId),
         sessionHierarchyApi.getArtifacts(workflow.rootSessionId),
-        api.inbox.list(workflow.projectId),
       ]);
 
       runs = runResponse.runs;
       tree = treeResponse;
       artifacts = artifactResponse;
-      inboxItems = inboxResponse;
       error = null;
       lastLoadedAt = Date.now();
 
@@ -281,11 +241,6 @@
       map.set(child.id, child);
     }
     return map;
-  });
-
-  const workflowSessionIds = $derived.by(() => {
-    if (!tree) return new Set([workflow.rootSessionId]);
-    return new Set(flattenTree(tree).map((session) => session.id));
   });
 
   const runCards = $derived.by(() => {
@@ -373,18 +328,6 @@
       .slice(0, 8);
   });
 
-  const workflowInboxItems = $derived.by(() => {
-    return inboxItems
-      .filter((item) => {
-        if (!(item.status === "open" || item.status === "acknowledged")) return false;
-        const metadata = parseJsonRecord(item.metadata);
-        if (metadata.workflowId === workflow.id) return true;
-        return item.source_session_id ? workflowSessionIds.has(item.source_session_id) : false;
-      })
-      .sort((a, b) => b.updated_at - a.updated_at)
-      .slice(0, 6);
-  });
-
   const recentDeliverables = $derived.by(() => {
     return runCards
       .flatMap((card) => card.deliverables)
@@ -439,9 +382,6 @@
           </div>
           <p class="truncate text-xs text-gray-500">
             {formatSchedule(workflow.schedule)} &middot; {successRate}% health &middot; {runs.length} runs
-            {#if workflowInboxItems.length > 0}
-              &middot; {workflowInboxItems.length} inbox
-            {/if}
           </p>
         </div>
       </div>
@@ -483,76 +423,6 @@
       <div class="mb-4 rounded-lg border border-gray-700 bg-gray-800/50 px-4 py-2.5 text-sm text-gray-400">
         Workflow paused. Runs are preserved; the scheduler is idle.
       </div>
-    {/if}
-
-    {#if workflowInboxItems.length > 0}
-      <section class="mb-5">
-        <div class="mb-2 flex items-center justify-between">
-          <h2 class="text-[11px] font-semibold uppercase tracking-widest text-amber-400">Inbox Requests</h2>
-          <span class="text-[11px] text-gray-600">{workflowInboxItems.length} active</span>
-        </div>
-
-        <div class="space-y-3">
-          {#each workflowInboxItems as item (item.id)}
-            {@const metadata = parseJsonRecord(item.metadata)}
-            <div class="rounded-2xl border border-gray-800/70 bg-gray-900/40 p-4">
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${toneForInboxPriority(item.priority)}`}>
-                      {item.priority}
-                    </span>
-                    {#if item.requires_response}
-                      <span class="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-200">
-                        Response needed
-                      </span>
-                    {/if}
-                    {#if typeof metadata.workflowName === "string" && metadata.workflowName}
-                      <span class="rounded-full bg-gray-800 px-2 py-0.5 text-[10px] font-medium text-gray-400">
-                        {metadata.workflowName}
-                      </span>
-                    {/if}
-                  </div>
-                  <div class="mt-3 text-sm font-semibold text-white">{item.title}</div>
-                  {#if item.body}
-                    <div class="mt-2 text-sm leading-relaxed text-gray-300 wf-md wf-md-content">
-                      <Markdown content={item.body} />
-                    </div>
-                  {/if}
-                  <div class="mt-3 text-[11px] text-gray-500">
-                    Updated <RelativeTime timestamp={item.updated_at} />
-                  </div>
-                </div>
-
-                <div class="flex shrink-0 flex-col items-end gap-2">
-                  {#if item.source_session_id}
-                    <button
-                      onclick={() => openSession(item.source_session_id)}
-                      class="rounded-lg border border-gray-700 px-2.5 py-1 text-[11px] font-medium text-gray-300 transition hover:border-gray-600 hover:bg-gray-800 hover:text-white"
-                    >
-                      Open source
-                    </button>
-                  {/if}
-                  {#if item.status === "open"}
-                    <button
-                      onclick={() => void updateInboxStatus(item, "acknowledged")}
-                      class="rounded-lg border border-gray-700 px-2.5 py-1 text-[11px] font-medium text-gray-300 transition hover:border-gray-600 hover:bg-gray-800 hover:text-white"
-                    >
-                      Acknowledge
-                    </button>
-                  {/if}
-                  <button
-                    onclick={() => void updateInboxStatus(item, "resolved")}
-                    class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/15"
-                  >
-                    Resolve
-                  </button>
-                </div>
-              </div>
-            </div>
-          {/each}
-        </div>
-      </section>
     {/if}
 
     <!-- Attention items (only if any exist) -->

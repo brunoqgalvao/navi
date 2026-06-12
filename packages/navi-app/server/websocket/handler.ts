@@ -28,7 +28,6 @@ import {
 } from "../services/hook-executor";
 import { runQueryHooks } from "../services/query-hooks";
 import { initPhaseTracker, setPhaseUpdateBroadcast, type ConversationPhase } from "../services/phase-tracker";
-import { createProjectInboxItem, processAssistantInboxDirectives } from "../services/inbox-service";
 import { readFileSync } from "fs";
 import { homedir } from "os";
 // Infinite Loop Mode (Ralph Wiggum bot)
@@ -92,19 +91,6 @@ function logBunSpawnDiagnostics(
   writeDebugLog(message);
 }
 
-function broadcastInboxItemsCreated(count: number, firstTitle: string) {
-  const title = count === 1 ? `Inbox item created` : `${count} inbox items created`;
-  const message = count === 1 ? firstTitle : `Latest item: ${firstTitle}`;
-  broadcastToClients({
-    type: "ui_command",
-    command: "notification",
-    payload: {
-      title,
-      message,
-      type: "warning",
-    },
-  });
-}
 
 function workflowForSession(sessionId: string) {
   const session = sessions.get(sessionId);
@@ -2727,36 +2713,16 @@ The user will explicitly approve the plan before any execution begins.
             messages.markFinal(lastMainAssistantMsgId);
           }
 
-          let assistantContentForPostProcessing = msg.lastAssistantContent;
-          if (sessionId && projectId && msg.lastAssistantContent?.length > 0) {
-            const inboxResult = processAssistantInboxDirectives({
-              projectId,
-              sessionId,
-              messageId: lastMainAssistantMsgId,
-              content: msg.lastAssistantContent,
-            });
-
-            if (inboxResult.createdItems.length > 0) {
-              assistantContentForPostProcessing = Array.isArray(inboxResult.sanitizedContent)
-                ? inboxResult.sanitizedContent
-                : msg.lastAssistantContent;
-              broadcastInboxItemsCreated(
-                inboxResult.createdItems.length,
-                inboxResult.createdItems[0].title
-              );
-            }
-          }
-
-          if (sessionId && assistantContentForPostProcessing?.length > 0) {
+          if (sessionId && msg.lastAssistantContent?.length > 0) {
             searchIndex.indexMessage(
               crypto.randomUUID(),
               sessionId,
-              JSON.stringify(assistantContentForPostProcessing),
+              JSON.stringify(msg.lastAssistantContent),
               Date.now()
             );
 
             if (needsAutoTitle && prompt) {
-              generateChatTitle(prompt, assistantContentForPostProcessing, sessionId);
+              generateChatTitle(prompt, msg.lastAssistantContent, sessionId);
             }
           }
 
@@ -3105,27 +3071,9 @@ The user will explicitly approve the plan before any execution begins.
 
             const workflow = workflowForSession(sessionId);
             if (projectId && workflow) {
-              const item = createProjectInboxItem({
-                projectId,
-                sessionId,
-                source: "workflow-system",
-                dedupeKey: `workflow:${workflow.id}:runtime-error`,
-                item: {
-                  title: `Workflow failed: ${workflow.name}`,
-                  body: msg.error,
-                  kind: "attention",
-                  status: "open",
-                  priority: "high",
-                  requiresResponse: true,
-                  responseOptions: ["I fixed it", "Retry the workflow"],
-                  workItemId: null,
-                  metadata: {
-                    workflowId: workflow.id,
-                    workflowName: workflow.name,
-                  },
-                },
-              });
-              broadcastInboxItemsCreated(1, item.title);
+              // Inbox feature removed; keep workflow failures visible in logs.
+              // The workflow engine rebuild owns proper user notification.
+              console.error(`[Workflow] "${workflow.name}" (${workflow.id}) failed: ${msg.error}`);
             }
 
             // Run query hooks on error (fire-and-forget) - e.g., phase tracking
