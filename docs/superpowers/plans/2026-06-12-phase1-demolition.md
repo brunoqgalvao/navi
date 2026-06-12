@@ -34,7 +34,9 @@
 ```bash
 cd /Users/brunogalvao/Documents/dev-bruno/claude-code-local-ui
 git worktree add .worktrees/phase1-demolition -b phase1-demolition
-cd .worktrees/phase1-demolition && bun install
+cd .worktrees/phase1-demolition
+bun install
+bun install --cwd packages/navi-app   # root has NO workspaces field; app deps install separately (postinstall runs repair-sharp)
 ```
 
 (`.worktrees/` is already gitignored.)
@@ -63,7 +65,7 @@ echo "SMOKE OK"
 - [ ] **Step 3: Run it to verify it passes on the untouched tree**
 
 Run: `chmod +x packages/navi-app/scripts/smoke.sh && packages/navi-app/scripts/smoke.sh`
-Expected: `SMOKE OK`. (Note: the server reads the port from argv[2] / `Bun.env.PORT` — `server/index.ts` `PREFERRED_PORT`. The smoke DB is the real `~/.claude-code-ui/data.db`; smoke only does reads.)
+Expected: `SMOKE OK`. (Notes: the server reads the port from argv[2] / `Bun.env.PORT` — `server/index.ts` `PREFERRED_PORT`; `run-with-bun.mjs` is just a bun locator, plain `bun run server/index.ts 3777` is equivalent. The server silently bumps to the next port if 3777 is taken — kill anything on `$SMOKE_PORT` before starting. The smoke DB is the real `~/.claude-code-ui/data.db`; smoke only does reads.)
 
 - [ ] **Step 4: Commit**
 
@@ -78,7 +80,7 @@ git commit -m "chore: add API smoke script for demolition gates"
 - Delete: `server/routes/kanban.ts`, `src/lib/features/kanban/`
 - Modify: `server/index.ts`, `server/db.ts`, `src/App.svelte`, `src/lib/layout/RightPanel.svelte`, `src/lib/core/registries.ts` (extension entry, if present)
 
-- [ ] **Step 1: Inventory** — `grep -rn "kanban" --include="*.ts" --include="*.svelte" packages/navi-app/{src,server} -il` — note every hit; this list is your checklist.
+- [ ] **Step 1: Inventory** — `grep -rni "kanban" --include="*.ts" --include="*.svelte" packages/navi-app/src packages/navi-app/server` — note every hit; this list is your checklist.
 - [ ] **Step 2: Frontend** — remove KanbanPanel/KanbanBoard imports, state, panel-mode entries, and keyboard shortcuts from `App.svelte` and `RightPanel.svelte`; remove the `kanban` extension registration from `core/registries.ts` and its `DEFAULT_EXTENSIONS` entry.
 - [ ] **Step 3: Server** — remove `handleKanbanRoutes` import + dispatch from `server/index.ts`; delete `server/routes/kanban.ts`.
 - [ ] **Step 4: DB** — in `db.ts`: remove the `kanban_cards` CREATE TABLE and its helper object (grep `kanban` in db.ts). Add the one-shot cleanup (this scaffold is reused by later tasks):
@@ -94,7 +96,7 @@ function dropLegacyTables() {
 }
 ```
 
-Call `dropLegacyTables()` at the end of `initDb()` (after table creation), then `persist()` if that's the established pattern for schema changes in `initDb` (mirror what `initDb` already does after DDL).
+Insert the `dropLegacyTables()` call inside `initDb()` immediately before its final `saveDb()` call (that's the established persistence pattern after DDL).
 - [ ] **Step 5: Delete** — `rm -rf packages/navi-app/src/lib/features/kanban`
 - [ ] **Step 6: Verify** — inventory grep ≈ 0 non-test hits; `bun run check` 0 errors; `bun test server/ shared/` pass; `scripts/smoke.sh` → `SMOKE OK`.
 - [ ] **Step 7: Commit** — `git add -A && git commit -m "demolition: remove kanban"`
@@ -128,7 +130,7 @@ Identifiers: `comments`, `messageComments`, `commentResponder`, `handleCommentsR
 
 Identifiers: `email`, `agentmail`, `AGENTMAIL`, `browser-email-init`, `EmailPanel`. **Files:** Delete `server/routes/email.ts`, `src/lib/features/email/`, `src/lib/features/browser-email-init.ts`. Modify `server/index.ts`, `src/App.svelte` (incl. the `browser-email-init` onMount call), and `server/routes/auth.ts` (remove `AGENTMAIL_API_BASE` and its error message — auth.ts otherwise stays). No DB tables.
 **Do NOT touch:** `.claude/skills/navi-email` (external skill, unlisted = untouched), `mcp__navi-email` MCP references in skills/docs.
-- [ ] Steps 1–6
+- [ ] Steps 1–6 (the bare identifier `email` hits unrelated code — title-generator, auth flows, docs — verify each hit before editing)
 - [ ] Commit: `demolition: remove email/AgentMail feature`
 
 ## Chunk 2: Waves 3–4 (surgery)
@@ -142,35 +144,37 @@ Identifiers: `agent-builder`, `agentBuilder`, `AgentBuilder`, `showAgentBuilder`
 
 ### Task 8: Delete experimental agents + self-healing builds
 
-Identifiers: `experimental`, `experimentalAgents`, `selfHealing`, `self-healing`, `initExperimentalWebSocket`. **Files:** Delete `server/routes/experimental.ts`, `server/services/experimental-agents.ts`, `server/services/self-healing-builds.ts`, `src/lib/components/experimental/` (verify each component's consumers first — `GenerativeUI` is referenced from `AssistantMessage.svelte`; remove that render branch). Modify `server/index.ts` (route + `initExperimentalWebSocket`). No DB tables.
+Identifiers: `experimental`, `experimentalAgents`, `selfHealing`, `self-healing`, `initExperimentalWebSocket`. **Files:** Delete `server/routes/experimental.ts`, `server/services/experimental-agents.ts`, `server/services/self-healing-builds.ts`, and exactly three files from `src/lib/components/agents/`: `ExperimentalAgentsPanel.svelte`, `QuickAgentButtons.svelte`, `SelfHealingWidget.svelte` — the rest of that directory (`AgentCard`, `BrowserAgentCard`, `CodingAgentCard`, …) is kept multi-agent UI. Modify `server/index.ts` (route + `initExperimentalWebSocket`). No DB tables.
+**Do NOT touch:** `src/lib/components/experimental/GenerativeUI.svelte` — that's the `genui` message widget, part of the kept inline-widgets system, despite living in a folder named "experimental".
 - [ ] Steps 1–6 (the word `experimental` appears in comments/docs broadly — only delete the feature's code paths)
 - [ ] Commit: `demolition: remove experimental agents and self-healing builds`
 
 ### Task 9: Delete E2B / cloud execution
 
 Identifiers: `e2b`, `cloud-execution`, `cloudExecution`, `executeInCloud`, `execution_mode`, `e2b_sandbox_id`. **Files:** Delete `server/routes/cloud-execution.ts`, `server/services/e2b-executor.ts`. Modify `server/index.ts` and `server/websocket/handler.ts` (remove the `executeInCloud` import and the cloud-execution branch in the query flow, ~100 LoC — read the whole branch before cutting; the local-execution path must be the unconditional path afterward). Modify frontend hosts per inventory (execution-mode toggle UI if present).
-DB: add `cloud_executions` to `LEGACY_TABLES`, remove CREATE TABLE + helpers. **Leave the orphaned `sessions` columns (`execution_mode`, `cloud_repo_url`, `cloud_branch`, `e2b_sandbox_id`) in place** — SQLite column drops need table rebuilds; not worth it pre-rebuild. Add a `// orphaned by 2026-06 refocus` comment at the sessions CREATE TABLE.
+DB: add `cloud_executions` to `LEGACY_TABLES`, remove CREATE TABLE + helpers. **Leave the orphaned `sessions` columns (`execution_mode`, `cloud_repo_url`, `cloud_branch`, `e2b_sandbox_id`) in place** — SQLite column drops need table rebuilds; not worth it pre-rebuild. Specifically in `db.ts`: keep the ALTER TABLE migration lines and the TS type fields for these columns (mark with `// orphaned by 2026-06 refocus`), but delete the now-unused `UPDATE sessions` helper functions for them. These db.ts-only identifier hits are **exempt** from the zero-hit completion grep.
 - [ ] Steps 1–6 + manual read of the handler diff before committing (live chat path)
 - [ ] Commit: `demolition: remove E2B cloud execution`
 
 ### Task 10: Delete proactive-hooks
 
-Identifiers: `proactive-hooks`, `proactiveHooks`, `setupProactiveHooks`, `onUserMessage`, `onAssistantMessage`, `startSessionTracking`, `buildHookContext`, `SuggestionPanel`, `hooksEnabled`. **Files:** Delete `server/routes/proactive-hooks.ts`, `server/services/proactive-hooks.ts` (+ its memory service — check imports), `src/lib/features/proactive-hooks/`. Modify `server/index.ts`, `src/App.svelte` (8 imports + calls inside the chat message flow — remove call sites cleanly, keep surrounding flow intact), `src/lib/components/Settings.svelte` (`hooksEnabled` toggle).
-**Do NOT touch:** `.claude/hooks` lifecycle system (`server/routes/hooks.ts`, `services/hook-executor.ts`, `services/hook-loader.ts`, `services/query-hooks.ts`) — different feature, kept.
+Identifiers: `proactive-hooks`, `proactiveHooks`, `setupProactiveHooks`, `onUserMessage`, `onAssistantMessage`, `startSessionTracking`, `buildHookContext`, `SuggestionPanel`, `hooksEnabled`. **Files:** Delete `server/routes/proactive-hooks.ts`, `server/routes/memory.ts` (the "Project Memory" route exists solely for the Memory Builder proactive hook — registered in index.ts with that comment; it goes with this feature), `src/lib/features/proactive-hooks/`. Modify `server/index.ts` (both route registrations), `src/App.svelte` (8 imports + calls inside the chat message flow — remove call sites cleanly, keep surrounding flow intact), `src/lib/components/Settings.svelte` (`hooksEnabled` toggle).
+**Do NOT touch:** `.claude/hooks` lifecycle system (`server/routes/hooks.ts`, `services/hook-executor.ts`, `services/hook-loader.ts`, `services/query-hooks.ts`) — different feature, kept. `routes/skills.ts` `/api/skills/generate` (used by the Skill Scout hook) also stays — skills are kept.
 - [ ] Steps 1–6 + manually send a chat message in smoke-priority (the message flow was edited)
 - [ ] Commit: `demolition: remove proactive-hooks`
 
 ### Task 11: Delete channels + channel-inbox + WhatsApp sync
 
 Identifiers: `channel`, `channels`, `channelInbox`, `channel-inbox`, `whatsapp-sync`, `whatsappSync`, `channelProviders`, `currentChannelId`, `ChannelView`, `CreateChannelModal`. **Files:** Delete `server/routes/channels.ts`, `server/routes/channel-inbox.ts`, `server/services/channel-providers.ts`, `server/services/whatsapp-sync.ts`, `src/lib/features/channels/`, `src/lib/features/channel-inbox/`. Modify `server/index.ts`, `src/App.svelte`, `src/lib/components/sidebar/Sidebar.svelte`, `src/lib/layout/RightPanel.svelte`, `core/registries.ts` (channels extension entry).
-DB: add `channels`, `channel_workspaces`, `channel_threads`, `channel_messages` to `LEGACY_TABLES`; remove CREATE TABLEs + helpers.
+DB: add `channels`, `channel_workspaces`, `channel_threads`, `channel_messages` to `LEGACY_TABLES`; remove CREATE TABLEs + helpers. (The server handler is `handleChannelRoutes` — singular.)
 - [ ] Steps 1–6 (the singular `channel` hits WebSocket/BroadcastChannel code — verify each hit)
 - [ ] Commit: `demolition: remove channels, channel-inbox, whatsapp-sync`
 
 ### Task 12: Delete inbox (highest risk — websocket message loop)
 
 Identifiers: `inbox`, `inboxItems`, `inbox_items`, `createProjectInboxItem`, `processAssistantInboxDirectives`, `broadcastInboxItemsCreated`, `InboxPanel`. **Files:** Delete `server/routes/inbox-items.ts`, `server/services/inbox-service.ts` (+ `inbox-service.test.ts`), inbox frontend feature dir(s) (`src/lib/features/inbox/` — confirm name via inventory). Modify:
-- `server/websocket/handler.ts`: remove the inbox-directive parsing in the assistant message processing loop (`processAssistantInboxDirectives`, `createProjectInboxItem`, `broadcastInboxItemsCreated`). The sanitized-content variable feeds search indexing — after removal, index `msg.lastAssistantContent` directly. Read the whole block before cutting.
+- `server/websocket/handler.ts`: remove the inbox-directive parsing in the assistant message processing loop (`processAssistantInboxDirectives`, `createProjectInboxItem`, `broadcastInboxItemsCreated`). The sanitized-content variable (`assistantContentForPostProcessing`) feeds BOTH search indexing and `generateChatTitle` — after removal, feed `msg.lastAssistantContent` to both. Read the whole block before cutting.
+- `src/lib/features/workflows/components/WorkflowMonitorView.svelte` (KEPT feature — strip only its `inboxItems` references, leave the rest intact) and `src/lib/components/ProjectCoordinationPanel.svelte` (check consumers; strip inbox references).
 - `server/services/workflow-scheduler.ts`: remove the `createProjectInboxItem` import and its call site (replace with a `console.error`/notification if the call reported failures — read it first; the spec's reviewer flagged this exact spot).
 - `server/index.ts`, Sidebar/RightPanel/App.svelte wiring.
 DB: add `inbox_items` to `LEGACY_TABLES`; remove CREATE TABLE + helpers.
