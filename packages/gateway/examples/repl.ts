@@ -25,6 +25,8 @@ import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
 import { ClaudeBackend } from "../src/adapters/claude.js";
+import { CodexBackend } from "../src/adapters/codex.js";
+import type { AgentBackend } from "../src/types.js";
 import type { GatewayEvent } from "../src/events.js";
 import type { AgentSession, SessionOptions } from "../src/types.js";
 
@@ -74,12 +76,16 @@ function green(s: string): string {
 
 // ── Session setup ─────────────────────────────────────────────────────────────
 
-if (backendId !== "claude") {
-  console.error(red(`[repl] Backend '${backendId}' not supported yet. Only 'claude' is available.`));
+const BACKENDS: Record<string, AgentBackend> = {
+  claude: new ClaudeBackend(),
+  codex: new CodexBackend(),
+};
+
+const backend = BACKENDS[backendId];
+if (!backend) {
+  console.error(red(`[repl] Backend '${backendId}' not supported. Available: ${Object.keys(BACKENDS).join(", ")}`));
   process.exit(1);
 }
-
-const backend = new ClaudeBackend();
 
 const sessionOpts: SessionOptions = {
   cwd: path.resolve(cwdOpt),

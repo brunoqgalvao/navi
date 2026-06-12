@@ -20,3 +20,6 @@ export type {
 export { BackendRegistry } from "./registry.js";
 
 export { normalizeUsage, PRICE_TABLE, type PriceEntry, type NormalizeInput } from "./usage.js";
+
+export { ClaudeBackend, ClaudeSession } from "./adapters/claude.js";
+export { CodexBackend, CodexSession } from "./adapters/codex.js";
