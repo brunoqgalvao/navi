@@ -5,12 +5,16 @@
  *
  * AgentTree manages a hierarchy of agent sessions across any registered
  * backend. It enforces:
- *   - maxDepth: root is depth 0; spawning at depth >= maxDepth is rejected
+ *   - maxDepth: root is depth 0; child depth = parent.depth + 1.
+ *     With the default maxDepth=2: root(0) → child(1) → grandchild(2) are
+ *     allowed; attempting to spawn a great-grandchild (depth 3) is rejected.
+ *     In general, any spawn whose computed child depth > maxDepth is rejected.
  *   - maxChildren: max concurrent children per parent
  *   - costCeilingUsd: when accumulated cost across all agents exceeds this,
  *     all running children are cancelled
  *   - permission bubbling: child permission-request events are re-emitted via
  *     onRootEvent; respondToPermission routes back to the originating child
+ *     session only (unknown requestId is a no-op)
  */
 
 import { randomUUID } from "node:crypto";
@@ -65,7 +69,17 @@ export interface AgentResult {
   error?: string;
 }
 
+/**
+ * Options for constructing an AgentTree.
+ *
+ * NOTE: `onRootEvent` receives events (text-delta, permission-request, etc.)
+ * from all agents. The `textChunks` arrays inside each AgentNode and the
+ * `_agents` map accumulate for the entire lifetime of the tree. Callers own
+ * lifecycle management: call `cancelAll()` when done and discard the tree
+ * instance to release memory.
+ */
 export interface AgentTreeOptions {
+  /** Maximum child depth below root (root = depth 0). Default: 2. */
   maxDepth?: number;
   maxChildren?: number;
   costCeilingUsd?: number;
@@ -91,6 +105,18 @@ export class AgentTree {
   private _totalCostUsd = 0;
   private _ceilingExceeded = false;
 
+  /**
+   * Map from permission requestId → nodeId so respondToPermission can route
+   * precisely to the owning session without broadcasting.
+   */
+  private readonly _permissionOwner = new Map<string, string>();
+
+  /**
+   * Per-node active turn promise. Set while a turn is in-flight, cleared when
+   * the turn promise settles. Used to reject concurrent sendToAgent calls.
+   */
+  private readonly _activeTurns = new Map<string, Promise<void>>();
+
   constructor(registry: BackendRegistry, opts: AgentTreeOptions) {
     this._registry = registry;
     this._maxDepth = opts.maxDepth ?? 2;
@@ -104,6 +130,11 @@ export class AgentTree {
   // ── Public API ─────────────────────────────────────────────────────────────
 
   spawnAgent(opts: SpawnOptions): SpawnResult {
+    // Guard: refuse to spawn any new agents after cost ceiling is exceeded
+    if (this._ceilingExceeded) {
+      throw new Error("Cannot spawn: cost ceiling has been exceeded");
+    }
+
     const backend = this._registry.get(opts.backend);
 
     // Determine depth
@@ -117,7 +148,9 @@ export class AgentTree {
       depth = parent.depth + 1;
     }
 
-    // Enforce depth limit
+    // Enforce depth limit.
+    // child depth = parent.depth + 1 (root spawns produce depth 1).
+    // With default maxDepth=2: depths 1 and 2 are allowed; depth 3 is rejected.
     if (depth > this._maxDepth) {
       throw new Error(
         `Depth limit exceeded: cannot spawn at depth ${depth} (maxDepth=${this._maxDepth})`
@@ -209,13 +242,27 @@ export class AgentTree {
     const node = this._agents.get(id);
     if (!node) throw new Error(`Agent ${id} not found`);
     if (node.status !== "running") throw new Error(`Agent ${id} is not running`);
+    if (this._activeTurns.has(id)) {
+      throw new Error(`Agent ${id} already has a turn in-flight`);
+    }
     // Fire and forget follow-up turn
     void this._runTurn(node, message);
   }
 
+  /**
+   * Respond to a permission request from a child agent.
+   * Routes the decision precisely to the session that owns the requestId.
+   * Unknown requestIds are silently ignored (no-op).
+   */
   respondToPermission(requestId: string, decision: "allow" | "allow-session" | "deny"): void {
-    // Route to whichever agent has this pending permission
-    for (const node of this._agents.values()) {
+    const nodeId = this._permissionOwner.get(requestId);
+    if (nodeId === undefined) {
+      // Unknown requestId — no-op
+      return;
+    }
+    const node = this._agents.get(nodeId);
+    this._permissionOwner.delete(requestId);
+    if (node) {
       node.session.respondToPermission(requestId, decision);
     }
   }
@@ -239,17 +286,25 @@ export class AgentTree {
   }
 
   private async _runTurn(node: AgentNode, message: string): Promise<void> {
-    try {
-      const stream = node.session.send({ text: message });
-      for await (const evt of stream) {
-        this._handleChildEvent(node, evt);
+    const turnPromise = (async () => {
+      try {
+        const stream = node.session.send({ text: message });
+        for await (const evt of stream) {
+          this._handleChildEvent(node, evt);
+        }
+      } catch (err) {
+        if (node.status !== "cancelled") {
+          node.status = "error";
+          node.errorMessage = err instanceof Error ? err.message : String(err);
+        }
+      } finally {
+        // Clear active turn so subsequent sendToAgent calls are accepted
+        this._activeTurns.delete(node.id);
       }
-    } catch (err) {
-      if (node.status !== "cancelled") {
-        node.status = "error";
-        node.errorMessage = err instanceof Error ? err.message : String(err);
-      }
-    }
+    })();
+
+    this._activeTurns.set(node.id, turnPromise);
+    await turnPromise;
   }
 
   private _handleChildEvent(node: AgentNode, evt: GatewayEvent): void {
@@ -280,8 +335,9 @@ export class AgentTree {
         break;
 
       case "permission-request":
+        // Record which node owns this requestId for precise routing
+        this._permissionOwner.set(evt.requestId, node.id);
         // Bubble permission-request events to the root event handler
-        // The caller can respond via respondToPermission which routes back
         this._onRootEvent?.(evt);
         break;
 

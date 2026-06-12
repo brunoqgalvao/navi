@@ -25,16 +25,19 @@ type EventScript = GatewayEvent[] | ((sessionId: string) => GatewayEvent[]);
 
 interface FakeSession extends AgentSession {
   respondToPermissionCalls: Array<{ requestId: string; decision: PermissionDecision }>;
+  cancelCalled: boolean;
 }
 
 function makeSession(id: string, script: EventScript): FakeSession {
   const pendingPermissions = new Map<string, (decision: PermissionDecision) => void>();
   const respondToPermissionCalls: Array<{ requestId: string; decision: PermissionDecision }> = [];
+  let cancelCalled = false;
 
   const session: FakeSession = {
     id,
     backendSessionId: undefined,
     respondToPermissionCalls,
+    get cancelCalled() { return cancelCalled; },
     respondToPermission(requestId, decision) {
       respondToPermissionCalls.push({ requestId, decision });
       const resolve = pendingPermissions.get(requestId);
@@ -44,7 +47,7 @@ function makeSession(id: string, script: EventScript): FakeSession {
       }
     },
     async cancel() {
-      // noop for fake
+      cancelCalled = true;
     },
     async *send(_input: UserInput): AsyncIterable<GatewayEvent> {
       const events = typeof script === "function" ? script(id) : script;
@@ -227,6 +230,68 @@ describe("AgentTree", () => {
     expect(ids).toContain(id2);
   });
 
+  // ── Depth semantics ────────────────────────────────────────────────────────
+  // maxDepth=2 (default): root(0) → child(1) → grandchild(2) allowed;
+  // great-grandchild(3) rejected.
+
+  test("depth: default maxDepth=2 allows root→child→grandchild chain", async () => {
+    const backend = makeFakeBackend({ id: "claude" });
+    const registry = makeRegistry(backend);
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "acceptAll",
+      cwd: "/tmp",
+      // maxDepth defaults to 2
+    });
+
+    const { childId: rootId } = tree.spawnAgent({ backend: "claude", task: "root" });
+    const { childId: child1Id } = tree.spawnAgent({
+      backend: "claude",
+      task: "child",
+      parentId: rootId,
+    });
+    // grandchild at depth 2 — must succeed
+    const { childId: grandchildId } = tree.spawnAgent({
+      backend: "claude",
+      task: "grandchild",
+      parentId: child1Id,
+    });
+
+    expect(typeof grandchildId).toBe("string");
+
+    await waitForAgent(tree, rootId);
+    await waitForAgent(tree, child1Id);
+    await waitForAgent(tree, grandchildId);
+  });
+
+  test("depth: default maxDepth=2 rejects great-grandchild at depth 3", async () => {
+    const backend = makeFakeBackend({ id: "claude" });
+    const registry = makeRegistry(backend);
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "acceptAll",
+      cwd: "/tmp",
+      // maxDepth defaults to 2
+    });
+
+    const { childId: rootId } = tree.spawnAgent({ backend: "claude", task: "root" });
+    const { childId: child1Id } = tree.spawnAgent({
+      backend: "claude",
+      task: "child",
+      parentId: rootId,
+    });
+    const { childId: grandchildId } = tree.spawnAgent({
+      backend: "claude",
+      task: "grandchild",
+      parentId: child1Id,
+    });
+
+    // great-grandchild at depth 3 must be rejected
+    expect(() =>
+      tree.spawnAgent({ backend: "claude", task: "great-grandchild", parentId: grandchildId })
+    ).toThrow(/depth limit exceeded/i);
+
+    await waitForAgent(tree, rootId);
+  });
+
   test("depth limit: rejects spawn at depth > maxDepth", async () => {
     const backend = makeFakeBackend({ id: "claude" });
     const registry = makeRegistry(backend);
@@ -268,19 +333,8 @@ describe("AgentTree", () => {
   });
 
   test("children limit: rejects when parent already has maxChildren running", async () => {
-    // Use a slow script that stays running long enough
-    let resolveAll: () => void;
-    const allDone = new Promise<void>((r) => { resolveAll = r; });
-
-    const slowScript = (sessionId: string): GatewayEvent[] => {
-      // Return empty array — the session completes instantly, but we'll
-      // use immediate sessions to test the limit at spawn time
-      return [{ type: "done", sessionId, reason: "complete" }];
-    };
-
     // We need to keep children running; simplest: use a blocking script
     // Hack: override createSession to return a session that never ends
-    let sessionCount = 0;
     const neverEndingBackend: AgentBackend = {
       id: "claude",
       capabilities: () => ({
@@ -297,7 +351,6 @@ describe("AgentTree", () => {
       },
       createSession(_opts) {
         const id = randomUUID();
-        sessionCount++;
         return {
           id,
           backendSessionId: undefined,
@@ -331,6 +384,8 @@ describe("AgentTree", () => {
 
     await tree.cancelAll();
   });
+
+  // ── Cost ceiling ───────────────────────────────────────────────────────────
 
   test("cost ceiling cancels all agents when exceeded", async () => {
     const expensiveScript = (sessionId: string): GatewayEvent[] => [
@@ -368,6 +423,143 @@ describe("AgentTree", () => {
     expect(tree.totalCostUsd).toBeGreaterThan(0);
   });
 
+  test("cost ceiling: proves cancellation — both sessions cancelled when child A exceeds ceiling", async () => {
+    // child A: emits usage over ceiling then never ends (unless cancelled)
+    // child B: never ends (unless cancelled)
+    // After A's usage event pushes total over ceiling, cancelAll must be called,
+    // making both sessions' cancel() observed and both statuses "cancelled".
+
+    type TrackingSession = {
+      id: string;
+      backendSessionId: undefined;
+      respondToPermission: () => void;
+      cancel: () => Promise<void>;
+      send: (input: UserInput) => AsyncIterable<GatewayEvent>;
+      cancelCalled: boolean;
+    };
+
+    const sessions: TrackingSession[] = [];
+
+    let sessionIndex = 0;
+    const trackingBackend: AgentBackend = {
+      id: "claude",
+      capabilities: () => ({
+        streaming: true,
+        thinkingStream: false,
+        permissions: "callback",
+        resume: false,
+        mcp: false,
+        skills: "injected",
+        models: [],
+      }),
+      async detect() { return { installed: true, authed: true }; },
+      createSession(_opts) {
+        const myIndex = sessionIndex++;
+        const id = randomUUID();
+        let cancelCalled = false;
+
+        const session: TrackingSession = {
+          id,
+          backendSessionId: undefined,
+          get cancelCalled() { return cancelCalled; },
+          respondToPermission() {},
+          async cancel() { cancelCalled = true; },
+          async *send(_input: UserInput): AsyncIterable<GatewayEvent> {
+            if (myIndex === 0) {
+              // Session A: emit usage over ceiling, then block forever
+              yield {
+                type: "usage",
+                sessionId: id,
+                usage: {
+                  inputTokens: 100,
+                  outputTokens: 100,
+                  model: "fake-model",
+                  raw: {},
+                  costUsd: 10.0, // over the $5 ceiling
+                },
+              };
+              // Stream never ends on its own — waits for cancellation
+              await new Promise<void>(() => {});
+            } else {
+              // Session B: never ends
+              await new Promise<void>(() => {});
+            }
+          },
+        };
+
+        sessions.push(session);
+        return session;
+      },
+      resumeSession() { throw new Error("no resume"); },
+    };
+
+    const registry = new BackendRegistry();
+    registry.register(trackingBackend);
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "acceptAll",
+      cwd: "/tmp",
+      costCeilingUsd: 5.0,
+    });
+
+    const { childId: idA } = tree.spawnAgent({ backend: "claude", task: "expensive child A" });
+    const { childId: idB } = tree.spawnAgent({ backend: "claude", task: "never-ending child B" });
+
+    // Wait for the ceiling to trigger (session A emits usage immediately)
+    const start = Date.now();
+    while (Date.now() - start < 2000) {
+      const stA = tree.getAgentResult(idA).status;
+      const stB = tree.getAgentResult(idB).status;
+      if (stA === "cancelled" && stB === "cancelled") break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+
+    // Both statuses must be cancelled
+    expect(tree.getAgentResult(idA).status).toBe("cancelled");
+    expect(tree.getAgentResult(idB).status).toBe("cancelled");
+
+    // Both sessions' cancel() must have been called
+    expect(sessions[0]?.cancelCalled).toBe(true);
+    expect(sessions[1]?.cancelCalled).toBe(true);
+
+    // Total cost should reflect session A's usage
+    expect(tree.totalCostUsd).toBeGreaterThanOrEqual(10.0);
+  });
+
+  test("cost ceiling exceeded: spawnAgent throws after ceiling is exceeded", async () => {
+    const expensiveScript = (sessionId: string): GatewayEvent[] => [
+      {
+        type: "usage",
+        sessionId,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 100,
+          model: "fake-model",
+          raw: {},
+          costUsd: 10.0,
+        },
+      },
+      { type: "done", sessionId, reason: "complete" },
+    ];
+
+    const backend = makeFakeBackend({ id: "claude", scriptFn: expensiveScript });
+    const registry = makeRegistry(backend);
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "acceptAll",
+      cwd: "/tmp",
+      costCeilingUsd: 5.0,
+    });
+
+    const { childId } = tree.spawnAgent({ backend: "claude", task: "expensive task" });
+    await waitForAgent(tree, childId, 3000);
+
+    // Ceiling is now exceeded; next spawn must throw
+    expect(() =>
+      tree.spawnAgent({ backend: "claude", task: "should be rejected" })
+    ).toThrow(/cannot spawn.*cost ceiling/i);
+  });
+
+  // ── Permission routing ─────────────────────────────────────────────────────
+
   test("permission bubble: child permission-request reaches onRootEvent", async () => {
     const backend = makeFakeBackend({ id: "claude", scriptFn: permissionScript });
     const registry = makeRegistry(backend);
@@ -393,9 +585,62 @@ describe("AgentTree", () => {
     await waitForAgent(tree, childId, 3000);
   });
 
-  test("permission round-trip: respondToPermission routes back to originating session and run completes", async () => {
-    const backend = makeFakeBackend({ id: "claude", scriptFn: permissionScript });
-    const registry = makeRegistry(backend);
+  test("permission round-trip: respondToPermission routes to ONLY the owning child session", async () => {
+    // Two children, only child A emits a permission-request.
+    // After responding, only child A's session should have received the call —
+    // child B's session must have zero respondToPermission calls.
+
+    const permRequestId = "req-routing-test";
+
+    // A script that emits a permission-request then completes
+    const permScriptA = (sessionId: string): GatewayEvent[] => [
+      {
+        type: "permission-request",
+        sessionId,
+        requestId: permRequestId,
+        tool: "bash",
+        description: "run a command",
+        input: { command: "ls" },
+        options: ["allow", "allow-session", "deny"],
+      },
+      { type: "text-delta", sessionId, text: "ran the command" },
+      { type: "done", sessionId, reason: "complete" },
+    ];
+
+    // B script: plain success (no permission needed)
+    const plainScriptB = (sessionId: string): GatewayEvent[] => [
+      { type: "text-delta", sessionId, text: "done" },
+      { type: "done", sessionId, reason: "complete" },
+    ];
+
+    let sessionIdx = 0;
+    const sessions: FakeSession[] = [];
+
+    const mixedBackend: AgentBackend = {
+      id: "claude",
+      capabilities: () => ({
+        streaming: true,
+        thinkingStream: false,
+        permissions: "callback",
+        resume: false,
+        mcp: false,
+        skills: "injected",
+        models: [],
+      }),
+      async detect() { return { installed: true, authed: true }; },
+      createSession(_opts) {
+        const idx = sessionIdx++;
+        const id = randomUUID();
+        const script = idx === 0 ? permScriptA(id) : plainScriptB(id);
+        const sess = makeSession(id, script);
+        sessions.push(sess);
+        return sess;
+      },
+      resumeSession() { throw new Error("no resume"); },
+    };
+
+    const registry = new BackendRegistry();
+    registry.register(mixedBackend);
 
     const rootEvents: GatewayEvent[] = [];
     const tree = new AgentTree(registry, {
@@ -404,9 +649,10 @@ describe("AgentTree", () => {
       onRootEvent: (e) => rootEvents.push(e),
     });
 
-    const { childId } = tree.spawnAgent({ backend: "claude", task: "needs permission" });
+    const { childId: childA } = tree.spawnAgent({ backend: "claude", task: "needs perm" });
+    const { childId: childB } = tree.spawnAgent({ backend: "claude", task: "no perm" });
 
-    // Wait for the permission-request event to bubble up
+    // Wait for the permission-request to bubble up
     await new Promise<void>((resolve) => {
       const check = setInterval(() => {
         if (rootEvents.some((e) => e.type === "permission-request")) {
@@ -421,21 +667,41 @@ describe("AgentTree", () => {
     expect(permEvt).toBeDefined();
     expect(permEvt?.type).toBe("permission-request");
 
-    // Capture the requestId and respond via the tree
-    const requestId = (permEvt as Extract<GatewayEvent, { type: "permission-request" }>).requestId;
-    tree.respondToPermission(requestId, "allow");
+    // Respond via tree
+    tree.respondToPermission(permRequestId, "allow");
 
-    // The child run should complete now
-    await waitForAgent(tree, childId, 3000);
-    expect(tree.getAgentResult(childId).status).toBe("done");
+    // Wait for child A to complete
+    await waitForAgent(tree, childA, 3000);
+    await waitForAgent(tree, childB, 3000);
 
-    // The child's session should have received the decision
-    const childSession = backend.createdSessions[0] as FakeSession;
-    expect(childSession).toBeDefined();
-    expect(childSession.respondToPermissionCalls.length).toBeGreaterThan(0);
-    expect(childSession.respondToPermissionCalls[0]?.requestId).toBe(requestId);
-    expect(childSession.respondToPermissionCalls[0]?.decision).toBe("allow");
+    expect(tree.getAgentResult(childA).status).toBe("done");
+
+    // ONLY session A should have received respondToPermission call
+    const sessA = sessions[0]!;
+    const sessB = sessions[1]!;
+    expect(sessA.respondToPermissionCalls.length).toBeGreaterThan(0);
+    expect(sessA.respondToPermissionCalls[0]?.requestId).toBe(permRequestId);
+    expect(sessA.respondToPermissionCalls[0]?.decision).toBe("allow");
+
+    // Session B must NOT have received the call
+    expect(sessB.respondToPermissionCalls.length).toBe(0);
   });
+
+  test("respondToPermission: unknown requestId is a no-op (does not throw)", () => {
+    const backend = makeFakeBackend({ id: "claude" });
+    const registry = makeRegistry(backend);
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "acceptAll",
+      cwd: "/tmp",
+    });
+
+    // Should not throw for an unknown requestId
+    expect(() =>
+      tree.respondToPermission("nonexistent-req-id", "allow")
+    ).not.toThrow();
+  });
+
+  // ── permissionMode inheritance ─────────────────────────────────────────────
 
   test("permissionMode inheritance: child inherits parent's effective permissionMode", async () => {
     const backend = makeFakeBackend({ id: "claude" });
@@ -483,6 +749,60 @@ describe("AgentTree", () => {
 
     expect(backend.createdSessionOpts[0]?.permissionMode).toBe("prompt");
   });
+
+  // ── sendToAgent active-turn guard ─────────────────────────────────────────
+
+  test("sendToAgent: throws when a turn is already in-flight for that node", async () => {
+    // Session that never completes its first send
+    const neverEndingBackend: AgentBackend = {
+      id: "claude",
+      capabilities: () => ({
+        streaming: true,
+        thinkingStream: false,
+        permissions: "callback",
+        resume: false,
+        mcp: false,
+        skills: "injected",
+        models: [],
+      }),
+      async detect() { return { installed: true, authed: true }; },
+      createSession(_opts) {
+        const id = randomUUID();
+        return {
+          id,
+          backendSessionId: undefined,
+          respondToPermission() {},
+          async cancel() {},
+          async *send() {
+            // First turn: block forever (never yields done)
+            await new Promise<void>(() => {});
+          },
+        };
+      },
+      resumeSession() { throw new Error("no resume"); },
+    };
+
+    const registry = new BackendRegistry();
+    registry.register(neverEndingBackend);
+    const tree = new AgentTree(registry, {
+      defaultPermissionMode: "acceptAll",
+      cwd: "/tmp",
+    });
+
+    const { childId } = tree.spawnAgent({ backend: "claude", task: "initial task" });
+
+    // Give the first turn a moment to start
+    await new Promise((r) => setTimeout(r, 20));
+
+    // The initial turn is in-flight; attempting sendToAgent must throw
+    expect(() =>
+      tree.sendToAgent(childId, "follow-up message")
+    ).toThrow(/already has a turn in-flight/i);
+
+    await tree.cancelAll();
+  });
+
+  // ── Misc ───────────────────────────────────────────────────────────────────
 
   test("getAgentResult returns running while agent is still running", async () => {
     let sessionResolve: () => void;

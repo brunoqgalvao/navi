@@ -21,8 +21,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AgentTree } from "./tree.js";
-import type { McpServerConfig } from "../types.js";
-import type { BackendId } from "../types.js";
+import type { McpServerConfig, BackendId, SessionOptions } from "../types.js";
 
 // ── Tool schemas ──────────────────────────────────────────────────────────────
 
@@ -226,12 +225,18 @@ export function startSpawnControlServer(tree: AgentTree, port?: number): Control
         });
       }
 
+      // Only POST is supported
+      if (req.method !== "POST") {
+        return new Response(JSON.stringify({ error: "method not allowed" }), {
+          status: 405,
+          headers: { "content-type": "application/json", allow: "POST" },
+        });
+      }
+
       const url = new URL(req.url);
       let body: unknown = {};
       try {
-        if (req.method === "POST") {
-          body = await req.json();
-        }
+        body = await req.json();
       } catch {
         return new Response(JSON.stringify({ error: "invalid JSON" }), {
           status: 400,
@@ -335,5 +340,3 @@ export function spawnServerConfigFor(controlUrl: string, token: string): McpServ
   };
 }
 
-// Re-export for convenience from the control server
-import type { SessionOptions } from "../types.js";

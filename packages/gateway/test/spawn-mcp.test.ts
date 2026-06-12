@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { AgentTree } from "../src/spawn/tree.js";
-import { createSpawnMcpServer, startSpawnControlServer } from "../src/spawn/mcp-server.js";
+import { createSpawnMcpServer, startSpawnControlServer, spawnServerConfigFor } from "../src/spawn/mcp-server.js";
 import { BackendRegistry } from "../src/registry.js";
 import type {
   AgentBackend,
@@ -349,6 +349,10 @@ describe("createSpawnMcpServer (in-process)", () => {
       await waitFor(() => (capturedSession?.respondToPermissionCalls.length ?? 0) > 0, 1000);
       expect(capturedSession!.respondToPermissionCalls[0]?.requestId).toBe(permRequestId);
       expect(capturedSession!.respondToPermissionCalls[0]?.decision).toBe("allow");
+
+      // ONLY the owning session received the call — no other session was spawned
+      // in this test so we verify the call count is exactly 1
+      expect(capturedSession!.respondToPermissionCalls.length).toBe(1);
     } finally {
       await cleanup();
     }
@@ -471,5 +475,71 @@ describe("startSpawnControlServer", () => {
     } finally {
       ctrl.stop();
     }
+  });
+
+  test("GET /spawn with valid token returns 405", async () => {
+    const { tree } = makeTreeWithFakeBackend();
+    const ctrl = startSpawnControlServer(tree);
+    try {
+      const res = await fetch(`http://127.0.0.1:${ctrl.port}/spawn`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${ctrl.token}`,
+        },
+      });
+      expect(res.status).toBe(405);
+    } finally {
+      ctrl.stop();
+    }
+  });
+
+  test("non-POST methods return 405 before routing (HEAD, PUT, DELETE)", async () => {
+    const { tree } = makeTreeWithFakeBackend();
+    const ctrl = startSpawnControlServer(tree);
+    try {
+      for (const method of ["HEAD", "PUT", "DELETE"] as const) {
+        const res = await fetch(`http://127.0.0.1:${ctrl.port}/list`, {
+          method,
+          headers: { authorization: `Bearer ${ctrl.token}` },
+        });
+        expect(res.status).toBe(405);
+      }
+    } finally {
+      ctrl.stop();
+    }
+  });
+});
+
+// ── spawnServerConfigFor shape ────────────────────────────────────────────────
+
+describe("spawnServerConfigFor", () => {
+  test("returns config with correct name, command, args containing mcp-stdio.ts path, and env vars", () => {
+    const controlUrl = "http://127.0.0.1:34567";
+    const token = "test-token-abc";
+
+    const config = spawnServerConfigFor(controlUrl, token);
+
+    expect(config.name).toBe("navi-spawn");
+    expect(config.command).toBe("bun");
+
+    // args must be an array and contain the path to mcp-stdio.ts
+    expect(Array.isArray(config.args)).toBe(true);
+    const argsStr = config.args!.join(" ");
+    expect(argsStr).toContain("mcp-stdio.ts");
+
+    // env must contain both required variables
+    expect(config.env).toBeDefined();
+    expect(config.env!["NAVI_SPAWN_URL"]).toBe(controlUrl);
+    expect(config.env!["NAVI_SPAWN_TOKEN"]).toBe(token);
+  });
+
+  test("spawnServerConfigFor env contains different tokens for different calls", () => {
+    const config1 = spawnServerConfigFor("http://127.0.0.1:1111", "token-1");
+    const config2 = spawnServerConfigFor("http://127.0.0.1:2222", "token-2");
+
+    expect(config1.env!["NAVI_SPAWN_URL"]).toBe("http://127.0.0.1:1111");
+    expect(config2.env!["NAVI_SPAWN_URL"]).toBe("http://127.0.0.1:2222");
+    expect(config1.env!["NAVI_SPAWN_TOKEN"]).toBe("token-1");
+    expect(config2.env!["NAVI_SPAWN_TOKEN"]).toBe("token-2");
   });
 });

@@ -86,10 +86,22 @@ server.tool(
   "List all agents in the tree with their current status.",
   {},
   async () => {
-    const result = await callControl("/list", {});
-    return {
-      content: [{ type: "text" as const, text: JSON.stringify(result) }],
-    };
+    try {
+      const result = await callControl("/list", {});
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 );
 
@@ -98,10 +110,22 @@ server.tool(
   "Get the result of a spawned agent.",
   { id: z.string() },
   async (args) => {
-    const result = await callControl("/result", args);
-    return {
-      content: [{ type: "text" as const, text: JSON.stringify(result) }],
-    };
+    try {
+      const result = await callControl("/result", args);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 );
 
@@ -137,10 +161,22 @@ server.tool(
     decision: z.enum(["allow", "allow-session", "deny"]),
   },
   async (args) => {
-    const result = await callControl("/respond", args);
-    return {
-      content: [{ type: "text" as const, text: JSON.stringify(result) }],
-    };
+    try {
+      const result = await callControl("/respond", args);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 );
 
