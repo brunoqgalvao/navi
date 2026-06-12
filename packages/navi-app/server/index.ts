@@ -46,8 +46,6 @@ import { handleDashboardRoutes } from "./routes/dashboard";
 import { handleIntegrationsRoutes } from "./routes/integrations";
 // Credentials Management (API keys, tokens)
 import { handleCredentialsRoutes } from "./routes/credentials";
-// Experimental Features (Ensemble Consensus, Self-Healing, Experimental Agents)
-import { handleExperimentalRoutes, initExperimentalWebSocket } from "./routes/experimental";
 // Backend adapters (Claude, Codex, Gemini)
 import { handleBackendRoutes } from "./routes/backends";
 // Project Memory (for proactive hooks)
@@ -413,10 +411,6 @@ const server = Bun.serve({
     response = await handleDashboardRoutes(url, method, req);
     if (response) return response;
 
-    // Experimental features routes (Ensemble Consensus, Self-Healing, Agents)
-    response = await handleExperimentalRoutes(url, method, req);
-    if (response) return response;
-
     // Filesystem routes
     response = await handleFilesystemRoutes(url, method, req);
     if (response) return response;
@@ -596,9 +590,6 @@ addProcessEventListener((event: ProcessEvent) => {
     ...event,
   });
 });
-
-// Initialize experimental features WebSocket broadcasting
-initExperimentalWebSocket(broadcastToClients);
 
 // Initialize cron scheduler with WebSocket broadcast
 cronScheduler.init(broadcastToClients);

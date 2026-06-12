@@ -14,8 +14,4 @@ export const HOTKEYS: Hotkey[] = [
   { key: "Cmd/Ctrl + ,", action: "Open settings" },
   { key: "Escape", action: "Close panels" },
   { key: "?", action: "Show hotkeys help" },
-  // Experimental agents
-  { key: "Cmd/Ctrl + Shift + A", action: "Open agents panel", category: "experimental" },
-  { key: "Cmd/Ctrl + Shift + H", action: "Toggle self-healing", category: "experimental" },
-  { key: "Cmd/Ctrl + Shift + F", action: "Spawn Fix Errors agent", category: "experimental" },
 ];

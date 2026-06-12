@@ -142,7 +142,6 @@
   import FeedbackModal from "./lib/components/FeedbackModal.svelte";
   import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
-  import { ExperimentalAgentsPanel, SelfHealingWidget } from "./lib/components/agents";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
   import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
   import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
@@ -353,8 +352,6 @@
   let modelSelection = $state("");
   let lastSessionModel = $state("");
   let showSettings = $state(false);
-  let showExperimentalAgents = $state(false);
-
   let settingsInitialTab = $state<"api" | "permissions" | "claude-md" | "skills" | "features" | "analytics" | "mcp" | undefined>(undefined);
   let showProjectSettings = $state(false);
   let projectSettingsInitialTab = $state<"instructions" | "model" | "permissions" | "skills" | undefined>(undefined);
@@ -1008,19 +1005,6 @@
       showSettings = true;
     }
 
-    // Experimental agent shortcuts (Cmd/Ctrl + Shift + key)
-    if (e.shiftKey && isMod) {
-      if (e.key === 'A' || e.key === 'a') {
-        e.preventDefault();
-        showExperimentalAgents = !showExperimentalAgents;
-      } else if (e.key === 'H' || e.key === 'h') {
-        e.preventDefault();
-        toggleSelfHealing();
-      } else if (e.key === 'F' || e.key === 'f') {
-        e.preventDefault();
-        spawnQuickAgent('healer-agent');
-      }
-    }
   }
 
   let pendingPermissionRequest = $state<{ requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string } | null>(null);
@@ -3364,68 +3348,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
   }
 
-  // Experimental agent functions
-  async function toggleSelfHealing() {
-    if (!currentProject) {
-      showError({ message: "Select a project first" });
-      return;
-    }
-    try {
-      const res = await fetch(`${getServerUrl()}/api/experimental/healing/${currentProject.id}`);
-      const data = await res.json();
-
-      if (data.running) {
-        await fetch(`${getServerUrl()}/api/experimental/healing/stop`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: currentProject.id })
-        });
-        showSuccess("Self-Healing Stopped");
-      } else {
-        await fetch(`${getServerUrl()}/api/experimental/healing/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: currentProject.id })
-        });
-        showSuccess("Self-Healing Started", "Watching for build errors");
-      }
-    } catch (e: any) {
-      showError({ message: e.message });
-    }
-  }
-
-  async function spawnQuickAgent(agentType: string) {
-    if (!$session.sessionId) {
-      showError({ message: "Start a chat session first" });
-      return;
-    }
-
-    const tasks: Record<string, string> = {
-      "red-team": `Perform a security analysis of the current project at ${currentProject?.path || "."}. Look for vulnerabilities, injection risks, auth issues, and edge cases.`,
-      "healer-agent": `Run type check and fix any TypeScript or build errors in the project at ${currentProject?.path || "."}`,
-    };
-
-    try {
-      const res = await fetch(`${getServerUrl()}/api/experimental/agents/spawn`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: $session.sessionId,
-          agentType,
-          task: tasks[agentType] || "Analyze the codebase",
-          context: {}
-        })
-      });
-
-      if (!res.ok) throw new Error(await res.text());
-
-      const data = await res.json();
-      showSuccess("Agent Spawned", `${agentType} is working on your task`);
-    } catch (e: any) {
-      showError({ message: e.message });
-    }
-  }
-
   function openInboxPanel() {
     showInbox = true;
     rightPanelMode = "inbox";
@@ -4761,35 +4683,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     </div>
   {/if}
 
-  <!-- Experimental Agents Panel -->
-  {#if showExperimentalAgents}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30" onclick={() => showExperimentalAgents = false} role="dialog" aria-modal="true" tabindex="-1">
-      <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200" onclick={(e) => e.stopPropagation()}>
-        <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <div class="p-1.5 bg-amber-100 rounded-lg">
-              <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <h3 class="font-semibold text-sm text-gray-900">Experimental Agents</h3>
-            <span class="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">Beta</span>
-          </div>
-          <button onclick={() => showExperimentalAgents = false} class="p-1 text-gray-400 hover:text-gray-600 transition-colors">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <ExperimentalAgentsPanel />
-        {#if currentProject}
-          <div class="px-4 pb-4 border-t border-gray-100 pt-3">
-            <SelfHealingWidget />
-          </div>
-        {/if}
-      </div>
-    </div>
-  {/if}
 
 
   <!-- CLAUDE.md Modal -->
