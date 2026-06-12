@@ -105,6 +105,9 @@ export class JsonRpcClient {
   }
 
   private _handleLine(line: string): void {
+    if (process.env["NAVI_GATEWAY_DEBUG"] === "1") {
+      process.stderr.write(`[jsonrpc:recv] ${line}\n`);
+    }
     let msg: JsonRpcIncoming;
     try {
       msg = JSON.parse(line) as JsonRpcIncoming;
@@ -171,8 +174,12 @@ export class JsonRpcClient {
 
   private _send(obj: unknown): void {
     if (this._closed) return;
+    const line = JSON.stringify(obj) + "\n";
+    if (process.env["NAVI_GATEWAY_DEBUG"] === "1") {
+      process.stderr.write(`[jsonrpc:send] ${line}`);
+    }
     try {
-      this._proc.stdin!.write(JSON.stringify(obj) + "\n");
+      this._proc.stdin!.write(line);
     } catch {
       // Process may have died; ignore write errors
     }

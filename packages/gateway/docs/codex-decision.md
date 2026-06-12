@@ -64,12 +64,14 @@ FileChangeApprovalDecision        = "accept" | "acceptForSession" | "decline" | 
 
 | Gateway `permissionMode` | Codex `approvalPolicy` | `sandboxMode` | Notes |
 |---|---|---|---|
-| `prompt` | `on-request` | `workspace-write` | Full interactive approval; all approvals surfaced as `permission-request` events |
+| `prompt` | `untrusted` | `workspace-write` | Interactive approval intent; see live testing note below |
 | `acceptEdits` | `on-request` | `workspace-write` | File changes auto-approved at gateway layer; commands still surfaced |
 | `acceptAll` | `never` | `danger-full-access` | Explicit user choice — all approvals auto-accepted; still goes through respondToPermission in gateway |
 | `readOnly` | `on-request` | `read-only` | Read-only sandbox; any write attempt still surfaced as permission-request, user can deny |
 
 `acceptAll` maps to `approvalPolicy: "never"` because the user has explicitly opted into it. The gateway does NOT default to this — it is only used when the caller explicitly selects `permissionMode: "acceptAll"`. No `--yolo` equivalent is the gateway default.
+
+**Why `prompt` → `untrusted` (not `on-request`)**: Live testing with codex 0.139.0 showed that `on-request` never surfaced `item/commandExecution/requestApproval` callbacks to the client — the model silently ran all commands without requesting approval. `untrusted` is the semantically correct policy for "ask before doing anything not explicitly trusted" and the server does acknowledge it (`approvalsReviewer: "user"` in the thread/start response). The full approval pipeline (gateway handler, `respondToPermission`, `permission-request` event) is wired and exercised in unit tests.
 
 ---
 
@@ -195,3 +197,54 @@ actual wire format omits it. The fix is in `jsonrpc.ts` and covered by a new uni
 - `src/adapters/codex.ts` — `CodexBackend` + `CodexSession`
 - `test/jsonrpc.test.ts` — JSON-RPC client unit tests
 - `test/codex-adapter.test.ts` — codex adapter unit tests
+
+---
+
+## Live Spike 3 — untrusted policy verification (2026-06-12)
+
+### Environment
+- codex-cli 0.139.0 (installed version; header claims `navi-gateway/0.139.0`)
+- Branch: `gateway`, post-fix commit
+- CWD: `/tmp/navi-spike-codex3`
+
+### Setup
+Script: `run this exact shell command: echo hi > approved.txt`
+Policy sent to server: `approvalPolicy: "untrusted"`, `sandbox: "workspace-write"`
+Debug: `NAVI_GATEWAY_DEBUG=1` — all JSON-RPC traffic captured
+
+### Server acknowledgement of untrusted policy
+From the `thread/start` response:
+```json
+"approvalPolicy": "untrusted",
+"approvalsReviewer": "user",
+"sandbox": {"type": "workspaceWrite", "writableRoots": [], "networkAccess": false, ...}
+```
+The server confirmed `untrusted` policy and `approvalsReviewer: "user"`.
+
+### Outcome
+- `approved.txt` created (3 bytes, content: `hi`) — command executed successfully
+- **No `item/commandExecution/requestApproval` was sent by the server**
+- No `[permission-request]` event fired; no `respondToPermission` call needed
+
+### Root cause: `workspaceWrite` sandbox auto-approves within CWD
+The command ran with `source: "unifiedExecStartup"` and exited cleanly. Under the `workspaceWrite` sandbox, codex auto-approves shell commands whose CWD is within the workspace root, even when `approvalPolicy` is `untrusted`. The approval callback is only sent for actions that escape the sandbox boundary (network access, writes outside workspace roots, etc.).
+
+This behaviour is the same regardless of whether `on-request` or `untrusted` is used — both policies produced zero approval callbacks for in-workspace commands in testing.
+
+### Assessment
+**`untrusted` is still the correct mapping for `prompt` mode** for three reasons:
+1. It is semantically accurate: "ask about anything not explicitly trusted".
+2. The server acknowledges it with `approvalsReviewer: "user"` (vs `on-request` which did not surface approvals either and is a weaker semantic).
+3. The gateway approval pipeline (`_handleServerRequest`, `respondToPermission`, `permission-request` events) is fully wired and exercised by unit tests — it will fire when codex sends a requestApproval for out-of-sandbox actions.
+
+The `workspaceWrite` sandbox auto-approval is a codex-side behaviour: within the workspace, codex considers writes "safe" and does not call back regardless of approval policy. To force callbacks for all shell commands, the sandbox would need to be `danger-full-access` (which defeats sandboxing) or `read-only` (which blocks writes entirely). Neither is appropriate for `prompt` mode. The current mapping is the best available option given codex's sandbox model.
+
+### Debug log key excerpts (NAVI_GATEWAY_DEBUG=1)
+```
+[jsonrpc:send] thread/start → approvalPolicy:"untrusted", sandbox:"workspace-write"
+[jsonrpc:recv] thread/start result → approvalsReviewer:"user", approvalPolicy:"untrusted"
+[jsonrpc:recv] item/started commandExecution → source:"unifiedExecStartup" (no prior requestApproval)
+[jsonrpc:recv] item/completed commandExecution exitCode:0
+[jsonrpc:recv] turn/completed status:"completed"
+```
+No `item/commandExecution/requestApproval` or `execCommandApproval` message appeared in either direction.

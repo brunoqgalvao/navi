@@ -966,13 +966,11 @@ describe("CodexSession", () => {
 
     await sendPromise;
 
-    // Should get error + done{error} (process died unexpectedly)
-    // OR if no requests were pending, just closed → done{error} or done{complete}
     // The session has an outstanding turn/start pending request that will be rejected
+    // when the process closes — this is always an "error" done reason, not "cancelled".
     const doneEvt = events.find((e) => e.type === "done") as Extract<GatewayEvent, { type: "done" }> | undefined;
     expect(doneEvt).toBeDefined();
-    // Either error or cancelled is acceptable (process died, no graceful turn completion)
-    expect(["error", "cancelled"]).toContain(doneEvt!.reason);
+    expect(doneEvt!.reason).toBe("error");
   });
 });
 

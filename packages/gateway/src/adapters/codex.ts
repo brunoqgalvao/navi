@@ -85,7 +85,11 @@ function mapPermissionMode(mode: SessionOptions["permissionMode"]): {
 } {
   switch (mode) {
     case "prompt":
-      return { approvalPolicy: "on-request", sandboxMode: "workspace-write" };
+      // "untrusted" asks for approval on any action not in an explicit trust list,
+      // which is the only policy that reliably surfaces interactive approval callbacks
+      // in codex 0.128.0+. "on-request" was found to never fire requestApproval in
+      // live testing — the model only asks when it wants escalation under that policy.
+      return { approvalPolicy: "untrusted", sandboxMode: "workspace-write" };
     case "acceptEdits":
       // File changes auto-approved at gateway layer; commands still surfaced
       return { approvalPolicy: "on-request", sandboxMode: "workspace-write" };

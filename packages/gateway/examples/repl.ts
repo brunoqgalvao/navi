@@ -228,7 +228,14 @@ function handleEvent(evt: GatewayEvent, opts: HandlerOptions): void {
       break;
 
     case "permission-request":
+      // Always log permission-request events to stderr so live spike evidence is captured.
+      process.stderr.write(
+        yellow(
+          `[permission-request] tool=${evt.tool} requestId=${evt.requestId} description=${JSON.stringify(evt.description)}\n`
+        )
+      );
       if (opts.scriptMode && opts.onPermissionRequest) {
+        process.stderr.write(green(`[permission-request] auto-approving via respondToPermission\n`));
         opts.onPermissionRequest(evt.requestId);
       }
       break;
