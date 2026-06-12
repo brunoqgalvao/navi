@@ -21,7 +21,6 @@
     onPreview?: (path: string) => void;
     onQuoteText?: (text: string) => void;
     onForkWithQuote?: (text: string) => void;
-    onAskCouncil?: (text: string) => void;
   }
 
   let {
@@ -39,7 +38,6 @@
     onPreview,
     onQuoteText,
     onForkWithQuote,
-    onAskCouncil,
   }: Props = $props();
 
   let showDeleteConfirm = $state(false);
@@ -263,7 +261,6 @@
     selectedText={selectionMenu.text}
     onQuote={handleQuote}
     onForkWithQuote={handleForkWithQuote}
-    onAskCouncil={onAskCouncil}
     onClose={() => selectionMenu = null}
   />
 {/if}

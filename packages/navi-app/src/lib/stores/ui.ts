@@ -928,23 +928,3 @@ function createFileBrowserStore() {
 
 export const fileBrowserState = createFileBrowserStore();
 
-// Council modal state
-interface CouncilModalState {
-  open: boolean;
-  initialPrompt: string;
-}
-
-function createCouncilModalStore() {
-  const { subscribe, set, update } = writable<CouncilModalState>({
-    open: false,
-    initialPrompt: "",
-  });
-
-  return {
-    subscribe,
-    open: (prompt = "") => set({ open: true, initialPrompt: prompt }),
-    close: () => set({ open: false, initialPrompt: "" }),
-  };
-}
-
-export const councilModal = createCouncilModalStore();

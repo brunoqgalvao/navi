@@ -77,8 +77,6 @@ import { handleMcpRoutes } from "./routes/mcp";
 import { handleLoopRoutes } from "./routes/loops";
 // Resource Monitor (@experimental - disabled by default)
 import { handleResourceRoutes } from "./routes/resources";
-// LLM Council - Multi-model comparison
-import { handleCouncilRoutes } from "./routes/council";
 // Cron Scheduler - Scheduled tasks
 import { handleCronRoutes } from "./routes/cron";
 import { handleWorkflowRoutes } from "./routes/workflows";
@@ -400,10 +398,6 @@ const server = Bun.serve({
 
     // Resource Monitor routes (@experimental)
     response = await handleResourceRoutes(url, method, req);
-    if (response) return response;
-
-    // LLM Council routes (multi-model comparison)
-    response = await handleCouncilRoutes(url, method, req);
     if (response) return response;
 
     // Cron scheduler routes

@@ -146,8 +146,6 @@
   import { ExperimentalAgentsPanel, SelfHealingWidget } from "./lib/components/agents";
   import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
-  import { CouncilModal, CouncilPanel, councilStore, councilPanelOpen } from "./lib/features/council";
-  import { councilModal } from "./lib/stores/ui";
   import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
   import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
   import EscalationBanner from "./lib/features/session-hierarchy/components/EscalationBanner.svelte";
@@ -985,8 +983,6 @@
         showHotkeysHelp = false;
       } else if (showSettings) {
         showSettings = false;
-      } else if ($councilPanelOpen) {
-        councilStore.closePanel();
       } else if (showPreview || showFileBrowser) {
         closeRightPanel();
       } else if (currentSessionLoading) {
@@ -1016,10 +1012,6 @@
     } else if (e.key === 'g') {
       e.preventDefault();
       toggleGitPanel();
-    } else if (e.key === 'l') {
-      // Cmd/Ctrl+L - Toggle LLM Council panel
-      e.preventDefault();
-      councilStore.togglePanel();
     } else if (e.key === '/') {
       e.preventDefault();
       inputRef?.focus();
@@ -3271,17 +3263,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         window.open("https://github.com/anthropics/claude-code/issues", "_blank");
         return true;
 
-      case "council":
-        // Open LLM Council panel (multi-model comparison)
-        if (args) {
-          // If args provided, start a new conversation with that prompt
-          councilStore.newConversation(args);
-          councilStore.sendMessage(args);
-        } else {
-          councilStore.openPanel();
-        }
-        return true;
-
       default:
         return false;
     }
@@ -4092,7 +4073,7 @@ Please walk me through the setup step by step. When I have the credentials, save
   <!-- Main Content Area -->
   <div class="flex-1 flex min-w-0 min-h-0 overflow-hidden">
 
-  <!-- Chat + Council Split Container -->
+  <!-- Chat Container -->
   <div class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
 
   <!-- Chat Area -->
@@ -4340,10 +4321,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                 onMessageClick={handleMessageClick}
                 onQuoteText={quoteTextInChat}
                 onForkWithQuote={forkWithQuote}
-                onAskCouncil={(text) => {
-                  councilStore.newConversation(text);
-                  councilStore.sendMessage(text);
-                }}
                 onPermissionApprove={handlePermissionApprove}
                 onPermissionDeny={handlePermissionDeny}
                 onQuestionAnswer={handleQuestionAnswer}
@@ -4523,22 +4500,8 @@ Please walk me through the setup step by step. When I have the credentials, save
 
   </main>
 
-  <!-- Council Panel (Split View) -->
-  {#if $councilPanelOpen}
-    <div class="h-[40%] min-h-[200px] flex-shrink-0">
-      <CouncilPanel
-        onClose={() => councilStore.closePanel()}
-        onAdoptResponse={(text) => {
-          // Add the response text to the chat input
-          inputText = text;
-          councilStore.closePanel();
-        }}
-      />
-    </div>
-  {/if}
-
   </div>
-  <!-- End Chat + Council Split Container -->
+  <!-- End Chat + Split Container -->
 
   <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context / Email) -->
   {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels || showEmail}
@@ -5005,12 +4968,6 @@ Please walk me through the setup step by step. When I have the credentials, save
 <UpdateChecker />
 <ConnectivityBanner />
 
-<!-- LLM Council Modal -->
-<CouncilModal
-  open={$councilModal.open}
-  onClose={() => councilModal.close()}
-  initialPrompt={$councilModal.initialPrompt}
-/>
 
 <!-- Resource Monitor (floating button + modal) -->
 {#if $resourceMonitorEnabled}

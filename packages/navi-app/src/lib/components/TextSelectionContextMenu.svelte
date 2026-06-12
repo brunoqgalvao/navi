@@ -9,11 +9,10 @@
     onQuote: (text: string) => void;
     onForkWithQuote: (text: string) => void;
     onAddComment?: (text: string) => void;
-    onAskCouncil?: (text: string) => void;
     onClose: () => void;
   }
 
-  let { x, y, selectedText, onQuote, onForkWithQuote, onAddComment, onAskCouncil, onClose }: Props = $props();
+  let { x, y, selectedText, onQuote, onForkWithQuote, onAddComment, onClose }: Props = $props();
 
   let menuRef = $state<HTMLDivElement | null>(null);
   let adjustedX = $state(0);
@@ -58,11 +57,6 @@
 
   function handleAddComment() {
     onAddComment?.(selectedText);
-    onClose();
-  }
-
-  function handleAskCouncil() {
-    onAskCouncil?.(selectedText);
     onClose();
   }
 
@@ -128,15 +122,4 @@
     </button>
   {/if}
 
-  <!-- Ask LLM Council option -->
-  {#if onAskCouncil}
-    <button
-      onclick={handleAskCouncil}
-      class="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2.5 transition-colors"
-      role="menuitem"
-    >
-      <span class="w-4 h-4 flex items-center justify-center text-sm">🏛️</span>
-      Ask Council
-    </button>
-  {/if}
 </div>

@@ -50,7 +50,6 @@
     onMessageClick?: (e: MouseEvent) => void;
     onQuoteText?: (text: string) => void;
     onForkWithQuote?: (text: string) => void;
-    onAskCouncil?: (text: string) => void;
     onOpenSubagentSession?: (sessionId: string) => void;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
@@ -74,7 +73,6 @@
     onMessageClick,
     onQuoteText,
     onForkWithQuote,
-    onAskCouncil,
     onOpenSubagentSession,
     renderMarkdown,
     jsonBlocksMap = new Map(),
@@ -742,7 +740,6 @@
     onQuote={handleQuote}
     onForkWithQuote={handleForkWithQuote}
     onAddComment={messageId ? handleAddComment : undefined}
-    onAskCouncil={onAskCouncil}
     onClose={() => selectionMenu = null}
   />
 {/if}

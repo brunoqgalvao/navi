@@ -56,7 +56,6 @@
     onMessageClick?: (e: MouseEvent) => void;
     onQuoteText?: (text: string) => void;
     onForkWithQuote?: (text: string) => void;
-    onAskCouncil?: (text: string) => void;
     onPermissionApprove?: (approveAll?: boolean) => void;
     onPermissionDeny?: () => void;
     onQuestionAnswer?: (answers: Record<string, string | string[]>) => void;
@@ -111,7 +110,6 @@
     onMessageClick,
     onQuoteText,
     onForkWithQuote,
-    onAskCouncil,
     onPermissionApprove,
     onPermissionDeny,
     onQuestionAnswer,
@@ -456,7 +454,6 @@
               {onPreview}
               {onQuoteText}
               {onForkWithQuote}
-              {onAskCouncil}
             />
           {:else if msg.role === 'system'}
             {@const content = typeof msg.content === 'string' ? msg.content : ''}
@@ -480,7 +477,6 @@
               {onMessageClick}
               {onQuoteText}
               {onForkWithQuote}
-              {onAskCouncil}
               onOpenSubagentSession={openHierarchySessionById}
               {renderMarkdown}
               {jsonBlocksMap}
