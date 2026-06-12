@@ -149,7 +149,6 @@
   import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
   import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
   import EscalationBanner from "./lib/features/session-hierarchy/components/EscalationBanner.svelte";
-  import { SessionsBoard, type BoardSession } from "./lib/features/sessions-board";
   import { CanvasView } from "./lib/features/canvas-mode";
   import { fetchCommands, type CustomCommand } from "./lib/features/commands";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
@@ -358,8 +357,6 @@
   let lastSessionModel = $state("");
   let showSettings = $state(false);
   let showAgentBuilder = $state(false);
-  let showSessionsDashboard = $state(false);
-  let sessionsDashboardProjectId = $state<string | undefined>(undefined);
   let showCanvasMode = $state(false);
   let showExperimentalAgents = $state(false);
 
@@ -1018,17 +1015,6 @@
     } else if (e.key === ',') {
       e.preventDefault();
       showSettings = true;
-    } else if (e.key === 'd') {
-      e.preventDefault();
-      if (showSessionsDashboard) {
-        // Close
-        showSessionsDashboard = false;
-        sessionsDashboardProjectId = undefined;
-      } else {
-        // Open with current project context if in a project
-        sessionsDashboardProjectId = currentProject?.id;
-        showSessionsDashboard = true;
-      }
     }
 
     // Experimental agent shortcuts (Cmd/Ctrl + Shift + key)
@@ -4056,7 +4042,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     onOpenProjectInNewWindow={openProjectInNewWindow}
     onOpenSessionInNewWindow={openSessionInNewWindow}
     onOpenHomeInNewWindow={openHomeInNewWindow}
-    onOpenSessionsBoard={(projectId) => { sessionsDashboardProjectId = projectId; showSessionsDashboard = true; }}
     onOpenAgentBuilder={() => showAgentBuilder = true}
     onGoToProjectDashboard={() => session.setSession(null)}
     onOpenInbox={openInboxPanel}
@@ -4653,21 +4638,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   {#if showAgentBuilder}
     <div class="fixed inset-0 z-50 bg-white">
       <AgentBuilder onClose={() => showAgentBuilder = false} />
-    </div>
-  {/if}
-
-  {#if showSessionsDashboard}
-    <div class="fixed inset-0 z-50 bg-white dark:bg-gray-900">
-      <SessionsBoard
-        projectId={sessionsDashboardProjectId}
-        projectName={sessionsDashboardProjectId ? sidebarProjects.find(p => p.id === sessionsDashboardProjectId)?.name : undefined}
-        onClose={() => { showSessionsDashboard = false; sessionsDashboardProjectId = undefined; }}
-        onSessionSelect={(boardSession) => {
-          showSessionsDashboard = false;
-          sessionsDashboardProjectId = undefined;
-          goToSessionById(boardSession.projectId, boardSession.id);
-        }}
-      />
     </div>
   {/if}
 

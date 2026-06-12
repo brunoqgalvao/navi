@@ -43,7 +43,6 @@ import { handlePortFixerRoutes } from "./routes/port-fixer";
 import { handleBranchNameRoutes } from "./routes/branch-name";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 import { handleCommandsRoutes } from "./routes/commands";
-import { handleSessionsBoardRoutes } from "./routes/sessions-board";
 // Dashboard feature (isolated - remove import to disable)
 import { handleDashboardRoutes } from "./routes/dashboard";
 // OAuth Integrations (Google, GitHub, etc.)
@@ -593,10 +592,6 @@ const server = Bun.serve({
 
     // Commands routes (custom slash commands)
     response = await handleCommandsRoutes(url, method, req);
-    if (response) return response;
-
-    // Sessions board routes (dashboard view)
-    response = await handleSessionsBoardRoutes(url, method, req, activeProcesses, pendingPermissions);
     if (response) return response;
 
     // Ephemeral chat

@@ -111,7 +111,6 @@
     onOpenProjectInNewWindow: (project: Project) => void;
     onOpenSessionInNewWindow: (session: Session) => void;
     onOpenHomeInNewWindow: () => void;
-    onOpenSessionsBoard?: (projectId?: string) => void;
     onOpenAgentBuilder?: () => void;
     onGoToProjectDashboard?: () => void;
     onOpenInbox?: () => void;
@@ -188,7 +187,6 @@
     onOpenProjectInNewWindow,
     onOpenSessionInNewWindow,
     onOpenHomeInNewWindow,
-    onOpenSessionsBoard,
     onOpenAgentBuilder,
     onGoToProjectDashboard,
     onOpenInbox,
@@ -1707,10 +1705,6 @@
                           <button onclick={(e) => { e.stopPropagation(); onOpenProjectInNewWindow(proj); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                             Open in New Window
-                          </button>
-                          <button onclick={(e) => { e.stopPropagation(); onOpenSessionsBoard?.(proj.id); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path></svg>
-                            Sessions Board
                           </button>
                           <button onclick={(e) => { onToggleProjectArchive(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
