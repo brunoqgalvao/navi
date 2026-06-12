@@ -1,7 +1,7 @@
 # Navi Rebuild — Design Spec
 
 **Date:** 2026-06-10
-**Status:** Draft for review
+**Status:** Long-term plan, deferred. Near-term work follows `2026-06-12-navi-refocus-design.md` (in-place stabilization), which adopts this spec's gateway and workflow designs so the eventual rebuild port shrinks.
 **Owner:** Bruno Galvão
 
 ## 1. Goal
