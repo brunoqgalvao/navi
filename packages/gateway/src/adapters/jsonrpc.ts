@@ -9,8 +9,7 @@
  * Framing: each JSON-RPC message is one UTF-8 line terminated by \n.
  */
 
-import { randomUUID } from "crypto";
-import type { ChildProcess } from "child_process";
+import type { ChildProcess } from "node:child_process";
 
 // ── JSON-RPC 2.0 wire types ───────────────────────────────────────────────────
 
@@ -85,8 +84,23 @@ export class JsonRpcClient {
     });
 
     proc.on("error", (err) => {
+      // Mark closed before rejecting so subsequent request() calls fail immediately
+      this._closed = true;
       this._rejectAll(err);
+      for (const w of this._closeWaiters) w();
+      this._closeWaiters = [];
     });
+
+    // Drain stderr to prevent the 64 KB pipe-buffer from stalling the child process.
+    if (proc.stderr) {
+      if (process.env["NAVI_GATEWAY_DEBUG"] === "1") {
+        proc.stderr.on("data", (chunk: Buffer | string) => {
+          process.stderr.write(chunk);
+        });
+      } else {
+        proc.stderr.resume();
+      }
+    }
   }
 
   private _onClose(): void {

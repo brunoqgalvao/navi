@@ -13,8 +13,8 @@
  *            and that is an explicit user opt-in.
  */
 
-import { randomUUID } from "crypto";
-import { spawn } from "child_process";
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import type { GatewayEvent, PermissionDecision } from "../events.js";
 import type {
   AgentBackend,
@@ -126,7 +126,6 @@ export class CodexSession implements AgentSession {
   /** tools the user has allowed for the duration of this session */
   private _sessionAllowedTools = new Set<string>();
 
-  private _currentChannel: EventChannel | null = null;
   private _currentTurnId: string | null = null;
   private _rpc: JsonRpcClient | null = null;
 
@@ -163,31 +162,19 @@ export class CodexSession implements AgentSession {
   async cancel(): Promise<void> {
     this._cancelled = true;
 
-    // Reject all pending permissions (server will get an error response)
+    // Settle all pending permission promises (cancel = deny) and respond to server
     for (const [, perm] of this._pendingPermissions) {
-      // Send "cancel" decision to codex so it doesn't hang
+      // Resolve the gateway-side promise so the handler unblocks and doesn't leak
+      perm.resolve("deny");
+      // Send "cancel" decision to codex so it doesn't hang waiting for approval
       if (this._rpc && !this._rpc.isClosed) {
-        const codexDecision = perm.isFileChange
-          ? { decision: "cancel" }
-          : { decision: "cancel" };
-        this._rpc.respond(perm.serverReqId, codexDecision);
+        this._rpc.respond(perm.serverReqId, { decision: "cancel" });
       }
     }
     this._pendingPermissions.clear();
 
-    // Interrupt current turn
-    if (this._rpc && !this._rpc.isClosed && this._currentTurnId && this._backendSessionId) {
-      try {
-        await this._rpc.request("turn/interrupt", {
-          threadId: this._backendSessionId,
-          turnId: this._currentTurnId,
-        });
-      } catch {
-        // Ignore: turn may have already completed
-      }
-    }
-
-    // Kill the process; the channel end is handled in _runTurn's finally block
+    // Kill the process first so any in-flight requests (including turn/interrupt) fail fast.
+    // The channel end is handled in _runTurn's finally block.
     if (this._rpc && !this._rpc.isClosed) {
       this._rpc.kill("SIGTERM");
     }
@@ -199,7 +186,6 @@ export class CodexSession implements AgentSession {
     this._pendingPermissions.clear();
 
     const channel = new EventChannel();
-    this._currentChannel = channel;
 
     const runTurn = this._runTurn(input, channel);
 
@@ -209,11 +195,13 @@ export class CodexSession implements AgentSession {
     }
 
     await runTurn;
-    this._currentChannel = null;
   }
 
   private async _runTurn(input: UserInput, channel: EventChannel): Promise<void> {
     let rpc: JsonRpcClient | null = null;
+    // Tracks whether a done event was already pushed (e.g. via turn/completed notification)
+    // to avoid double-done if cancel() races with normal completion.
+    let donePushed = false;
 
     try {
       // Spawn a fresh app-server process for this turn
@@ -224,6 +212,9 @@ export class CodexSession implements AgentSession {
       // Register notification handler
       rpc.onNotification((method, params) => {
         this._handleNotification(method, params, channel);
+        // Track if the notification handler pushed a done event (e.g. turn/completed)
+        // so we don't push a duplicate done if cancel() races with normal completion.
+        if (method === "turn/completed") donePushed = true;
       });
 
       // Register server-request handler (approval callbacks)
@@ -316,6 +307,12 @@ export class CodexSession implements AgentSession {
 
       // Wait for turn completion (driven by notifications via the channel)
       await rpc.waitClosed();
+      // If cancelled while waitClosed was pending (process killed by cancel()), emit done.
+      // Normal completion emits done{complete} via the turn/completed notification handler
+      // (tracked via donePushed). Guard against the race where both fire.
+      if (this._cancelled && !donePushed) {
+        channel.push({ type: "done", sessionId: this.id, reason: "cancelled" });
+      }
     } catch (err) {
       if (this._cancelled) {
         channel.push({ type: "done", sessionId: this.id, reason: "cancelled" });

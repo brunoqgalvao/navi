@@ -4,7 +4,7 @@
  *
  * All functions are side-effect-free and unit-testable without spawning a process.
  *
- * Generated type imports come from codex-protocol.gen.ts (codex-cli 0.128.0).
+ * Types inlined from the app-server protocol; authoritative definitions in codex-protocol.gen.ts/.
  */
 
 import type { GatewayEvent, PermissionDecision } from "../events.js";
@@ -173,17 +173,18 @@ export function itemCompletedToEvents(
 
 /**
  * Translate a `thread/tokenUsage/updated` notification to a usage GatewayEvent.
+ * model may be undefined when the notification arrives before thread/start resolves.
  */
 export function tokenUsageToEvent(
   usage: TokenUsage,
-  model: string,
+  model: string | undefined,
   sessionId: string
 ): GatewayEvent {
   const last = usage.last;
   return {
     type: "usage",
     sessionId,
-    usage: normalizeUsage(model, {
+    usage: normalizeUsage(model ?? "unknown", {
       inputTokens: last.inputTokens,
       outputTokens: last.outputTokens,
       cacheReadTokens: last.cachedInputTokens,

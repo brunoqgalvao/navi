@@ -4,7 +4,7 @@
  * Translation layer (claudeMessageToEvents) is pure and unit-tested.
  * ClaudeSession implements AgentSession using the SDK's query() function.
  */
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import {
   query as sdkQuery,
   type SDKMessage,

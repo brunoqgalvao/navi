@@ -274,6 +274,27 @@ describe("JsonRpcClient", () => {
     expect((written[0]!.result as { decision: string }).decision).toBe("accept");
   });
 
+  test("proc 'error' event: in-flight request rejects AND subsequent request() rejects immediately", async () => {
+    const proc = makeFakeProc();
+    const client = new JsonRpcClient(proc as never);
+
+    // Send a request that will never get a response
+    const inflight = client.request("hanging");
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Emit an "error" event as if the spawn failed
+    const spawnError = new Error("spawn ENOENT");
+    proc.emit("error", spawnError);
+
+    // The in-flight request should reject
+    await expect(inflight).rejects.toThrow();
+
+    // After the error, the client must be marked closed
+    // so a subsequent request() rejects immediately rather than hanging
+    const afterError = client.request("another");
+    await expect(afterError).rejects.toThrow();
+  });
+
   test("accepts non-conformant responses without jsonrpc field (codex app-server protocol)", async () => {
     // codex app-server omits "jsonrpc":"2.0" from all its responses and notifications.
     // The client must accept these rather than silently dropping them.

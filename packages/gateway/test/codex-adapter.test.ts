@@ -180,6 +180,25 @@ describe("tokenUsageToEvent", () => {
     expect(u.cacheReadTokens).toBe(100);
     expect(u.model).toBe("gpt-5.2-codex");
   });
+
+  test("model undefined → usage event with model 'unknown', no crash", () => {
+    const usage = {
+      last: {
+        inputTokens: 100,
+        cachedInputTokens: 0,
+        outputTokens: 50,
+        reasoningOutputTokens: 0,
+        totalTokens: 150,
+      },
+    };
+    // Pass undefined — simulates notification arriving before model is known
+    expect(() => tokenUsageToEvent(usage, undefined, "sess-early")).not.toThrow();
+    const evt = tokenUsageToEvent(usage, undefined, "sess-early");
+    expect(evt.type).toBe("usage");
+    const u = (evt as Extract<GatewayEvent, { type: "usage" }>).usage;
+    expect(u.model).toBe("unknown");
+    expect(u.inputTokens).toBe(100);
+  });
 });
 
 describe("commandApprovalToEvent", () => {
@@ -929,6 +948,75 @@ describe("CodexSession", () => {
     proc._close();
 
     await sendPromise;
+  });
+
+  test("cancel() while permission-request is outstanding → done{cancelled}, no error, promise settles", async () => {
+    const { spawnFn, proc } = makeFakeSpawn();
+
+    const session = new CodexSession(
+      "gw-sess-cancel-perm",
+      { cwd: "/tmp", permissionMode: "prompt" },
+      undefined,
+      spawnFn
+    );
+
+    const events: GatewayEvent[] = [];
+    let permRequestSeen = false;
+
+    const sendPromise = (async () => {
+      for await (const evt of session.send({ text: "do something" })) {
+        events.push(evt);
+        if (evt.type === "permission-request" && !permRequestSeen) {
+          permRequestSeen = true;
+          // Cancel while the permission promise is unresolved
+          await session.cancel();
+        }
+      }
+    })();
+
+    // Drive the session up to turn/start
+    await new Promise((r) => setTimeout(r, 10));
+    const written = getWritten(proc);
+
+    const initReq = written.find((w) => w.method === "initialize");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: initReq!.id, result: { userAgent: "test", codexHome: "/tmp", platformFamily: "unix", platformOs: "macos" } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const written2 = getWritten(proc);
+    const threadReq = written2.find((w) => w.method === "thread/start");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: threadReq!.id, result: { thread: { id: "t1" }, model: "gpt-5.2-codex", cwd: "/tmp" } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const written3 = getWritten(proc);
+    const turnReq = written3.find((w) => w.method === "turn/start");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: turnReq!.id, result: { turn: { id: "turn1" } } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Send a command approval request — the handler will block on the pending promise
+    proc._push(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "srv-perm-cancel",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "t1", turnId: "turn1", itemId: "cmd-pending",
+        startedAtMs: 0, command: "sleep 100", cwd: "/tmp",
+        reason: null, approvalId: null,
+      },
+    }));
+
+    await new Promise((r) => setTimeout(r, 20));
+    // cancel() fires inside the for-await when permission-request is seen
+
+    // The cancel should kill the proc; wait for sendPromise to settle
+    await sendPromise;
+
+    // Must get done{cancelled} and no error event
+    const doneEvt = events.find((e) => e.type === "done") as Extract<GatewayEvent, { type: "done" }> | undefined;
+    expect(doneEvt).toBeDefined();
+    expect(doneEvt!.reason).toBe("cancelled");
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    // The permission-request event must have been emitted
+    expect(permRequestSeen).toBe(true);
   });
 
   test("process death mid-turn → error event + done{error}", async () => {
