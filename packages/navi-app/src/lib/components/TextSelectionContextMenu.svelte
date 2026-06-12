@@ -100,6 +100,4 @@
     </svg>
     Fork with quote
   </button>
-
-
 </div>

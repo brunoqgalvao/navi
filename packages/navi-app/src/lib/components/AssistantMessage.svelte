@@ -29,6 +29,7 @@
     TOOL_GROUP_CONFIG,
     generateGroupSummary,
   } from "$lib/core";
+
   interface Props {
     content: ContentBlock[];
     subagentUpdates?: ChatMessage[];
@@ -49,7 +50,6 @@
     jsonBlocksMap?: Map<string, any>;
     shellBlocksMap?: Map<string, { code: string; language: string }>;
     sessionId?: string;
-    messageId?: string;
   }
 
   let {
@@ -72,7 +72,6 @@
     jsonBlocksMap = new Map(),
     shellBlocksMap = new Map(),
     sessionId = '',
-    messageId = '',
   }: Props = $props();
 
   let showMenu = $state(false);

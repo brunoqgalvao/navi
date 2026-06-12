@@ -18,6 +18,7 @@
   import { sessionHierarchyApi, parseEscalation, type Escalation, type HierarchySession, isActiveStatus } from "../features/session-hierarchy";
   import { loadMoreMessages } from "../actions/session-actions";
   import WaitCountdown from "./widgets/WaitCountdown.svelte";
+
   interface Props {
     sessionId: string | null;
     projectPath?: string;
@@ -472,7 +473,6 @@
               {jsonBlocksMap}
               {shellBlocksMap}
               sessionId={sessionId ?? ''}
-              messageId={msg.id}
             />
           {/if}
         </div>
