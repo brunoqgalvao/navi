@@ -58,8 +58,6 @@ import { handleProactiveHooksRoutes } from "./routes/proactive-hooks";
 import { handleHooksRoutes } from "./routes/hooks";
 // Cloud Execution (E2B sandboxes)
 import { handleCloudExecutionRoutes } from "./routes/cloud-execution";
-// Email (AgentMail)
-import { handleEmailRoutes } from "./routes/email";
 // Browser-use automation
 import { handleBrowserRoutes } from "./routes/browser";
 // Channels (cross-workspace agent collaboration)
@@ -522,10 +520,6 @@ const server = Bun.serve({
 
     // Cloud Execution routes (E2B)
     response = await handleCloudExecutionRoutes(url, method, req);
-    if (response) return response;
-
-    // Email routes (AgentMail)
-    response = await handleEmailRoutes(url, method, req);
     if (response) return response;
 
     // Browser routes (browser-use)

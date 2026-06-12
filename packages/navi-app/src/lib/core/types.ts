@@ -42,7 +42,6 @@ export type ExtensionId =
   | "context"         // Session context visibility
   | "inbox"           // Workspace inbox
   | "shared-inbox"    // Cross-project shared inbox
-  | "email"           // Navi's email inbox
   | "channels"        // WhatsApp, Telegram & messaging integrations
   | "browser-preview"; // Browser-use live preview
 
@@ -60,7 +59,6 @@ export type PanelMode =
   | "context"         // Context sidebar view
   | "inbox"           // Workspace inbox view
   | "shared-inbox"    // Cross-project shared inbox view
-  | "email"           // Email inbox view
   | "channels"        // WhatsApp, Telegram & messaging inbox
   | "browser-preview"; // Browser-use preview
 
@@ -94,9 +92,7 @@ export type MessageWidgetType =
   | "generative-ui"
   | "copyable"
   | "todo-list"
-  | "browser-action"    // Browser-use action/result
-  | "email-notification" // Incoming email
-  | "email-sent";        // Sent email confirmation
+  | "browser-action";    // Browser-use action/result
 
 // =============================================================================
 // 3. DASHBOARD WIDGETS (Project Landing Page)

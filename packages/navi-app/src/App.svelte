@@ -9,7 +9,6 @@
   import { mcpApi, type McpServer } from "./lib/features/mcp";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree, startNewChat } from "./lib/actions";
-  import { initBrowserEmail } from "./lib/features/browser-email-init";
   import { parseHash, onHashChange } from "./lib/router";
   import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
   import { getDefaultContextResetThresholdPercent, getEffectiveSessionContextWindow } from "./lib/context-window";
@@ -904,10 +903,9 @@
   let showContext = $state(false);
   let showInbox = $state(false);
   let showChannels = $state(false);
-  let showEmail = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context" | "inbox" | "shared-inbox" | "email" | "channels";
+  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context" | "inbox" | "shared-inbox" | "channels";
   let rightPanelMode = $state<RightPanelMode>("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
@@ -1313,9 +1311,6 @@
 
     // Initialize extension registry with default extensions
     initializeRegistry();
-
-    // Initialize browser-use and email features
-    initBrowserEmail();
 
     startSidecar().then(async () => {
       serverReady = true;
@@ -3352,7 +3347,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     showContext = false;
     showInbox = false;
     showChannels = false;
-    showEmail = false;
     previewSource = "";
     terminalInitialCommand = "";
   }
@@ -3449,7 +3443,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const panelMode = mode as RightPanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels || showEmail;
+    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -3484,9 +3478,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         break;
       case "channels":
         showChannels = true;
-        break;
-      case "email":
-        showEmail = true;
         break;
     }
     rightPanelMode = panelMode;
@@ -4466,8 +4457,8 @@ Please walk me through the setup step by step. When I have the credentials, save
   </div>
   <!-- End Chat Container -->
 
-  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context / Email) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels || showEmail}
+  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context) -->
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext || showInbox || showChannels}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}

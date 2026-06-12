@@ -16,15 +16,13 @@
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
   import PreviewPanel from "../components/PreviewPanel.svelte";
-  import EmailPanel from "../features/email/EmailPanel.svelte";
   import { ChannelsPanel } from "../features/channel-inbox/components";
   import InboxPanel from "../features/inbox/components/InboxPanel.svelte";
   import SharedInboxPanel from "../features/inbox/components/SharedInboxPanel.svelte";
   import { ContextPanel } from "../features/context";
-  import AuthGate from "../components/AuthGate.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context" | "email" | "channels" | "inbox" | "shared-inbox";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context" | "channels" | "inbox" | "shared-inbox";
 
   interface Props {
     mode: PanelMode;
@@ -299,15 +297,6 @@
       <!-- Context panel - session context visibility -->
       <div class="flex-1 flex flex-col w-full overflow-hidden">
         <ContextPanel {sessionId} />
-      </div>
-    {:else if mode === "email"}
-      <!-- Email panel - requires auth -->
-      <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <AuthGate feature="email" featureDescription="your personal Navi email inbox" featureIcon="email">
-          {#snippet children()}
-            <EmailPanel />
-          {/snippet}
-        </AuthGate>
       </div>
     {:else if mode === "channels"}
       <!-- Channels panel - WhatsApp, Telegram & messaging integrations -->

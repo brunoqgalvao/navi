@@ -265,16 +265,6 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     defaultEnabled: true,
     defaultOrder: 9,
   },
-  email: {
-    id: "email",
-    name: "Email",
-    icon: "mail",
-    description: "Navi's email inboxes (experimental)",
-    panelMode: "email",
-    requiresProject: false,
-    defaultEnabled: false, // @experimental - AgentMail integration
-    defaultOrder: 100,
-  },
   channels: {
     id: "channels",
     name: "Channels",
