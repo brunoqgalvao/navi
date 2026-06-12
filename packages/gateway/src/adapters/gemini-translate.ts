@@ -66,20 +66,24 @@ export function toAcpOutcome(
 ): { outcome: "selected"; optionId: string } | { outcome: "cancelled" } {
   switch (decision) {
     case "allow": {
+      // Only match allow_once or a well-known optionId — never over-grant.
+      // If neither is present, return cancelled (adapter resolves gateway side safely).
       const opt =
         options.find((o) => o.kind === "allow_once") ??
-        options.find((o) => o.optionId === "proceed_once") ??
-        options.find((o) => o.kind?.startsWith("allow"));
+        options.find((o) => o.optionId === "proceed_once");
       if (!opt) return { outcome: "cancelled" };
       return { outcome: "selected", optionId: opt.optionId };
     }
     case "allow-session": {
+      // allow_always is the session-scoped grant in ACP (confirmed in spike doc:
+      // "proceed_always" = allow always for this tool). Fall back to allow-once
+      // if no allow_always option is present — never select a broader option
+      // (allow_always_server) over the intended one.
       const opt =
         options.find((o) => o.kind === "allow_always") ??
-        options.find((o) => o.optionId === "proceed_always") ??
-        options.find((o) => o.kind?.startsWith("allow_always"));
+        options.find((o) => o.optionId === "proceed_always");
       if (!opt) {
-        // Fall back to allow-once if no allow_always option exists
+        // No allow_always option — fall back to allow-once
         return toAcpOutcome("allow", options);
       }
       return { outcome: "selected", optionId: opt.optionId };

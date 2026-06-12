@@ -17,7 +17,7 @@ import {
   stopReasonToDoneReason,
   type AcpPermissionRequestParams,
 } from "../src/adapters/gemini-translate.js";
-import { GeminiSession, GeminiBackend } from "../src/adapters/gemini.js";
+import { GeminiSession, GeminiBackend, stableToolName } from "../src/adapters/gemini.js";
 import { JsonRpcClient } from "../src/adapters/jsonrpc.js";
 import type { GatewayEvent } from "../src/events.js";
 import { EventEmitter } from "events";
@@ -47,13 +47,14 @@ describe("toAcpOutcome", () => {
     expect(outcome).toEqual({ outcome: "cancelled" });
   });
 
-  test("allow with no allow_once → falls back to any allow kind", () => {
+  test("allow with no allow_once and no proceed_once optionId → cancelled (no over-grant)", () => {
+    // Only allow_always present — must NOT select it (would be an over-grant).
+    // The fix: remove the startsWith("allow") fallback; return cancelled instead.
     const opts = [
       { optionId: "proceed_always", kind: "allow_always" as const },
     ];
     const outcome = toAcpOutcome("allow", opts);
-    // falls back to any allow_ option
-    expect(outcome.outcome).toBe("selected");
+    expect(outcome).toEqual({ outcome: "cancelled" });
   });
 
   test("allow-session with no allow_always → falls back to allow_once", () => {
@@ -1192,6 +1193,339 @@ describe("GeminiSession", () => {
     const promptReq = w3.find((w) => w.method === "session/prompt");
     proc._push(JSON.stringify({ jsonrpc: "2.0", id: promptReq!.id, result: { stopReason: "end_turn" } }));
     await sendPromise;
+  });
+});
+
+// ── stableToolName tests ──────────────────────────────────────────────────────
+
+describe("stableToolName", () => {
+  test("strips trailing -<digits> suffix", () => {
+    expect(stableToolName("write_file-1781297128764")).toBe("write_file");
+    expect(stableToolName("shell-123")).toBe("shell");
+    expect(stableToolName("read_file-9999999999999")).toBe("read_file");
+  });
+
+  test("no digits suffix → returns toolCallId as-is", () => {
+    expect(stableToolName("write_file")).toBe("write_file");
+    expect(stableToolName("my-tool-name-without-digits")).toBe("my-tool-name-without-digits");
+  });
+
+  test("no digit suffix, title provided → returns title (stable tool name)", () => {
+    // toolCallId has no digit suffix; title is the stable name to use
+    expect(stableToolName("sometool", "display_name")).toBe("display_name");
+  });
+
+  test("prefers id-stripped name over title when suffix is present", () => {
+    expect(stableToolName("write_file-111", "Write File")).toBe("write_file");
+  });
+
+  test("uses title as fallback when id has no digit suffix and title is provided", () => {
+    // The id itself doesn't match the digit suffix pattern — fall through to title
+    expect(stableToolName("xyz", "my_title")).toBe("my_title");
+  });
+
+  test("uses toolCallId when both id has no suffix and no title", () => {
+    expect(stableToolName("bare_id")).toBe("bare_id");
+  });
+});
+
+// ── toAcpOutcome missing-option tests ─────────────────────────────────────────
+
+describe("toAcpOutcome — missing option edge cases", () => {
+  test("allow with only reject options → cancelled (no over-grant)", () => {
+    const opts = [{ optionId: "cancel", kind: "reject_once" as const }];
+    expect(toAcpOutcome("allow", opts)).toEqual({ outcome: "cancelled" });
+  });
+
+  test("allow-session with only reject options → cancelled", () => {
+    const opts = [{ optionId: "cancel", kind: "reject_once" as const }];
+    // Falls back to allow → cancelled since no allow_once either
+    expect(toAcpOutcome("allow-session", opts)).toEqual({ outcome: "cancelled" });
+  });
+
+  test("allow-session with only allow_always and no allow_once → selects allow_always (correct grant level)", () => {
+    // allow-session IS allow_always — should select it, not cancel
+    const opts = [
+      { optionId: "proceed_always", kind: "allow_always" as const },
+      { optionId: "cancel", kind: "reject_once" as const },
+    ];
+    expect(toAcpOutcome("allow-session", opts)).toEqual({
+      outcome: "selected",
+      optionId: "proceed_always",
+    });
+  });
+
+  test("allow-session fallback: no allow_always but allow_once present → falls back to allow-once", () => {
+    const opts = [
+      { optionId: "proceed_once", kind: "allow_once" as const },
+      { optionId: "cancel", kind: "reject_once" as const },
+    ];
+    const outcome = toAcpOutcome("allow-session", opts);
+    expect(outcome).toEqual({ outcome: "selected", optionId: "proceed_once" });
+  });
+
+  test("allow-session with proceed_always optionId (no kind) → selects it", () => {
+    const opts = [{ optionId: "proceed_always" }];
+    expect(toAcpOutcome("allow-session", opts)).toEqual({
+      outcome: "selected",
+      optionId: "proceed_always",
+    });
+  });
+});
+
+// ── Process lifecycle / orphan prevention tests ───────────────────────────────
+
+describe("GeminiSession process lifecycle", () => {
+  test("clean turn 1 → process NOT killed (multi-turn reuse)", async () => {
+    let killCalled = false;
+    const proc = makeFakeProc();
+    const origKill = proc.kill.bind(proc);
+    proc.kill = (_sig?: string) => {
+      killCalled = true;
+      origKill(_sig);
+    };
+
+    const client = new JsonRpcClient(proc as never);
+    const spawnFn = () => client;
+
+    const session = new GeminiSession("gw-lifecycle-1", { cwd: "/tmp", permissionMode: "prompt" }, spawnFn);
+    const sendPromise = (async () => {
+      for await (const _ of session.send({ text: "turn 1" })) {}
+    })();
+
+    await runFakeTurn(proc, { sessionId: "s-lt-1" });
+    await sendPromise;
+
+    // Process should remain alive for multi-turn reuse
+    expect(killCalled).toBe(false);
+  });
+
+  test("turn 1 OK, turn 2 errors mid-stream → session._rpc nulled, session emits error+done{error}", async () => {
+    // Use a multi-turn proc: turn 1 completes cleanly, turn 2 dies mid-stream.
+    // We verify:
+    //   1. After turn 1, _rpc is still set (process kept alive for multi-turn).
+    //   2. After turn 2 error, events are error+done{error}.
+    //   3. After turn 2, _rpc is null (process was cleaned up).
+    const proc = makeFakeProc();
+    const client = new JsonRpcClient(proc as never);
+    const spawnFn = () => client;
+
+    const session = new GeminiSession("gw-lifecycle-2", { cwd: "/tmp", permissionMode: "prompt" }, spawnFn);
+    const turn1Events: GatewayEvent[] = [];
+
+    // Turn 1 — completes cleanly
+    const turn1 = (async () => {
+      for await (const evt of session.send({ text: "turn 1" })) {
+        turn1Events.push(evt);
+      }
+    })();
+
+    await runFakeTurn(proc, { sessionId: "s-lt-2" });
+    await turn1;
+
+    // After turn 1, _rpc is still set (process reused for multi-turn)
+    expect((session as unknown as { _rpc: unknown })._rpc).not.toBeNull();
+    expect(turn1Events.some((e) => e.type === "done" && (e as Extract<GatewayEvent, { type: "done" }>).reason === "complete")).toBe(true);
+
+    // Turn 2 — errors mid-stream (process dies while session/prompt is pending)
+    const turn2Events: GatewayEvent[] = [];
+    const turn2 = (async () => {
+      for await (const evt of session.send({ text: "turn 2" })) {
+        turn2Events.push(evt);
+      }
+    })();
+
+    // Wait for session/prompt to be sent on turn 2
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Kill the process mid-stream (simulates process death / error)
+    proc._close();
+
+    await turn2;
+
+    // After an error turn, _rpc must be null (process cleaned up)
+    expect((session as unknown as { _rpc: unknown })._rpc).toBeNull();
+
+    // Turn 2 must emit error + done{error}
+    const errorEvt = turn2Events.find((e) => e.type === "error") as Extract<GatewayEvent, { type: "error" }> | undefined;
+    expect(errorEvt).toBeDefined();
+
+    const doneEvt = turn2Events.find((e) => e.type === "done") as Extract<GatewayEvent, { type: "done" }> | undefined;
+    expect(doneEvt).toBeDefined();
+    expect(doneEvt!.reason).toBe("error");
+  });
+});
+
+// ── mcpServers pass-through tests ────────────────────────────────────────────
+
+describe("GeminiSession mcpServers / systemContext", () => {
+  test("mcpServers passed in opts appear in session/new params", async () => {
+    const { spawnFn, proc } = makeFakeSpawn();
+    const session = new GeminiSession(
+      "gw-mcp-1",
+      {
+        cwd: "/tmp",
+        permissionMode: "prompt",
+        mcpServers: [
+          { name: "my-server", command: "npx", args: ["my-mcp"], env: { FOO: "bar" } },
+        ],
+      },
+      spawnFn
+    );
+
+    const sendPromise = (async () => {
+      for await (const _ of session.send({ text: "hi" })) {}
+    })();
+
+    await new Promise((r) => setTimeout(r, 15));
+    const written = getWritten(proc);
+
+    const initReq = written.find((w) => w.method === "initialize");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: initReq!.id, result: { protocolVersion: 1, agentCapabilities: {} } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const w2 = getWritten(proc);
+    const newSess = w2.find((w) => w.method === "session/new");
+    expect(newSess).toBeDefined();
+
+    const params = newSess!.params as { mcpServers?: unknown };
+    expect(Array.isArray(params.mcpServers)).toBe(true);
+    const servers = params.mcpServers as Array<{ name: string; command: string; args?: string[]; env?: Record<string, string> }>;
+    expect(servers).toHaveLength(1);
+    expect(servers[0]!.name).toBe("my-server");
+    expect(servers[0]!.command).toBe("npx");
+    expect(servers[0]!.args).toEqual(["my-mcp"]);
+    expect(servers[0]!.env).toEqual({ FOO: "bar" });
+
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: newSess!.id, result: { sessionId: "s-mcp" } }));
+    await new Promise((r) => setTimeout(r, 5));
+    const w3 = getWritten(proc);
+    const promptReq = w3.find((w) => w.method === "session/prompt");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: promptReq!.id, result: { stopReason: "end_turn" } }));
+    await sendPromise;
+  });
+
+  test("no mcpServers → session/new params has empty array", async () => {
+    const { spawnFn, proc } = makeFakeSpawn();
+    const session = new GeminiSession("gw-mcp-empty", { cwd: "/tmp", permissionMode: "prompt" }, spawnFn);
+
+    const sendPromise = (async () => {
+      for await (const _ of session.send({ text: "hi" })) {}
+    })();
+
+    await new Promise((r) => setTimeout(r, 15));
+    const written = getWritten(proc);
+    const initReq = written.find((w) => w.method === "initialize");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: initReq!.id, result: { protocolVersion: 1 } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const w2 = getWritten(proc);
+    const newSess = w2.find((w) => w.method === "session/new");
+    const params = newSess!.params as { mcpServers?: unknown };
+    expect(params.mcpServers).toEqual([]);
+
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: newSess!.id, result: { sessionId: "s-empty" } }));
+    await new Promise((r) => setTimeout(r, 5));
+    const w3 = getWritten(proc);
+    const promptReq = w3.find((w) => w.method === "session/prompt");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: promptReq!.id, result: { stopReason: "end_turn" } }));
+    await sendPromise;
+  });
+
+  test("systemContext prepended to first prompt text only", async () => {
+    const { spawnFn, proc } = makeFakeSpawn();
+    const session = new GeminiSession(
+      "gw-sys-ctx",
+      { cwd: "/tmp", permissionMode: "prompt", systemContext: "You are a helpful assistant." },
+      spawnFn
+    );
+
+    const sendPromise = (async () => {
+      for await (const _ of session.send({ text: "hello" })) {}
+    })();
+
+    await new Promise((r) => setTimeout(r, 15));
+    const written = getWritten(proc);
+    const initReq = written.find((w) => w.method === "initialize");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: initReq!.id, result: { protocolVersion: 1 } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const w2 = getWritten(proc);
+    const newSess = w2.find((w) => w.method === "session/new");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: newSess!.id, result: { sessionId: "s-sysctx" } }));
+    await new Promise((r) => setTimeout(r, 5));
+
+    const w3 = getWritten(proc);
+    const promptReq = w3.find((w) => w.method === "session/prompt") as
+      | { params?: { prompt?: Array<{ type: string; text: string }> } }
+      | undefined;
+    expect(promptReq).toBeDefined();
+    const firstTextBlock = promptReq!.params?.prompt?.[0];
+    expect(firstTextBlock?.text).toContain("Context:\nYou are a helpful assistant.");
+    expect(firstTextBlock?.text).toContain("---\nhello");
+
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: (promptReq as Record<string, unknown>).id, result: { stopReason: "end_turn" } }));
+    await sendPromise;
+  });
+
+  test("systemContext NOT prepended to second prompt turn", async () => {
+    const proc = makeFakeProc();
+    let killCallCount = 0;
+    proc.kill = (_sig?: string) => {
+      killCallCount++;
+      proc._close();
+    };
+    const client = new JsonRpcClient(proc as never);
+    const spawnFn = () => client;
+
+    const session = new GeminiSession(
+      "gw-sysctx-turn2",
+      { cwd: "/tmp", permissionMode: "prompt", systemContext: "Be concise." },
+      spawnFn
+    );
+
+    // Turn 1
+    const turn1 = (async () => {
+      for await (const _ of session.send({ text: "turn 1" })) {}
+    })();
+
+    await new Promise((r) => setTimeout(r, 15));
+    const w = getWritten(proc);
+    const initReq = w.find((w2) => w2.method === "initialize");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: initReq!.id, result: { protocolVersion: 1 } }));
+    await new Promise((r) => setTimeout(r, 5));
+    const w2 = getWritten(proc);
+    const newSess = w2.find((w2) => w2.method === "session/new");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: newSess!.id, result: { sessionId: "s-t2" } }));
+    await new Promise((r) => setTimeout(r, 5));
+    const w3 = getWritten(proc);
+    const p1 = w3.find((w2) => w2.method === "session/prompt") as Record<string, unknown>;
+    // Verify turn 1 has context prepended
+    const prompt1 = (p1.params as { prompt: Array<{ text: string }> }).prompt[0]!.text;
+    expect(prompt1).toContain("Context:\nBe concise.");
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: p1.id, result: { stopReason: "end_turn" } }));
+    await turn1;
+
+    // Turn 2 — reuses same process (no kill happened)
+    expect(killCallCount).toBe(0);
+
+    const turn2 = (async () => {
+      for await (const _ of session.send({ text: "turn 2" })) {}
+    })();
+    await new Promise((r) => setTimeout(r, 10));
+    const w4 = getWritten(proc);
+    const p2 = w4.find((w2) => w2.method === "session/prompt" && (w2.params as { sessionId?: string }).sessionId === "s-t2") as Record<string, unknown> | undefined;
+    // Find the second session/prompt (same sessionId) — it should NOT have context prefix
+    // We find the last session/prompt request
+    const allPrompts = w4.filter((w2) => w2.method === "session/prompt") as Array<Record<string, unknown>>;
+    const lastPrompt = allPrompts[allPrompts.length - 1]!;
+    const promptText2 = (lastPrompt.params as { prompt: Array<{ text: string }> }).prompt[0]!.text;
+    expect(promptText2).toBe("turn 2");
+    expect(promptText2).not.toContain("Context:");
+
+    void p2; // suppress unused warning
+    proc._push(JSON.stringify({ jsonrpc: "2.0", id: lastPrompt.id, result: { stopReason: "end_turn" } }));
+    await turn2;
   });
 });
 

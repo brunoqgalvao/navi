@@ -16,6 +16,11 @@
  * Process lifecycle: one `gemini --experimental-acp` process per GeminiSession lifetime.
  * The session/new ACP session persists inside that process for multi-turn conversation.
  * On cancel(), session/cancel notification is sent then the process is killed.
+ *
+ * systemContext: ACP has no system-prompt field. We prepend the systemContext to the
+ * FIRST prompt text of the session only, in the form:
+ *   "Context:\n<systemContext>\n\n---\n<user text>"
+ * This is a best-effort approach; subsequent turns send only the user text.
  */
 
 import { randomUUID } from "node:crypto";
@@ -26,10 +31,12 @@ import type {
   AgentSession,
   Capabilities,
   DetectResult,
+  McpServerConfig,
   SessionOptions,
   UserInput,
 } from "../types.js";
 import { JsonRpcClient } from "./jsonrpc.js";
+import { EventChannel } from "./event-channel.js";
 import {
   agentMessageChunkToEvent,
   agentThoughtChunkToEvent,
@@ -44,40 +51,20 @@ import {
   type AcpToolCallUpdate,
 } from "./gemini-translate.js";
 
-// ── EventChannel (same pattern as claude/codex adapters) ─────────────────────
+// ── Stable tool name helper ───────────────────────────────────────────────────
 
-class EventChannel {
-  private _queue: Array<GatewayEvent | { __done: true }> = [];
-  private _waiter: (() => void) | undefined;
-
-  private _notify(): void {
-    const w = this._waiter;
-    this._waiter = undefined;
-    w?.();
-  }
-
-  push(evt: GatewayEvent): void {
-    this._queue.push(evt);
-    this._notify();
-  }
-
-  end(): void {
-    this._queue.push({ __done: true });
-    this._notify();
-  }
-
-  async *iter(): AsyncIterable<GatewayEvent> {
-    while (true) {
-      while (this._queue.length === 0) {
-        await new Promise<void>((res) => {
-          this._waiter = res;
-        });
-      }
-      const item = this._queue.shift()!;
-      if ("__done" in item) return;
-      yield item as GatewayEvent;
-    }
-  }
+/**
+ * Extract a stable tool identifier from a toolCall.
+ *
+ * ACP toolCallIds have the form "<toolName>-<digits>" (e.g. "write_file-1781297128764").
+ * We strip the trailing "-<digits>" instance suffix to get a stable name that can be
+ * used for session-allowed tool tracking. Falls back to toolCall.title if the id does
+ * not match the pattern, or to toolCallId as a last resort.
+ */
+export function stableToolName(toolCallId: string, title?: string): string {
+  const match = /^(.+)-\d+$/.exec(toolCallId);
+  if (match) return match[1]!;
+  return title ?? toolCallId;
 }
 
 // ── GeminiSession ─────────────────────────────────────────────────────────────
@@ -91,6 +78,12 @@ export class GeminiSession implements AgentSession {
 
   private _model: string | undefined;
   private _cancelled = false;
+
+  /**
+   * Whether the first ACP session has already been created.
+   * Once true, systemContext is NOT prepended to subsequent turns.
+   */
+  private _firstPromptSent = false;
 
   /** Pending permission requests: requestId → { serverReqId, options, resolve } */
   private _pendingPermissions = new Map<
@@ -179,6 +172,11 @@ export class GeminiSession implements AgentSession {
 
   private async _runTurn(input: UserInput, channel: EventChannel): Promise<void> {
     let rpc: JsonRpcClient | null = null;
+    // Track whether the turn completed successfully (session/prompt resolved).
+    // Used in the finally block to decide whether to kill the process:
+    //   - cancelled OR not completed → kill (orphan prevention)
+    //   - completed (clean done{complete/cancelled}) → keep alive for multi-turn
+    let completed = false;
     let donePushed = false;
 
     try {
@@ -193,6 +191,7 @@ export class GeminiSession implements AgentSession {
         rpc = this._spawnFn(this._opts.cwd, this._model);
         this._rpc = rpc;
         this._acpSessionId = undefined; // reset so we create a new ACP session
+        this._firstPromptSent = false;
       } else {
         rpc = this._rpc;
       }
@@ -209,7 +208,7 @@ export class GeminiSession implements AgentSession {
       // Initialize + create ACP session if not done yet
       if (!this._acpSessionId) {
         // Step 1: initialize
-        const initResult = await rpc.request<{
+        await rpc.request<{
           protocolVersion: number;
           agentCapabilities?: Record<string, unknown>;
         }>("initialize", {
@@ -218,12 +217,13 @@ export class GeminiSession implements AgentSession {
           clientCapabilities: {},
         });
 
-        // Step 2: create session
+        // Step 2: create session — pass mcpServers if provided
+        const mcpServers = mapMcpServers(this._opts.mcpServers);
         const sessionResult = await rpc.request<{ sessionId: string }>(
           "session/new",
           {
             cwd: this._opts.cwd,
-            mcpServers: [],
+            mcpServers,
           }
         );
 
@@ -237,20 +237,26 @@ export class GeminiSession implements AgentSession {
           model: this._model,
           cwd: this._opts.cwd,
         });
-
-        // Suppress unused variable warning
-        void initResult;
       }
 
-      // Step 3: send prompt — this resolves when the turn completes
+      // Step 3: build prompt text — prepend systemContext to first turn only
+      let promptText = input.text;
+      if (!this._firstPromptSent && this._opts.systemContext) {
+        promptText = `Context:\n${this._opts.systemContext}\n\n---\n${input.text}`;
+      }
+      this._firstPromptSent = true;
+
+      // Step 4: send prompt — this resolves when the turn completes
       const promptResult = await rpc.request<{ stopReason: string }>(
         "session/prompt",
         {
           sessionId: this._acpSessionId,
-          prompt: [{ type: "text", text: input.text }],
+          prompt: [{ type: "text", text: promptText }],
         }
       );
 
+      // Turn resolved successfully — mark completed so the process is not killed
+      completed = true;
       donePushed = true;
       const reason = stopReasonToDoneReason(promptResult.stopReason);
 
@@ -274,10 +280,13 @@ export class GeminiSession implements AgentSession {
       }
     } finally {
       channel.end();
-      // Note: we do NOT kill the rpc here for multi-turn support.
-      // The process is killed in cancel() or when the GeminiSession is garbage collected.
-      // For error/cancelled cases, the process should also be killed.
-      if (this._cancelled || !this._acpSessionId) {
+      // Kill the process if:
+      //   1. The user cancelled — process is no longer useful.
+      //   2. The turn did not complete — an error occurred mid-stream and the
+      //      process state is unknown; killing prevents orphans.
+      // A clean completion (completed=true) does NOT kill the process so that
+      // multi-turn sessions can reuse it via the same ACP session.
+      if (this._cancelled || !completed) {
         rpc?.kill("SIGTERM");
         this._rpc = null;
       }
@@ -340,7 +349,8 @@ export class GeminiSession implements AgentSession {
   ): Promise<unknown> {
     if (method === "session/request_permission") {
       const p = params as AcpPermissionRequestParams;
-      const toolName = p.toolCall.title ?? p.toolCall.toolCallId;
+      // Use stable tool name (strip instance suffix from toolCallId, prefer that over title)
+      const toolName = stableToolName(p.toolCall.toolCallId, p.toolCall.title);
 
       // permissionMode: acceptAll → auto-accept with allow_always option
       if (this._opts.permissionMode === "acceptAll") {
@@ -389,6 +399,25 @@ export class GeminiSession implements AgentSession {
     // Unknown server request
     throw new Error(`Unhandled server request method: ${method}`);
   }
+}
+
+// ── MCP server mapping ────────────────────────────────────────────────────────
+
+/**
+ * Map gateway McpServerConfig[] to the ACP session/new mcpServers shape.
+ * ACP expects: { name, command, args?, env? }
+ * Gateway McpServerConfig: { name, command, args?, env? } — same fields.
+ */
+function mapMcpServers(
+  servers: McpServerConfig[] | undefined
+): Array<{ name: string; command: string; args?: string[]; env?: Record<string, string> }> {
+  if (!servers || servers.length === 0) return [];
+  return servers.map((s) => ({
+    name: s.name,
+    command: s.command,
+    ...(s.args !== undefined ? { args: s.args } : {}),
+    ...(s.env !== undefined ? { env: s.env } : {}),
+  }));
 }
 
 // ── Process spawner ───────────────────────────────────────────────────────────

@@ -165,7 +165,7 @@ async function runInteractive(): Promise<void> {
   const ask = (q: string): Promise<string> =>
     new Promise((res) => rl.question(q, res));
 
-  console.log(cyan("[repl] Claude gateway REPL. Type your message, Ctrl+C to exit."));
+  console.log(cyan(`[repl] ${backendId} gateway REPL. Type your message, Ctrl+C to exit.`));
   if (resumeId) {
     console.log(dim(`[repl] Resuming session: ${resumeId}`));
   }

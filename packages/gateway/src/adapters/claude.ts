@@ -22,6 +22,7 @@ import type {
   UserInput,
 } from "../types.js";
 import { normalizeUsage } from "../usage.js";
+import { EventChannel } from "./event-channel.js";
 
 // ── Types for BetaContentBlock (just the shapes we need) ─────────────────────
 type TextBlock = { type: "text"; text: string };
@@ -183,52 +184,6 @@ export function makePermissionResult(
     behavior: "deny",
     message: "User denied permission",
   };
-}
-
-// ── Async channel ─────────────────────────────────────────────────────────────
-
-/**
- * A simple async channel for streaming GatewayEvents from concurrent
- * producers (canUseTool callback + SDK message loop) to a single consumer
- * (the send() generator).
- *
- * push() enqueues an item (or resolves a waiting consumer).
- * end() signals completion.
- */
-class EventChannel {
-  private _queue: Array<GatewayEvent | { __done: true }> = [];
-  private _waiter: (() => void) | undefined;
-
-  private _notify(): void {
-    const w = this._waiter;
-    this._waiter = undefined;
-    w?.();
-  }
-
-  push(evt: GatewayEvent): void {
-    this._queue.push(evt);
-    this._notify();
-  }
-
-  end(): void {
-    this._queue.push({ __done: true });
-    this._notify();
-  }
-
-  /** Returns an AsyncIterable that yields events until end() */
-  async *iter(): AsyncIterable<GatewayEvent> {
-    while (true) {
-      while (this._queue.length === 0) {
-        // Wait for a producer to push something
-        await new Promise<void>((res) => {
-          this._waiter = res;
-        });
-      }
-      const item = this._queue.shift()!;
-      if ("__done" in item) return;
-      yield item as GatewayEvent;
-    }
-  }
 }
 
 // ── ClaudeSession ─────────────────────────────────────────────────────────────

@@ -258,6 +258,32 @@ See section (a) above.
 
 ---
 
+## Re-verification (2026-06-12)
+
+Script-mode REPL, backend gemini, cwd `/tmp/navi-spike-gemini2`, prompt:
+`create a file ok.txt containing: ok`
+
+Relevant output:
+
+```
+[session] backendSessionId=c049f890-9b1c-42e3-9135-52070545e24d model=?
+[thinking] **Initiating File Creation**
+I'm focusing on file creation now, targeting a simple "ok.txt" file. My current plan involves
+utilizing the `write_file` tool...
+
+[permission-request] tool=Writing to ok.txt requestId=19bca327-d295-4923-9bb0-cccd4062788c
+                    description="Writing to ok.txt is requesting permission"
+[permission-request] auto-approving via respondToPermission
+ok.txt created.
+```
+
+- `permission-request` event emitted for `write_file` tool: confirmed
+- Auto-approved via `respondToPermission` (not acceptAll): confirmed
+- File `/tmp/navi-spike-gemini2/ok.txt` contains `ok`: confirmed
+- `optionId` field name confirmed correct (spike script fixed from `selectedOptionId`)
+
+---
+
 ## Model note
 
 The gemini ACP server uses whatever model is set in `~/.gemini/settings.json` or the CLI `-m` flag. In testing with a stale config (gemini-3-pro-preview), the prompt returned `-32603 Internal error: model no longer available`. The adapter passes `-m gemini-2.5-flash` as the default when no model is specified, matching the working live CLI behavior.
