@@ -243,6 +243,10 @@ export class ClaudeSession implements AgentSession {
   private _resumeId: string | undefined;
   private _queryFn: QueryFn;
   private _abortController: AbortController | undefined;
+  /** set to true by cancel() so the catch block can emit cancelled instead of error */
+  private _cancelled = false;
+  /** tools the user has allowed for the duration of this session */
+  private _sessionAllowedTools = new Set<string>();
 
   /** pending permission requests: requestId → { toolName, toolUseID, resolve } */
   private _pendingPermissions = new Map<
@@ -270,10 +274,15 @@ export class ClaudeSession implements AgentSession {
     const pending = this._pendingPermissions.get(requestId);
     if (!pending) return;
     this._pendingPermissions.delete(requestId);
+    if (decision === "allow-session") {
+      // Local guarantee: remember this tool so subsequent canUseTool calls skip the prompt
+      this._sessionAllowedTools.add(pending.toolName);
+    }
     pending.resolve(makePermissionResult(decision, pending.toolName, pending.toolUseID));
   }
 
   async cancel(): Promise<void> {
+    this._cancelled = true;
     this._abortController?.abort();
   }
 
@@ -282,6 +291,12 @@ export class ClaudeSession implements AgentSession {
     const channel = new EventChannel();
 
     const canUseTool: CanUseTool = (toolName, toolInput, options) => {
+      // Local session-allow guarantee: skip the prompt for tools the user already
+      // approved for the whole session (belt-and-suspenders alongside updatedPermissions).
+      if (this._sessionAllowedTools.has(toolName)) {
+        return Promise.resolve({ behavior: "allow", updatedInput: {} });
+      }
+
       return new Promise<PermissionResult>((resolve) => {
         const requestId = randomUUID();
         this._pendingPermissions.set(requestId, {
@@ -375,9 +390,14 @@ export class ClaudeSession implements AgentSession {
         }
         channel.end();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        channel.push({ type: "error", sessionId: this.id, message, fatal: true });
-        channel.push({ type: "done", sessionId: this.id, reason: "error" });
+        if (this._cancelled) {
+          // Abort triggered by cancel() — not an error; just signal done
+          channel.push({ type: "done", sessionId: this.id, reason: "cancelled" });
+        } else {
+          const message = err instanceof Error ? err.message : String(err);
+          channel.push({ type: "error", sessionId: this.id, message, fatal: true });
+          channel.push({ type: "done", sessionId: this.id, reason: "error" });
+        }
         channel.end();
       }
     };

@@ -513,4 +513,128 @@ describe("ClaudeSession permission pending-map", () => {
     expect(toolEnd).toBeDefined();
     expect(toolEnd!.isError).toBe(true);
   });
+
+  // ── Fix 1: cancelled reason ──────────────────────────────────────────────────
+
+  test("cancel() mid-stream → done{reason:'cancelled'} and no error event", async () => {
+    // fakeQuery yields one message then blocks forever until the abort signal fires
+    async function* fakeQuery(params: { prompt: string; options?: Record<string, unknown> }) {
+      const abortController = params.options?.abortController as AbortController | undefined;
+      yield makeSystemInit();
+      // Block until abort fires (or a short safety timeout)
+      await new Promise<void>((resolve) => {
+        if (abortController?.signal.aborted) {
+          resolve();
+          return;
+        }
+        const onAbort = () => resolve();
+        abortController?.signal.addEventListener("abort", onAbort, { once: true });
+        // Safety: also resolve after 2 s so test can't hang forever
+        setTimeout(resolve, 2000);
+      });
+      // Throw an AbortError as the SDK would when the signal fires
+      const err = new DOMException("Aborted", "AbortError");
+      throw err;
+    }
+
+    const session = new ClaudeSession(
+      "gw-cancel-1",
+      { cwd: "/tmp", permissionMode: "prompt" },
+      undefined,
+      fakeQuery as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query
+    );
+
+    const events: GatewayEvent[] = [];
+
+    const sendPromise = (async () => {
+      for await (const evt of session.send({ text: "hello" })) {
+        events.push(evt);
+        // Cancel as soon as we see session-meta (i.e., after the first message)
+        if (evt.type === "session-meta") {
+          await session.cancel();
+        }
+      }
+    })();
+
+    await sendPromise;
+
+    const doneEvt = events.find((e) => e.type === "done") as
+      | Extract<GatewayEvent, { type: "done" }>
+      | undefined;
+    expect(doneEvt).toBeDefined();
+    expect(doneEvt!.reason).toBe("cancelled");
+    // No error event should be emitted on a clean cancel
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  });
+
+  // ── Fix 2: allow-session local guarantee ────────────────────────────────────
+
+  test("allow-session: second canUseTool for same tool → no new permission-request", async () => {
+    // fakeQuery calls canUseTool twice for the same tool name
+    async function* fakeQuery(params: { prompt: string; options?: Record<string, unknown> }) {
+      const canUseTool = params.options?.canUseTool as Function;
+      yield makeSystemInit();
+
+      // First canUseTool call — should emit a permission-request
+      if (canUseTool) {
+        const perm1 = canUseTool("Bash", { command: "ls" }, {
+          toolUseID: "t-sess-1",
+          signal: new AbortController().signal,
+          title: "Run command",
+        });
+        yield makeAssistantMsg([
+          { type: "tool_use", id: "t-sess-1", name: "Bash", input: { command: "ls" } },
+        ]);
+        await perm1;
+
+        // Second canUseTool call for the same tool — should NOT emit permission-request
+        const perm2 = canUseTool("Bash", { command: "pwd" }, {
+          toolUseID: "t-sess-2",
+          signal: new AbortController().signal,
+          title: "Run command again",
+        });
+        yield makeAssistantMsg([
+          { type: "tool_use", id: "t-sess-2", name: "Bash", input: { command: "pwd" } },
+        ]);
+        await perm2;
+      }
+
+      yield makeResultSuccess();
+    }
+
+    const session = new ClaudeSession(
+      "gw-sess-allow",
+      { cwd: "/tmp", permissionMode: "prompt" },
+      undefined,
+      fakeQuery as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query
+    );
+
+    const events: GatewayEvent[] = [];
+    let permissionRequestCount = 0;
+
+    const sendPromise = (async () => {
+      for await (const evt of session.send({ text: "run stuff" })) {
+        events.push(evt);
+        if (evt.type === "permission-request") {
+          permissionRequestCount++;
+          // Respond allow-session on the first (and only expected) request
+          session.respondToPermission(evt.requestId, "allow-session");
+        }
+      }
+    })();
+
+    await sendPromise;
+
+    // Exactly one permission-request should have been emitted
+    expect(permissionRequestCount).toBe(1);
+    // Both tool-start events should appear (both tool invocations were allowed)
+    const toolStarts = events.filter((e) => e.type === "tool-start");
+    expect(toolStarts).toHaveLength(2);
+    // Stream should complete normally
+    const doneEvt = events.find((e) => e.type === "done") as
+      | Extract<GatewayEvent, { type: "done" }>
+      | undefined;
+    expect(doneEvt).toBeDefined();
+    expect(doneEvt!.reason).toBe("complete");
+  });
 });
