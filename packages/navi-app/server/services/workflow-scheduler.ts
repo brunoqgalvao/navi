@@ -214,14 +214,14 @@ function createWorkflowRunSession(workflow: Workflow) {
   return child;
 }
 
-function broadcastWorkflowNotification(title: string, message: string, type: "info" | "warning" | "error" = "warning") {
+function broadcastWorkflowNotification(title: string, message: string) {
   broadcastFn?.({
     type: "ui_command",
     command: "notification",
     payload: {
       title,
       message,
-      type,
+      type: "warning",
     },
   });
 }
@@ -231,12 +231,9 @@ function broadcastWorkflowNotification(title: string, message: string, type: "in
 // owns proper user notification.
 function reportWorkflowAttention(
   workflow: Workflow,
-  _sessionId: string | null,
   options: {
     title: string;
     body: string;
-    priority?: "medium" | "high" | "urgent";
-    dedupeKey: string;
   }
 ) {
   console.error(`[Workflow] ${options.title}: ${options.body} (workflow=${workflow.id})`);
@@ -267,11 +264,9 @@ async function executeWorkflow(workflow: Workflow, triggerSource: "manual" | "sc
       last_skip_reason: skipReason,
       last_error: null,
     });
-    reportWorkflowAttention(workflow, workflow.root_session_id, {
+    reportWorkflowAttention(workflow, {
       title: `Workflow blocked: ${workflow.name}`,
       body: `The workflow could not run because: ${skipReason}`,
-      priority: /auth|oauth|token|credential|gmail|google/i.test(skipReason) ? "urgent" : "high",
-      dedupeKey: `workflow:${workflow.id}:gate-skip`,
     });
     broadcastFn?.({
       type: "workflow:run_skipped",
@@ -300,11 +295,9 @@ async function executeWorkflow(workflow: Workflow, triggerSource: "manual" | "sc
       last_error: error,
       next_run_at: calculateNextWorkflowRun(schedule) ?? null,
     });
-    reportWorkflowAttention(workflow, workflow.root_session_id, {
+    reportWorkflowAttention(workflow, {
       title: `Workflow failed to start: ${workflow.name}`,
       body: error,
-      priority: "urgent",
-      dedupeKey: `workflow:${workflow.id}:run-session-error`,
     });
     return;
   }
@@ -357,11 +350,9 @@ async function executeWorkflow(workflow: Workflow, triggerSource: "manual" | "sc
     workflows.update(workflow.id, {
       last_error: error,
     });
-    reportWorkflowAttention(workflow, childSession.id, {
+    reportWorkflowAttention(workflow, {
       title: `Workflow failed to dispatch: ${workflow.name}`,
       body: error,
-      priority: "high",
-      dedupeKey: `workflow:${workflow.id}:dispatch-error`,
     });
   }
 }

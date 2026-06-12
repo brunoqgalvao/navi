@@ -91,7 +91,6 @@ function logBunSpawnDiagnostics(
   writeDebugLog(message);
 }
 
-
 function workflowForSession(sessionId: string) {
   const session = sessions.get(sessionId);
   if (!session) return null;
