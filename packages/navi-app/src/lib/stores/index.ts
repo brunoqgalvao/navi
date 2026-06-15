@@ -79,7 +79,6 @@ export {
   onboardingComplete,
   advancedMode,
   debugMode,
-  dashboardEnabled,
   loopModeEnabled,
   deployToCloudEnabled,
   resourceMonitorEnabled,

@@ -1,16 +1,11 @@
 <script lang="ts">
   /**
-   * ProjectLanding - Default view when no session is active
+   * ProjectLanding - Default view when no session is active.
    *
-   * Shows dashboard if .claude/dashboard.md exists AND dashboard feature is enabled,
-   * otherwise falls back to ProjectEmptyState.
+   * Renders ProjectEmptyState (the project's new-chat / landing state).
    */
-  import { onMount } from "svelte";
   import type { Session, Workflow } from "$lib/api";
   import ProjectEmptyState from "./ProjectEmptyState.svelte";
-  import DashboardView from "$lib/features/dashboard/components/DashboardView.svelte";
-  import { getDashboard } from "$lib/features/dashboard";
-  import { dashboardEnabled } from "$lib/stores";
 
   interface Props {
     projectId: string;
@@ -47,51 +42,6 @@
     onOpenFiles,
     onShowClaudeMd,
   }: Props = $props();
-
-  let checkingDashboard = $state(true);
-  let hasDashboard = $state(false);
-
-  async function checkDashboard() {
-    // Skip dashboard check if feature is disabled
-    if (!$dashboardEnabled) {
-      hasDashboard = false;
-      checkingDashboard = false;
-      return;
-    }
-
-    if (!projectPath) {
-      hasDashboard = false;
-      checkingDashboard = false;
-      return;
-    }
-
-    try {
-      const response = await getDashboard(projectPath);
-      hasDashboard = response.exists;
-    } catch {
-      hasDashboard = false;
-    } finally {
-      checkingDashboard = false;
-    }
-  }
-
-  onMount(() => {
-    checkDashboard();
-  });
-
-  // Re-check when project changes or dashboard feature toggles
-  $effect(() => {
-    if (projectPath) {
-      checkingDashboard = true;
-      checkDashboard();
-    }
-  });
-
-  // Also re-check when dashboard feature is toggled
-  $effect(() => {
-    $dashboardEnabled;
-    checkDashboard();
-  });
 </script>
 
 <div class="flex h-full flex-col pt-4">
@@ -110,21 +60,13 @@
   </div>
 
   <div class="flex-1 min-h-0">
-    {#if checkingDashboard}
-      <div class="flex h-48 items-center justify-center">
-        <div class="animate-pulse text-sm text-gray-400">Loading...</div>
-      </div>
-    {:else if hasDashboard}
-      <DashboardView {projectPath} {projectName} />
-    {:else}
-      <ProjectEmptyState
-        {projectName}
-        {projectDescription}
-        {claudeMdContent}
-        {projectContext}
-        {onSuggestionClick}
-        {onShowClaudeMd}
-      />
-    {/if}
+    <ProjectEmptyState
+      {projectName}
+      {projectDescription}
+      {claudeMdContent}
+      {projectContext}
+      {onSuggestionClick}
+      {onShowClaudeMd}
+    />
   </div>
 </div>

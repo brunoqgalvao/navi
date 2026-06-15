@@ -89,32 +89,6 @@ export type MessageWidgetType =
   | "browser-action";    // Browser-use action/result
 
 // =============================================================================
-// 3. DASHBOARD WIDGETS (Project Landing Page)
-// =============================================================================
-
-/**
- * Dashboard widgets appear on the project landing page.
- * They're defined in `.claude/dashboard.md` using markdown code blocks.
- *
- * Examples: Git log, Preview, File viewer, Status checks
- */
-export interface DashboardWidget<TConfig = unknown> {
-  type: DashboardWidgetType;
-  component: ComponentType<SvelteComponent>;
-  /** Default configuration */
-  defaultConfig?: Partial<TConfig>;
-  /** Validate configuration from markdown */
-  validateConfig?: (config: unknown) => TConfig;
-}
-
-export type DashboardWidgetType =
-  | "git-log"
-  | "preview"
-  | "file"
-  | "status"
-  | "suggestions";
-
-// =============================================================================
 // 4. REFERENCES (Input @ Mentions)
 // =============================================================================
 

@@ -39,8 +39,6 @@ import { handlePortFixerRoutes } from "./routes/port-fixer";
 import { handleBranchNameRoutes } from "./routes/branch-name";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 import { handleCommandsRoutes } from "./routes/commands";
-// Dashboard feature (isolated - remove import to disable)
-import { handleDashboardRoutes } from "./routes/dashboard";
 // OAuth Integrations (Google, GitHub, etc.)
 import { handleIntegrationsRoutes } from "./routes/integrations";
 // Credentials Management (API keys, tokens)
@@ -390,10 +388,6 @@ const server = Bun.serve({
 
     // Agent workspace routes
     response = await handleWorkItemRoutes(url, method, req);
-    if (response) return response;
-
-    // Dashboard routes (isolated feature)
-    response = await handleDashboardRoutes(url, method, req);
     if (response) return response;
 
     // Filesystem routes

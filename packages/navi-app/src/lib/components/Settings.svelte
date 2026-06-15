@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, costsApi, containerPreviewApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project, type ContainerPreview } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, dashboardEnabled, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
+  import { advancedMode, debugMode, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
@@ -1492,27 +1492,6 @@
               </div>
 
               <div class="space-y-4">
-                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                  <div class="flex items-center justify-between">
-                    <div>
-                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Project Dashboard</h5>
-                      <p class="text-sm text-gray-500 dark:text-gray-400">Show customizable dashboard when clicking a project</p>
-                    </div>
-                    <button
-                      onclick={() => dashboardEnabled.toggle()}
-                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$dashboardEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
-                    >
-                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$dashboardEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
-                    </button>
-                  </div>
-
-                  {#if $dashboardEnabled}
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
-                      Dashboard shows project info, quick actions, and widgets. Customize via <code>.claude/dashboard.md</code>
-                    </p>
-                  {/if}
-                </div>
-
                 <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>

@@ -11,8 +11,6 @@ import type {
   PanelMode,
   MessageWidget,
   MessageWidgetType,
-  DashboardWidget,
-  DashboardWidgetType,
   Registry,
 } from "./types";
 
@@ -140,37 +138,6 @@ class MessageWidgetRegistryImpl extends BaseRegistry<MessageWidget> {
 export const messageWidgetRegistry = new MessageWidgetRegistryImpl();
 
 // =============================================================================
-// DASHBOARD WIDGET REGISTRY
-// =============================================================================
-
-class DashboardWidgetRegistryImpl extends BaseRegistry<DashboardWidget> {
-  constructor() {
-    super("type" as keyof DashboardWidget);
-  }
-
-  /**
-   * Get widget types for dashboard parser
-   */
-  getWidgetTypes(): DashboardWidgetType[] {
-    return this.getIds() as DashboardWidgetType[];
-  }
-
-  /**
-   * Validate and get config for a widget type
-   */
-  getValidatedConfig<T>(type: DashboardWidgetType, config: unknown): T | null {
-    const widget = this.get(type);
-    if (!widget) return null;
-    if (widget.validateConfig) {
-      return widget.validateConfig(config) as T;
-    }
-    return { ...widget.defaultConfig, ...(config as object) } as T;
-  }
-}
-
-export const dashboardWidgetRegistry = new DashboardWidgetRegistryImpl();
-
-// =============================================================================
 // DEFAULT EXTENSIONS
 // =============================================================================
 
@@ -278,7 +245,6 @@ export function initializeRegistries(): void {
   }
 
   // Message widgets are registered by their respective component files
-  // Dashboard widgets are registered by the dashboard feature
 
   initialized = true;
 }
@@ -289,6 +255,5 @@ export function initializeRegistries(): void {
 export function resetRegistries(): void {
   extensionRegistry.clear();
   messageWidgetRegistry.clear();
-  dashboardWidgetRegistry.clear();
   initialized = false;
 }
