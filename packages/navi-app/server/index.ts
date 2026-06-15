@@ -21,7 +21,6 @@ import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal"
 import { handleProxyRoutes } from "./routes/proxy";
 import { handleProcessRoutes } from "./routes/processes";
 import { handleAnalyticsRoutes } from "./routes/analytics";
-import { handleDeployRoutes } from "./routes/deploy";
 import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
 import { handleExtensionRoutes } from "./routes/extensions";
 import { handleWorktreeRoutes } from "./routes/worktrees";
@@ -479,10 +478,6 @@ const server = Bun.serve({
 
     // Analytics routes
     response = await handleAnalyticsRoutes(url, method);
-    if (response) return response;
-
-    // Deploy routes (Navi Cloud)
-    response = await handleDeployRoutes(url, method, req);
     if (response) return response;
 
     // Browser routes (browser-use)
