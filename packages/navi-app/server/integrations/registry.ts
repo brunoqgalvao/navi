@@ -457,41 +457,6 @@ export function validateCredentials(
 }
 
 /**
- * Substitute credential values into environment variables
- * Replaces {{key}} placeholders with actual credential values
- */
-export function substituteCredentials(
-  template: Record<string, string>,
-  credentials: Record<string, string>
-): Record<string, string> {
-  const result: Record<string, string> = {};
-
-  for (const [key, value] of Object.entries(template)) {
-    result[key] = value.replace(/\{\{(\w+)\}\}/g, (_, credKey) => {
-      return credentials[credKey] || "";
-    });
-  }
-
-  return result;
-}
-
-/**
- * Get MCP configuration with credentials substituted
- */
-export function getMCPConfig(
-  providerId: string,
-  credentials: Record<string, string>
-): MCPConfig | undefined {
-  const provider = getProvider(providerId);
-  if (!provider?.mcp) return undefined;
-
-  return {
-    ...provider.mcp,
-    env: substituteCredentials(provider.mcp.env, credentials),
-  };
-}
-
-/**
  * Check if a provider requires OAuth
  */
 export function isOAuthProvider(providerId: string): boolean {
