@@ -39,8 +39,6 @@ import { handlePortFixerRoutes } from "./routes/port-fixer";
 import { handleBranchNameRoutes } from "./routes/branch-name";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 import { handleCommandsRoutes } from "./routes/commands";
-// OAuth Integrations (Google, GitHub, etc.)
-import { handleIntegrationsRoutes } from "./routes/integrations";
 // Credentials Management (API keys, tokens)
 import { handleCredentialsRoutes } from "./routes/credentials";
 // Backend adapters (Claude, Codex, Gemini)
@@ -412,10 +410,6 @@ const server = Bun.serve({
 
     // Auth routes
     response = await handleAuthRoutes(url, method, req);
-    if (response) return response;
-
-    // Integrations routes (OAuth)
-    response = await handleIntegrationsRoutes(url, method, req);
     if (response) return response;
 
     // Credentials routes (API keys, tokens)

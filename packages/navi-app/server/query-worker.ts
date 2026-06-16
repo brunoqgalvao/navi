@@ -1951,50 +1951,6 @@ Example clarifying questions:
       }
     }
 
-    // Add integration MCPs (from configured integrations with credentials)
-    // Uses project-scoped credentials if available, falls back to user-level
-    try {
-      const { getAvailableIntegrationMCPs } = await import("./services/integration-mcp");
-      const { sessions } = await import("./db");
-
-      // Get project ID from session for project-scoped credentials
-      let projectId: string | undefined;
-      if (sessionId) {
-        const session = sessions.get(sessionId);
-        projectId = session?.project_id;
-      }
-
-      const credentialScope = projectId ? { projectId } : undefined;
-      const integrationMCPs = getAvailableIntegrationMCPs(credentialScope);
-
-      for (const [name, config] of Object.entries(integrationMCPs)) {
-        if (isMcpEnabled(name) && !mcpServers[name]) {
-          mcpServers[name] = config;
-          console.error(`[Worker] Added integration MCP server: ${name}${projectId ? ` (project: ${projectId})` : ""}`);
-        }
-      }
-    } catch (e) {
-      console.error(`[Worker] Failed to load integration MCPs:`, e);
-    }
-
-    // Add composable integration MCP servers (new system - defineIntegration)
-    // These are built-in integrations using Navi's OAuth
-    try {
-      // Import to trigger registration, then get connected servers
-      await import("./integrations/providers");
-      const { getIntegrationMcpServers } = await import("./integrations/providers");
-      const integrationServers = getIntegrationMcpServers();
-
-      for (const [name, server] of Object.entries(integrationServers)) {
-        if (isMcpEnabled(name) && !mcpServers[name]) {
-          mcpServers[name] = server;
-          console.error(`[Worker] Added composable integration: ${name}`);
-        }
-      }
-    } catch (e) {
-      console.error(`[Worker] Failed to load composable integrations:`, e);
-    }
-
     // Enable multi-session tools if enabled (for all sessions that can spawn or are children)
     if (multiSession?.enabled && isBuiltinMcpEnabled("multi-session")) {
       mcpServers["multi-session"] = multiSessionServer;

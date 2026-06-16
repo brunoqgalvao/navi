@@ -5,12 +5,11 @@
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
-  import IntegrationSettings from "./IntegrationSettings.svelte";
   import { PluginSettings } from "../features/plugins";
   import { McpSettings } from "../features/mcp";
   import { isTelemetryEnabled, setTelemetryOptOut, trackEvent, TelemetryEvents } from "../telemetry";
 
-  type Tab = "api" | "permissions" | "claude-md" | "skills" | "commands" | "features" | "experimental" | "previews" | "analytics" | "integrations" | "plugins" | "mcp";
+  type Tab = "api" | "permissions" | "claude-md" | "skills" | "commands" | "features" | "experimental" | "previews" | "analytics" | "plugins" | "mcp";
 
   interface Props {
     open: boolean;
@@ -122,7 +121,6 @@
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: "api", label: "API Keys", icon: "M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" },
-    { id: "integrations", label: "Integrations", icon: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" },
     { id: "permissions", label: "Permissions", icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" },
     { id: "claude-md", label: "CLAUDE.md", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
     { id: "skills", label: "Skills", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
@@ -892,15 +890,6 @@
               </div>
             </div>
             {/if}
-
-          {:else if activeTab === "integrations"}
-            <div class="max-w-3xl">
-              <div class="mb-6">
-                <h4 class="text-lg font-semibold text-zinc-100 mb-1">OAuth Integrations</h4>
-                <p class="text-sm text-zinc-400">Connect external services to give agents access to Gmail, Google Sheets, Drive, and more.</p>
-              </div>
-              <IntegrationSettings />
-            </div>
 
           {:else if activeTab === "permissions"}
             {#if loadingPermissions}

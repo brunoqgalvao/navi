@@ -21,8 +21,7 @@
   },
   "license": "MIT",
   "bin": {
-    "navi": "./bin/navi.ts",
-    "navi-integrations": "./server/integrations/cli.ts"
+    "navi": "./bin/navi.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.15",
