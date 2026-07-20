@@ -76,6 +76,11 @@ Exit: a cron workflow survives server restart; a chained workflow fires; a faili
 
 ## 7. Phase 5 — Preview fix
 
+> **SUPERSEDED (2026-07-20):** this phase is replaced by
+> `2026-07-20-simplification-deltas-design.md` (Delta A), which deletes the
+> entire preview/dev-server stack instead of fixing it. Do not implement this
+> section.
+
 Subtraction first: keep **native-preview** (dev-server spawn, framework detection, log buffer) and **preview-proxy**; delete the container path (`routes/container-preview.ts` and the container manager inside `services/preview/` — the rest of that directory stays), `routes/port-manager-preview.ts` + `services/port-manager-preview.ts`, and `services/port-fixer.ts` (the LLM port logic).
 
 - **Deterministic ports:** allocate from a configured range, persist per-project assignments, detect conflicts with `lsof` and fail with an actionable error (which process, which port, suggested action) instead of LLM arbitration.
