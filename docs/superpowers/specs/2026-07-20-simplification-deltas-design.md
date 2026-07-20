@@ -33,7 +33,7 @@ Existing browser surface: `browser` extension (registry id `browser`, panelMode 
 
 **Delete (frontend):** the five preview panels, `PreviewButton`, `preview` and `preview-unified` registry entries and panel modes, App.svelte preview state/handlers (including the `"preview"`/`"preview-unified"` members of the panel-mode unions in `App.svelte` and `src/lib/layout/RightPanel.svelte`), and the `browser-preview` placeholder registry entry.
 
-**Keep — explicitly NOT deleted despite the name:** `src/lib/Preview.svelte` (1961 LoC) and `WorkspacePanel.svelte` — this pair IS the browser panel (RightPanel renders it for `mode === "browser"`). It already renders URLs, markdown, images, HTML, JSON, and 3D files via the existing files API. Do not confuse it with `PreviewPanel.svelte` (173 LoC, delete list).
+**Keep — explicitly NOT deleted despite the name:** `src/lib/Preview.svelte` (1961 LoC) and `src/lib/components/WorkspacePanel.svelte` — this pair IS the browser panel (RightPanel renders it for `mode === "browser"`). It already renders URLs, markdown, images, HTML, JSON, and 3D files via the existing files API. Do not confuse it with `PreviewPanel.svelte` (173 LoC, delete list).
 
 **Keep/extend — the browser panel:**
 - URL bar + iframe/webview, as today. No proxying: localhost URLs load directly; whatever the user runs, they run themselves (terminal panel still exists for that).
