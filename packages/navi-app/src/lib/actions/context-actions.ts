@@ -149,6 +149,7 @@ export async function pruneToolResults(sessionId: string): Promise<{ success: bo
       const activeSession = get(currentSession);
       if (sessionReset && activeSession.sessionId === sessionId) {
         currentSession.clearClaudeSession();
+        currentSession.setUsage(resetResult.estimatedInputTokens ?? 0, 0);
       }
     } catch (resetError) {
       console.error("Prune succeeded but reset-context failed:", resetError);

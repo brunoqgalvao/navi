@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { get } from "svelte/store";
   import { availableModels, type ModelInfo } from "../stores";
+  import { DEFAULT_CONTEXT_WINDOW } from "../context-window";
   import { marked } from "marked";
   import ProjectSkillSelector from "./ProjectSkillSelector.svelte";
   import SkillEditor from "./SkillEditor.svelte";
@@ -15,9 +16,10 @@
     project: Project;
     onClose: () => void;
     initialTab?: Tab;
+    onProjectUpdated?: (project: Project) => void;
   }
 
-  let { project, onClose, initialTab }: Props = $props();
+  let { project, onClose, initialTab, onProjectUpdated }: Props = $props();
 
   let activeTab: Tab = $state(initialTab || "instructions");
 
@@ -37,7 +39,19 @@
 
   let defaultModel = $state("");
   let savingModel = $state(false);
+  let savingContextWindow = $state(false);
   let models = $state<ModelInfo[]>([]);
+  let contextWindowPreset = $state(String(DEFAULT_CONTEXT_WINDOW));
+  let customContextWindow = $state(String(DEFAULT_CONTEXT_WINDOW));
+  const contextWindowPresets = [
+    { value: 200_000, label: "200k", description: "Standard Claude context" },
+    { value: 1_000_000, label: "1M", description: "Long-context Claude/Anthropic models" },
+  ];
+  const selectedContextWindow = $derived(
+    contextWindowPreset === "custom"
+      ? Math.max(1, Number(customContextWindow) || DEFAULT_CONTEXT_WINDOW)
+      : Number(contextWindowPreset)
+  );
 
   let permissionSettings = $state<PermissionSettings | null>(null);
   let defaultTools = $state<string[]>([]);
@@ -46,6 +60,13 @@
 
   let showPreview = $state(false);
   let previewHtml = $derived(claudeMdDraft ? marked(claudeMdDraft) : "");
+
+  function syncContextWindowState(value: number | null | undefined) {
+    const contextWindow = value && value > 0 ? value : DEFAULT_CONTEXT_WINDOW;
+    const preset = contextWindowPresets.find((item) => item.value === contextWindow);
+    contextWindowPreset = preset ? String(preset.value) : "custom";
+    customContextWindow = String(contextWindow);
+  }
 
   // Skill editor state
   let showSkillEditor = $state(false);
@@ -63,6 +84,7 @@
       claudeMd = claudeMdResult.content || "";
       claudeMdExists = claudeMdResult.exists;
       claudeMdDraft = claudeMd;
+      syncContextWindowState(project.context_window);
 
       permissionSettings = perms.global;
       defaultTools = perms.defaults.tools;
@@ -145,6 +167,25 @@
       console.error("Failed to save model setting:", e);
     } finally {
       savingModel = false;
+    }
+  }
+
+  async function saveContextWindow() {
+    savingContextWindow = true;
+    try {
+      const updated = await api.projects.update(project.id, {
+        name: project.name,
+        path: project.path,
+        description: project.description ?? undefined,
+        context_window: selectedContextWindow,
+      });
+      project = updated;
+      syncContextWindowState(updated.context_window);
+      onProjectUpdated?.(updated);
+    } catch (e) {
+      console.error("Failed to save context window:", e);
+    } finally {
+      savingContextWindow = false;
     }
   }
 
@@ -462,6 +503,58 @@ Write instructions for Claude here. This file tells Claude:
               </select>
               <p class="text-xs text-gray-500 mt-2">
                 This setting will be used when starting new chats in this project.
+              </p>
+            </div>
+
+            <div class="mt-6 bg-gray-50 rounded-xl border border-gray-200 p-6">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <h3 class="text-sm font-medium text-gray-900">Context Window</h3>
+                  <p class="text-xs text-gray-500 mt-1">Used for usage warnings and auto-compact thresholds in this workspace.</p>
+                </div>
+                <button
+                  onclick={saveContextWindow}
+                  disabled={savingContextWindow}
+                  class="px-3 py-1.5 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-black transition-colors disabled:opacity-50"
+                >
+                  {savingContextWindow ? "Saving..." : "Save"}
+                </button>
+              </div>
+
+              <div class="mt-4 grid grid-cols-3 gap-2">
+                {#each contextWindowPresets as preset}
+                  <button
+                    type="button"
+                    onclick={() => contextWindowPreset = String(preset.value)}
+                    class="rounded-lg border px-3 py-2 text-left transition-colors {contextWindowPreset === String(preset.value) ? 'border-gray-900 bg-white shadow-sm' : 'border-gray-200 bg-white/70 hover:border-gray-300'}"
+                  >
+                    <span class="block text-sm font-semibold text-gray-900">{preset.label}</span>
+                    <span class="block text-xs text-gray-500 mt-0.5">{preset.description}</span>
+                  </button>
+                {/each}
+                <button
+                  type="button"
+                  onclick={() => contextWindowPreset = "custom"}
+                  class="rounded-lg border px-3 py-2 text-left transition-colors {contextWindowPreset === 'custom' ? 'border-gray-900 bg-white shadow-sm' : 'border-gray-200 bg-white/70 hover:border-gray-300'}"
+                >
+                  <span class="block text-sm font-semibold text-gray-900">Custom</span>
+                  <span class="block text-xs text-gray-500 mt-0.5">Use another budget</span>
+                </button>
+              </div>
+
+              {#if contextWindowPreset === "custom"}
+                <label class="mt-4 block text-xs font-medium text-gray-700">Token budget</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1000"
+                  bind:value={customContextWindow}
+                  class="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none focus:ring-0 transition-colors"
+                />
+              {/if}
+
+              <p class="text-xs text-gray-500 mt-3">
+                Current budget: {selectedContextWindow.toLocaleString()} tokens.
               </p>
             </div>
 

@@ -10,6 +10,7 @@
   import ModelReasoningSelector from "./ModelReasoningSelector.svelte";
   import Tooltip from "./Tooltip.svelte";
   import { getApiBase } from "../config";
+  import { isZaiModel } from "../../../shared/zai-models";
 
   interface FileEntry {
     name: string;
@@ -113,6 +114,15 @@
     codex: { label: "Codex" },
     gemini: { label: "Gemini" },
   };
+
+  function getActiveProviderLabel(): string {
+    if (backend !== "claude") {
+      return backendMeta[backend].label;
+    }
+
+    const model = backendModels.claude?.find((candidate) => candidate.value === selectedModel);
+    return model?.provider === "zai" || isZaiModel(selectedModel) ? "Z.ai" : "Claude";
+  }
 
   function handleToggle() {
     worktreeEnabled = !worktreeEnabled;
@@ -1180,7 +1190,7 @@
       onpaste={handlePaste}
       onscroll={syncScroll}
       use:disableAutocorrect
-      placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : ($planMode ? `Describe what you want to build... ${backendMeta[backend].label} will plan first` : `Message ${backendMeta[backend].label}... (@ files, @terminal, @chat, ! shell)`)}
+      placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : ($planMode ? `Describe what you want to build... ${getActiveProviderLabel()} will plan first` : `Message ${getActiveProviderLabel()}... (@ files, @terminal, @chat, ! shell)`)}
       {disabled}
       spellcheck="false"
       autocomplete="off"

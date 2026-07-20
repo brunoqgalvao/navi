@@ -198,6 +198,7 @@
     pruneToolResults,
     startNewChatWithSummary,
     extractHistoryContextForQuery,
+    makePrunedHistoryContext,
     hasPrunedContext,
     hasRollbackContext,
     getDefaultModelForBackend,
@@ -261,6 +262,7 @@
     try {
       await startSidecar();
       serverReady = true;
+      startConnectivityMonitoring(30000);
       loadProjects();
       loadRecentChatsAction();
       loadFolders();
@@ -486,6 +488,16 @@
     },
     onUsageUpdate: (inputTokens, outputTokens) => {
       session.setUsage(inputTokens, outputTokens);
+    },
+    onLiveUsageUpdate: (sessionId, inputTokens, outputTokens) => {
+      if (sessionId === get(session).sessionId) {
+        session.setUsage(inputTokens, outputTokens);
+      }
+    },
+    onContextWindowUpdate: (sessionId, info) => {
+      if (sessionId === get(session).sessionId) {
+        session.setContextInfo(info.contextWindow ?? null, info.maxOutputTokens ?? null);
+      }
     },
     onPermissionRequest: (data) => {
       pendingPermissionRequest = {
@@ -1158,11 +1170,14 @@
   const currentContextBackend = $derived($session.sessionId ? (sessionBackendStore.get($session.sessionId, $sessionBackendStore) || $defaultBackend) : $defaultBackend);
   const currentContextModel = $derived(modelSelection || $session.selectedModel || currentSessionData?.model || "");
   const contextWindow = $derived(getEffectiveSessionContextWindow({
+    sessionContextWindow: $session.contextWindow,
     projectContextWindow: currentProject?.context_window,
     backend: currentContextBackend,
     model: currentContextModel,
   }));
-  const autoCompactThresholdPercent = $derived(getDefaultContextResetThresholdPercent(contextWindow));
+  const autoCompactThresholdPercent = $derived(
+    getDefaultContextResetThresholdPercent(contextWindow, $session.maxOutputTokens)
+  );
   const usagePercent = $derived(contextWindow > 0 ? Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100)) : 0);
   let activeSkills = $state<Skill[]>([]);
   let mcpServers = $state<McpServer[]>([]);
@@ -1183,8 +1198,8 @@
       overflow: "Auto-compact is enabled. Pruning tool outputs before continuing.",
     },
     "prune-then-compact": {
-      inProgress: "Context usage is high. Pruning noisy tool outputs, then asking Claude to compact.",
-      overflow: "Auto-compact is enabled. Pruning noisy tool outputs, then asking Claude to compact.",
+      inProgress: "Context usage is high. Pruning noisy tool outputs and preparing a compact handoff.",
+      overflow: "Auto-compact is enabled. Pruning noisy tool outputs and preparing a compact handoff.",
     },
   };
 
@@ -1194,22 +1209,57 @@
     session.setUsage(Math.max(0, current.inputTokens - tokensSaved), current.outputTokens);
   }
 
-  async function runAutoCompactMethod(sessionId: string, method: AutoCompactMethod) {
-    if (method === "compact") {
-      sendCommand("/compact");
-      return;
-    }
-
+  async function runAutoCompactMethod(sessionId: string, method: AutoCompactMethod, reason: "threshold" | "overflow") {
     autoReducingSessions.add(sessionId);
     try {
-      const pruneResult = await pruneToolResults(sessionId);
-      updateUsageAfterPrune(sessionId, pruneResult.tokensSaved);
+      const reduction = await api.sessions.reduceContext(sessionId, {
+        method,
+        reason,
+      });
 
-      if (method === "prune-then-compact") {
+      if (reduction.tokensSaved > 0) {
+        updateUsageAfterPrune(sessionId, reduction.tokensSaved);
+      }
+
+      if (reduction.historyContext) {
+        sessionHistoryContext.update(map => {
+          map.set(sessionId, makePrunedHistoryContext(reduction.historyContext!));
+          return new Map(map);
+        });
+      }
+
+      if (reduction.sessionReset && sessionId === get(session).sessionId) {
+        session.clearClaudeSession();
+        session.setUsage(reduction.estimatedInputTokens ?? 0, 0);
+      }
+
+      if (!reduction.success && reduction.nextAction === "none") {
+        notifications.add({
+          type: "warning",
+          title: "Auto-compact skipped",
+          message: reduction.error || "No context reduction was available for this session.",
+        });
+        processMessageQueue(sessionId);
+        return;
+      }
+
+      if (reduction.nextAction === "sdk_compact") {
         sendCommand("/compact");
         return;
       }
 
+      if (reason === "overflow") {
+        sendCommand("Continue from the latest user request using the compacted handoff. Avoid re-reading large outputs; use targeted searches and summarize bulky results.");
+        return;
+      }
+
+      processMessageQueue(sessionId);
+    } catch (error) {
+      notifications.add({
+        type: "error",
+        title: "Auto-compact failed",
+        message: error instanceof Error ? error.message : "Context reduction failed.",
+      });
       processMessageQueue(sessionId);
     } finally {
       autoReducingSessions.delete(sessionId);
@@ -1240,7 +1290,7 @@
         : methodDetails.inProgress,
     });
 
-    void runAutoCompactMethod(sessionId, method);
+    void runAutoCompactMethod(sessionId, method, reason);
     return true;
   }
 
@@ -1341,9 +1391,6 @@
     // Set up global error handlers
     const cleanupErrorHandlers = setupGlobalErrorHandlers();
 
-    // Start connectivity monitoring (checks every 30 seconds)
-    startConnectivityMonitoring(30000);
-
     // Initialize extension registry with default extensions
     initializeRegistry();
 
@@ -1352,6 +1399,7 @@
 
     startSidecar().then(async () => {
       serverReady = true;
+      startConnectivityMonitoring(30000);
 
       // Initialize auth state (check if user is already logged in)
       auth.init();
@@ -2109,6 +2157,13 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
   }
 
+  function handleProjectUpdated(updatedProject: Project) {
+    sidebarProjects = sidebarProjects.map((proj) =>
+      proj.id === updatedProject.id ? updatedProject : proj
+    );
+    projects.set(sidebarProjects);
+  }
+
   function openDeleteConfirm(proj: Project, e: Event) {
     e.stopPropagation();
     projectToDelete = proj;
@@ -2188,6 +2243,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     session.setSession(s.id, s.claude_session_id);
     session.setCost(s.total_cost_usd || 0);
     session.setUsage(s.input_tokens || 0, s.output_tokens || 0);
+    session.setContextInfo(s.context_window ?? null, s.max_output_tokens ?? null);
 
     // Restore model for this session from cache or DB, defaulting by backend.
     const cachedModel = $sessionModels.get(s.id);
@@ -2233,6 +2289,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       const freshSession = await api.sessions.get(s.id);
       if (freshSession) {
         session.setUsage(freshSession.input_tokens || 0, freshSession.output_tokens || 0);
+        session.setContextInfo(freshSession.context_window ?? null, freshSession.max_output_tokens ?? null);
         session.setCost(freshSession.total_cost_usd || 0);
         // Update model from DB if we don't have a cached value
         if (freshSession.model && !cachedModel) {
@@ -4752,7 +4809,12 @@ Please walk me through the setup step by step. When I have the credentials, save
   />
 
   {#if showProjectSettings && currentProject}
-    <ProjectSettings project={currentProject} onClose={() => { showProjectSettings = false; projectSettingsInitialTab = undefined; }} initialTab={projectSettingsInitialTab} />
+    <ProjectSettings
+      project={currentProject}
+      onClose={() => { showProjectSettings = false; projectSettingsInitialTab = undefined; }}
+      initialTab={projectSettingsInitialTab}
+      onProjectUpdated={handleProjectUpdated}
+    />
   {/if}
 
   <!-- Worktree Merge Modal -->
@@ -4859,7 +4921,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     open={showContextOverflowModal}
     onClose={() => showContextOverflowModal = false}
     onPrune={() => pruneToolResults($session.sessionId || '')}
-    onCompact={() => { void runAutoCompactMethod($session.sessionId || '', "prune-then-compact"); }}
+    onCompact={() => { void runAutoCompactMethod($session.sessionId || '', "prune-then-compact", "overflow"); }}
     onNewChat={() => {
       startNewChatAction();
       showContextOverflowModal = false;
@@ -5021,7 +5083,9 @@ Please walk me through the setup step by step. When I have the credentials, save
 
 <NotificationToast />
 <UpdateChecker />
-<ConnectivityBanner />
+{#if serverReady && !serverError}
+  <ConnectivityBanner />
+{/if}
 
 <!-- LLM Council Modal -->
 <CouncilModal

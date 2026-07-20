@@ -118,7 +118,10 @@ function isPortAvailable(port) {
       server.close();
       resolve(true);
     });
-    server.listen(port, '127.0.0.1');
+    // Probe the SAME interface httpServer.listen(port) binds (all/dual-stack ::),
+    // not just 127.0.0.1 — otherwise a stale IPv6 holder reads as "free" and the
+    // real listen() blows up with EADDRINUSE on :::PORT.
+    server.listen(port);
   });
 }
 
@@ -554,6 +557,25 @@ process.on('SIGTERM', () => {
 
 async function start() {
   PORT = await findAvailablePort(PREFERRED_PORT);
+
+  if (PORT !== PREFERRED_PORT) {
+    console.error(
+      `[PTY] WARNING: preferred port ${PREFERRED_PORT} was busy; using ${PORT}. ` +
+      `The frontend hardcodes ${PREFERRED_PORT}, so terminals will NOT connect. ` +
+      `Free it with "npm run kill" and restart.`
+    );
+  }
+
+  // Catch the race where the port frees between probe and listen (or a clean
+  // EADDRINUSE) and fail with a readable message instead of an unhandled event.
+  httpServer.once('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      console.error(`[PTY] Port ${PORT} in use. Run "npm run kill" then restart.`);
+      process.exit(1);
+    }
+    throw err;
+  });
+
   httpServer.listen(PORT);
 }
 

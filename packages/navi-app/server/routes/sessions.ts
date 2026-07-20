@@ -134,6 +134,45 @@ function buildSessionContinuationHandoff(sessionId: string): string | undefined 
   ].join("\n");
 }
 
+type ContextReductionMethod = "compact" | "prune" | "prune-then-compact";
+type ContextReductionReason = "threshold" | "overflow" | "manual";
+type ContextReductionNextAction = "sdk_compact" | "continue" | "none";
+
+const CONTEXT_REDUCTION_METHODS = new Set(["compact", "prune", "prune-then-compact"]);
+const CONTEXT_REDUCTION_REASONS = new Set(["threshold", "overflow", "manual"]);
+
+function normalizeContextReductionMethod(value: unknown): ContextReductionMethod {
+  return typeof value === "string" && CONTEXT_REDUCTION_METHODS.has(value)
+    ? value as ContextReductionMethod
+    : "compact";
+}
+
+function normalizeContextReductionReason(value: unknown): ContextReductionReason {
+  return typeof value === "string" && CONTEXT_REDUCTION_REASONS.has(value)
+    ? value as ContextReductionReason
+    : "manual";
+}
+
+function estimateHandoffTokens(historyContext: string | undefined): number {
+  if (!historyContext) {
+    return 0;
+  }
+  return Math.min(10000, Math.max(1000, Math.round(historyContext.length / 4)));
+}
+
+function persistContextReset(
+  sessionId: string,
+  method: ContextReductionMethod,
+  reason: ContextReductionReason
+): { historyContext?: string; estimatedInputTokens: number } {
+  const historyContext = buildSessionContinuationHandoff(sessionId);
+  const estimatedInputTokens = estimateHandoffTokens(historyContext);
+  sessions.clearBackendSessionState(sessionId);
+  sessions.setPendingContextHandoff(sessionId, historyContext ?? null, method, reason);
+  sessions.resetTokenCounts(sessionId, estimatedInputTokens, 0);
+  return { historyContext, estimatedInputTokens };
+}
+
 export function createSessionApprovedAllSet(): Set<string> {
   return new Set<string>();
 }
@@ -337,11 +376,103 @@ export async function handleSessionRoutes(
       return json({ error: "Session not found" }, 404);
     }
     // Clear backend-specific session state so the next query starts fresh.
-    sessions.clearBackendSessionState(id);
+    const reset = persistContextReset(id, "prune", "manual");
     return json({
       success: true,
       sessionReset: true,
-      historyContext: buildSessionContinuationHandoff(id),
+      historyContext: reset.historyContext,
+      estimatedInputTokens: reset.estimatedInputTokens,
+    });
+  }
+
+  const reduceContextMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/reduce-context$/);
+  if (reduceContextMatch && method === "POST") {
+    const sessionId = reduceContextMatch[1];
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    const project = projects.get(session.project_id);
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const requestedMethod = normalizeContextReductionMethod(body.method);
+    const reason = normalizeContextReductionReason(body.reason);
+    const effectiveMethod: ContextReductionMethod =
+      reason === "overflow" && requestedMethod === "compact"
+        ? "prune-then-compact"
+        : requestedMethod;
+
+    if (effectiveMethod === "compact" && reason !== "overflow") {
+      return json({
+        success: true,
+        method: requestedMethod,
+        effectiveMethod,
+        reason,
+        nextAction: "sdk_compact" satisfies ContextReductionNextAction,
+        sessionReset: false,
+        prunedCount: 0,
+        tokensSaved: 0,
+        prunedToolUseIds: [],
+      });
+    }
+
+    const preserveRecentCount = body.preserveRecentCount ?? 0;
+    const maxPrunedLength = body.maxPrunedLength ?? 200;
+    let foundArtifacts = false;
+    let prunedCount = 0;
+    let tokensSaved = 0;
+    let prunedToolUseIds: string[] = [];
+
+    if (session.claude_session_id) {
+      const pruneResult = await pruneClaudeSessionArtifacts({
+        claudeSessionId: session.claude_session_id,
+        candidateProjectPaths: [session.worktree_path, project.path],
+        preserveRecentCount,
+        maxPrunedLength,
+      });
+
+      foundArtifacts = pruneResult.foundArtifacts;
+      prunedCount = pruneResult.prunedCount;
+      tokensSaved = Math.round(pruneResult.charsSaved / 4);
+      prunedToolUseIds = pruneResult.prunedToolUseIds;
+    }
+
+    const shouldReset = prunedCount > 0 || reason === "overflow";
+    if (!shouldReset) {
+      return json({
+        success: false,
+        error: foundArtifacts
+          ? "No large tool outputs found to prune"
+          : "Claude session file not found",
+        method: requestedMethod,
+        effectiveMethod,
+        reason,
+        nextAction: "none" satisfies ContextReductionNextAction,
+        sessionReset: false,
+        prunedCount,
+        tokensSaved,
+        prunedToolUseIds,
+      });
+    }
+
+    const reset = persistContextReset(sessionId, effectiveMethod, reason);
+
+    return json({
+      success: true,
+      method: requestedMethod,
+      effectiveMethod,
+      reason,
+      nextAction: "continue" satisfies ContextReductionNextAction,
+      sessionReset: true,
+      prunedCount,
+      tokensSaved,
+      prunedToolUseIds,
+      historyContext: reset.historyContext,
+      estimatedInputTokens: reset.estimatedInputTokens,
     });
   }
 

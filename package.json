@@ -8,7 +8,7 @@
     "dev:nowatch": "bun run --cwd packages/navi-app dev:nowatch",
     "dev:tauri": "bun run --cwd packages/navi-app tauri:dev",
     "dev:landing": "bun run --cwd packages/landing-page dev",
-    "kill": "lsof -ti:1420,3021,3022 | xargs kill -9 || true",
+    "kill": "bash scripts/kill-ports.sh",
     "build": "bun run --cwd packages/navi-app build && bun run --cwd packages/landing-page build"
   },
   "devDependencies": {

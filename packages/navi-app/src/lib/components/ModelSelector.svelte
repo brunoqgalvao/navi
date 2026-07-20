@@ -32,14 +32,14 @@
     if (anthropicModels.length > 0) {
       groups.push({ provider: "anthropic", label: "Claude", models: anthropicModels });
     }
+    if (zaiModels.length > 0) {
+      groups.push({ provider: "zai", label: "Z.ai", models: zaiModels });
+    }
     if (openaiModels.length > 0) {
       groups.push({ provider: "openai", label: "OpenAI", models: openaiModels });
     }
     if (googleModels.length > 0) {
       groups.push({ provider: "google", label: "Google", models: googleModels });
-    }
-    if (zaiModels.length > 0) {
-      groups.push({ provider: "zai", label: "Z.AI", models: zaiModels });
     }
     return groups;
   });

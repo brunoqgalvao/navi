@@ -19,7 +19,7 @@ export interface AgentDefinition {
   scripts: ScriptRef[];
 
   // Metadata from frontmatter
-  model?: "haiku" | "sonnet" | "opus";
+  model?: "haiku" | "sonnet" | "opus" | "fable";
   description?: string;
 }
 
@@ -126,7 +126,7 @@ export interface FileRef {
 export interface AgentFrontmatter {
   name: string;
   description?: string;
-  model?: "haiku" | "sonnet" | "opus";
+  model?: "haiku" | "sonnet" | "opus" | "fable";
   tools?: string[];
   skills?: string[]; // paths or library:id
   subAgents?: string[]; // paths

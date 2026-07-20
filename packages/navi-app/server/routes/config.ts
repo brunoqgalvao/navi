@@ -1,6 +1,7 @@
 import { json } from "../utils/response";
 import { globalSettings, DEFAULT_TOOLS, DANGEROUS_TOOLS } from "../db";
 import { getCuratedAnthropicModels } from "../../shared/anthropic-models";
+import { getCuratedZaiModels } from "../../shared/zai-models";
 
 type ModelInfo = {
   value: string;
@@ -15,10 +16,7 @@ function getFallbackClaudeModels(): ModelInfo[] {
 
 function getConfiguredZaiModels(): ModelInfo[] {
   const zaiApiKey = globalSettings.get("zaiApiKey") || process.env.ZAI_API_KEY;
-  return zaiApiKey ? [
-    { value: "glm-4.7", displayName: "GLM-4.7", description: "Z.AI flagship coding model", provider: "zai" },
-    { value: "glm-4.5-air", displayName: "GLM-4.5 Air", description: "Fast, lightweight model", provider: "zai" },
-  ] : [];
+  return zaiApiKey ? getCuratedZaiModels() : [];
 }
 
 export async function handleConfigRoutes(url: URL, method: string, req: Request): Promise<Response | null> {

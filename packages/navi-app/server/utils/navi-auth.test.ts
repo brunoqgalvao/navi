@@ -108,7 +108,7 @@ describe("resolveNaviClaudeAuthFromState", () => {
   test("uses Z.AI auth for glm models before Claude login or Anthropic API key", () => {
     const result = resolveNaviClaudeAuthFromState(
       createInputs({
-        model: "glm-4.7",
+        model: "glm-5.2[1m]",
         preferredAuth: "api_key",
         storedApiKey: "sk-ant-api-abcdef12",
         envZaiApiKey: "zai-key-12345678",
@@ -117,9 +117,12 @@ describe("resolveNaviClaudeAuthFromState", () => {
     );
 
     expect(result.mode).toBe("zai");
+    // No autoCompactWindow override: the CLI has no such env var — 1M context is
+    // selected by the "[1m]" suffix in the model id itself.
     expect(result.overrides).toEqual({
-      apiKey: "zai-key-12345678",
+      authToken: "zai-key-12345678",
       baseUrl: "https://api.z.ai/api/anthropic",
+      apiTimeoutMs: "3000000",
     });
     expect(result.source).toBe("Environment → ZAI_API_KEY");
   });

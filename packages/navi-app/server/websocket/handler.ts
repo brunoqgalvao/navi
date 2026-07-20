@@ -12,8 +12,8 @@ import { hasMessageContent, shouldPersistUserMessage, safeSend } from "../servic
 import { handlePtyWebSocket, detachFromAllTerminals, cleanupWsExec, type PtyMessage } from "../routes/terminal";
 import { resolveNaviClaudeAuth, formatAuthForLog } from "../utils/navi-auth";
 import { resolveBunExecutable } from "../utils/bun";
-import { resolveClaudeCodeExecutable } from "../utils/claude-code";
-import { DEFAULT_CONTEXT_WINDOW, getDefaultContextResetThreshold, getEffectiveContextWindow } from "../utils/context-window";
+import { resolveClaudeCodeExecutable, type ClaudeAuthEnvOverrides } from "../utils/claude-code";
+import { DEFAULT_CONTEXT_WINDOW, extractModelContextInfo, getDefaultContextResetThreshold, getEffectiveContextWindow } from "../utils/context-window";
 import { describePath, writeDebugLog } from "../utils/logging";
 import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 // Multi-backend support
@@ -54,6 +54,31 @@ import { getSdkUserMessageFlags } from "../../shared/sdk-user-message";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+function clearClaudeAuthEnv(env: NodeJS.ProcessEnv) {
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  delete env.ANTHROPIC_BASE_URL;
+  delete env.NAVI_ANTHROPIC_API_KEY;
+  delete env.NAVI_ANTHROPIC_AUTH_TOKEN;
+  delete env.NAVI_ANTHROPIC_BASE_URL;
+  delete env.NAVI_API_TIMEOUT_MS;
+}
+
+function applyClaudeAuthOverrides(env: NodeJS.ProcessEnv, overrides: ClaudeAuthEnvOverrides) {
+  if (overrides.apiKey) {
+    env.NAVI_ANTHROPIC_API_KEY = overrides.apiKey;
+  }
+  if (overrides.authToken) {
+    env.NAVI_ANTHROPIC_AUTH_TOKEN = overrides.authToken;
+  }
+  if (overrides.baseUrl) {
+    env.NAVI_ANTHROPIC_BASE_URL = overrides.baseUrl;
+  }
+  if (overrides.apiTimeoutMs) {
+    env.NAVI_API_TIMEOUT_MS = overrides.apiTimeoutMs;
+  }
+}
 
 function logBunSpawnDiagnostics(
   sessionId: string | undefined,
@@ -1005,10 +1030,7 @@ async function startChildSessionQuery(
 
   const workerEnv = { ...process.env };
   workerEnv.NAVI_DB_READONLY = "1";
-  delete workerEnv.ANTHROPIC_API_KEY;
-  delete workerEnv.ANTHROPIC_BASE_URL;
-  delete workerEnv.NAVI_ANTHROPIC_API_KEY;
-  delete workerEnv.NAVI_ANTHROPIC_BASE_URL;
+  clearClaudeAuthEnv(workerEnv);
 
   // Resolve and inject auth for child session (inherit from parent settings, not OAuth default)
   const authResult = resolveNaviClaudeAuth(config.model);
@@ -1017,12 +1039,7 @@ async function startChildSessionQuery(
     return;
   }
 
-  if (authResult.overrides.apiKey) {
-    workerEnv.NAVI_ANTHROPIC_API_KEY = authResult.overrides.apiKey;
-  }
-  if (authResult.overrides.baseUrl) {
-    workerEnv.NAVI_ANTHROPIC_BASE_URL = authResult.overrides.baseUrl;
-  }
+  applyClaudeAuthOverrides(workerEnv, authResult.overrides);
   workerEnv.NAVI_AUTH_MODE = authResult.mode;
   workerEnv.NAVI_AUTH_SOURCE = authResult.source;
 
@@ -2161,6 +2178,8 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
   // fall back to the session's persisted selection instead of the backend default.
   const effectiveModel = model || session?.model || undefined;
   const adapter = getAdapter(backendId);
+  const pendingContextHandoff = session?.pending_context_handoff?.trim() || undefined;
+  const effectiveHistoryContext = historyContext || pendingContextHandoff;
   const resumeId =
     adapter.supportsResume && session?.backend_session_id
       ? session.backend_session_id
@@ -2211,8 +2230,8 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
     for await (const event of adapter.query({
       prompt: resumeId
         ? prompt || ""
-        : historyContext
-          ? `${historyContext}\n\nUser's new message:\n${prompt}`
+        : effectiveHistoryContext
+          ? `${effectiveHistoryContext}\n\nUser's new message:\n${prompt}`
           : prompt || "",
       cwd: workingDirectory,
       sessionId: sessionId || crypto.randomUUID(),
@@ -2221,6 +2240,10 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
       permissionMode: isAutoApprove ? "auto" : "confirm",
       backendOptions: reasoningEffort ? { reasoningEffort } : undefined,
     })) {
+      if (sessionId && pendingContextHandoff) {
+        sessions.clearPendingContextHandoff(sessionId);
+      }
+
       if (event.type === "backend_session" && sessionId) {
         sessions.updateBackendSessionState(
           event.backendSessionId,
@@ -2498,9 +2521,16 @@ The user will explicitly approve the plan before any execution begins.
   // Expand plugin commands if present (e.g., /owner/plugin:command args)
   const expandedPrompt = workingDirectory ? expandPluginCommands(prompt || "", workingDirectory) : prompt;
 
-  let effectivePrompt = historyContext
-    ? `${historyContext}\n\nUser's new message:\n${expandedPrompt}`
+  const pendingContextHandoff = session?.pending_context_handoff?.trim() || undefined;
+  const effectiveHistoryContext = historyContext || pendingContextHandoff;
+
+  let effectivePrompt = effectiveHistoryContext
+    ? `${effectiveHistoryContext}\n\nUser's new message:\n${expandedPrompt}`
     : expandedPrompt;
+
+  if (sessionId && pendingContextHandoff) {
+    sessions.clearPendingContextHandoff(sessionId);
+  }
 
   // Execute SessionStart hooks from enabled plugins (async, don't block)
   if (workingDirectory && hasHooksForEvent(workingDirectory, "SessionStart")) {
@@ -2607,10 +2637,7 @@ The user will explicitly approve the plan before any execution begins.
 
   const workerEnv = { ...process.env };
   workerEnv.NAVI_DB_READONLY = "1";
-  delete workerEnv.ANTHROPIC_API_KEY;
-  delete workerEnv.ANTHROPIC_BASE_URL;
-  delete workerEnv.NAVI_ANTHROPIC_API_KEY;
-  delete workerEnv.NAVI_ANTHROPIC_BASE_URL;
+  clearClaudeAuthEnv(workerEnv);
 
   const authResult = resolveNaviClaudeAuth(model);
   if (authResult.mode === "none") {
@@ -2622,12 +2649,7 @@ The user will explicitly approve the plan before any execution begins.
     return;
   }
 
-  if (authResult.overrides.apiKey) {
-    workerEnv.NAVI_ANTHROPIC_API_KEY = authResult.overrides.apiKey;
-  }
-  if (authResult.overrides.baseUrl) {
-    workerEnv.NAVI_ANTHROPIC_BASE_URL = authResult.overrides.baseUrl;
-  }
+  applyClaudeAuthOverrides(workerEnv, authResult.overrides);
   // Pass auth mode to worker for its own logging
   workerEnv.NAVI_AUTH_MODE = authResult.mode;
   workerEnv.NAVI_AUTH_SOURCE = authResult.source;
@@ -2825,6 +2847,13 @@ The user will explicitly approve the plan before any execution begins.
             }
           }
 
+          // Context window the runtime reported for this session's model — the
+          // authoritative budget, persisted and forwarded to the client.
+          const reportedContextInfo = extractModelContextInfo(
+            msg.resultData?.modelUsage,
+            msg.resultData?.model || null
+          );
+
           if (sessionId && msg.resultData) {
             const costUsd = msg.resultData.total_cost_usd || 0;
             const usage = msg.resultData.usage || {};
@@ -2832,6 +2861,13 @@ The user will explicitly approve the plan before any execution begins.
             const totalInputTokens = (contextUsage.input_tokens || 0) +
               (contextUsage.cache_creation_input_tokens || 0) +
               (contextUsage.cache_read_input_tokens || 0);
+            if (reportedContextInfo) {
+              sessions.updateContextInfo(
+                sessionId,
+                reportedContextInfo.contextWindow,
+                reportedContextInfo.maxOutputTokens
+              );
+            }
             sessions.updateClaudeSession(
               msg.resultData.session_id,
               msg.resultData.model || null,
@@ -2948,7 +2984,7 @@ The user will explicitly approve the plan before any execution begins.
                         });
 
                         untilDoneSessions.delete(sessionId);
-                        sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
+                        sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage, contextWindow: reportedContextInfo?.contextWindow, maxOutputTokens: reportedContextInfo?.maxOutputTokens ?? undefined });
                         return;
                       }
 
@@ -2966,7 +3002,7 @@ The user will explicitly approve the plan before any execution begins.
                         });
 
                         untilDoneSessions.delete(sessionId);
-                        sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
+                        sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage, contextWindow: reportedContextInfo?.contextWindow, maxOutputTokens: reportedContextInfo?.maxOutputTokens ?? undefined });
                         return;
                       }
 
@@ -3125,7 +3161,7 @@ The user will explicitly approve the plan before any execution begins.
             }
           }
 
-          sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage });
+          sendToSession(sessionId, { type: "done", uiSessionId: sessionId, claudeSessionId: msg.resultData?.session_id, finalMessageId: lastMainAssistantMsgId, usage: msg.lastAssistantUsage, contextWindow: reportedContextInfo?.contextWindow, maxOutputTokens: reportedContextInfo?.maxOutputTokens ?? undefined });
           if (sessionId) {
             // Update kanban card to waiting_review (agent completed, needs user review)
             setKanbanCardReview(sessionId, "Ready for review");
@@ -3167,6 +3203,18 @@ The user will explicitly approve the plan before any execution begins.
             uiSessionId: sessionId,
             error: msg.error,
           });
+          if (sessionId && msg.lastAssistantUsage) {
+            // Persist context accounting even when the turn dies (e.g. "Prompt is
+            // too long") — otherwise the UI keeps showing the previous turn's
+            // usage while the context is actually at the wall.
+            const u = msg.lastAssistantUsage;
+            const totalInputTokens = (u.input_tokens || 0) +
+              (u.cache_creation_input_tokens || 0) +
+              (u.cache_read_input_tokens || 0);
+            if (totalInputTokens > 0) {
+              sessions.updateUsage(sessionId, totalInputTokens, u.output_tokens || 0, Date.now());
+            }
+          }
           if (sessionId) {
             // Update kanban card to blocked on error
             setKanbanCardBlocked(sessionId, `Error: ${msg.error}`);

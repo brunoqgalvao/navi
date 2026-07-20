@@ -131,6 +131,21 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           callbacks.onTodoUpdate?.(uiSessionId, todos);
         }
 
+        // Live context accounting: each main-chain assistant message carries the
+        // usage of the API call that produced it. Sidechain (subagent) messages
+        // track a different context, and synthetic error messages report zeros.
+        const assistantUsage = assistantMsg.usage;
+        if (assistantUsage && !parentId) {
+          const totalTokens =
+            (assistantUsage.input_tokens || 0) +
+            (assistantUsage.cache_creation_input_tokens || 0) +
+            (assistantUsage.cache_read_input_tokens || 0) +
+            (assistantUsage.output_tokens || 0);
+          if (totalTokens > 0) {
+            callbacks.onAssistantUsage?.(uiSessionId, assistantUsage);
+          }
+        }
+
         callbacks.onMessageUpdate?.(uiSessionId);
         if (uiSessionId === currentSessionId) {
           callbacks.scrollToBottom?.();
@@ -292,6 +307,12 @@ export function createMessageHandler(config: MessageHandlerConfig) {
           }
           if (doneMsg.usage) {
             callbacks.onComplete?.(uiSessionId, { costUsd: 0, usage: doneMsg.usage });
+          }
+          if (doneMsg.contextWindow || doneMsg.maxOutputTokens) {
+            callbacks.onContextInfo?.(uiSessionId, {
+              contextWindow: doneMsg.contextWindow,
+              maxOutputTokens: doneMsg.maxOutputTokens,
+            });
           }
           // Notify about claudeSessionId so frontend can update session state
           if (doneMsg.claudeSessionId) {

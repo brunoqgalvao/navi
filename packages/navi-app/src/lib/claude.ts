@@ -130,6 +130,7 @@ export interface ModelUsage {
   webSearchRequests: number;
   costUSD: number;
   contextWindow: number;
+  maxOutputTokens?: number;
 }
 
 export interface PermissionDenial {
@@ -183,6 +184,9 @@ export interface DoneMessage {
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
   };
+  // Context window the runtime reported for this session's model.
+  contextWindow?: number;
+  maxOutputTokens?: number;
   uuid?: string;
   timestamp?: number;
 }

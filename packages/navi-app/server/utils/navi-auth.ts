@@ -1,8 +1,11 @@
 import { execFileSync } from "child_process";
 import { globalSettings } from "../db";
 import { resolveClaudeCodeExecutable, type ClaudeAuthEnvOverrides } from "./claude-code";
-
-const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
+import {
+  ZAI_ANTHROPIC_BASE_URL,
+  ZAI_API_TIMEOUT_MS,
+  isZaiModel,
+} from "../../shared/zai-models";
 const CLAUDE_OAUTH_STATUS_TTL_MS = 5000;
 
 export type NaviAuthMode = "oauth" | "api_key" | "zai" | "none";
@@ -116,13 +119,18 @@ export function resolveNaviClaudeAuthFromState({
   oauthStatus,
 }: ResolveNaviClaudeAuthInputs): NaviAuthResult {
   const zaiApiKey = storedZaiApiKey || envZaiApiKey;
-  const isGlmModel = model?.startsWith("glm-");
 
   // Priority 1: Z.AI for GLM models
-  if (isGlmModel && zaiApiKey) {
+  if (isZaiModel(model) && zaiApiKey) {
     return {
       mode: "zai",
-      overrides: { apiKey: zaiApiKey, baseUrl: ZAI_ANTHROPIC_BASE_URL },
+      // The 1M context for "[1m]" models is selected by the model id itself —
+      // the runtime has no auto-compact-window env var.
+      overrides: {
+        authToken: zaiApiKey,
+        baseUrl: ZAI_ANTHROPIC_BASE_URL,
+        apiTimeoutMs: ZAI_API_TIMEOUT_MS,
+      },
       source: storedZaiApiKey ? "Navi settings → Z.AI API key" : "Environment → ZAI_API_KEY",
       keyPrefix: zaiApiKey.slice(0, 8),
     };

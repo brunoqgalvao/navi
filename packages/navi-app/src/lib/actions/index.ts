@@ -83,6 +83,7 @@ export {
   startNewChatWithSummary,
   getMessagesForApi,
   extractHistoryContextForQuery,
+  makePrunedHistoryContext,
   hasPrunedContext,
   hasRollbackContext,
   clearPrunedCache,

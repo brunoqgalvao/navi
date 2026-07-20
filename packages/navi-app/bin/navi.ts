@@ -38,6 +38,10 @@ const PREFERRED_BUN_BIN =
 // Parse args
 const args = process.argv.slice(2);
 const command = args[0];
+const shouldAutoOpenBrowser =
+  !args.includes("--no-open") &&
+  process.env.NAVI_AUTO_OPEN !== "false" &&
+  process.env.NAVI_MANAGED_BY !== "launchd";
 
 // ── navi update ──────────────────────────────────────────────
 if (command === "update") {
@@ -257,6 +261,8 @@ async function handleService(serviceArgs: string[]) {
     <string>${nodePath}</string>
     <key>NAVI_MANAGED_BY</key>
     <string>launchd</string>
+    <key>NAVI_AUTO_OPEN</key>
+    <string>false</string>
   </dict>
   <key>ProcessType</key>
   <string>Interactive</string>
@@ -607,18 +613,19 @@ async function main() {
   log(dim("  Press Ctrl+C to stop all servers."));
   log("");
 
-  // Try to open browser
-  try {
-    const openCmd =
-      process.platform === "darwin"
-        ? ["open", `http://localhost:${frontendPort}`]
-        : process.platform === "win32"
-          ? ["cmd", "/c", "start", `http://localhost:${frontendPort}`]
-          : ["xdg-open", `http://localhost:${frontendPort}`];
+  if (shouldAutoOpenBrowser) {
+    try {
+      const openCmd =
+        process.platform === "darwin"
+          ? ["open", `http://localhost:${frontendPort}`]
+          : process.platform === "win32"
+            ? ["cmd", "/c", "start", `http://localhost:${frontendPort}`]
+            : ["xdg-open", `http://localhost:${frontendPort}`];
 
-    spawn(openCmd, { stdout: "ignore", stderr: "ignore" });
-  } catch {
-    // silently fail — user can open manually
+      spawn(openCmd, { stdout: "ignore", stderr: "ignore" });
+    } catch {
+      // silently fail — user can open manually
+    }
   }
 
   // Handle graceful shutdown

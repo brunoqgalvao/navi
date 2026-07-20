@@ -36,7 +36,6 @@ const internalStore = { subscribe };
 export const connectionStatus = derived<typeof internalStore, ConnectionStatus>(
   internalStore,
   ($state) => {
-    if ($state.checking && $state.lastCheck === null) return "checking";
     if (!$state.browserOnline) return "offline";
     if (!$state.serverReachable) return "server-down";
     if (!$state.internetReachable) return "offline";
@@ -139,7 +138,15 @@ export function startConnectivityMonitoring(intervalMs: number = 30000): void {
     };
 
     // Update initial browser state
-    update((s) => ({ ...s, browserOnline: navigator.onLine }));
+    update((s) => ({
+      ...s,
+      browserOnline: navigator.onLine,
+      serverReachable: true,
+      internetReachable: true,
+      lastCheck: null,
+      checking: false,
+      failureCount: 0,
+    }));
   }
 
   // Initial check

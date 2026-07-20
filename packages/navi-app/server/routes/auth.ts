@@ -239,11 +239,14 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       ? `${storedApiKey.slice(0, 10)}...${storedApiKey.slice(-4)}`
       : null;
 
-    const zaiKey = globalSettings.get("zaiApiKey") as string | null;
+    const storedZaiKey = globalSettings.get("zaiApiKey") as string | null;
+    const envZaiKey = process.env.ZAI_API_KEY || null;
+    const zaiKey = storedZaiKey || envZaiKey;
     const hasZaiKey = !!zaiKey;
     const zaiKeyPreview = zaiKey
       ? `${zaiKey.slice(0, 8)}...${zaiKey.slice(-4)}`
       : null;
+    const zaiKeySource = storedZaiKey ? "settings" : envZaiKey ? "environment" : null;
 
     return json({
       claudeInstalled,
@@ -258,6 +261,7 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       preferredAuth,
       hasZaiKey,
       zaiKeyPreview,
+      zaiKeySource,
     });
   }
 
@@ -319,13 +323,16 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
   }
 
   if (url.pathname === "/api/auth/zai-key" && method === "GET") {
-    const zaiKey = globalSettings.get("zaiApiKey") as string | null;
+    const storedZaiKey = globalSettings.get("zaiApiKey") as string | null;
+    const envZaiKey = process.env.ZAI_API_KEY || null;
+    const zaiKey = storedZaiKey || envZaiKey;
     const hasZaiKey = !!zaiKey;
     const zaiKeyPreview = zaiKey
       ? `${zaiKey.slice(0, 8)}...${zaiKey.slice(-4)}`
       : null;
+    const zaiKeySource = storedZaiKey ? "settings" : envZaiKey ? "environment" : null;
 
-    return json({ hasZaiKey, zaiKeyPreview });
+    return json({ hasZaiKey, zaiKeyPreview, zaiKeySource });
   }
 
   if (url.pathname === "/api/auth/login" && method === "POST") {

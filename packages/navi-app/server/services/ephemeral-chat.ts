@@ -67,14 +67,21 @@ export async function handleEphemeralChat(req: Request): Promise<Response> {
     } else {
       const claudeAuth = resolveNaviClaudeAuth(normalizedClaudeModel);
 
-      if ((claudeAuth.mode === "api_key" || claudeAuth.mode === "zai") && claudeAuth.overrides.apiKey && !useTools) {
+      const directAuthToken = claudeAuth.mode === "zai"
+        ? claudeAuth.overrides.authToken
+        : claudeAuth.overrides.apiKey;
+
+      if ((claudeAuth.mode === "api_key" || claudeAuth.mode === "zai") && directAuthToken && !useTools) {
         const baseUrl = (claudeAuth.overrides.baseUrl || "https://api.anthropic.com").replace(/\/$/, "");
+        const authHeaders = claudeAuth.mode === "zai"
+          ? { Authorization: `Bearer ${directAuthToken}` }
+          : { "x-api-key": directAuthToken };
 
         const res = await fetch(`${baseUrl}/v1/messages`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key": claudeAuth.overrides.apiKey,
+            ...authHeaders,
             "anthropic-version": "2023-06-01",
           },
           body: JSON.stringify({

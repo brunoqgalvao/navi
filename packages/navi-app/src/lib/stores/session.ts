@@ -217,6 +217,10 @@ function createCurrentSessionStore() {
     selectedModel: string;
     inputTokens: number;
     outputTokens: number;
+    // Context window the runtime actually reported for this session's model —
+    // authoritative over project settings and model-name heuristics.
+    contextWindow: number | null;
+    maxOutputTokens: number | null;
     isPending: boolean; // True when in "new chat" state before first message sent
   }>({
     projectId: null,
@@ -228,6 +232,8 @@ function createCurrentSessionStore() {
     selectedModel: "",
     inputTokens: 0,
     outputTokens: 0,
+    contextWindow: null,
+    maxOutputTokens: null,
     isPending: false,
   });
 
@@ -240,12 +246,12 @@ function createCurrentSessionStore() {
     setProject: (projectId: string | null) =>
       update((s) => {
         syncUrl(projectId, null);
-        return { ...s, projectId, sessionId: null, claudeSessionId: null, inputTokens: 0, outputTokens: 0, isPending: false };
+        return { ...s, projectId, sessionId: null, claudeSessionId: null, inputTokens: 0, outputTokens: 0, contextWindow: null, maxOutputTokens: null, isPending: false };
       }),
     setSession: (sessionId: string | null, claudeSessionId?: string | null) =>
       update((s) => {
         syncUrl(s.projectId, sessionId);
-        return { ...s, sessionId, claudeSessionId: claudeSessionId ?? null, isPending: false };
+        return { ...s, sessionId, claudeSessionId: claudeSessionId ?? null, contextWindow: null, maxOutputTokens: null, isPending: false };
       }),
     // Set pending state for new chat (no DB session yet)
     setPending: (isPending: boolean) =>
@@ -266,6 +272,8 @@ function createCurrentSessionStore() {
     setSelectedModel: (selectedModel: string) => update((s) => ({ ...s, selectedModel })),
     setUsage: (inputTokens: number, outputTokens: number) =>
       update((s) => ({ ...s, inputTokens, outputTokens })),
+    setContextInfo: (contextWindow: number | null, maxOutputTokens: number | null) =>
+      update((s) => ({ ...s, contextWindow, maxOutputTokens })),
     addUsage: (inputTokens: number, outputTokens: number) =>
       update((s) => ({
         ...s,
@@ -284,11 +292,13 @@ function createCurrentSessionStore() {
         selectedModel: "",
         inputTokens: 0,
         outputTokens: 0,
+        contextWindow: null,
+        maxOutputTokens: null,
         isPending: false,
       });
     },
     restoreFromUrl: (projectId: string | null, sessionId: string | null) =>
-      update((s) => ({ ...s, projectId, sessionId, claudeSessionId: null, inputTokens: 0, outputTokens: 0, isPending: false })),
+      update((s) => ({ ...s, projectId, sessionId, claudeSessionId: null, inputTokens: 0, outputTokens: 0, contextWindow: null, maxOutputTokens: null, isPending: false })),
   };
 }
 

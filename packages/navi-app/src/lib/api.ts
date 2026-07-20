@@ -144,6 +144,13 @@ export interface Session {
   total_turns: number;
   input_tokens: number;
   output_tokens: number;
+  // Context window the runtime reported for this session's model.
+  context_window?: number | null;
+  max_output_tokens?: number | null;
+  pending_context_handoff?: string | null;
+  pending_context_method?: string | null;
+  pending_context_reason?: string | null;
+  context_reduced_at?: number | null;
   pinned?: number;
   sort_order?: number;
   auto_accept_all?: number;
@@ -680,7 +687,7 @@ export const api = {
         body: JSON.stringify({ order }),
       }),
     resetContext: (id: string) =>
-      request<{ success: boolean; sessionReset: boolean; historyContext?: string }>(`/sessions/${id}/reset-context`, {
+      request<{ success: boolean; sessionReset: boolean; historyContext?: string; estimatedInputTokens?: number }>(`/sessions/${id}/reset-context`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
@@ -711,6 +718,32 @@ export const api = {
           body: JSON.stringify(options || {}),
         }
       ),
+    reduceContext: (
+      id: string,
+      options: {
+        method: "compact" | "prune" | "prune-then-compact";
+        reason: "threshold" | "overflow" | "manual";
+        preserveRecentCount?: number;
+        maxPrunedLength?: number;
+      }
+    ) =>
+      request<{
+        success: boolean;
+        error?: string;
+        method: "compact" | "prune" | "prune-then-compact";
+        effectiveMethod: "compact" | "prune" | "prune-then-compact";
+        reason: "threshold" | "overflow" | "manual";
+        nextAction: "sdk_compact" | "continue" | "none";
+        sessionReset: boolean;
+        prunedCount: number;
+        tokensSaved: number;
+        prunedToolUseIds: string[];
+        historyContext?: string;
+        estimatedInputTokens?: number;
+      }>(`/sessions/${id}/reduce-context`, {
+        method: "POST",
+        body: JSON.stringify(options),
+      }),
     getPendingQuestion: (id: string) =>
       request<{
         id: string;
@@ -813,7 +846,7 @@ export const api = {
   },
 
   models: {
-    list: () => request<Array<{ value: string; displayName: string; description: string }>>("/models"),
+    list: () => request<Array<{ value: string; displayName: string; description: string; provider?: string }>>("/models"),
   },
 
   auth: {
@@ -829,6 +862,7 @@ export const api = {
         preferredAuth: "oauth" | "api_key" | null;
         hasZaiKey: boolean;
         zaiKeyPreview: string | null;
+        zaiKeySource: "settings" | "environment" | null;
       }>("/auth/status"),
     setApiKey: (apiKey: string) =>
       request<{ success: boolean }>("/auth/api-key", {
@@ -1235,7 +1269,7 @@ export interface Agent {
   slug: string;
   name: string;
   description: string;
-  model?: "haiku" | "sonnet" | "opus";
+  model?: "haiku" | "sonnet" | "opus" | "fable";
   tools?: string[];
   body: string;
   scope: "global" | "project";
@@ -1249,7 +1283,7 @@ export interface Agent {
 export interface CreateAgentInput {
   name: string;
   description?: string;
-  model?: "haiku" | "sonnet" | "opus";
+  model?: "haiku" | "sonnet" | "opus" | "fable";
   tools?: string[];
   instructions?: string;
   format?: "simple" | "bundle";
@@ -1260,7 +1294,7 @@ export interface CreateAgentInput {
 export interface UpdateAgentInput {
   name?: string;
   description?: string;
-  model?: "haiku" | "sonnet" | "opus";
+  model?: "haiku" | "sonnet" | "opus" | "fable";
   tools?: string[];
   instructions?: string;
   format?: "simple" | "bundle";

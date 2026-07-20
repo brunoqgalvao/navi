@@ -59,6 +59,10 @@ export async function initDb() {
       total_turns INTEGER DEFAULT 0,
       input_tokens INTEGER DEFAULT 0,
       output_tokens INTEGER DEFAULT 0,
+      pending_context_handoff TEXT,
+      pending_context_method TEXT,
+      pending_context_reason TEXT,
+      context_reduced_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -86,6 +90,18 @@ export async function initDb() {
   } catch {}
   try {
     db.run("ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN pending_context_handoff TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN pending_context_method TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN pending_context_reason TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN context_reduced_at INTEGER");
   } catch {}
   try {
     db.run("ALTER TABLE projects ADD COLUMN summary TEXT");
@@ -262,6 +278,16 @@ export async function initDb() {
   // Conversation phase tracking (inferred by cheap LLM)
   try {
     db.run("ALTER TABLE sessions ADD COLUMN conversation_phase TEXT DEFAULT 'idle'");
+  } catch {}
+
+  // Context window the runtime actually reported for this session's model
+  // (from the result message's modelUsage) — the authoritative budget, unlike
+  // the project-level context_window setting.
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN context_window INTEGER");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN max_output_tokens INTEGER");
   } catch {}
 
   // Context negotiation - draft deliverables and clarification loop
@@ -947,6 +973,12 @@ export interface Session {
   total_turns: number;
   input_tokens: number;
   output_tokens: number;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  pending_context_handoff: string | null;
+  pending_context_method: string | null;
+  pending_context_reason: string | null;
+  context_reduced_at: number | null;
   pinned: number;
   sort_order: number;
   auto_accept_all: number;
@@ -1976,6 +2008,16 @@ export const sessions = {
       "UPDATE sessions SET claude_session_id = NULL, backend_session_id = NULL, backend_session_metadata = NULL, updated_at = ? WHERE id = ?",
       [Date.now(), id]
     ),
+  setPendingContextHandoff: (id: string, handoff: string | null, method: string | null, reason: string | null) =>
+    run(
+      "UPDATE sessions SET pending_context_handoff = ?, pending_context_method = ?, pending_context_reason = ?, context_reduced_at = ?, updated_at = ? WHERE id = ?",
+      [handoff, method, reason, handoff ? Date.now() : null, Date.now(), id]
+    ),
+  clearPendingContextHandoff: (id: string) =>
+    run(
+      "UPDATE sessions SET pending_context_handoff = NULL, pending_context_method = NULL, pending_context_reason = NULL, updated_at = ? WHERE id = ?",
+      [Date.now(), id]
+    ),
   updateConversationPhase: (phase: string, id: string) =>
     run("UPDATE sessions SET conversation_phase = ? WHERE id = ?", [phase, id]),
   updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, inputTokens: number, outputTokens: number, updated_at: number, id: string) =>
@@ -1983,6 +2025,12 @@ export const sessions = {
     // the persisted values (explicit clearing goes through clearBackendSessionState).
     run("UPDATE sessions SET claude_session_id = COALESCE(?, claude_session_id), model = COALESCE(?, model), total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
         [claude_session_id, model, cost, turns, inputTokens, outputTokens, updated_at, id]),
+  updateContextInfo: (id: string, contextWindow: number, maxOutputTokens: number | null) =>
+    run("UPDATE sessions SET context_window = ?, max_output_tokens = ? WHERE id = ?",
+        [contextWindow, maxOutputTokens, id]),
+  updateUsage: (id: string, inputTokens: number, outputTokens: number, updated_at: number) =>
+    run("UPDATE sessions SET input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
+        [inputTokens, outputTokens, updated_at, id]),
   delete: (id: string) => run("DELETE FROM sessions WHERE id = ?", [id]),
   togglePin: (id: string, pinned: boolean) =>
     run("UPDATE sessions SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
@@ -2008,8 +2056,8 @@ export const sessions = {
   setAutoAcceptAll: (id: string, autoAcceptAll: boolean) =>
     run("UPDATE sessions SET auto_accept_all = ?, updated_at = ? WHERE id = ?", [autoAcceptAll ? 1 : 0, Date.now(), id]),
   resetTokenCounts: (sessionId: string, inputTokens: number, outputTokens: number) =>
-    run("UPDATE sessions SET input_tokens = ?, output_tokens = ? WHERE id = ?",
-        [inputTokens, outputTokens, sessionId]),
+    run("UPDATE sessions SET input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
+        [inputTokens, outputTokens, Date.now(), sessionId]),
   setArchivedByProject: (projectId: string, archived: boolean) =>
     run("UPDATE sessions SET archived = ?, updated_at = ? WHERE project_id = ?", [archived ? 1 : 0, Date.now(), projectId]),
   archiveAllNonStarred: (projectId: string) =>

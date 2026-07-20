@@ -80,6 +80,7 @@
 
   let hasZaiKey = $state(false);
   let zaiKeyPreview: string | null = $state(null);
+  let zaiKeySource: "settings" | "environment" | null = $state(null);
   let showZaiInput = $state(false);
   let zaiKeyInput = $state("");
   let zaiError: string | null = $state(null);
@@ -252,6 +253,7 @@
       preferredAuth = auth.preferredAuth;
       hasZaiKey = auth.hasZaiKey;
       zaiKeyPreview = auth.zaiKeyPreview;
+      zaiKeySource = auth.zaiKeySource;
       apiTabLoaded = true;
     } catch (e) {
       console.error("Failed to load API settings:", e);
@@ -398,6 +400,7 @@
       await api.auth.setZaiKey(zaiKeyInput.trim());
       hasZaiKey = true;
       zaiKeyPreview = `${zaiKeyInput.slice(0, 8)}...${zaiKeyInput.slice(-4)}`;
+      zaiKeySource = "settings";
       showZaiInput = false;
       zaiKeyInput = "";
     } catch (e: any) {
@@ -410,8 +413,10 @@
   async function deleteZaiKey() {
     try {
       await api.auth.deleteZaiKey();
-      hasZaiKey = false;
-      zaiKeyPreview = null;
+      const auth = await api.auth.status();
+      hasZaiKey = auth.hasZaiKey;
+      zaiKeyPreview = auth.zaiKeyPreview;
+      zaiKeySource = auth.zaiKeySource;
     } catch (e) {
       console.error("Failed to delete Z.ai key:", e);
     }
@@ -824,8 +829,8 @@
                     <div class="flex-1 space-y-4">
                       <div class="flex items-center justify-between">
                         <div>
-                          <h5 class="font-medium text-gray-900 dark:text-gray-100">Z.ai (GLM-4.7)</h5>
-                          <p class="text-sm text-gray-500 dark:text-gray-400">Access GLM models for coding</p>
+                          <h5 class="font-medium text-gray-900 dark:text-gray-100">Z.ai GLM Coding Plan</h5>
+                          <p class="text-sm text-gray-500 dark:text-gray-400">Access GLM-5.2, GLM-5 Turbo, and GLM-4.x coding models</p>
                         </div>
                         {#if hasZaiKey}
                           <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">Configured</span>
@@ -837,13 +842,15 @@
                       {#if hasZaiKey && zaiKeyPreview && !showZaiInput}
                         <div class="flex items-center gap-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2.5">
                           <code class="text-sm font-mono text-gray-600 dark:text-gray-300">{zaiKeyPreview}</code>
-                          <span class="text-xs text-gray-400 dark:text-gray-500">stored</span>
-                          <button
-                            onclick={deleteZaiKey}
-                            class="ml-auto text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                          >
-                            Remove
-                          </button>
+                          <span class="text-xs text-gray-400 dark:text-gray-500">{zaiKeySource === "environment" ? "environment" : "stored"}</span>
+                          {#if zaiKeySource !== "environment"}
+                            <button
+                              onclick={deleteZaiKey}
+                              class="ml-auto text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                            >
+                              Remove
+                            </button>
+                          {/if}
                         </div>
                       {/if}
 
@@ -885,7 +892,7 @@
                       {/if}
 
                       <p class="text-xs text-gray-500 dark:text-gray-400">
-                        Get your key from <a href="https://z.ai/subscribe" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">z.ai</a> ($3/month for GLM Coding Plan)
+                        Get your key from <a href="https://z.ai/model-api" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Z.ai</a>. GLM-5.2 1M appears as <code class="font-mono">glm-5.2[1m]</code> after a key is configured.
                       </p>
                     </div>
                   </div>

@@ -80,4 +80,96 @@ describe("createMessageHandler", () => {
     expect(stored[0]?.content).toBe(content);
     expect(stored[0]?.isSynthetic).toBe(true);
   });
+
+  test("live-updates context usage from main-chain assistant messages", () => {
+    const updates: Array<{
+      sessionId: string;
+      usage: { input_tokens: number; cache_read_input_tokens?: number };
+    }> = [];
+    const handler = createMessageHandler({
+      callbacks: {
+        onAssistantUsage: (sessionId, usage) => updates.push({ sessionId, usage }),
+      },
+      getCurrentSessionId: () => SESSION_ID,
+      getProjectId: () => "project-1",
+    });
+
+    handler.handle({
+      type: "assistant",
+      uiSessionId: SESSION_ID,
+      content: [{ type: "text", text: "working on it" }],
+      parentToolUseId: null,
+      usage: {
+        input_tokens: 2,
+        output_tokens: 11_301,
+        cache_creation_input_tokens: 66_870,
+        cache_read_input_tokens: 97_039,
+      },
+    });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.sessionId).toBe(SESSION_ID);
+    expect(updates[0]?.usage.cache_read_input_tokens).toBe(97_039);
+  });
+
+  test("ignores usage from sidechain and synthetic assistant messages", () => {
+    const updates: unknown[] = [];
+    const handler = createMessageHandler({
+      callbacks: {
+        onAssistantUsage: (sessionId, usage) => updates.push([sessionId, usage]),
+      },
+      getCurrentSessionId: () => SESSION_ID,
+      getProjectId: () => "project-1",
+    });
+
+    // Subagent (sidechain) usage tracks the subagent's context, not this session's.
+    handler.handle({
+      type: "assistant",
+      uiSessionId: SESSION_ID,
+      content: [{ type: "text", text: "subagent output" }],
+      parentToolUseId: "toolu_parent",
+      usage: {
+        input_tokens: 5,
+        output_tokens: 100,
+        cache_read_input_tokens: 50_000,
+        cache_creation_input_tokens: 0,
+      },
+    });
+
+    // Synthetic error messages ("Prompt is too long") report all-zero usage.
+    handler.handle({
+      type: "assistant",
+      uiSessionId: SESSION_ID,
+      content: [{ type: "text", text: "Prompt is too long" }],
+      parentToolUseId: null,
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    });
+
+    expect(updates).toHaveLength(0);
+  });
+
+  test("forwards the runtime-reported context window on done", () => {
+    const infos: Array<{ contextWindow?: number; maxOutputTokens?: number }> = [];
+    const handler = createMessageHandler({
+      callbacks: {
+        onContextInfo: (_sessionId, info) => infos.push(info),
+      },
+      getCurrentSessionId: () => SESSION_ID,
+      getProjectId: () => "project-1",
+    });
+
+    handler.handle({
+      type: "done",
+      uiSessionId: SESSION_ID,
+      contextWindow: 200_000,
+      maxOutputTokens: 32_000,
+    });
+
+    expect(infos).toEqual([{ contextWindow: 200_000, maxOutputTokens: 32_000 }]);
+  });
 });
