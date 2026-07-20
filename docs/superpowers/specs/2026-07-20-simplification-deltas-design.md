@@ -17,7 +17,7 @@ Three further cuts/cleanups, decided 2026-07-20:
 
 ## 2. Evidence base (measured 2026-07-20, post-demolition main)
 
-Preview stack, server side (~4.9k LoC): `services/native-preview.ts` 1650, `services/port-manager-preview.ts` 748, `services/port-fixer.ts` 561 (LLM port arbitration), `routes/preview-proxy.ts` 636, `routes/container-preview.ts` 361, `routes/native-preview.ts` 239, `routes/port-manager-preview.ts` 143, `routes/worktree-preview.ts` 306, plus `services/preview/` (container-manager, framework/runtime detectors, proxy-manager, spec, branch indicator injection — ~2k more).
+Preview stack, server side (~5k LoC): `services/native-preview.ts` 1650, `services/port-manager-preview.ts` 748, `services/port-fixer.ts` 561 (LLM port arbitration), `routes/port-fixer.ts` 120, `routes/preview-proxy.ts` 636, `routes/container-preview.ts` 361, `routes/native-preview.ts` 239, `routes/port-manager-preview.ts` 143, `routes/worktree-preview.ts` 306, plus `services/preview/` (container-manager, framework/runtime detectors, proxy-manager, spec, branch indicator injection — 2323 more).
 
 Preview stack, frontend (~2.3k LoC): `NativePreviewPanel.svelte` 1075, `ContainerPreviewPanel.svelte` 515, `PortManagerPreviewPanel.svelte` 395, `PreviewPanel.svelte` 173, `StreamingPreview.svelte` 143, `PreviewButton.svelte`, plus App.svelte preview state and the `preview`/`preview-unified` registry entries.
 
@@ -29,13 +29,15 @@ Existing browser surface: `browser` extension (registry id `browser`, panelMode 
 
 ## 3. Delta A — Preview stack removal
 
-**Delete (server):** all eight preview files listed in §2 plus the `services/preview/` directory. `routes/worktree-preview.ts` is expected to go with them; the plan's inventory step must confirm nothing outside the preview stack imports it — if the git/worktree feature depends on it, that dependency is extracted, not kept via the preview route.
+**Delete (server):** all nine preview files listed in §2 plus the `services/preview/` directory. Known dependents to unhook (found 2026-07-20; the inventory step re-verifies): `routes/worktrees.ts` imports `cleanupWorktreePreview` from `worktree-preview.ts` (extract or drop that call, don't keep the route for it); `routes/sessions.ts` calls `nativePreviewService.stopForSession` in session lifecycle; `routes/background-processes.ts` lazily imports `services/preview`; `server/index.ts` registers the preview/port-fixer routes.
 
-**Delete (frontend):** the five preview panels, `PreviewButton`, `preview` and `preview-unified` registry entries and panel modes, App.svelte preview state/handlers, and the `browser-preview` placeholder registry entry.
+**Delete (frontend):** the five preview panels, `PreviewButton`, `preview` and `preview-unified` registry entries and panel modes, App.svelte preview state/handlers (including the `"preview"`/`"preview-unified"` members of the panel-mode unions in `App.svelte` and `src/lib/layout/RightPanel.svelte`), and the `browser-preview` placeholder registry entry.
+
+**Keep — explicitly NOT deleted despite the name:** `src/lib/Preview.svelte` (1961 LoC) and `WorkspacePanel.svelte` — this pair IS the browser panel (RightPanel renders it for `mode === "browser"`). It already renders URLs, markdown, images, HTML, JSON, and 3D files via the existing files API. Do not confuse it with `PreviewPanel.svelte` (173 LoC, delete list).
 
 **Keep/extend — the browser panel:**
 - URL bar + iframe/webview, as today. No proxying: localhost URLs load directly; whatever the user runs, they run themselves (terminal panel still exists for that).
-- **Local file rendering:** the panel accepts a file path (from the file tree's "preview" affordance or a chat link) and renders markdown (existing renderer), images, and HTML. Server side this needs at most one small static-file endpoint if the existing files API can't serve raw bytes with content-type — prefer reusing the files API.
+- **Local file rendering:** already built in `Preview.svelte` (fetches content through the files API — no new endpoint needed). The work here is subtraction only: strip any dev-server/preview-stack couplings from `Preview.svelte`/`WorkspacePanel.svelte` if the inventory finds them.
 - Failure states are the browser's own (iframe load error → simple message + retry). No log buffers, no restart buttons — there is no process to manage.
 
 **DB/config:** remove preview-related per-project settings columns/keys if any exist (inventory step enumerates; same `dropLegacyTables()`/one-shot cleanup mechanism as Phase 1).
@@ -48,11 +50,11 @@ Exit: zero dev-server/port/proxy/container code in the repo; browser panel rende
 
 **Replace with one panel (`SkillsPanel`):**
 - Lists skills discovered from `~/.claude/skills/` (global) and `<project>/.claude/skills/` (project), labeled by origin. Reuse `SkillCard.svelte` if it survives simplification cheaply; otherwise plain rows.
-- **Per-project enable/disable toggle** (the surviving job of `ProjectSkillSelector`; the component itself is absorbed/deleted). Persistence stays wherever it lives today (skills table / project settings) — the plan's inventory step confirms the current mechanism and keeps it.
+- **Per-project enable/disable toggle** (the surviving job of `ProjectSkillSelector`; the component itself is absorbed/deleted). Persistence already exists and is kept as-is: `enabledSkillsDb` with `global`/`project` scopes, served by `server/routes/skills.ts`.
 - Open folder (reveal in Finder), delete (with confirm — destructive).
 - No install, no browse, no editor, no wizard.
 
-**Server:** `server/skills.ts` slims to discovery/list, per-project toggle, delete, and whatever hash/sync the agent-SDK wiring genuinely needs (inventory before cutting).
+**Server:** two files in scope. `server/routes/skills.ts` (1605 LoC) is the main surface and the home of the per-project toggle mechanism (`enabledSkillsDb.get(skill.id, "project", projectId)`) — trim it to list/toggle/delete endpoints, keeping the toggle path intact. `server/skills.ts` (450 LoC) slims to discovery plus whatever hash/sync the agent-SDK wiring genuinely needs (inventory before cutting).
 
 Exit: marketplace route gone; one panel does list/toggle/open/delete; toggling a skill off for a project actually excludes it from that project's sessions.
 
@@ -68,8 +70,9 @@ Same method as Phase 1, which worked: a fresh git worktree branch (the live chec
 
 | Risk | Mitigation |
 |---|---|
-| Preview code entangled with terminal/processes panels | Inventory-first per file; grep gates like Phase 1 tasks |
-| `worktree-preview` secretly load-bearing for git feature | Explicit inventory step; extract dependency if found |
+| Preview code entangled with terminal/processes panels | Inventory-first per file; grep gates like Phase 1 tasks; known lazy import in `routes/background-processes.ts` |
+| Session lifecycle hook regression | `routes/sessions.ts` calls `nativePreviewService.stopForSession` — remove the call site explicitly, verify session close still clean |
+| `worktree-preview` secretly load-bearing for git feature | Known: `routes/worktrees.ts` imports `cleanupWorktreePreview`; extract or drop that dependency, verified by inventory |
 | Per-project skill toggle regresses SDK session wiring | Keep existing persistence/lookup path; test a session with a disabled skill |
 | Losing wanted marketplace installs | None needed — installing a skill is `git clone`/copy into `.claude/skills/`, documented in STATUS.md |
 
