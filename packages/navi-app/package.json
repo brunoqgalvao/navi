@@ -21,8 +21,7 @@
   },
   "license": "MIT",
   "bin": {
-    "navi": "./bin/navi.ts",
-    "navi-integrations": "./server/integrations/cli.ts"
+    "navi": "./bin/navi.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.15",
@@ -59,7 +58,6 @@
     "codemirror": "^6.0.2",
     "croner": "^9.1.0",
     "diff": "^8.0.2",
-    "e2b": "^2.9.1",
     "gray-matter": "^4.0.3",
     "highlight.js": "^11.11.1",
     "html2canvas": "^1.4.1",

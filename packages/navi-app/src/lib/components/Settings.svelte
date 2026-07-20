@@ -1,17 +1,15 @@
 <script lang="ts">
   import { api, costsApi, containerPreviewApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project, type ContainerPreview } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, dashboardEnabled, channelsEnabled, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
+  import { advancedMode, debugMode, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
-  import IntegrationSettings from "./IntegrationSettings.svelte";
   import { PluginSettings } from "../features/plugins";
   import { McpSettings } from "../features/mcp";
   import { isTelemetryEnabled, setTelemetryOptOut, trackEvent, TelemetryEvents } from "../telemetry";
-  import { hooksEnabled } from "../features/proactive-hooks";
 
-  type Tab = "api" | "permissions" | "claude-md" | "skills" | "commands" | "features" | "experimental" | "previews" | "analytics" | "integrations" | "plugins" | "mcp";
+  type Tab = "api" | "permissions" | "claude-md" | "skills" | "commands" | "features" | "experimental" | "previews" | "analytics" | "plugins" | "mcp";
 
   interface Props {
     open: boolean;
@@ -124,7 +122,6 @@
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: "api", label: "API Keys", icon: "M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" },
-    { id: "integrations", label: "Integrations", icon: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" },
     { id: "permissions", label: "Permissions", icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" },
     { id: "claude-md", label: "CLAUDE.md", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
     { id: "skills", label: "Skills", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
@@ -901,15 +898,6 @@
             </div>
             {/if}
 
-          {:else if activeTab === "integrations"}
-            <div class="max-w-3xl">
-              <div class="mb-6">
-                <h4 class="text-lg font-semibold text-zinc-100 mb-1">OAuth Integrations</h4>
-                <p class="text-sm text-zinc-400">Connect external services to give agents access to Gmail, Google Sheets, Drive, and more.</p>
-              </div>
-              <IntegrationSettings />
-            </div>
-
           {:else if activeTab === "permissions"}
             {#if loadingPermissions}
               <div class="flex items-center justify-center h-32">
@@ -1500,80 +1488,6 @@
               </div>
 
               <div class="space-y-4">
-                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                  <div class="flex items-center justify-between">
-                    <div>
-                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Project Dashboard</h5>
-                      <p class="text-sm text-gray-500 dark:text-gray-400">Show customizable dashboard when clicking a project</p>
-                    </div>
-                    <button
-                      onclick={() => dashboardEnabled.toggle()}
-                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$dashboardEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
-                    >
-                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$dashboardEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
-                    </button>
-                  </div>
-
-                  {#if $dashboardEnabled}
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
-                      Dashboard shows project info, quick actions, and widgets. Customize via <code>.claude/dashboard.md</code>
-                    </p>
-                  {/if}
-                </div>
-
-                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                  <div class="flex items-center justify-between">
-                    <div>
-                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Channels</h5>
-                      <p class="text-sm text-gray-500 dark:text-gray-400">Slack-style channels for agent collaboration across workspaces</p>
-                    </div>
-                    <button
-                      onclick={() => channelsEnabled.toggle()}
-                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$channelsEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
-                    >
-                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$channelsEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
-                    </button>
-                  </div>
-
-                  {#if $channelsEnabled}
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
-                      Channels appear in the sidebar when no workspace is selected. Create threads and @mention agents for cross-project collaboration.
-                    </p>
-                  {/if}
-                </div>
-
-                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                  <div class="flex items-center justify-between">
-                    <div>
-                      <h5 class="font-medium text-gray-900 dark:text-gray-100">Proactive Hooks</h5>
-                      <p class="text-sm text-gray-500 dark:text-gray-400">AI-powered suggestions that learn from your conversations</p>
-                    </div>
-                    <button
-                      onclick={() => hooksEnabled.toggle()}
-                      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {$hooksEnabled ? 'bg-gray-900 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'}"
-                    >
-                      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {$hooksEnabled ? 'translate-x-6' : 'translate-x-1'}"></span>
-                    </button>
-                  </div>
-
-                  <div class="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                    <div class="flex items-start gap-2">
-                      <span class="text-gray-400 mt-0.5">•</span>
-                      <span><strong>Skill Scout:</strong> Detects reusable workflows and suggests creating skills</span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                      <span class="text-gray-400 mt-0.5">•</span>
-                      <span><strong>Memory Builder:</strong> Learns your preferences and saves to <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded text-xs">.claude/MEMORY.md</code></span>
-                    </div>
-                  </div>
-
-                  {#if $hooksEnabled}
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
-                      Proactive hooks are enabled. You'll see suggestions after conversations based on detected patterns.
-                    </p>
-                  {/if}
-                </div>
-
                 <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>

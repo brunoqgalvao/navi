@@ -222,3 +222,18 @@ Identifiers: `integration-mcp`, `integrationMcp`, `integration-status`, `integra
 - `bun run check`: 0 errors; `bun test server/ shared/`: all pass; `scripts/smoke.sh`: SMOKE OK
 - `LEGACY_TABLES` covers: kanban_cards, message_comments, cloud_executions, channels, channel_workspaces, channel_threads, channel_messages, inbox_items
 - Branch `phase1-demolition` has one commit per task, each independently bootable
+
+---
+
+## Post-demolition follow-up backlog (from final whole-branch review, 2026-06-16)
+
+Branch result: 24 commits, +259 / −36,303 LoC. Gates green (check 0 errors, 59 tests, smoke OK). MERGE-READY.
+
+Carry into a later phase (none block merge):
+
+1. **(Important — latent)** `server/routes/auth.ts` `/api/auth/signup` still calls `createNaviInbox()` → AgentMail (`api.agentmail.to`, needs `AGENTMAIL_API_KEY`). The route is unwired (no component calls `auth.signup`), so it's unreachable today, but anyone re-enabling cloud-account UI inherits a broken signup. Decide: delete the signup path + `createNaviInbox`, or rebuild without AgentMail.
+2. Remove orphaned DB column `sessions.e2b_sandbox_id` (+ the other orphan-marked cloud columns) when a real migration mechanism exists.
+3. Drop write-less OAuth token columns from the `integrations` table (oauth flow deleted), or document them as reserved-for-rebuild.
+4. Delete orphaned MCP server dirs `.claude/mcp-servers/navi-email/` and `navi-whatsapp/` (not referenced by settings.json).
+5. Remove unused `@xyflow/svelte` dependency (was canvas-only) after a final import sweep.
+6. Trim unreachable leftovers: `IntegrationService` `"channels"|"messages"` union (core/types.ts), channel/message icon maps (core/references.ts), `"actions"|"widget"` in `SPECIAL_CODE_LANGUAGES` (core/message-widgets.ts), stale "show dashboard" comment (App.svelte).

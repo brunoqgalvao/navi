@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
-  import { currentSession as session, isConnected, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems, channelsEnabled } from "../../stores";
-  import { api, agentsApi, type Agent as ProjectAgent, type InboxItem, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult, type Workflow, type WorkflowGate, type WorkflowSchedule } from "../../api";
+  import { currentSession as session, isConnected, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems } from "../../stores";
+  import { api, agentsApi, type Agent as ProjectAgent, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult, type Workflow, type WorkflowGate, type WorkflowSchedule } from "../../api";
   import { getApiBase } from "../../config";
   import StarButton from "../StarButton.svelte";
   import TitleSuggestion from "../TitleSuggestion.svelte";
@@ -13,9 +13,6 @@
   import WorktreeBadge from "../WorktreeBadge.svelte";
   import type { ChatMessage } from "../../stores";
   import { blockedSessionsStore, blockedCount } from "../../features/session-hierarchy";
-  import { channels, currentChannelId, type Channel } from "../../features/channels";
-  import ChannelList from "../../features/channels/components/ChannelList.svelte";
-  import CreateChannelModal from "../../features/channels/components/CreateChannelModal.svelte";
   import Tooltip from "../Tooltip.svelte";
   import SessionChildren from "./SessionChildren.svelte";
   import WorkflowEditorModal from "./WorkflowEditorModal.svelte";
@@ -111,12 +108,7 @@
     onOpenProjectInNewWindow: (project: Project) => void;
     onOpenSessionInNewWindow: (session: Session) => void;
     onOpenHomeInNewWindow: () => void;
-    onOpenSessionsBoard?: (projectId?: string) => void;
-    onOpenAgentBuilder?: () => void;
     onGoToProjectDashboard?: () => void;
-    onOpenInbox?: () => void;
-    agents?: { id: string; name: string; type: "agent" | "skill"; description?: string }[];
-    onSelectAgent?: (agent: { id: string; name: string; type: "agent" | "skill"; description?: string }) => void;
     titleSuggestionRef?: TitleSuggestion | null;
   }
 
@@ -188,12 +180,7 @@
     onOpenProjectInNewWindow,
     onOpenSessionInNewWindow,
     onOpenHomeInNewWindow,
-    onOpenSessionsBoard,
-    onOpenAgentBuilder,
     onGoToProjectDashboard,
-    onOpenInbox,
-    agents = [],
-    onSelectAgent,
     titleSuggestionRef = $bindable(null),
   }: Props = $props();
 
@@ -207,32 +194,13 @@
   });
 
   // Agent section collapsed state
-  let agentsSectionCollapsed = $state(true);
   let projectAgents = $state<ProjectAgent[]>([]);
   let loadingProjectAgents = $state(false);
-  let projectInboxItems = $state<InboxItem[]>([]);
-  let loadingProjectInbox = $state(false);
-  let refreshingProjectInbox = $state(false);
-  let projectInboxError = $state<string | null>(null);
-
-  // Channels state
-  let channelsSectionCollapsed = $state(false);
-  let showCreateChannelModal = $state(false);
 
   // Sessions dropdown for collapsed sidebar
   let sessionsDropdownOpen = $state(false);
 
-  function handleSelectChannel(channel: Channel) {
-    currentChannelId.set(channel.id);
-  }
-
-  function handleChannelCreated(channelId: string) {
-    currentChannelId.set(channelId);
-  }
-
-  // Load channels on mount
   onMount(() => {
-    channels.load();
     const handleProjectAgentsUpdated = (event: Event) => {
       const customEvent = event as CustomEvent<{ projectId?: string }>;
       const updatedProjectId = customEvent.detail?.projectId;
@@ -257,96 +225,6 @@
       projectAgents = [];
     } finally {
       loadingProjectAgents = false;
-    }
-  }
-
-  function parseInboxMetadata(value: string | null): Record<string, unknown> {
-    if (!value) return {};
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
-    } catch {
-      return {};
-    }
-  }
-
-  function inboxPriorityRank(priority: InboxItem["priority"]): number {
-    switch (priority) {
-      case "urgent":
-        return 3;
-      case "high":
-        return 2;
-      case "medium":
-        return 1;
-      case "low":
-      default:
-        return 0;
-    }
-  }
-
-  function inboxKindLabel(kind: InboxItem["kind"]): string {
-    switch (kind) {
-      case "approval":
-        return "Approval";
-      case "attention":
-        return "Attention";
-      case "delivery":
-        return "Delivery";
-      case "question":
-        return "Question";
-      case "report":
-      default:
-        return "Report";
-    }
-  }
-
-  function inboxPriorityDotClass(priority: InboxItem["priority"]): string {
-    switch (priority) {
-      case "urgent":
-        return "bg-rose-500 shadow-[0_0_0_3px_rgba(244,63,94,0.14)]";
-      case "high":
-        return "bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.16)]";
-      case "low":
-        return "bg-slate-400 shadow-[0_0_0_3px_rgba(148,163,184,0.12)]";
-      case "medium":
-      default:
-        return "bg-sky-500 shadow-[0_0_0_3px_rgba(14,165,233,0.14)]";
-    }
-  }
-
-  function inboxSourceLabel(item: InboxItem): string | null {
-    const metadata = parseInboxMetadata(item.metadata);
-    if (typeof metadata.workflowName === "string" && metadata.workflowName.trim()) {
-      return metadata.workflowName;
-    }
-    if (typeof metadata.sessionTitle === "string" && metadata.sessionTitle.trim()) {
-      return metadata.sessionTitle;
-    }
-    return null;
-  }
-
-  async function loadProjectInbox(projectId: string, initialLoad: boolean) {
-    if (initialLoad) {
-      loadingProjectInbox = true;
-      projectInboxError = null;
-    } else {
-      refreshingProjectInbox = true;
-    }
-
-    try {
-      const items = await api.inbox.list(projectId);
-      if (currentProject?.id !== projectId) return;
-      projectInboxItems = items;
-      projectInboxError = null;
-    } catch (e) {
-      if (currentProject?.id !== projectId) return;
-      projectInboxError = e instanceof Error ? e.message : "Failed to load inbox";
-    } finally {
-      if (currentProject?.id !== projectId) return;
-      loadingProjectInbox = false;
-      refreshingProjectInbox = false;
     }
   }
 
@@ -415,27 +293,6 @@
     loadingProjectAgents = false;
   });
 
-  $effect(() => {
-    const projectId = currentProject?.id;
-    if (!projectId) {
-      projectInboxItems = [];
-      projectInboxError = null;
-      loadingProjectInbox = false;
-      refreshingProjectInbox = false;
-      return;
-    }
-
-    projectInboxItems = [];
-    projectInboxError = null;
-    refreshingProjectInbox = false;
-    void loadProjectInbox(projectId, true);
-    const timer = setInterval(() => {
-      void loadProjectInbox(projectId, false);
-    }, 5000);
-
-    return () => clearInterval(timer);
-  });
-
   let filteredSessions = $derived.by(() => {
     const query = sidebarSearchQuery.trim();
     const sortOrder = $chatSortOrder;
@@ -488,17 +345,6 @@
   // Use centralized attention store for running/needs-input items
   let runningChats = $derived($attentionItems.runningSessions.map(item => item.session));
   let needsInputChats = $derived($attentionItems.needsInput.map(item => item.session));
-  let activeProjectInboxItems = $derived.by(() =>
-    projectInboxItems
-      .filter((item) => item.status === "open" || item.status === "acknowledged")
-      .toSorted((a, b) => {
-        const priorityDelta = inboxPriorityRank(b.priority) - inboxPriorityRank(a.priority);
-        if (priorityDelta !== 0) return priorityDelta;
-        return b.created_at - a.created_at;
-      })
-  );
-  let visibleProjectInboxItems = $derived.by(() => activeProjectInboxItems.slice(0, 3));
-
   // Build map of parent session -> children (forks + agents)
   let childrenByParent = $derived.by(() => {
     const map = new Map<string, Session[]>();
@@ -1432,61 +1278,6 @@
         {/if}
       </div>
     {:else if !currentProject}
-      <!-- Channels Section (Experimental) -->
-      {#if $channelsEnabled}
-      <div class="px-3 mb-4">
-        <div class="flex items-center justify-between mb-2 mt-2 px-2">
-          <button
-            onclick={() => channelsSectionCollapsed = !channelsSectionCollapsed}
-            class="flex items-center gap-1 text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
-          >
-            <svg class="w-3 h-3 transition-transform {channelsSectionCollapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-            </svg>
-            Channels
-          </button>
-          <button
-            onclick={() => showCreateChannelModal = true}
-            class="p-1 text-gray-400 dark:text-gray-500 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-colors"
-            title="Create channel"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
-        </div>
-
-        {#if !channelsSectionCollapsed}
-          <div class="space-y-0.5 px-2">
-            {#each $channels as channel}
-              <button
-                onclick={() => handleSelectChannel(channel)}
-                class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors
-                  {$currentChannelId === channel.id
-                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
-              >
-                <span class="text-purple-400 dark:text-purple-500 font-medium">#</span>
-                <span class="truncate text-[12px]">{channel.name}</span>
-              </button>
-            {/each}
-
-            {#if $channels.length === 0}
-              <div class="px-2 py-3 text-center">
-                <p class="text-[11px] text-gray-400 dark:text-gray-500">No channels yet</p>
-                <button
-                  onclick={() => showCreateChannelModal = true}
-                  class="mt-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline"
-                >
-                  Create your first channel
-                </button>
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
-      {/if}
-
       <!-- Workspaces Section -->
       <div class="px-3" data-tour="workspaces">
         <div class="flex items-center justify-between mb-2 mt-2 px-2">
@@ -1708,10 +1499,6 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                             Open in New Window
                           </button>
-                          <button onclick={(e) => { e.stopPropagation(); onOpenSessionsBoard?.(proj.id); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path></svg>
-                            Sessions Board
-                          </button>
                           <button onclick={(e) => { onToggleProjectArchive(proj, e); projectMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
                             {proj.archived ? 'Unarchive' : 'Archive'}
@@ -1798,52 +1585,6 @@
           </div>
         {/if}
 
-        <!-- Agents Section -->
-        {#if onSelectAgent}
-          <div class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
-            <button
-              onclick={() => agentsSectionCollapsed = !agentsSectionCollapsed}
-              class="w-full flex items-center justify-between px-2 mb-1 group"
-            >
-              <h3 class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
-                <svg class="w-3 h-3 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                Agents
-              </h3>
-              <svg class="w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform {agentsSectionCollapsed ? '' : 'rotate-180'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-            </button>
-
-            {#if !agentsSectionCollapsed}
-              <div class="space-y-0.5">
-                {#if agents.length === 0}
-                  <p class="text-[11px] text-gray-400 dark:text-gray-500 italic px-2 py-2">No agents yet</p>
-                {:else}
-                  {#each agents as agent}
-                    <button
-                      onclick={() => onSelectAgent(agent)}
-                      class="w-full text-left px-2 py-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-700 dark:hover:text-indigo-400 transition-colors flex items-center gap-2"
-                    >
-                      {#if agent.type === "skill"}
-                        <svg class="w-3 h-3 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                      {:else}
-                        <svg class="w-3 h-3 text-indigo-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                      {/if}
-                      <span class="text-[12px] font-medium truncate">{agent.name}</span>
-                    </button>
-                  {/each}
-                {/if}
-                {#if onOpenAgentBuilder}
-                  <button
-                    onclick={onOpenAgentBuilder}
-                    class="w-full text-left px-2 py-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-400 transition-colors flex items-center gap-2 text-[11px]"
-                  >
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-                    View all agents...
-                  </button>
-                {/if}
-              </div>
-            {/if}
-          </div>
-        {/if}
       </div>
     {:else}
       <div class="px-3 flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -1908,102 +1649,6 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
           </button>
         </div>
-
-        <button
-          onclick={() => onOpenInbox?.()}
-          class={`group mb-4 w-full overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${projectInboxError ? "border-rose-200 bg-rose-50/80 hover:border-rose-300 dark:border-rose-500/20 dark:bg-rose-500/10 dark:hover:border-rose-500/30" : activeProjectInboxItems.length > 0 ? "border-amber-200/80 bg-gradient-to-br from-amber-50 via-white to-rose-50 hover:border-amber-300 hover:shadow-sm dark:border-amber-500/20 dark:bg-gradient-to-br dark:from-amber-500/10 dark:via-gray-900 dark:to-rose-500/10 dark:hover:border-amber-500/30" : "border-gray-200 bg-gray-50/90 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800/40 dark:hover:border-gray-600"}`}
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class={`flex h-8 w-8 items-center justify-center rounded-xl ${activeProjectInboxItems.length > 0 ? "bg-white text-amber-600 shadow-sm dark:bg-gray-900/70 dark:text-amber-300" : "bg-white text-gray-500 shadow-sm dark:bg-gray-900/70 dark:text-gray-300"}`}>
-                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-10 4h6" />
-                  </svg>
-                </span>
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Inbox</span>
-                    {#if refreshingProjectInbox && !loadingProjectInbox}
-                      <span class="text-[10px] text-gray-400 dark:text-gray-500">syncing</span>
-                    {/if}
-                  </div>
-                  <p class="mt-0.5 text-[12px] text-gray-600 dark:text-gray-300">
-                    {activeProjectInboxItems.length > 0
-                      ? "Requests waiting on you"
-                      : "Agents and workflows can leave requests here"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div class="flex items-center gap-2 shrink-0">
-              <span class={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${activeProjectInboxItems.length > 0 ? "bg-white text-amber-700 shadow-sm dark:bg-gray-900/70 dark:text-amber-200" : "bg-white text-gray-500 shadow-sm dark:bg-gray-900/70 dark:text-gray-300"}`}>
-                {activeProjectInboxItems.length}
-              </span>
-              <svg class="h-4 w-4 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-500 dark:text-gray-600 dark:group-hover:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          </div>
-
-          {#if projectInboxError}
-            <p class="mt-3 rounded-xl border border-rose-200/80 bg-white/80 px-3 py-2 text-[11px] text-rose-600 dark:border-rose-500/20 dark:bg-gray-900/50 dark:text-rose-300">
-              {projectInboxError}
-            </p>
-          {:else if loadingProjectInbox}
-            <div class="mt-3 space-y-2">
-              {#each Array(2) as _, index}
-                <div class="animate-pulse rounded-xl border border-white/80 bg-white/70 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40" data-inbox-skeleton={index}>
-                  <div class="h-2.5 w-16 rounded bg-gray-200 dark:bg-gray-700"></div>
-                  <div class="mt-2 h-3 w-40 rounded bg-gray-200/80 dark:bg-gray-700/80"></div>
-                </div>
-              {/each}
-            </div>
-          {:else if visibleProjectInboxItems.length === 0}
-            <div class="mt-3 rounded-xl border border-dashed border-white/80 bg-white/70 px-3 py-3 text-[12px] text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400">
-              No open inbox items.
-            </div>
-          {:else}
-            <div class="mt-3 space-y-2">
-              {#each visibleProjectInboxItems as item (item.id)}
-                {@const sourceLabel = inboxSourceLabel(item)}
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-900/45">
-                  <div class="flex items-start gap-2.5">
-                    <span class={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${inboxPriorityDotClass(item.priority)}`}></span>
-                    <div class="min-w-0 flex-1">
-                      <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="rounded-full bg-gray-900 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-white dark:bg-gray-100 dark:text-gray-900">
-                          {inboxKindLabel(item.kind)}
-                        </span>
-                        {#if item.requires_response}
-                          <span class="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
-                            Reply
-                          </span>
-                        {/if}
-                        {#if sourceLabel}
-                          <span class="truncate text-[10px] text-gray-500 dark:text-gray-400">
-                            {sourceLabel}
-                          </span>
-                        {/if}
-                      </div>
-
-                      <div class="mt-1 truncate text-[12px] font-medium text-gray-800 dark:text-gray-100">
-                        {item.title}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              {/each}
-
-              {#if activeProjectInboxItems.length > visibleProjectInboxItems.length}
-                <div class="text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                  +{activeProjectInboxItems.length - visibleProjectInboxItems.length} more in inbox
-                </div>
-              {/if}
-            </div>
-          {/if}
-        </button>
 
         <div class="flex items-center justify-between mb-2 px-1">
           <h3 class="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Chats</h3>
@@ -2636,13 +2281,6 @@
     {/if}
   </div>
 </aside>
-
-<!-- Create Channel Modal -->
-<CreateChannelModal
-  bind:open={showCreateChannelModal}
-  onClose={() => showCreateChannelModal = false}
-  onCreated={handleChannelCreated}
-/>
 
 <WorkflowEditorModal
   open={showWorkflowEditor}

@@ -234,35 +234,6 @@ export interface WorkItemEvent {
   created_at: number;
 }
 
-export type InboxItemStatus = "open" | "acknowledged" | "resolved" | "dismissed";
-export type InboxItemPriority = "low" | "medium" | "high" | "urgent";
-export type InboxItemKind = "report" | "question" | "attention" | "approval" | "delivery";
-
-export interface InboxItem {
-  id: string;
-  project_id: string;
-  kind: InboxItemKind;
-  title: string;
-  body: string | null;
-  status: InboxItemStatus;
-  priority: InboxItemPriority;
-  source_agent_id: string | null;
-  source_session_id: string | null;
-  work_item_id: string | null;
-  requires_response: number;
-  response_options: string | null;
-  metadata: string | null;
-  created_at: number;
-  updated_at: number;
-  resolved_at: number | null;
-}
-
-export interface InboxItemWithProject extends InboxItem {
-  project_name: string | null;
-  project_path: string | null;
-  project_archived: number | null;
-}
-
 export interface ActiveSessionStatus {
   sessionId: string;
   projectId: string;
@@ -558,54 +529,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-  },
-
-  inbox: {
-    listAll: () => request<InboxItemWithProject[]>("/inbox"),
-    list: (projectId: string) => request<InboxItem[]>(`/projects/${projectId}/inbox`),
-    get: (id: string) => request<InboxItem>(`/inbox/${id}`),
-    create: (
-      projectId: string,
-      data: {
-        kind: InboxItemKind;
-        title: string;
-        body?: string | null;
-        status?: InboxItemStatus;
-        priority?: InboxItemPriority;
-        sourceAgentId?: string | null;
-        sourceSessionId?: string | null;
-        workItemId?: string | null;
-        requiresResponse?: boolean;
-        responseOptions?: unknown;
-        metadata?: unknown;
-      }
-    ) =>
-      request<InboxItem>(`/projects/${projectId}/inbox`, {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
-    update: (
-      id: string,
-      data: {
-        kind?: InboxItemKind;
-        title?: string;
-        body?: string | null;
-        status?: InboxItemStatus;
-        priority?: InboxItemPriority;
-        sourceAgentId?: string | null;
-        sourceSessionId?: string | null;
-        workItemId?: string | null;
-        requiresResponse?: boolean;
-        responseOptions?: unknown;
-        metadata?: unknown;
-        resolvedAt?: number | null;
-      }
-    ) =>
-      request<InboxItem>(`/inbox/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      }),
-    delete: (id: string) => request<{ success: boolean }>(`/inbox/${id}`, { method: "DELETE" }),
   },
 
   sessions: {

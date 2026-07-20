@@ -18,8 +18,6 @@
   import { sessionHierarchyApi, parseEscalation, type Escalation, type HierarchySession, isActiveStatus } from "../features/session-hierarchy";
   import { loadMoreMessages } from "../actions/session-actions";
   import WaitCountdown from "./widgets/WaitCountdown.svelte";
-  // Comments feature @experimental
-  import { commentsStore } from "$lib/features/comments";
 
   interface Props {
     sessionId: string | null;
@@ -56,7 +54,6 @@
     onMessageClick?: (e: MouseEvent) => void;
     onQuoteText?: (text: string) => void;
     onForkWithQuote?: (text: string) => void;
-    onAskCouncil?: (text: string) => void;
     onPermissionApprove?: (approveAll?: boolean) => void;
     onPermissionDeny?: () => void;
     onQuestionAnswer?: (answers: Record<string, string | string[]>) => void;
@@ -111,7 +108,6 @@
     onMessageClick,
     onQuoteText,
     onForkWithQuote,
-    onAskCouncil,
     onPermissionApprove,
     onPermissionDeny,
     onQuestionAnswer,
@@ -190,13 +186,6 @@
   const isLoadingMessages = $derived(sessionId ? loadingMessagesSet.has(sessionId) : false);
   const todos = $derived(sessionId ? ($sessionTodos.get(sessionId) || []) : []);
   const isStreaming = $derived(streamingState?.isStreaming ?? false);
-
-  // Load comments for session @experimental
-  $effect(() => {
-    if (sessionId) {
-      commentsStore.loadForSession(sessionId);
-    }
-  });
 
   // Split child sessions by type to avoid mixing forks and delegated agents
   const agentChildSessions = $derived(childSessions.filter(c => c.session_type !== "fork"));
@@ -456,7 +445,6 @@
               {onPreview}
               {onQuoteText}
               {onForkWithQuote}
-              {onAskCouncil}
             />
           {:else if msg.role === 'system'}
             {@const content = typeof msg.content === 'string' ? msg.content : ''}
@@ -480,13 +468,11 @@
               {onMessageClick}
               {onQuoteText}
               {onForkWithQuote}
-              {onAskCouncil}
               onOpenSubagentSession={openHierarchySessionById}
               {renderMarkdown}
               {jsonBlocksMap}
               {shellBlocksMap}
               sessionId={sessionId ?? ''}
-              messageId={msg.id}
             />
           {/if}
         </div>

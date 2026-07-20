@@ -125,16 +125,6 @@ export const DEFAULT_EXTENSIONS: Record<string, Extension> = {
     defaultEnabled: false,
     defaultOrder: 4,
   },
-  kanban: {
-    id: "kanban",
-    name: "Kanban",
-    icon: "layout-kanban",
-    description: "Agentic task board",
-    panelMode: "kanban",
-    requiresProject: true,
-    defaultEnabled: true,
-    defaultOrder: 5,
-  },
   preview: {
     id: "preview",
     name: "Preview",
@@ -154,26 +144,6 @@ export const DEFAULT_EXTENSIONS: Record<string, Extension> = {
     requiresProject: false,
     defaultEnabled: true,
     defaultOrder: 7,
-  },
-  inbox: {
-    id: "inbox",
-    name: "Inbox",
-    icon: "inbox",
-    description: "Action requests from workflows, agents, and prompts",
-    panelMode: "inbox",
-    requiresProject: true,
-    defaultEnabled: true,
-    defaultOrder: 8,
-  },
-  "shared-inbox": {
-    id: "shared-inbox",
-    name: "Shared Inbox",
-    icon: "inbox",
-    description: "Follow-ups waiting across all workspaces",
-    panelMode: "shared-inbox",
-    requiresProject: false,
-    defaultEnabled: true,
-    defaultOrder: 9,
   },
 };
 

@@ -10,8 +10,6 @@ describe("system prompt append", () => {
     expect(UI_INSTRUCTIONS).toContain("## Navi Workflows");
     expect(UI_INSTRUCTIONS).toContain("`navi-workflows`");
     expect(UI_INSTRUCTIONS).toContain("root session, and child run sessions");
-    expect(UI_INSTRUCTIONS).toContain("## Workspace Inbox");
-    expect(UI_INSTRUCTIONS).toContain("```inbox-item");
   });
 
   test("includes available skills metadata after the base UI instructions", () => {

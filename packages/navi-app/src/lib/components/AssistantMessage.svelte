@@ -29,11 +29,6 @@
     TOOL_GROUP_CONFIG,
     generateGroupSummary,
   } from "$lib/core";
-  // Comments feature @experimental
-  import { commentsStore, showComments, createMessageThreadsStore } from "$lib/features/comments";
-  import CommentThread from "$lib/features/comments/components/CommentThread.svelte";
-  import CommentInput from "$lib/features/comments/components/CommentInput.svelte";
-  import CommentIndicator from "$lib/features/comments/components/CommentIndicator.svelte";
 
   interface Props {
     content: ContentBlock[];
@@ -50,13 +45,11 @@
     onMessageClick?: (e: MouseEvent) => void;
     onQuoteText?: (text: string) => void;
     onForkWithQuote?: (text: string) => void;
-    onAskCouncil?: (text: string) => void;
     onOpenSubagentSession?: (sessionId: string) => void;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
     shellBlocksMap?: Map<string, { code: string; language: string }>;
     sessionId?: string;
-    messageId?: string;
   }
 
   let {
@@ -74,13 +67,11 @@
     onMessageClick,
     onQuoteText,
     onForkWithQuote,
-    onAskCouncil,
     onOpenSubagentSession,
     renderMarkdown,
     jsonBlocksMap = new Map(),
     shellBlocksMap = new Map(),
     sessionId = '',
-    messageId = '',
   }: Props = $props();
 
   let showMenu = $state(false);
@@ -90,28 +81,6 @@
 
   // Text selection context menu state
   let selectionMenu = $state<{ x: number; y: number; text: string } | null>(null);
-
-  // Comments state @experimental
-  let commentInput = $state<{ x: number; y: number; text: string } | null>(null);
-  let expandedThreadId = $state<string | null>(null);
-  let localThreads = $state<import("$lib/features/comments").CommentThread[]>([]);
-
-  // Subscribe to comment threads reactively
-  $effect(() => {
-    if (sessionId && messageId) {
-      // Subscribe to the store and filter for this message
-      const unsubscribe = commentsStore.subscribe((map) => {
-        const sessionThreads = map.get(sessionId) || [];
-        localThreads = sessionThreads.filter((t) => t.message_id === messageId);
-      });
-      return unsubscribe;
-    }
-    localThreads = [];
-    return undefined;
-  });
-
-  // Use local state for reactivity
-  const messageThreads = $derived(localThreads);
 
   function handleContextMenu(e: MouseEvent) {
     const selection = window.getSelection();
@@ -135,28 +104,6 @@
   function handleForkWithQuote(text: string) {
     onForkWithQuote?.(text);
     selectionMenu = null;
-  }
-
-  function handleAddComment(text: string) {
-    if (!selectionMenu) return;
-    // Open comment input at the selection position
-    commentInput = {
-      x: selectionMenu.x,
-      y: selectionMenu.y,
-      text,
-    };
-    selectionMenu = null;
-  }
-
-  function handleCommentCreated(threadId: string) {
-    // Expand the newly created thread
-    expandedThreadId = threadId;
-  }
-
-  async function handleAskAI(threadId: string, question: string) {
-    // Get the message content as context and ask AI
-    const context = getCopyText();
-    await commentsStore.askAI(sessionId, threadId, question, context);
   }
 
   function toggleBlock(idx: number) {
@@ -463,18 +410,6 @@
     <div class="flex-1 min-w-0 relative space-y-2" onclick={onMessageClick} oncontextmenu={handleContextMenu}>
       <!-- Hover actions -->
       <div class="absolute -top-5 right-0 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm px-1 py-0.5 z-20">
-        <!-- Comment indicator @experimental -->
-        {#if $showComments && messageThreads.length > 0}
-          <button
-            onclick={(e) => { e.stopPropagation(); expandedThreadId = expandedThreadId ? null : messageThreads[0].thread_id; }}
-            class="p-1 text-amber-500 hover:text-amber-600 rounded transition-colors"
-            title="{messageThreads.length} comment{messageThreads.length > 1 ? 's' : ''}"
-          >
-            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clip-rule="evenodd" />
-            </svg>
-          </button>
-        {/if}
         <CopyButton text={copyText} />
         <div class="relative">
           <button
@@ -719,20 +654,6 @@
 
   </div>
 
-  <!-- Comment Threads (shown inline below message) @experimental -->
-  {#if $showComments && messageThreads.length > 0}
-    <div class="mt-3 ml-4 flex flex-col gap-2 max-w-sm">
-      {#each messageThreads as thread (thread.thread_id)}
-        <CommentThread
-          {thread}
-          {sessionId}
-          onClose={() => {}}
-          onAskAI={handleAskAI}
-        />
-      {/each}
-    </div>
-  {/if}
-
 <!-- Text Selection Context Menu -->
 {#if selectionMenu}
   <TextSelectionContextMenu
@@ -741,23 +662,7 @@
     selectedText={selectionMenu.text}
     onQuote={handleQuote}
     onForkWithQuote={handleForkWithQuote}
-    onAddComment={messageId ? handleAddComment : undefined}
-    onAskCouncil={onAskCouncil}
     onClose={() => selectionMenu = null}
-  />
-{/if}
-
-<!-- Comment Input (when adding new comment) @experimental -->
-{#if commentInput && messageId && sessionId}
-  <CommentInput
-    {messageId}
-    {sessionId}
-    selectionText={commentInput.text}
-    x={commentInput.x}
-    y={commentInput.y}
-    onClose={() => commentInput = null}
-    onCreated={handleCommentCreated}
-    onAskAI={handleAskAI}
   />
 {/if}
 

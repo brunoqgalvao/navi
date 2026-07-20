@@ -15,7 +15,7 @@ import type { ComponentType, SvelteComponent } from "svelte";
  * Extensions are sidebar panels that provide dedicated UI for specific features.
  * They appear as tabs in the right sidebar and can be enabled/disabled per project.
  *
- * Examples: Files, Git, Terminal, Preview, Kanban
+ * Examples: Files, Git, Terminal, Preview
  */
 export interface Extension {
   id: ExtensionId;
@@ -38,13 +38,8 @@ export type ExtensionId =
   | "git"
   | "terminal"
   | "processes"
-  | "kanban"
   | "preview"
   | "context"         // Session context visibility
-  | "inbox"           // Workspace inbox
-  | "shared-inbox"    // Cross-project shared inbox
-  | "email"           // Navi's email inbox
-  | "channels"        // WhatsApp, Telegram & messaging integrations
   | "browser-preview"; // Browser-use live preview
 
 /**
@@ -57,13 +52,8 @@ export type PanelMode =
   | "git"
   | "terminal"
   | "processes"
-  | "kanban"
   | "preview-unified"
   | "context"         // Context sidebar view
-  | "inbox"           // Workspace inbox view
-  | "shared-inbox"    // Cross-project shared inbox view
-  | "email"           // Email inbox view
-  | "channels"        // WhatsApp, Telegram & messaging inbox
   | "browser-preview"; // Browser-use preview
 
 // =============================================================================
@@ -96,35 +86,7 @@ export type MessageWidgetType =
   | "generative-ui"
   | "copyable"
   | "todo-list"
-  | "browser-action"    // Browser-use action/result
-  | "email-notification" // Incoming email
-  | "email-sent";        // Sent email confirmation
-
-// =============================================================================
-// 3. DASHBOARD WIDGETS (Project Landing Page)
-// =============================================================================
-
-/**
- * Dashboard widgets appear on the project landing page.
- * They're defined in `.claude/dashboard.md` using markdown code blocks.
- *
- * Examples: Git log, Preview, File viewer, Status checks
- */
-export interface DashboardWidget<TConfig = unknown> {
-  type: DashboardWidgetType;
-  component: ComponentType<SvelteComponent>;
-  /** Default configuration */
-  defaultConfig?: Partial<TConfig>;
-  /** Validate configuration from markdown */
-  validateConfig?: (config: unknown) => TConfig;
-}
-
-export type DashboardWidgetType =
-  | "git-log"
-  | "preview"
-  | "file"
-  | "status"
-  | "suggestions";
+  | "browser-action";    // Browser-use action/result
 
 // =============================================================================
 // 4. REFERENCES (Input @ Mentions)

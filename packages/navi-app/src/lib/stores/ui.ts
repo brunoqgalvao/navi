@@ -12,13 +12,10 @@ const TOUR_COMPLETE_KEY = "claude-code-ui-tours-complete";
 const CHAT_VIEW_MODE_KEY = "claude-code-ui-chat-view-mode";
 const UI_SCALE_KEY = "claude-code-ui-scale";
 const THEME_KEY = "claude-code-ui-theme";
-const DASHBOARD_ENABLED_KEY = "claude-code-ui-dashboard-enabled";
-const CHANNELS_ENABLED_KEY = "claude-code-ui-channels-enabled";
 const LOOP_MODE_ENABLED_KEY = "claude-code-ui-loop-mode-enabled";
 const DEPLOY_TO_CLOUD_ENABLED_KEY = "claude-code-ui-deploy-to-cloud-enabled";
 const RESOURCE_MONITOR_ENABLED_KEY = "claude-code-ui-resource-monitor-enabled";
 const CHAT_SORT_ORDER_KEY = "claude-code-ui-chat-sort-order";
-const CANVAS_MODE_ENABLED_KEY = "claude-code-ui-canvas-mode-enabled";
 const AUTO_COMPACT_ENABLED_KEY = "claude-code-ui-auto-compact-enabled";
 const AUTO_COMPACT_METHOD_KEY = "claude-code-ui-auto-compact-method";
 
@@ -98,56 +95,6 @@ function createDebugModeStore() {
     set: (value: boolean) => {
       if (typeof window !== "undefined") {
         localStorage.setItem(DEBUG_MODE_KEY, String(value));
-      }
-      set(value);
-    },
-  };
-}
-
-// Dashboard feature store (experimental - default off)
-function createDashboardEnabledStore() {
-  const stored = typeof window !== "undefined" ? localStorage.getItem(DASHBOARD_ENABLED_KEY) : null;
-  const { subscribe, set } = writable(stored === "true");
-
-  return {
-    subscribe,
-    toggle: () => {
-      let current = false;
-      subscribe(v => current = v)();
-      const newValue = !current;
-      if (typeof window !== "undefined") {
-        localStorage.setItem(DASHBOARD_ENABLED_KEY, String(newValue));
-      }
-      set(newValue);
-    },
-    set: (value: boolean) => {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(DASHBOARD_ENABLED_KEY, String(value));
-      }
-      set(value);
-    },
-  };
-}
-
-// Channels feature store (experimental - default off)
-function createChannelsEnabledStore() {
-  const stored = typeof window !== "undefined" ? localStorage.getItem(CHANNELS_ENABLED_KEY) : null;
-  const { subscribe, set } = writable(stored === "true");
-
-  return {
-    subscribe,
-    toggle: () => {
-      let current = false;
-      subscribe(v => current = v)();
-      const newValue = !current;
-      if (typeof window !== "undefined") {
-        localStorage.setItem(CHANNELS_ENABLED_KEY, String(newValue));
-      }
-      set(newValue);
-    },
-    set: (value: boolean) => {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(CHANNELS_ENABLED_KEY, String(value));
       }
       set(value);
     },
@@ -273,31 +220,6 @@ function createShowArchivedStore() {
     set: (value: boolean) => {
       if (typeof window !== "undefined") {
         localStorage.setItem(SHOW_ARCHIVED_KEY, String(value));
-      }
-      set(value);
-    },
-  };
-}
-
-// Canvas Mode feature store (experimental - default off)
-function createCanvasModeEnabledStore() {
-  const stored = typeof window !== "undefined" ? localStorage.getItem(CANVAS_MODE_ENABLED_KEY) : null;
-  const { subscribe, set } = writable(stored === "true");
-
-  return {
-    subscribe,
-    toggle: () => {
-      let current = false;
-      subscribe(v => current = v)();
-      const newValue = !current;
-      if (typeof window !== "undefined") {
-        localStorage.setItem(CANVAS_MODE_ENABLED_KEY, String(newValue));
-      }
-      set(newValue);
-    },
-    set: (value: boolean) => {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(CANVAS_MODE_ENABLED_KEY, String(value));
       }
       set(value);
     },
@@ -786,12 +708,9 @@ function createThemeStore() {
 export const onboardingComplete = createOnboardingStore();
 export const advancedMode = createAdvancedModeStore();
 export const debugMode = createDebugModeStore();
-export const dashboardEnabled = createDashboardEnabledStore();
-export const channelsEnabled = createChannelsEnabledStore();
 export const loopModeEnabled = createLoopModeEnabledStore();
 export const deployToCloudEnabled = createDeployToCloudEnabledStore();
 export const resourceMonitorEnabled = createResourceMonitorEnabledStore();
-export const canvasModeEnabled = createCanvasModeEnabledStore();
 export const autoCompactEnabled = createAutoCompactEnabledStore();
 export const autoCompactMethod = createAutoCompactMethodStore();
 export const newChatView = createNewChatViewStore();
@@ -928,23 +847,3 @@ function createFileBrowserStore() {
 
 export const fileBrowserState = createFileBrowserStore();
 
-// Council modal state
-interface CouncilModalState {
-  open: boolean;
-  initialPrompt: string;
-}
-
-function createCouncilModalStore() {
-  const { subscribe, set, update } = writable<CouncilModalState>({
-    open: false,
-    initialPrompt: "",
-  });
-
-  return {
-    subscribe,
-    open: (prompt = "") => set({ open: true, initialPrompt: prompt }),
-    close: () => set({ open: false, initialPrompt: "" }),
-  };
-}
-
-export const councilModal = createCouncilModalStore();

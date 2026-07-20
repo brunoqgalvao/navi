@@ -11,7 +11,6 @@ import {
   type Workflow,
 } from "../db";
 import { triggerQuery } from "../websocket/handler";
-import { createProjectInboxItem } from "./inbox-service";
 import { buildWorkflowRunPrompt } from "./workflow-run-prompt";
 
 export type WorkflowScheduleKind = "at" | "every" | "cron";
@@ -215,50 +214,30 @@ function createWorkflowRunSession(workflow: Workflow) {
   return child;
 }
 
-function broadcastInboxNotification(title: string, message: string, type: "info" | "warning" | "error" = "warning") {
+function broadcastWorkflowNotification(title: string, message: string) {
   broadcastFn?.({
     type: "ui_command",
     command: "notification",
     payload: {
       title,
       message,
-      type,
+      type: "warning",
     },
   });
 }
 
-function createWorkflowAttentionInboxItem(
+// Inbox feature removed: workflow attention reports now log to the server
+// console and surface a toast notification. The workflow engine rebuild
+// owns proper user notification.
+function reportWorkflowAttention(
   workflow: Workflow,
-  sessionId: string | null,
   options: {
     title: string;
     body: string;
-    priority?: "medium" | "high" | "urgent";
-    dedupeKey: string;
   }
 ) {
-  const item = createProjectInboxItem({
-    projectId: workflow.project_id,
-    sessionId,
-    source: "workflow-system",
-    dedupeKey: options.dedupeKey,
-    item: {
-      title: options.title,
-      body: options.body,
-      kind: "attention",
-      status: "open",
-      priority: options.priority || "high",
-      requiresResponse: true,
-      responseOptions: ["I fixed it", "Retry the workflow"],
-      workItemId: null,
-      metadata: {
-        workflowId: workflow.id,
-        workflowName: workflow.name,
-      },
-    },
-  });
-
-  broadcastInboxNotification(item.title, item.body || "Workflow needs attention.");
+  console.error(`[Workflow] ${options.title}: ${options.body} (workflow=${workflow.id})`);
+  broadcastWorkflowNotification(options.title, options.body || "Workflow needs attention.");
 }
 
 async function executeWorkflow(workflow: Workflow, triggerSource: "manual" | "scheduled") {
@@ -285,11 +264,9 @@ async function executeWorkflow(workflow: Workflow, triggerSource: "manual" | "sc
       last_skip_reason: skipReason,
       last_error: null,
     });
-    createWorkflowAttentionInboxItem(workflow, workflow.root_session_id, {
+    reportWorkflowAttention(workflow, {
       title: `Workflow blocked: ${workflow.name}`,
       body: `The workflow could not run because: ${skipReason}`,
-      priority: /auth|oauth|token|credential|gmail|google/i.test(skipReason) ? "urgent" : "high",
-      dedupeKey: `workflow:${workflow.id}:gate-skip`,
     });
     broadcastFn?.({
       type: "workflow:run_skipped",
@@ -318,11 +295,9 @@ async function executeWorkflow(workflow: Workflow, triggerSource: "manual" | "sc
       last_error: error,
       next_run_at: calculateNextWorkflowRun(schedule) ?? null,
     });
-    createWorkflowAttentionInboxItem(workflow, workflow.root_session_id, {
+    reportWorkflowAttention(workflow, {
       title: `Workflow failed to start: ${workflow.name}`,
       body: error,
-      priority: "urgent",
-      dedupeKey: `workflow:${workflow.id}:run-session-error`,
     });
     return;
   }
@@ -375,11 +350,9 @@ async function executeWorkflow(workflow: Workflow, triggerSource: "manual" | "sc
     workflows.update(workflow.id, {
       last_error: error,
     });
-    createWorkflowAttentionInboxItem(workflow, childSession.id, {
+    reportWorkflowAttention(workflow, {
       title: `Workflow failed to dispatch: ${workflow.name}`,
       body: error,
-      priority: "high",
-      dedupeKey: `workflow:${workflow.id}:dispatch-error`,
     });
   }
 }

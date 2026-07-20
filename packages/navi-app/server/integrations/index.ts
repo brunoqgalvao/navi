@@ -6,7 +6,6 @@
 
 export * from "./types";
 export * from "./db";
-export * from "./oauth";
 export * from "./crypto";
 export * from "./credentials";
 

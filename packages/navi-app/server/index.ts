@@ -17,17 +17,12 @@ import { handleMessageRoutes } from "./routes/messages";
 import { handleSkillRoutes } from "./routes/skills";
 import { handleMarketplaceRoutes } from "./routes/marketplace";
 import { handleAgentRoutes } from "./routes/agents";
-import { handleAgentBuilderRoutes } from "./routes/agent-builder";
 import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal";
 import { handleProxyRoutes } from "./routes/proxy";
 import { handleProcessRoutes } from "./routes/processes";
 import { handleAnalyticsRoutes } from "./routes/analytics";
-import { handleDeployRoutes } from "./routes/deploy";
 import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
 import { handleExtensionRoutes } from "./routes/extensions";
-import { handleKanbanRoutes } from "./routes/kanban";
-// Message Comments (Google Docs-style inline annotations) @experimental
-import { handleCommentRoutes } from "./routes/comments";
 import { handleWorktreeRoutes } from "./routes/worktrees";
 // ⚠️ EXPERIMENTAL: Worktree preview - remove this import to revert (see worktree-preview.ts for full revert steps)
 import { handleWorktreePreviewRoutes } from "./routes/worktree-preview";
@@ -44,32 +39,13 @@ import { handlePortFixerRoutes } from "./routes/port-fixer";
 import { handleBranchNameRoutes } from "./routes/branch-name";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 import { handleCommandsRoutes } from "./routes/commands";
-import { handleSessionsBoardRoutes } from "./routes/sessions-board";
-// Dashboard feature (isolated - remove import to disable)
-import { handleDashboardRoutes } from "./routes/dashboard";
-// OAuth Integrations (Google, GitHub, etc.)
-import { handleIntegrationsRoutes } from "./routes/integrations";
 // Credentials Management (API keys, tokens)
 import { handleCredentialsRoutes } from "./routes/credentials";
-// Experimental Features (Ensemble Consensus, Self-Healing, Experimental Agents)
-import { handleExperimentalRoutes, initExperimentalWebSocket } from "./routes/experimental";
 // Backend adapters (Claude, Codex, Gemini)
 import { handleBackendRoutes } from "./routes/backends";
-// Project Memory (for proactive hooks)
-import { handleMemoryRoutes } from "./routes/memory";
-// Proactive Hooks (cheap Haiku analysis)
-import { handleProactiveHooksRoutes } from "./routes/proactive-hooks";
 import { handleHooksRoutes } from "./routes/hooks";
-// Cloud Execution (E2B sandboxes)
-import { handleCloudExecutionRoutes } from "./routes/cloud-execution";
-// Email (AgentMail)
-import { handleEmailRoutes } from "./routes/email";
 // Browser-use automation
 import { handleBrowserRoutes } from "./routes/browser";
-// Channels (cross-workspace agent collaboration)
-import { handleChannelRoutes } from "./routes/channels";
-// Channel Inbox (WhatsApp, Telegram, Email integrations)
-import { handleChannelInboxRoutes } from "./routes/channel-inbox";
 // Plugin Management
 import { handlePluginRoutes } from "./routes/plugins";
 // MCP Server Settings
@@ -78,13 +54,10 @@ import { handleMcpRoutes } from "./routes/mcp";
 import { handleLoopRoutes } from "./routes/loops";
 // Resource Monitor (@experimental - disabled by default)
 import { handleResourceRoutes } from "./routes/resources";
-// LLM Council - Multi-model comparison
-import { handleCouncilRoutes } from "./routes/council";
 // Cron Scheduler - Scheduled tasks
 import { handleCronRoutes } from "./routes/cron";
 import { handleWorkflowRoutes } from "./routes/workflows";
 import { handleWorkItemRoutes } from "./routes/work-items";
-import { handleInboxItemRoutes } from "./routes/inbox-items";
 
 // Services
 import { handleEphemeralChat } from "./services/ephemeral-chat";
@@ -403,10 +376,6 @@ const server = Bun.serve({
     response = await handleResourceRoutes(url, method, req);
     if (response) return response;
 
-    // LLM Council routes (multi-model comparison)
-    response = await handleCouncilRoutes(url, method, req);
-    if (response) return response;
-
     // Cron scheduler routes
     response = await handleCronRoutes(url, method, req);
     if (response) return response;
@@ -417,17 +386,6 @@ const server = Bun.serve({
 
     // Agent workspace routes
     response = await handleWorkItemRoutes(url, method, req);
-    if (response) return response;
-
-    response = await handleInboxItemRoutes(url, method, req);
-    if (response) return response;
-
-    // Dashboard routes (isolated feature)
-    response = await handleDashboardRoutes(url, method, req);
-    if (response) return response;
-
-    // Experimental features routes (Ensemble Consensus, Self-Healing, Agents)
-    response = await handleExperimentalRoutes(url, method, req);
     if (response) return response;
 
     // Filesystem routes
@@ -452,10 +410,6 @@ const server = Bun.serve({
 
     // Auth routes
     response = await handleAuthRoutes(url, method, req);
-    if (response) return response;
-
-    // Integrations routes (OAuth)
-    response = await handleIntegrationsRoutes(url, method, req);
     if (response) return response;
 
     // Credentials routes (API keys, tokens)
@@ -490,24 +444,12 @@ const server = Bun.serve({
     response = await handleMarketplaceRoutes(url, method, req);
     if (response) return response;
 
-    // Memory routes (project memory for proactive hooks)
-    response = await handleMemoryRoutes(url, method, req);
-    if (response) return response;
-
-    // Proactive hooks routes (cheap Haiku analysis)
-    response = await handleProactiveHooksRoutes(url, method, req);
-    if (response) return response;
-
     // Hooks routes (lifecycle hooks from .claude/hooks/)
     response = await handleHooksRoutes(url, method, req);
     if (response) return response;
 
     // Agent routes
     response = await handleAgentRoutes(url, method, req);
-    if (response) return response;
-
-    // Agent builder routes
-    response = await handleAgentBuilderRoutes(url, method, req);
     if (response) return response;
 
     // Terminal routes
@@ -526,28 +468,8 @@ const server = Bun.serve({
     response = await handleAnalyticsRoutes(url, method);
     if (response) return response;
 
-    // Deploy routes (Navi Cloud)
-    response = await handleDeployRoutes(url, method, req);
-    if (response) return response;
-
-    // Cloud Execution routes (E2B)
-    response = await handleCloudExecutionRoutes(url, method, req);
-    if (response) return response;
-
-    // Email routes (AgentMail)
-    response = await handleEmailRoutes(url, method, req);
-    if (response) return response;
-
     // Browser routes (browser-use)
     response = await handleBrowserRoutes(url, method, req);
-    if (response) return response;
-
-    // Channels routes (cross-workspace agent collaboration)
-    response = await handleChannelRoutes(url, method, req);
-    if (response) return response;
-
-    // Channel Inbox routes (WhatsApp, Telegram, Email)
-    response = await handleChannelInboxRoutes(url, method, req);
     if (response) return response;
 
     // Background process routes
@@ -556,14 +478,6 @@ const server = Bun.serve({
 
     // Extension routes
     response = await handleExtensionRoutes(url, method, req);
-    if (response) return response;
-
-    // Kanban routes
-    response = await handleKanbanRoutes(url, method, req);
-    if (response) return response;
-
-    // Message Comments routes (Google Docs-style) @experimental
-    response = await handleCommentRoutes(url, method, req);
     if (response) return response;
 
     // Worktree routes
@@ -606,10 +520,6 @@ const server = Bun.serve({
     response = await handleCommandsRoutes(url, method, req);
     if (response) return response;
 
-    // Sessions board routes (dashboard view)
-    response = await handleSessionsBoardRoutes(url, method, req, activeProcesses, pendingPermissions);
-    if (response) return response;
-
     // Ephemeral chat
     if (url.pathname === "/api/ephemeral" && method === "POST") {
       return handleEphemeralChat(req);
@@ -629,9 +539,6 @@ addProcessEventListener((event: ProcessEvent) => {
     ...event,
   });
 });
-
-// Initialize experimental features WebSocket broadcasting
-initExperimentalWebSocket(broadcastToClients);
 
 // Initialize cron scheduler with WebSocket broadcast
 cronScheduler.init(broadcastToClients);

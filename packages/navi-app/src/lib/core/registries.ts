@@ -11,8 +11,6 @@ import type {
   PanelMode,
   MessageWidget,
   MessageWidgetType,
-  DashboardWidget,
-  DashboardWidgetType,
   Registry,
 } from "./types";
 
@@ -140,37 +138,6 @@ class MessageWidgetRegistryImpl extends BaseRegistry<MessageWidget> {
 export const messageWidgetRegistry = new MessageWidgetRegistryImpl();
 
 // =============================================================================
-// DASHBOARD WIDGET REGISTRY
-// =============================================================================
-
-class DashboardWidgetRegistryImpl extends BaseRegistry<DashboardWidget> {
-  constructor() {
-    super("type" as keyof DashboardWidget);
-  }
-
-  /**
-   * Get widget types for dashboard parser
-   */
-  getWidgetTypes(): DashboardWidgetType[] {
-    return this.getIds() as DashboardWidgetType[];
-  }
-
-  /**
-   * Validate and get config for a widget type
-   */
-  getValidatedConfig<T>(type: DashboardWidgetType, config: unknown): T | null {
-    const widget = this.get(type);
-    if (!widget) return null;
-    if (widget.validateConfig) {
-      return widget.validateConfig(config) as T;
-    }
-    return { ...widget.defaultConfig, ...(config as object) } as T;
-  }
-}
-
-export const dashboardWidgetRegistry = new DashboardWidgetRegistryImpl();
-
-// =============================================================================
 // DEFAULT EXTENSIONS
 // =============================================================================
 
@@ -225,16 +192,6 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     defaultEnabled: false,
     defaultOrder: 4,
   },
-  kanban: {
-    id: "kanban",
-    name: "Kanban",
-    icon: "layout-kanban",
-    description: "Agentic task board",
-    panelMode: "kanban",
-    requiresProject: true,
-    defaultEnabled: true,
-    defaultOrder: 5,
-  },
   preview: {
     id: "preview",
     name: "Preview",
@@ -254,46 +211,6 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     requiresProject: false,
     defaultEnabled: true,
     defaultOrder: 7,
-  },
-  inbox: {
-    id: "inbox",
-    name: "Inbox",
-    icon: "inbox",
-    description: "Action requests from workflows, agents, and prompts",
-    panelMode: "inbox",
-    requiresProject: true,
-    defaultEnabled: true,
-    defaultOrder: 8,
-  },
-  "shared-inbox": {
-    id: "shared-inbox",
-    name: "Shared Inbox",
-    icon: "inbox",
-    description: "Follow-ups waiting across all workspaces",
-    panelMode: "shared-inbox",
-    requiresProject: false,
-    defaultEnabled: true,
-    defaultOrder: 9,
-  },
-  email: {
-    id: "email",
-    name: "Email",
-    icon: "mail",
-    description: "Navi's email inboxes (experimental)",
-    panelMode: "email",
-    requiresProject: false,
-    defaultEnabled: false, // @experimental - AgentMail integration
-    defaultOrder: 100,
-  },
-  channels: {
-    id: "channels",
-    name: "Channels",
-    icon: "message-circle",
-    description: "WhatsApp, Telegram & messaging integrations",
-    panelMode: "channels",
-    requiresProject: false,
-    defaultEnabled: true,
-    defaultOrder: 8,
   },
   "browser-preview": {
     id: "browser-preview",
@@ -328,7 +245,6 @@ export function initializeRegistries(): void {
   }
 
   // Message widgets are registered by their respective component files
-  // Dashboard widgets are registered by the dashboard feature
 
   initialized = true;
 }
@@ -339,6 +255,5 @@ export function initializeRegistries(): void {
 export function resetRegistries(): void {
   extensionRegistry.clear();
   messageWidgetRegistry.clear();
-  dashboardWidgetRegistry.clear();
   initialized = false;
 }

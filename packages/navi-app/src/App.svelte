@@ -3,13 +3,12 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, planMode, autoCompactEnabled, autoCompactMethod, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId, type ReasoningEffort, type AutoCompactMethod } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, planMode, autoCompactEnabled, autoCompactMethod, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type BackendId, type ReasoningEffort, type AutoCompactMethod } from "./lib/stores";
   import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill, type Workflow, type WorkflowGate, type WorkflowSchedule } from "./lib/api";
   import { mcpApi, type McpServer } from "./lib/features/mcp";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree, startNewChat } from "./lib/actions";
-  import { initBrowserEmail } from "./lib/features/browser-email-init";
   import { parseHash, onHashChange } from "./lib/router";
   import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
   import { getDefaultContextResetThresholdPercent, getEffectiveSessionContextWindow } from "./lib/context-window";
@@ -98,17 +97,6 @@
   import InfiniteLoopConfig from "./lib/components/InfiniteLoopConfig.svelte";
   import InfiniteLoopStatus from "./lib/components/InfiniteLoopStatus.svelte";
 
-  // Proactive Hooks - AI-powered suggestions (skill scout, error detector, memory builder)
-  import {
-    setupProactiveHooks,
-    onUserMessage as hookOnUserMessage,
-    onAssistantMessage as hookOnAssistantMessage,
-    startSessionTracking,
-    stopSessionTracking,
-    buildHookContext,
-    SuggestionPanel,
-  } from "./lib/features/proactive-hooks";
-
   import ProjectSettings from "./lib/components/ProjectSettings.svelte";
   import SearchModal from "./lib/components/SearchModal.svelte";
   import QuickSessionsPanel from "./lib/components/QuickSessionsPanel.svelte";
@@ -118,7 +106,6 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
-  import CloudExecutionStatus from "./lib/components/CloudExecutionStatus.svelte";
   import WorkflowMonitorView from "./lib/features/workflows/components/WorkflowMonitorView.svelte";
   import ContextWarning from "./lib/components/ContextWarning.svelte";
   import MergeModal from "./lib/components/MergeModal.svelte";
@@ -135,24 +122,15 @@
   import ProjectEmptyState from "./lib/components/ProjectEmptyState.svelte";
   import ProjectLanding from "./lib/components/ProjectLanding.svelte";
   import NewProjectModal from "./lib/components/NewProjectModal.svelte";
-  // Channels
-  import { currentChannelId } from "./lib/features/channels";
-  import { channelsEnabled, resourceMonitorEnabled } from "./lib/stores";
-  import ChannelView from "./lib/features/channels/components/ChannelView.svelte";
+  import { resourceMonitorEnabled } from "./lib/stores";
   import ProjectPermissionsModal from "./lib/components/ProjectPermissionsModal.svelte";
   import FeedbackModal from "./lib/components/FeedbackModal.svelte";
   import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
-  import { ExperimentalAgentsPanel, SelfHealingWidget } from "./lib/components/agents";
-  import { AgentBuilder, agentBuilderApi, createAgent, openAgent, loadLibrary, agentLibrary, skillLibraryForBuilder, type AgentDefinition } from "./lib/features/agent-builder";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
-  import { CouncilModal, CouncilPanel, councilStore, councilPanelOpen } from "./lib/features/council";
-  import { councilModal } from "./lib/stores/ui";
   import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
   import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
   import EscalationBanner from "./lib/features/session-hierarchy/components/EscalationBanner.svelte";
-  import { SessionsBoard, type BoardSession } from "./lib/features/sessions-board";
-  import { CanvasView } from "./lib/features/canvas-mode";
   import { fetchCommands, type CustomCommand } from "./lib/features/commands";
   import NavHistoryButton from "./lib/components/NavHistoryButton.svelte";
   import type { PermissionRequestMessage } from "./lib/claude";
@@ -347,7 +325,7 @@
   let newProjectPath = $state("");
   let newProjectQuickName = $state("");
   let defaultProjectsDir = $state("");
-  let projectCreationMode = $state<"quick" | "browse" | "agent" | "template">("quick");
+  let projectCreationMode = $state<"quick" | "browse" | "template">("quick");
   let editingProject = $state<Project | null>(null);
   let editProjectName = $state("");
   let editProjectPath = $state("");
@@ -361,14 +339,6 @@
   let modelSelection = $state("");
   let lastSessionModel = $state("");
   let showSettings = $state(false);
-  let showAgentBuilder = $state(false);
-  let showSessionsDashboard = $state(false);
-  let sessionsDashboardProjectId = $state<string | undefined>(undefined);
-  let showCanvasMode = $state(false);
-  let showExperimentalAgents = $state(false);
-
-  // Derived agents list for sidebar (combine agents + skills from stores)
-  let sidebarAgents = $derived([...$agentLibrary, ...$skillLibraryForBuilder].slice(0, 10));
   let settingsInitialTab = $state<"api" | "permissions" | "claude-md" | "skills" | "features" | "analytics" | "mcp" | undefined>(undefined);
   let showProjectSettings = $state(false);
   let projectSettingsInitialTab = $state<"instructions" | "model" | "permissions" | "skills" | undefined>(undefined);
@@ -378,7 +348,6 @@
   let isResolvingMergeConflicts = $state(false);
   let mergeConflictInfo = $state<{ branch: string; baseBranch: string; fileCount: number; snapshotId: string } | null>(null);
   let sidebarCollapsed = $state(false);
-  let isCanvasMode = $state(false);
   let messageMenuId: string | null = $state(null);
   let messageMenuPos = $state({ x: 0, y: 0 });
   let linkContextMenu = $state<{ url: string; x: number; y: number } | null>(null);
@@ -419,59 +388,6 @@
   let untilDoneIteration = $derived(currentUntilDone?.iteration ?? 0);
   let isInfiniteLoopMode = $derived(!!currentUntilDone?.loopId);
   let untilDoneMaxIterations = 10; // Default max iterations
-
-  // Cloud execution state
-  let cloudBranches = $state<string[]>([]);
-  let currentExecutionSettings = $derived(
-    $session.sessionId ? executionModeStore.get($session.sessionId, get(executionModeStore)) : { mode: "local" as ExecutionMode }
-  );
-  let executionMode = $derived(currentExecutionSettings.mode);
-  let cloudBranch = $derived(currentExecutionSettings.branch || "main");
-
-  // Current cloud execution status for the active session
-  let currentCloudExecution = $derived(
-    $session.sessionId ? cloudExecutionStore.get($session.sessionId, get(cloudExecutionStore)) : undefined
-  );
-  let showCloudStatus = $derived(
-    currentCloudExecution && !["completed", "failed"].includes(currentCloudExecution.stage)
-  );
-
-  // Load branches when project changes and it's a git repo
-  async function loadCloudBranches() {
-    if (!currentProjectIsGitRepo || !currentProject?.path) {
-      cloudBranches = [];
-      return;
-    }
-    try {
-      const { getBranches } = await import("./lib/features/git/api");
-      const branchData = await getBranches(currentProject.path);
-      cloudBranches = [branchData.current, ...branchData.local.filter(b => b !== branchData.current)];
-    } catch (e) {
-      cloudBranches = ["main"];
-    }
-  }
-
-  function handleExecutionModeChange(mode: ExecutionMode) {
-    const sessionId = $session.sessionId;
-    if (sessionId) {
-      // Get git remote URL for cloud execution
-      const repoUrl = currentProjectIsGitRepo ? getGitRemoteUrl() : undefined;
-      executionModeStore.setMode(sessionId, mode, repoUrl, cloudBranch);
-    }
-  }
-
-  function handleCloudBranchChange(branch: string) {
-    const sessionId = $session.sessionId;
-    if (sessionId) {
-      executionModeStore.setBranch(sessionId, branch);
-    }
-  }
-
-  function getGitRemoteUrl(): string | undefined {
-    // TODO: Get actual remote URL from git status
-    // For now, return undefined - the cloud executor will need the repo URL passed explicitly
-    return undefined;
-  }
 
   const messageHandler = useMessageHandler({
     getCurrentSessionId: () => $session.sessionId,
@@ -663,15 +579,6 @@
         }
       }
 
-      // Trigger proactive hooks after assistant responds
-      if (reason === "done") {
-        const msgs = $sessionMessages.get(sessionId) || [];
-        const lastMsg = msgs[msgs.length - 1];
-        if (lastMsg && lastMsg.role === "assistant") {
-          const proj = currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null;
-          hookOnAssistantMessage(lastMsg, msgs, sessionId, proj);
-        }
-      }
     },
     onCompactStart: (sessionId) => {
       compactingSessionsStore.update(set => {
@@ -921,14 +828,10 @@
   let showBrowser = $state(false);
   let showGitPanel = $state(false);
   let showTerminal = $state(false);
-  let showKanban = $state(false);
   let showContext = $state(false);
-  let showInbox = $state(false);
-  let showChannels = $state(false);
-  let showEmail = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "inbox" | "shared-inbox" | "email" | "channels";
+  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context";
   let rightPanelMode = $state<RightPanelMode>("preview");
   let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
@@ -998,8 +901,6 @@
         showHotkeysHelp = false;
       } else if (showSettings) {
         showSettings = false;
-      } else if ($councilPanelOpen) {
-        councilStore.closePanel();
       } else if (showPreview || showFileBrowser) {
         closeRightPanel();
       } else if (currentSessionLoading) {
@@ -1029,48 +930,12 @@
     } else if (e.key === 'g') {
       e.preventDefault();
       toggleGitPanel();
-    } else if (e.key === 'l') {
-      // Cmd/Ctrl+L - Toggle LLM Council panel
-      e.preventDefault();
-      councilStore.togglePanel();
     } else if (e.key === '/') {
       e.preventDefault();
       inputRef?.focus();
     } else if (e.key === ',') {
       e.preventDefault();
       showSettings = true;
-    } else if (e.key === 't') {
-      e.preventDefault();
-      toggleKanban();
-    } else if (e.key === 'd') {
-      e.preventDefault();
-      if (showSessionsDashboard) {
-        // Close
-        showSessionsDashboard = false;
-        sessionsDashboardProjectId = undefined;
-      } else {
-        // Open with current project context if in a project
-        sessionsDashboardProjectId = currentProject?.id;
-        showSessionsDashboard = true;
-      }
-    }
-
-    // Experimental agent shortcuts (Cmd/Ctrl + Shift + key)
-    if (e.shiftKey && isMod) {
-      if (e.key === 'A' || e.key === 'a') {
-        e.preventDefault();
-        showExperimentalAgents = !showExperimentalAgents;
-      } else if (e.key === 'H' || e.key === 'h') {
-        e.preventDefault();
-        toggleSelfHealing();
-      } else if (e.key === 'F' || e.key === 'f') {
-        e.preventDefault();
-        spawnQuickAgent('healer-agent');
-      } else if (e.key === 'C' || e.key === 'c') {
-        // Canvas Mode toggle (Cmd/Ctrl + Shift + C)
-        e.preventDefault();
-        showCanvasMode = !showCanvasMode;
-      }
     }
   }
 
@@ -1394,9 +1259,6 @@
     // Initialize extension registry with default extensions
     initializeRegistry();
 
-    // Initialize browser-use and email features
-    initBrowserEmail();
-
     startSidecar().then(async () => {
       serverReady = true;
       startConnectivityMonitoring(30000);
@@ -1413,14 +1275,8 @@
         loadModelsAction(),
         loadPermissionsAction(),
         loadCostsAction(),
-        loadLibrary(), // Load agents for sidebar
         loadMcpServers(), // Load MCP server states
       ]);
-
-      // Initialize proactive hooks (skill scout, error detector, memory builder)
-      setupProactiveHooks().then(() => {
-        // Proactive hooks setup complete
-      });
 
       client = new ClaudeClient();
       client.connect().then(() => {
@@ -1435,32 +1291,7 @@
       client.onMessage((msg) => {
         messageHandler.handleMessage(msg);
 
-        // Handle cloud execution messages
-        if (msg.type === "cloud_execution_started") {
-          cloudExecutionStore.start(
-            msg.uiSessionId || "",
-            msg.executionId,
-            msg.repoUrl,
-            msg.branch
-          );
-        } else if (msg.type === "cloud_stage") {
-          cloudExecutionStore.setStage(msg.uiSessionId || "", msg.stage, msg.message);
-        } else if (msg.type === "cloud_output") {
-          cloudExecutionStore.addOutput(msg.uiSessionId || "", msg.data);
-        } else if (msg.type === "cloud_result") {
-          cloudExecutionStore.complete(
-            msg.uiSessionId || "",
-            msg.success,
-            msg.duration,
-            msg.estimatedCostUsd,
-            msg.error
-          );
-          // Clear loading state
-          loadingSessions.update(s => { s.delete(msg.uiSessionId || ""); return new Set(s); });
-        } else if (msg.type === "cloud_error") {
-          cloudExecutionStore.complete(msg.uiSessionId || "", false, 0, 0, msg.error);
-          loadingSessions.update(s => { s.delete(msg.uiSessionId || ""); return new Set(s); });
-        } else if (msg.type === "background_process_event") {
+        if (msg.type === "background_process_event") {
           // Forward background process events to the store for real-time updates
           backgroundProcessEvents.emit(msg as any);
         }
@@ -1884,9 +1715,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     pendingPermissionRequest = null;
     pendingQuestion = null;
 
-    // Close any open channel when selecting a workspace
-    currentChannelId.set(null);
-
     session.setProject(project.id);
     session.setSession(null);
     sidebarSessions = [];
@@ -1914,10 +1742,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     try {
       const gitStatus = await getGitStatus(project.path);
       currentProjectIsGitRepo = gitStatus.isGitRepo;
-      // Load branches for cloud execution if it's a git repo
-      if (gitStatus.isGitRepo) {
-        loadCloudBranches();
-      }
     } catch (e) {
       currentProjectIsGitRepo = false;
     }
@@ -2211,8 +2035,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function selectSession(s: Session, skipHistory = false) {
-    isCanvasMode = false;
-
     const prevSessionId = $session.sessionId;
     if (prevSessionId && inputText.trim()) {
       sessionDrafts.setDraft(prevSessionId, inputText);
@@ -2585,11 +2407,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     } catch (err) {
       console.error("Failed to toggle session archive:", err);
     }
-  }
-
-  async function archiveSessionFromCanvas(sess: Session) {
-    if (sess.archived) return;
-    await setSessionArchived(sess, true);
   }
 
   async function archiveAllNonStarred() {
@@ -3066,15 +2883,8 @@ Please walk me through the setup step by step. When I have the credentials, save
     };
     sessionMessages.addMessage(currentSessionId, userMessage);
 
-    // Trigger proactive hooks on user message
-    const projectForHooks = currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null;
-    hookOnUserMessage(userMessage, get(sessionMessages).get(currentSessionId) || [], currentSessionId, projectForHooks);
-
     loadingSessions.update(s => { s.add(currentSessionId); return new Set(s); });
     sessionStatus.setRunning(currentSessionId, $session.projectId!);
-
-    // Get execution mode settings for this session
-    const execSettings = executionModeStore.get(currentSessionId, get(executionModeStore));
 
     // Extract @agent mention from the beginning of the message (e.g., "@coder add feature")
     // Agent must be at the start of the message, followed by space
@@ -3107,10 +2917,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       reasoningEffort: effort,
       // Plan mode - Claude plans before acting
       planMode: get(planMode),
-      // Cloud execution options
-      executionMode: execSettings.mode,
-      cloudRepoUrl: execSettings.repoUrl,
-      cloudBranch: execSettings.branch,
     });
 
     if ($sessionHistoryContext.get(currentSessionId)) {
@@ -3181,10 +2987,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       timestamp: new Date(),
     };
     sessionMessages.addMessage(targetSessionId, userMsg);
-
-    // Trigger proactive hooks
-    const projForHooks = currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null;
-    hookOnUserMessage(userMsg, get(sessionMessages).get(targetSessionId) || [], targetSessionId, projForHooks);
 
     loadingSessions.update(s => { s.add(targetSessionId); return new Set(s); });
     sessionStatus.setRunning(targetSessionId, $session.projectId!);
@@ -3332,17 +3134,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         window.open("https://github.com/anthropics/claude-code/issues", "_blank");
         return true;
 
-      case "council":
-        // Open LLM Council panel (multi-model comparison)
-        if (args) {
-          // If args provided, start a new conversation with that prompt
-          councilStore.newConversation(args);
-          councilStore.sendMessage(args);
-        } else {
-          councilStore.openPanel();
-        }
-        return true;
-
       default:
         return false;
     }
@@ -3457,11 +3248,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     showBrowser = false;
     showGitPanel = false;
     showTerminal = false;
-    showKanban = false;
     showContext = false;
-    showInbox = false;
-    showChannels = false;
-    showEmail = false;
     previewSource = "";
     terminalInitialCommand = "";
   }
@@ -3484,86 +3271,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     }
   }
 
-  function toggleKanban() {
-    if (showKanban && rightPanelMode === "kanban") {
-      showKanban = false;
-    } else {
-      showKanban = true;
-      rightPanelMode = "kanban";
-    }
-  }
-
-  // Experimental agent functions
-  async function toggleSelfHealing() {
-    if (!currentProject) {
-      showError({ message: "Select a project first" });
-      return;
-    }
-    try {
-      const res = await fetch(`${getServerUrl()}/api/experimental/healing/${currentProject.id}`);
-      const data = await res.json();
-
-      if (data.running) {
-        await fetch(`${getServerUrl()}/api/experimental/healing/stop`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: currentProject.id })
-        });
-        showSuccess("Self-Healing Stopped");
-      } else {
-        await fetch(`${getServerUrl()}/api/experimental/healing/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: currentProject.id })
-        });
-        showSuccess("Self-Healing Started", "Watching for build errors");
-      }
-    } catch (e: any) {
-      showError({ message: e.message });
-    }
-  }
-
-  async function spawnQuickAgent(agentType: string) {
-    if (!$session.sessionId) {
-      showError({ message: "Start a chat session first" });
-      return;
-    }
-
-    const tasks: Record<string, string> = {
-      "red-team": `Perform a security analysis of the current project at ${currentProject?.path || "."}. Look for vulnerabilities, injection risks, auth issues, and edge cases.`,
-      "healer-agent": `Run type check and fix any TypeScript or build errors in the project at ${currentProject?.path || "."}`,
-    };
-
-    try {
-      const res = await fetch(`${getServerUrl()}/api/experimental/agents/spawn`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: $session.sessionId,
-          agentType,
-          task: tasks[agentType] || "Analyze the codebase",
-          context: {}
-        })
-      });
-
-      if (!res.ok) throw new Error(await res.text());
-
-      const data = await res.json();
-      showSuccess("Agent Spawned", `${agentType} is working on your task`);
-    } catch (e: any) {
-      showError({ message: e.message });
-    }
-  }
-
-  function handleCanvasToggle(isCanvas: boolean) {
-    isCanvasMode = isCanvas;
-  }
-
-  function openInboxPanel() {
-    showInbox = true;
-    rightPanelMode = "inbox";
-  }
-
   /**
    * Handle extension toolbar clicks - toggles the corresponding panel
    */
@@ -3571,7 +3278,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const panelMode = mode as RightPanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showInbox || showChannels || showEmail;
+    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -3592,26 +3299,11 @@ Please walk me through the setup step by step. When I have the credentials, save
       case "terminal":
         showTerminal = true;
         break;
-      case "kanban":
-        showKanban = true;
-        break;
       case "preview-unified":
         showPreview = true;
         break;
       case "context":
         showContext = true;
-        break;
-      case "inbox":
-        openInboxPanel();
-        break;
-      case "shared-inbox":
-        showInbox = true;
-        break;
-      case "channels":
-        showChannels = true;
-        break;
-      case "email":
-        showEmail = true;
         break;
     }
     rightPanelMode = panelMode;
@@ -4026,18 +3718,6 @@ Please walk me through the setup step by step. When I have the credentials, save
 
 <Confetti trigger={showConfetti} onComplete={() => showConfetti = false} />
 
-<!-- Proactive Hooks Suggestions (skill scout, error detector, memory builder) -->
-{#if $session.sessionId}
-  <SuggestionPanel
-    sessionId={$session.sessionId}
-    getContext={() => buildHookContext(
-      $session.sessionId!,
-      $sessionMessages.get($session.sessionId!) || [],
-      currentProject ? { id: currentProject.id, name: currentProject.name, path: currentProject.path } : null
-    )}
-  />
-{/if}
-
 {#if showOnboarding}
   <Onboarding onComplete={handleOnboardingComplete} />
 {/if}
@@ -4149,15 +3829,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     onOpenProjectInNewWindow={openProjectInNewWindow}
     onOpenSessionInNewWindow={openSessionInNewWindow}
     onOpenHomeInNewWindow={openHomeInNewWindow}
-    onOpenSessionsBoard={(projectId) => { sessionsDashboardProjectId = projectId; showSessionsDashboard = true; }}
-    onOpenAgentBuilder={() => showAgentBuilder = true}
     onGoToProjectDashboard={() => session.setSession(null)}
-    onOpenInbox={openInboxPanel}
-    agents={sidebarAgents}
-    onSelectAgent={(agent) => {
-      openAgent(agent as AgentDefinition);
-      showAgentBuilder = true;
-    }}
     bind:titleSuggestionRef
   />
 
@@ -4166,19 +3838,19 @@ Please walk me through the setup step by step. When I have the credentials, save
   <!-- Main Content Area -->
   <div class="flex-1 flex min-w-0 min-h-0 overflow-hidden">
 
-  <!-- Chat + Council Split Container -->
+  <!-- Chat Container -->
   <div class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
 
   <!-- Chat Area -->
   <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-900 relative overflow-hidden">
 
-    <!-- Navigation History (top-left) - hidden in canvas mode -->
-    <div class="absolute top-3 left-3 z-20 bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm {isCanvasMode ? 'hidden' : ''}">
+    <!-- Navigation History (top-left) -->
+    <div class="absolute top-3 left-3 z-20 bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
       <NavHistoryButton onNavigate={handleNavHistoryNavigate} />
     </div>
 
-    <!-- Toolbar Buttons - hidden in canvas mode -->
-    {#if currentProject && !isCanvasMode}
+    <!-- Toolbar Buttons -->
+    {#if currentProject}
     <div class="absolute top-3 right-3 z-20 flex gap-1">
       {#if $advancedMode}
       <button
@@ -4208,12 +3880,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       />
     {/if}
 
-    {#if $channelsEnabled && $currentChannelId}
-      <!-- Channel View -->
-      <ChannelView
-        onClose={() => currentChannelId.set(null)}
-      />
-    {:else if !currentProject}
+    {#if !currentProject}
       <WorkspaceHome
         projects={sidebarProjects}
         {recentChats}
@@ -4223,9 +3890,9 @@ Please walk me through the setup step by step. When I have the credentials, save
       />
     {:else}
 
-        <!-- Header (Mobile/Simplified) - hidden in canvas mode -->
+        <!-- Header (Mobile/Simplified) -->
 
-        <header class="h-14 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 bg-white/95 dark:bg-gray-800/95 md:hidden z-10 sticky top-0 {isCanvasMode ? '!hidden' : ''}">
+        <header class="h-14 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 bg-white/95 dark:bg-gray-800/95 md:hidden z-10 sticky top-0">
 
             <button onclick={() => session.setProject(null)} class="text-gray-500 dark:text-gray-400">
 
@@ -4312,7 +3979,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                   selectSession(sess as Session);
                 }}
                 onOpenSession={selectSessionById}
-                onArchiveSession={archiveSessionFromCanvas}
                 onNewSession={startNewChatAction}
                 onPreviewFile={openPreview}
                 onOpenFiles={() => {
@@ -4320,29 +3986,9 @@ Please walk me through the setup step by step. When I have the credentials, save
                   rightPanelMode = "files";
                 }}
                 onShowClaudeMd={() => showClaudeMdModal = true}
-                onCanvasToggle={handleCanvasToggle}
               />
             {/if}
           {:else}
-            <!-- Cloud Execution Status -->
-            {#if currentCloudExecution}
-              <div class="px-4 max-w-4xl mx-auto">
-                <CloudExecutionStatus
-                  executionId={currentCloudExecution.executionId}
-                  stage={currentCloudExecution.stage}
-                  stageMessage={currentCloudExecution.stageMessage}
-                  repoUrl={currentCloudExecution.repoUrl}
-                  branch={currentCloudExecution.branch}
-                  outputLines={currentCloudExecution.outputLines}
-                  duration={currentCloudExecution.duration}
-                  estimatedCostUsd={currentCloudExecution.estimatedCostUsd}
-                  success={currentCloudExecution.success}
-                  error={currentCloudExecution.error}
-                  onCancel={() => stopGeneration()}
-                />
-              </div>
-            {/if}
-
             <!-- Child session sticky header (forks + agents). Escalation controls only for agents. -->
             {#if currentSessionHierarchy()?.hasParent && $session.sessionId}
               <div class="sticky top-0 z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
@@ -4414,10 +4060,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                 onMessageClick={handleMessageClick}
                 onQuoteText={quoteTextInChat}
                 onForkWithQuote={forkWithQuote}
-                onAskCouncil={(text) => {
-                  councilStore.newConversation(text);
-                  councilStore.sendMessage(text);
-                }}
                 onPermissionApprove={handlePermissionApprove}
                 onPermissionDeny={handlePermissionDeny}
                 onQuestionAnswer={handleQuestionAnswer}
@@ -4457,9 +4099,9 @@ Please walk me through the setup step by step. When I have the credentials, save
 
         </div>
 
-        <!-- Scroll to Bottom Button - hidden in canvas mode -->
+        <!-- Scroll to Bottom Button -->
         <div
-          class="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 transition-all duration-300 ease-out {isCanvasMode ? 'hidden' : ''} {!userIsNearBottom && currentMessages.length > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}"
+          class="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 transition-all duration-300 ease-out {!userIsNearBottom && currentMessages.length > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}"
         >
           <button
             onclick={jumpToBottom}
@@ -4477,8 +4119,7 @@ Please walk me through the setup step by step. When I have the credentials, save
           </button>
         </div>
 
-        <!-- Input Area - hidden in canvas mode -->
-        {#if !isCanvasMode}
+        <!-- Input Area -->
         <div class="absolute bottom-0 left-0 right-0 p-6 pointer-events-none flex justify-center bg-gradient-to-t from-white via-white to-transparent dark:from-gray-900 dark:via-gray-900" data-tour="chat-input">
 
             <div class="w-full max-w-3xl pointer-events-auto relative">
@@ -4527,9 +4168,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                     isNewChat={$session.isPending || !$session.sessionId || currentMessages.length === 0}
                     worktreeBranch={currentSessionData?.worktree_branch}
                     worktreeBaseBranch={currentSessionData?.worktree_base_branch}
-                    {executionMode}
-                    {cloudBranch}
-                    {cloudBranches}
                     onSubmit={sendMessage}
                     onStop={stopGeneration}
                     onPreview={openPreview}
@@ -4539,8 +4177,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                     onToggleUntilDone={toggleUntilDone}
                     onOpenInfiniteLoop={() => openInfiniteLoopConfig(inputText)}
                     {isInfiniteLoopMode}
-                    onExecutionModeChange={handleExecutionModeChange}
-                    onCloudBranchChange={handleCloudBranchChange}
                     onCreateWithWorktree={async (description, message) => {
                       const newSessionId = await createNewChatWithWorktree(description);
                       if (newSessionId && message.trim()) {
@@ -4591,31 +4227,16 @@ Please walk me through the setup step by step. When I have the credentials, save
             </div>
 
         </div>
-        {/if}
 
     {/if}
 
   </main>
 
-  <!-- Council Panel (Split View) -->
-  {#if $councilPanelOpen}
-    <div class="h-[40%] min-h-[200px] flex-shrink-0">
-      <CouncilPanel
-        onClose={() => councilStore.closePanel()}
-        onAdoptResponse={(text) => {
-          // Add the response text to the chat input
-          inputText = text;
-          councilStore.closePanel();
-        }}
-      />
-    </div>
-  {/if}
-
   </div>
-  <!-- End Chat + Council Split Container -->
+  <!-- End Chat Container -->
 
-  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context / Email) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showKanban || showContext || showInbox || showChannels || showEmail}
+  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context) -->
+  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -4636,11 +4257,8 @@ Please walk me through the setup step by step. When I have the credentials, save
         else if (mode === "browser") showBrowser = true;
         else if (mode === "git") showGitPanel = true;
         else if (mode === "terminal") showTerminal = true;
-        else if (mode === "kanban") showKanban = true;
         else if (mode === "preview-unified") showPreview = true;
         else if (mode === "context") showContext = true;
-        else if (mode === "inbox" || mode === "shared-inbox") showInbox = true;
-        else if (mode === "channels") showChannels = true;
       }}
       onClose={closeRightPanel}
       onStartResize={startResizingRight}
@@ -4650,21 +4268,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       onTerminalSendToClaude={handleTerminalSendToClaude}
       onPreviewAskClaude={handlePreviewAskClaude}
       onElementInspected={handleElementInspected}
-      onNavigateToSession={(sessionId, prompt, autoSend) => {
-        // Navigate to the session
-        session.setSession($session.projectId!, sessionId);
-        // Close the right panel to focus on the chat
-        closeRightPanel();
-        // If there's a prompt, set it and optionally auto-send
-        if (prompt) {
-          if (autoSend) {
-            // Use message queue to ensure message is sent even if WS isn't ready yet
-            messageQueue.add({ sessionId, text: prompt, attachments: [] });
-          } else {
-            inputText = prompt;
-          }
-        }
-      }}
     />
   {/if}
 
@@ -4676,15 +4279,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     onClose={() => { showNewProjectModal = false; newProjectTargetFolderId = null; projectCreationMode = "quick"; }}
     onCreate={createProject}
     onPickDirectory={pickDirectory}
-    onCreateAgent={async (name, description) => {
-      const agent = await createAgent(name, description, "agent");
-      if (agent) {
-        showNewProjectModal = false;
-        projectCreationMode = "quick";
-        openAgent(agent);
-        showAgentBuilder = true;
-      }
-    }}
     onCreateFromTemplate={async (templateId, name) => {
       await createProjectFromTemplate(templateId, name);
     }}
@@ -4762,43 +4356,6 @@ Please walk me through the setup step by step. When I have the credentials, save
 
   <Settings open={showSettings} onClose={() => { showSettings = false; settingsInitialTab = undefined; loadMcpServers(); }} initialTab={settingsInitialTab} />
 
-  {#if showAgentBuilder}
-    <div class="fixed inset-0 z-50 bg-white">
-      <AgentBuilder onClose={() => showAgentBuilder = false} />
-    </div>
-  {/if}
-
-  {#if showSessionsDashboard}
-    <div class="fixed inset-0 z-50 bg-white dark:bg-gray-900">
-      <SessionsBoard
-        projectId={sessionsDashboardProjectId}
-        projectName={sessionsDashboardProjectId ? sidebarProjects.find(p => p.id === sessionsDashboardProjectId)?.name : undefined}
-        onClose={() => { showSessionsDashboard = false; sessionsDashboardProjectId = undefined; }}
-        onSessionSelect={(boardSession) => {
-          showSessionsDashboard = false;
-          sessionsDashboardProjectId = undefined;
-          goToSessionById(boardSession.projectId, boardSession.id);
-        }}
-      />
-    </div>
-  {/if}
-
-  {#if showCanvasMode}
-    <CanvasView
-      onClose={() => showCanvasMode = false}
-      onSessionSelect={(sessionId, projectId) => {
-        showCanvasMode = false;
-        goToSessionById(projectId, sessionId);
-      }}
-      onProjectSelect={(projectId) => {
-        showCanvasMode = false;
-        const project = sidebarProjects.find(p => p.id === projectId);
-        if (project) {
-          selectProject(project);
-        }
-      }}
-    />
-  {/if}
   <FeedbackModal
     open={showFeedbackModal}
     onClose={() => {
@@ -4964,7 +4521,7 @@ Please walk me through the setup step by step. When I have the credentials, save
         </div>
         <div class="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
           {#each HOTKEYS as hotkey}
-            <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors {hotkey.category === 'experimental' ? 'bg-amber-50' : ''}">
+            <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors">
               <span class="text-sm text-gray-600">{hotkey.action}</span>
               <kbd class="px-2 py-1 text-xs font-mono bg-gray-100 border border-gray-200 rounded text-gray-700">{hotkey.key}</kbd>
             </div>
@@ -4976,37 +4533,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       </div>
     </div>
   {/if}
-
-  <!-- Experimental Agents Panel -->
-  {#if showExperimentalAgents}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30" onclick={() => showExperimentalAgents = false} role="dialog" aria-modal="true" tabindex="-1">
-      <div class="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200" onclick={(e) => e.stopPropagation()}>
-        <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <div class="p-1.5 bg-amber-100 rounded-lg">
-              <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <h3 class="font-semibold text-sm text-gray-900">Experimental Agents</h3>
-            <span class="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">Beta</span>
-          </div>
-          <button onclick={() => showExperimentalAgents = false} class="p-1 text-gray-400 hover:text-gray-600 transition-colors">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <ExperimentalAgentsPanel />
-        {#if currentProject}
-          <div class="px-4 pb-4 border-t border-gray-100 pt-3">
-            <SelfHealingWidget />
-          </div>
-        {/if}
-      </div>
-    </div>
-  {/if}
-
 
   <!-- CLAUDE.md Modal -->
   {#if showClaudeMdModal}
@@ -5087,12 +4613,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   <ConnectivityBanner />
 {/if}
 
-<!-- LLM Council Modal -->
-<CouncilModal
-  open={$councilModal.open}
-  onClose={() => councilModal.close()}
-  initialPrompt={$councilModal.initialPrompt}
-/>
 
 <!-- Resource Monitor (floating button + modal) -->
 {#if $resourceMonitorEnabled}
