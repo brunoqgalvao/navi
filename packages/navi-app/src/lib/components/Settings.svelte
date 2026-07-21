@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, costsApi, containerPreviewApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project, type ContainerPreview } from "../api";
+  import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project } from "../api";
   import { onMount } from "svelte";
   import { advancedMode, debugMode, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
   import SkillLibrary from "./SkillLibrary.svelte";
@@ -9,7 +9,7 @@
   import { McpSettings } from "../features/mcp";
   import { isTelemetryEnabled, setTelemetryOptOut, trackEvent, TelemetryEvents } from "../telemetry";
 
-  type Tab = "api" | "permissions" | "claude-md" | "skills" | "commands" | "features" | "experimental" | "previews" | "analytics" | "plugins" | "mcp";
+  type Tab = "api" | "permissions" | "claude-md" | "skills" | "commands" | "features" | "experimental" | "analytics" | "plugins" | "mcp";
 
   interface Props {
     open: boolean;
@@ -113,13 +113,6 @@
   let updateCheckResult = $state<"up-to-date" | "available" | null>(null);
   let updateCheckError = $state<string | null>(null);
 
-  // Container previews state
-  let previews = $state<ContainerPreview[]>([]);
-  let loadingPreviews = $state(false);
-  let stoppingPreview = $state<string | null>(null);
-  let previewSystemStatus = $state<{ initialized: boolean; runtime: { runtime: string; running: boolean }; containerCount: number } | null>(null);
-  let previewsLoaded = $state(false);
-
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: "api", label: "API Keys", icon: "M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" },
     { id: "permissions", label: "Permissions", icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" },
@@ -130,7 +123,6 @@
     { id: "commands", label: "Commands", icon: "M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
     { id: "features", label: "Features", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" },
     { id: "experimental", label: "Experimental", icon: "M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" },
-    { id: "previews", label: "Previews", icon: "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
     { id: "analytics", label: "Analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   ];
 
@@ -142,7 +134,6 @@
   $effect(() => {
     if (!open) {
       // Reset loaded flags when modal closes so data refreshes next time
-      previewsLoaded = false;
       apiTabLoaded = false;
       permissionsLoaded = false;
       claudeMdLoaded = false;
@@ -168,45 +159,7 @@
     if (activeTab === "analytics" && !analytics && !loadingAnalytics) {
       loadAnalytics();
     }
-    if (activeTab === "previews" && !previewsLoaded && !loadingPreviews) {
-      previewsLoaded = true;
-      loadPreviews();
-    }
   });
-
-  async function loadPreviews() {
-    loadingPreviews = true;
-    try {
-      const [previewsList, status] = await Promise.all([
-        containerPreviewApi.list(),
-        containerPreviewApi.getSystemStatus()
-      ]);
-      previews = previewsList;
-      previewSystemStatus = status;
-    } catch (e) {
-      console.error("Failed to load previews:", e);
-    } finally {
-      loadingPreviews = false;
-    }
-  }
-
-  async function stopPreview(sessionId: string) {
-    stoppingPreview = sessionId;
-    try {
-      await containerPreviewApi.stop(sessionId);
-      previews = previews.filter(p => p.sessionId !== sessionId);
-    } catch (e) {
-      console.error("Failed to stop preview:", e);
-    } finally {
-      stoppingPreview = null;
-    }
-  }
-
-  async function stopAllPreviews() {
-    for (const preview of previews) {
-      await stopPreview(preview.sessionId);
-    }
-  }
 
   async function loadProjectsList() {
     try {
@@ -1529,127 +1482,6 @@
                     </p>
                   {/if}
                 </div>
-              </div>
-            </div>
-
-          {:else if activeTab === "previews"}
-            <div class="space-y-6 max-w-2xl">
-              <div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-1">Container Previews</h4>
-                <p class="text-sm text-gray-500">Manage running container-based dev server previews.</p>
-              </div>
-
-              <!-- System Status -->
-              {#if previewSystemStatus}
-                <div class="p-4 bg-gray-50 rounded-lg">
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-3">
-                      <div class="w-3 h-3 rounded-full {previewSystemStatus.runtime.running ? 'bg-green-500' : 'bg-gray-400'}"></div>
-                      <div>
-                        <span class="text-sm font-medium text-gray-700">
-                          {previewSystemStatus.runtime.runtime === 'none' ? 'No Runtime' : previewSystemStatus.runtime.runtime}
-                        </span>
-                        <span class="text-xs text-gray-500 ml-2">
-                          ({previewSystemStatus.containerCount} containers running)
-                        </span>
-                      </div>
-                    </div>
-                    {#if previews.length > 0}
-                      <button
-                        onclick={stopAllPreviews}
-                        class="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        Stop All
-                      </button>
-                    {/if}
-                  </div>
-                </div>
-              {/if}
-
-              <!-- Loading -->
-              {#if loadingPreviews}
-                <div class="flex justify-center py-8">
-                  <svg class="w-6 h-6 animate-spin text-gray-400" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                </div>
-              {:else if previews.length === 0}
-                <div class="text-center py-12 text-gray-500">
-                  <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <circle cx="12" cy="12" r="10" stroke-width="2" />
-                  </svg>
-                  <p class="text-sm font-medium">No previews running</p>
-                  <p class="text-xs mt-1">Start a preview from the Preview extension in any session</p>
-                </div>
-              {:else}
-                <div class="space-y-3">
-                  {#each previews as preview}
-                    <div class="p-4 bg-white border border-gray-200 rounded-lg">
-                      <div class="flex items-start justify-between">
-                        <div class="flex-1 min-w-0">
-                          <div class="flex items-center gap-2">
-                            <span class="w-2 h-2 rounded-full {preview.status === 'running' ? 'bg-green-500' : preview.status === 'starting' ? 'bg-yellow-500 animate-pulse' : preview.status === 'paused' ? 'bg-blue-500' : 'bg-red-500'}"></span>
-                            <span class="text-sm font-medium text-gray-900 truncate">{preview.slug}</span>
-                          </div>
-                          <div class="mt-1 flex items-center gap-4 text-xs text-gray-500">
-                            <span class="flex items-center gap-1">
-                              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 4.97-4.03 9-9 9" />
-                              </svg>
-                              {preview.branch}
-                            </span>
-                            {#if preview.framework}
-                              <span>{preview.framework}</span>
-                            {/if}
-                          </div>
-                          {#if preview.url}
-                            <a
-                              href={preview.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              class="mt-2 inline-flex items-center gap-1 text-xs text-cyan-600 hover:text-cyan-700 font-mono"
-                            >
-                              {preview.url}
-                              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                              </svg>
-                            </a>
-                          {/if}
-                        </div>
-                        <button
-                          onclick={() => stopPreview(preview.sessionId)}
-                          disabled={stoppingPreview === preview.sessionId}
-                          class="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                          title="Stop preview"
-                        >
-                          {#if stoppingPreview === preview.sessionId}
-                            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                          {:else}
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <rect x="6" y="6" width="12" height="12" rx="2" stroke-width="2" />
-                            </svg>
-                          {/if}
-                        </button>
-                      </div>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-
-              <!-- Refresh button -->
-              <div class="pt-4 border-t border-gray-100">
-                <button
-                  onclick={loadPreviews}
-                  disabled={loadingPreviews}
-                  class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                >
-                  Refresh
-                </button>
               </div>
             </div>
 

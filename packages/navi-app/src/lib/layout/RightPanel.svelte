@@ -15,11 +15,10 @@
   import { GitPanel } from "../features/git";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
-  import PreviewPanel from "../components/PreviewPanel.svelte";
   import { ContextPanel } from "../features/context";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "context";
 
   interface Props {
     mode: PanelMode;
@@ -28,9 +27,7 @@
     sessionId: string | null;
     projectPath: string | null;
     worktreePath?: string | null;  // Use this for git operations when in a worktree
-    worktreeBranch?: string | null;  // Current branch for container preview
     previewSource: string | null;
-    containerPreviewUrl?: string | null;  // URL for container preview
     browserUrl: string;
     isResizing: boolean;
     terminalInitialCommand?: string;
@@ -41,8 +38,6 @@
     onBrowserUrlChange: (url: string) => void;
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
-    /** Callback when preview panel wants to ask Claude for help */
-    onPreviewAskClaude?: (message: string) => void;
     /** Callback when user inspects an element in browser preview */
     onElementInspected?: (element: InspectedElement) => void;
   }
@@ -54,9 +49,7 @@
     sessionId,
     projectPath,
     worktreePath = null,
-    worktreeBranch = null,
     previewSource,
-    containerPreviewUrl = null,
     browserUrl,
     isResizing,
     terminalInitialCommand = "",
@@ -67,7 +60,6 @@
     onBrowserUrlChange,
     onTerminalRef,
     onTerminalSendToClaude,
-    onPreviewAskClaude,
     onElementInspected,
   }: Props = $props();
 
@@ -272,18 +264,6 @@
             onBrowserUrlChange(url);
             onModeChange("browser");
           }}
-        />
-      </div>
-    {:else if mode === "preview-unified"}
-      <!-- Unified Preview panel - full width -->
-      <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <PreviewPanel
-          {projectId}
-          {sessionId}
-          branch={worktreeBranch}
-          previewUrl={containerPreviewUrl}
-          onAskClaude={onPreviewAskClaude}
-          {onElementInspected}
         />
       </div>
     {:else if mode === "context"}

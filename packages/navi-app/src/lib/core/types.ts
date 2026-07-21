@@ -38,9 +38,7 @@ export type ExtensionId =
   | "git"
   | "terminal"
   | "processes"
-  | "preview"
-  | "context"         // Session context visibility
-  | "browser-preview"; // Browser-use live preview
+  | "context";        // Session context visibility
 
 /**
  * Panel modes - what the right sidebar can display
@@ -52,9 +50,7 @@ export type PanelMode =
   | "git"
   | "terminal"
   | "processes"
-  | "preview-unified"
-  | "context"         // Context sidebar view
-  | "browser-preview"; // Browser-use preview
+  | "context";        // Context sidebar view
 
 // =============================================================================
 // 2. MESSAGE WIDGETS (Inline in Chat Messages)

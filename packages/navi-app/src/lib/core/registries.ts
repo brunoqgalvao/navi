@@ -192,16 +192,6 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     defaultEnabled: false,
     defaultOrder: 4,
   },
-  preview: {
-    id: "preview",
-    name: "Preview",
-    icon: "play",
-    description: "Dev server preview with multiple engines",
-    panelMode: "preview-unified",
-    requiresProject: true,
-    defaultEnabled: true,
-    defaultOrder: 6,
-  },
   context: {
     id: "context",
     name: "Context",
@@ -211,16 +201,6 @@ export const DEFAULT_EXTENSIONS: Record<ExtensionId, Extension> = {
     requiresProject: false,
     defaultEnabled: true,
     defaultOrder: 7,
-  },
-  "browser-preview": {
-    id: "browser-preview",
-    name: "Browser",
-    icon: "globe",
-    description: "Browser-use preview (not yet implemented)",
-    panelMode: "browser-preview",
-    requiresProject: false,
-    defaultEnabled: false,
-    defaultOrder: 101,
   },
   };
 

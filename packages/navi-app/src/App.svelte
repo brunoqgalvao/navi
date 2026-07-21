@@ -831,9 +831,8 @@
   let showContext = $state(false);
   let showExtensionSettings = $state(false);
   let browserUrl = $state("http://localhost:3000");
-  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "preview-unified" | "context";
+  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "context";
   let rightPanelMode = $state<RightPanelMode>("preview");
-  let containerPreviewUrl = $state<string | null>(null);
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
   let projectFileIndex = $state<Map<string, string>>(new Map());
@@ -3145,12 +3144,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     sendMessage();
   }
 
-  // Handle "Ask Claude" from Preview Panel error state (auto-sends)
-  function handlePreviewAskClaude(message: string) {
-    inputText = message;
-    sendMessage();
-  }
-
   // Handle element inspection from browser preview
   function handleElementInspected(element: import("./lib/Preview.svelte").InspectedElement) {
     // Format element data for chat context
@@ -3298,9 +3291,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         break;
       case "terminal":
         showTerminal = true;
-        break;
-      case "preview-unified":
-        showPreview = true;
         break;
       case "context":
         showContext = true;
@@ -4244,9 +4234,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       sessionId={$session.sessionId || null}
       projectPath={currentProject?.path || null}
       worktreePath={currentSessionData?.worktree_path}
-      worktreeBranch={currentSessionData?.worktree_branch}
       {previewSource}
-      {containerPreviewUrl}
       {browserUrl}
       isResizing={isResizingRight}
       {terminalInitialCommand}
@@ -4257,7 +4245,6 @@ Please walk me through the setup step by step. When I have the credentials, save
         else if (mode === "browser") showBrowser = true;
         else if (mode === "git") showGitPanel = true;
         else if (mode === "terminal") showTerminal = true;
-        else if (mode === "preview-unified") showPreview = true;
         else if (mode === "context") showContext = true;
       }}
       onClose={closeRightPanel}
@@ -4266,7 +4253,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       onBrowserUrlChange={(url) => browserUrl = url}
       onTerminalRef={(ref) => terminalRef = ref}
       onTerminalSendToClaude={handleTerminalSendToClaude}
-      onPreviewAskClaude={handlePreviewAskClaude}
       onElementInspected={handleElementInspected}
     />
   {/if}

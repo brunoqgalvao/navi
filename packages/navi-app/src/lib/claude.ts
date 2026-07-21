@@ -439,7 +439,7 @@ export interface BackgroundProcessEventMessage {
   port?: number;
   process?: {
     id: string;
-    type: "bash" | "task" | "dev_server" | "container_preview";
+    type: "bash" | "task" | "dev_server";
     command: string;
     cwd: string;
     pid?: number;

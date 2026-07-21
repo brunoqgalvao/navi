@@ -125,16 +125,6 @@ export const DEFAULT_EXTENSIONS: Record<string, Extension> = {
     defaultEnabled: false,
     defaultOrder: 4,
   },
-  preview: {
-    id: "preview",
-    name: "Preview",
-    icon: "play",
-    description: "Dev server preview with multiple engines",
-    panelMode: "preview-unified",
-    requiresProject: true,
-    defaultEnabled: true,
-    defaultOrder: 6,
-  },
   context: {
     id: "context",
     name: "Context",

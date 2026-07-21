@@ -291,16 +291,9 @@
     // not the frontend dev server (port 1420) which would serve the Navi UI instead
     const serverUrl = getServerUrl();
 
-    // For localhost URLs, use preview proxy to inject inspector script
+    // Localhost URLs load directly — there is no preview proxy anymore
     if (isLocalUrl(formatted)) {
-      try {
-        const parsed = new URL(formatted);
-        const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
-        const path = parsed.pathname + parsed.search + parsed.hash;
-        return `${serverUrl}/api/preview/proxy/${port}${path}`;
-      } catch {
-        return formatted;
-      }
+      return formatted;
     }
 
     // For external URLs, use the general proxy
