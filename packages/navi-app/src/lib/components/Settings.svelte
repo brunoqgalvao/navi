@@ -2,7 +2,7 @@
   import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project } from "../api";
   import { onMount } from "svelte";
   import { advancedMode, debugMode, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
-  import SkillLibrary from "./SkillLibrary.svelte";
+  import SkillsPanel from "./SkillsPanel.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
   import { PluginSettings } from "../features/plugins";
@@ -1008,11 +1008,11 @@
           {:else if activeTab === "skills"}
             <div class="space-y-6">
               <div>
-                <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Skill Library</h4>
+                <h4 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Skills</h4>
                 <p class="text-sm text-gray-500 dark:text-gray-400">Skills customize Claude's behavior. Enable them globally or per-project.</p>
               </div>
 
-              <SkillLibrary />
+              <SkillsPanel />
             </div>
 
           {:else if activeTab === "plugins"}

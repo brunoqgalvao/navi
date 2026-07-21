@@ -1051,47 +1051,6 @@ export const skillsApi = {
   }),
   syncGlobal: () => request<{ synced: string[]; skipped: string[]; errors: string[]; total_global: number }>("/skills/sync-global", { method: "POST" }),
   listGlobal: () => request<Array<{ slug: string; name: string; description: string; path: string }>>("/skills/global"),
-  createExamples: () =>
-    request<{ success: boolean; created: string[] }>("/skills/examples", { method: "POST" }),
-  async importFile(file: File, useAi: boolean = false): Promise<Skill> {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("useAi", String(useAi));
-    const res = await fetch(`${getApiBaseUrl()}/skills/import`, {
-      method: "POST",
-      body: formData,
-    });
-    if (!res.ok) {
-      const data = await res.json().catch((parseError) => {
-        console.error("[API] Failed to parse skill import error:", parseError);
-        return {};
-      });
-      throw new Error(data.error || `Import failed: ${res.status}`);
-    }
-    return res.json();
-  },
-  importUrl: (url: string, useAi: boolean = false) =>
-    request<Skill>("/skills/import-url", {
-      method: "POST",
-      body: JSON.stringify({ url, useAi }),
-    }),
-  async exportZip(id: string, slug: string): Promise<void> {
-    const res = await fetch(`${getApiBaseUrl()}/skills/${id}/export`);
-    if (!res.ok) {
-      const data = await res.json().catch((parseError) => {
-        console.error("[API] Failed to parse skill export error:", parseError);
-        return {};
-      });
-      throw new Error(data.error || `Export failed: ${res.status}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${slug}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
-  },
   sync: (id: string, scope: "global" | "project", projectId?: string) =>
     request<{ success: boolean; hash: string }>(`/skills/${id}/sync`, {
       method: "POST",
@@ -1114,8 +1073,6 @@ export const skillsApi = {
       method: "POST",
       body: JSON.stringify({ editor }),
     }),
-  // Categories
-  listCategories: () => request<SkillCategory[]>("/skills/categories"),
   // Default enabled (auto-enable for new projects)
   listDefaultEnabled: () => request<Skill[]>("/skills/default-enabled"),
   setDefaultEnabled: (id: string, enabled: boolean) =>
@@ -1124,60 +1081,6 @@ export const skillsApi = {
     }),
 };
 
-// Marketplace (skills.sh integration)
-export interface MarketplaceSkill {
-  id: string;
-  name: string;
-  description: string;
-  owner: string;
-  repo: string;
-  installs: number;
-  stars?: number;
-  version?: string;
-  category?: string;
-  author?: string;
-}
-
-export interface MarketplaceSearchResult {
-  skills: MarketplaceSkill[];
-  total: number;
-  query: string;
-}
-
-export interface MarketplaceInstallResult {
-  success: boolean;
-  source: string;
-  global: boolean;
-  scope?: "global" | "project";
-  requestedSkill?: string | null;
-  output: string;
-}
-
-export const marketplaceApi = {
-  search: (query: string, limit = 50) =>
-    request<MarketplaceSearchResult>(`/marketplace/search?q=${encodeURIComponent(query)}&limit=${limit}`),
-  trending: () =>
-    request<{ skills: MarketplaceSkill[]; total: number }>("/marketplace/trending"),
-  info: (owner: string, repo: string, skill: string) =>
-    request<MarketplaceSkill>(`/marketplace/info/${owner}/${repo}/${skill}`),
-  install: (source: string, global = true, projectPath?: string) =>
-    request<MarketplaceInstallResult>("/marketplace/install", {
-      method: "POST",
-      body: JSON.stringify({ source, global, projectPath }),
-    }),
-  installCommand: (command: string, global = true, projectPath?: string) =>
-    request<MarketplaceInstallResult>("/marketplace/install", {
-      method: "POST",
-      body: JSON.stringify({ command, global, projectPath }),
-    }),
-  uninstall: (name: string, global = true) =>
-    request<{ success: boolean; name: string; output: string }>("/marketplace/uninstall", {
-      method: "POST",
-      body: JSON.stringify({ name, global }),
-    }),
-  installed: () =>
-    request<{ skills: MarketplaceSkill[]; total: number }>("/marketplace/installed"),
-};
 
 export interface SkillFileInfo {
   name: string;

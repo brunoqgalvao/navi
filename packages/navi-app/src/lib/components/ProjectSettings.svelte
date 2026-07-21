@@ -5,9 +5,7 @@
   import { availableModels, type ModelInfo } from "../stores";
   import { DEFAULT_CONTEXT_WINDOW } from "../context-window";
   import { marked } from "marked";
-  import ProjectSkillSelector from "./ProjectSkillSelector.svelte";
-  import SkillEditor from "./SkillEditor.svelte";
-  import SkillLibrary from "./SkillLibrary.svelte";
+  import SkillsPanel from "./SkillsPanel.svelte";
   import ProjectAnalytics from "./ProjectAnalytics.svelte";
 
   type Tab = "instructions" | "model" | "permissions" | "skills" | "analytics";
@@ -67,11 +65,6 @@
     contextWindowPreset = preset ? String(preset.value) : "custom";
     customContextWindow = String(contextWindow);
   }
-
-  // Skill editor state
-  let showSkillEditor = $state(false);
-  let editingSkill: import("../api").Skill | null = $state(null);
-  let showSkillLibrary = $state(false);
 
   onMount(async () => {
     loading = true;
@@ -655,13 +648,7 @@ Write instructions for Claude here. This file tells Claude:
           </div>
         </div>
       {:else if activeTab === "skills"}
-        <ProjectSkillSelector
-          projectId={project.id}
-          projectPath={project.path}
-          onCreateSkill={() => { editingSkill = null; showSkillEditor = true; }}
-          onEditSkill={(skill) => { editingSkill = skill; showSkillEditor = true; }}
-          onOpenLibrary={() => showSkillLibrary = true}
-        />
+        <SkillsPanel projectId={project.id} />
       {:else if activeTab === "analytics"}
         <ProjectAnalytics projectId={project.id} projectPath={project.path} />
       {/if}
@@ -669,33 +656,4 @@ Write instructions for Claude here. This file tells Claude:
   </div>
 </div>
 
-<SkillEditor
-  open={showSkillEditor}
-  onClose={() => { showSkillEditor = false; editingSkill = null; }}
-  skill={editingSkill}
-  projectId={project.id}
-/>
 
-{#if showSkillLibrary}
-  <div class="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
-      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-        <div>
-          <h2 class="text-lg font-semibold text-gray-900">Skill Library</h2>
-          <p class="text-sm text-gray-500">Manage all your skills</p>
-        </div>
-        <button
-          onclick={() => showSkillLibrary = false}
-          class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-        >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-      <div class="flex-1 overflow-y-auto p-6">
-        <SkillLibrary projectId={project.id} projectPath={project.path} showProjectToggle={true} />
-      </div>
-    </div>
-  </div>
-{/if}
