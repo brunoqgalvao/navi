@@ -1,6 +1,7 @@
 import { json } from "../utils/response";
 import { globalSettings } from "../db";
 
+import { getDataDir } from "../utils/data-dir";
 export async function handleAudioRoutes(url: URL, method: string, req: Request): Promise<Response | null> {
   if (url.pathname === "/api/transcribe" && method === "POST") {
     try {
@@ -61,7 +62,7 @@ export async function handleAudioRoutes(url: URL, method: string, req: Request):
       const { join } = await import("path");
       const fs = await import("fs/promises");
 
-      const audioDir = join(homedir(), ".claude-code-ui", "audio-backups");
+      const audioDir = join(getDataDir(), "audio-backups");
       await fs.mkdir(audioDir, { recursive: true });
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");

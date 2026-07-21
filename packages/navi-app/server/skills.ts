@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { getDataDir } from "./utils/data-dir";
 import {
   existsSync,
   mkdirSync,
@@ -13,7 +14,7 @@ import {
 import { homedir } from "os";
 import { join, resolve, sep, dirname, basename } from "path";
 
-export const SKILL_LIBRARY_PATH = join(homedir(), ".claude-code-ui", "skill-library");
+export const SKILL_LIBRARY_PATH = join(getDataDir(), "skill-library");
 export const CLAUDE_GLOBAL_SKILLS = join(homedir(), ".claude", "skills");
 
 if (!existsSync(SKILL_LIBRARY_PATH)) {

@@ -18,6 +18,7 @@ import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
+import { getDataDir } from "../utils/data-dir";
 export interface DefinitionOfDone {
   id: string;
   description: string;
@@ -92,7 +93,7 @@ export interface VerifierDecision {
 // PERSISTENCE
 // ═══════════════════════════════════════════════════════════════════════════
 
-const LOOPS_DIR = join(homedir(), ".claude-code-ui", "loops");
+const LOOPS_DIR = join(getDataDir(), "loops");
 
 // Ensure loops directory exists
 if (!existsSync(LOOPS_DIR)) {

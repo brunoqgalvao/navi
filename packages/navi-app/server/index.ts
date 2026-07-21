@@ -51,6 +51,7 @@ import { handleEphemeralChat } from "./services/ephemeral-chat";
 import { scheduleStorageMaintenance } from "./services/storage-maintenance";
 
 // WebSocket
+import { getDataDir } from "./utils/data-dir";
 import {
   createWebSocketHandlers,
   broadcastToClients,
@@ -88,7 +89,7 @@ async function loadAndMigrateEnvKeys() {
   const { join } = await import("path");
   const fs = await import("fs/promises");
 
-  const envPath = join(homedir(), ".claude-code-ui", ".env");
+  const envPath = join(getDataDir(), ".env");
   try {
     const content = await fs.readFile(envPath, "utf-8");
 

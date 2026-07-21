@@ -26,6 +26,7 @@ import { randomUUID } from "crypto";
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { getDataDir } from "../utils/data-dir";
 export type ScheduleKind = "at" | "every" | "cron";
 
 export interface ScheduleAt {
@@ -111,7 +112,7 @@ export interface JobRun {
 // Storage Paths
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CRON_DIR = join(homedir(), ".claude-code-ui", "cron");
+const CRON_DIR = join(getDataDir(), "cron");
 const JOBS_FILE = join(CRON_DIR, "jobs.json");
 const RUNS_DIR = join(CRON_DIR, "runs");
 

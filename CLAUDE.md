@@ -89,9 +89,20 @@ bun run dev:tauri      # Desktop app mode (Tauri)
 # Type checking
 bun run --cwd packages/navi-app check
 
-# API testing
-bun run --cwd packages/navi-app test:api
+# Tests (isolated data dir — safe to run anytime, never touches the live DB)
+bun run --cwd packages/navi-app test:server
+
+# Sandbox instance (isolated second Navi for agent-driven testing)
+bun run sandbox start [--frontend]   # backend :4021, pty :4022, frontend :4020
+bun run sandbox restart|stop|status|logs|url
 ```
+
+**Sandbox & data isolation:** `NAVI_DATA_DIR` overrides `~/.claude-code-ui`
+(helper: `server/utils/data-dir.ts`). The sandbox (`scripts/sandbox.sh`) uses
+`~/.claude-code-ui-sandbox` and ports 4020-4022 — outside the live frontend's
+3021-3030 discovery scan — so agents can start/stop/restart it freely without
+touching the live app. `scripts/smoke.sh` boots against a temp data dir (fast,
+~1s). The LIVE backend on :3021 is still restart-by-Bruno-only — we run inside it.
 
 **Ports:** Frontend dev: 1420 | Backend: 3021 | PTY server: 3022
 

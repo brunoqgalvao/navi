@@ -1,7 +1,7 @@
 {
   "name": "navi-app",
   "version": "2.0.0",
-  "description": "Navi — the local AI coding assistant UI. Already on it.",
+  "description": "Navi \u2014 the local AI coding assistant UI. Already on it.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,7 +17,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
     "test:api": "node scripts/run-with-bun.mjs run server/test-api.ts",
-    "test:api:verbose": "node scripts/run-with-bun.mjs run server/test-api.ts --verbose"
+    "test:api:verbose": "node scripts/run-with-bun.mjs run server/test-api.ts --verbose",
+    "test:server": "NAVI_DATA_DIR=$(mktemp -d /tmp/navi-test.XXXXXX) bun test server/ shared/"
   },
   "license": "MIT",
   "bin": {

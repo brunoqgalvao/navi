@@ -3,6 +3,7 @@ import { globalSettings, DEFAULT_TOOLS, DANGEROUS_TOOLS } from "../db";
 import { getCuratedAnthropicModels } from "../../shared/anthropic-models";
 import { getCuratedZaiModels } from "../../shared/zai-models";
 
+import { getDataDir } from "../utils/data-dir";
 type ModelInfo = {
   value: string;
   displayName: string;
@@ -65,7 +66,7 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
     const { join } = await import("path");
     const fs = await import("fs/promises");
 
-    const configDir = join(homedir(), ".claude-code-ui");
+    const configDir = getDataDir();
     await fs.mkdir(configDir, { recursive: true });
 
     const envPath = join(configDir, ".env");
@@ -108,7 +109,7 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
     const { homedir } = await import("os");
     const { join } = await import("path");
     const fs = await import("fs/promises");
-    const defaultPath = join(homedir(), ".claude-code-ui", "default-claude.md");
+    const defaultPath = join(getDataDir(), "default-claude.md");
 
     if (method === "GET") {
       try {
@@ -121,7 +122,7 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
 
     if (method === "POST") {
       const body = await req.json();
-      const configDir = join(homedir(), ".claude-code-ui");
+      const configDir = getDataDir();
       await fs.mkdir(configDir, { recursive: true });
       await fs.writeFile(defaultPath, body.content);
       return json({ success: true });
@@ -181,7 +182,7 @@ export async function handleConfigRoutes(url: URL, method: string, req: Request)
       return json({ created: false, exists: true, path: claudeMdPath });
     } catch {}
 
-    const defaultPath = join(homedir(), ".claude-code-ui", "default-claude.md");
+    const defaultPath = join(getDataDir(), "default-claude.md");
     let content: string;
     try {
       content = await fs.readFile(defaultPath, "utf-8");

@@ -6,7 +6,8 @@ import { sanitizePersistedMessageContent } from "./services/message-storage";
 import { DEFAULT_CONTEXT_WINDOW } from "./utils/context-window";
 import { isCompactSummaryContent } from "../shared/sdk-user-message";
 
-const DATA_DIR = join(homedir(), ".claude-code-ui");
+import { getDataDir } from "./utils/data-dir";
+const DATA_DIR = getDataDir();
 const DB_PATH = join(DATA_DIR, "data.db");
 
 if (!existsSync(DATA_DIR)) {

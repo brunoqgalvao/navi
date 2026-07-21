@@ -10,13 +10,14 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
+import { getDataDir } from "../utils/data-dir";
 const ALGORITHM = "aes-256-gcm";
 const KEY_LENGTH = 32;
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
 
-const DATA_DIR = join(homedir(), ".claude-code-ui");
+const DATA_DIR = getDataDir();
 const SECRET_PATH = join(DATA_DIR, ".integration-key");
 
 /**
