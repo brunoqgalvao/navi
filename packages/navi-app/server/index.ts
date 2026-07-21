@@ -24,18 +24,6 @@ import { handleAnalyticsRoutes } from "./routes/analytics";
 import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
 import { handleExtensionRoutes } from "./routes/extensions";
 import { handleWorktreeRoutes } from "./routes/worktrees";
-// ⚠️ EXPERIMENTAL: Worktree preview - remove this import to revert (see worktree-preview.ts for full revert steps)
-import { handleWorktreePreviewRoutes } from "./routes/worktree-preview";
-// Container-based preview system (Colima/Docker)
-import { handleContainerPreviewRoutes } from "./routes/container-preview";
-// Native preview system (lightweight, no Docker)
-import { handleNativePreviewRoutes } from "./routes/native-preview";
-// Preview proxy with branch indicator injection
-import { handlePreviewProxyRoutes } from "./routes/preview-proxy";
-// Port Manager preview system (LLM-powered port orchestration)
-import { handlePortManagerPreviewRoutes } from "./routes/port-manager-preview";
-// LLM-powered port conflict resolver
-import { handlePortFixerRoutes } from "./routes/port-fixer";
 import { handleBranchNameRoutes } from "./routes/branch-name";
 import { handleSessionHierarchyRoutes } from "./routes/session-hierarchy";
 import { handleCommandsRoutes } from "./routes/commands";
@@ -315,13 +303,9 @@ const server = Bun.serve({
       const memoryUsage = process.memoryUsage();
       // Dynamically import services to get their stats
       const { sessionManager } = await import("./services/session-manager");
-      const { nativePreviewService } = await import("./services/native-preview");
       return json({
         serverMaps: getMemoryStats(),
         sessionManager: sessionManager.getMemoryStats(),
-        nativePreview: {
-          activePreviews: nativePreviewService.getStatus() ? 1 : 0,
-        },
         process: {
           heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + "MB",
           heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024) + "MB",
@@ -484,29 +468,6 @@ const server = Bun.serve({
     response = await handleWorktreeRoutes(url, method, req);
     if (response) return response;
 
-    // ⚠️ EXPERIMENTAL: Worktree preview routes (dev server in branch) - remove to revert
-    response = await handleWorktreePreviewRoutes(url, method, req);
-    if (response) return response;
-
-    // Native preview routes (lightweight, no Docker)
-    response = await handleNativePreviewRoutes(url, method, req);
-    if (response) return response;
-
-    // Container-based preview routes (Colima/Docker)
-    response = await handleContainerPreviewRoutes(url, method, req);
-    if (response) return response;
-
-    // Preview proxy routes (injects branch indicator)
-    response = await handlePreviewProxyRoutes(url, method, req);
-    if (response) return response;
-
-    // Port Manager preview routes (LLM-powered port orchestration)
-    response = await handlePortManagerPreviewRoutes(url, method, req);
-    if (response) return response;
-
-    // Port fixer routes (LLM-powered conflict resolution)
-    response = await handlePortFixerRoutes(url, method, req);
-    if (response) return response;
 
     // Branch name generation (LLM-powered)
     response = await handleBranchNameRoutes(url, method, req);

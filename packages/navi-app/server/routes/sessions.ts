@@ -2,7 +2,6 @@ import { json } from "../utils/response";
 import { projects, sessions, messages, searchIndex, pendingQuestions, sessionHierarchy, sessionFolders, workflows, workflowRuns, workItems, type Message } from "../db";
 import { enableUntilDone, disableUntilDone, getUntilDoneSessions, cleanupSessionState, skipSessionWait, getActiveWaits } from "../websocket/handler";
 import { pruneClaudeSessionArtifacts } from "../services/claude-session-storage";
-import { nativePreviewService } from "../services/native-preview";
 import { sessionManager } from "../services/session-manager";
 import { pruneArchivedSessionArtifacts } from "../services/storage-maintenance";
 import { DEFAULT_CLAUDE_FAST_MODEL } from "../../shared/anthropic-models";
@@ -274,8 +273,6 @@ export async function handleSessionRoutes(
       const workflow = workflows.getByRootSession(id);
       // Clean up server-side state (WebSocket maps, active processes, etc.) before deleting
       cleanupSessionState(id);
-      // Stop any running preview for this session
-      await nativePreviewService.stopForSession(id);
       // Clean up session manager runtime state
       sessionManager.cleanup(id);
       if (workflow) {
