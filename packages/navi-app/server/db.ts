@@ -681,6 +681,11 @@ export async function initDb() {
     console.log(`[DB] Removed ${purgedCompactSummaries} compact summary message(s) from persisted chat history`);
   }
 
+  const staleAgents = reconcileStaleAgentSessions();
+  if (staleAgents > 0) {
+    console.log(`[DB] Marked ${staleAgents} stale agent session(s) as failed`);
+  }
+
   dropLegacyTables();
   saveDb()
   return db;
@@ -693,6 +698,21 @@ function dropLegacyTables() {
   for (const table of LEGACY_TABLES) {
     try { db.run(`DROP TABLE IF EXISTS ${table}`); } catch (e) { console.error(`drop ${table}:`, e); }
   }
+}
+
+// Spawned agent sessions only leave 'working'/'waiting' via an explicit deliver/
+// escalate; a crash, cancel, or server restart leaks them, and each leaked row
+// counts against MAX_CONCURRENT_SESSIONS forever. No agent query survives a
+// restart, so at boot any still-active spawned agent is stale.
+function reconcileStaleAgentSessions(): number {
+  db.run(
+    `UPDATE sessions SET agent_status = 'failed', updated_at = ?
+     WHERE parent_session_id IS NOT NULL
+     AND session_type = 'agent'
+     AND agent_status IN ('working', 'waiting')`,
+    [Date.now()]
+  );
+  return db.getRowsModified();
 }
 
 export function saveDb() {
@@ -2867,6 +2887,7 @@ export const sessionHierarchy = {
     const activeCount = queryOne<{ count: number }>(
       `SELECT COUNT(*) as count FROM sessions
        WHERE (root_session_id = ? OR id = ?)
+       AND session_type = 'agent'
        AND agent_status IN ('working', 'waiting', 'blocked', 'pending_review', 'clarification_requested')`,
       [rootId, rootId]
     );
@@ -3034,11 +3055,14 @@ export const sessionHierarchy = {
       [rootSessionId, rootSessionId]
     ),
 
-  // Count active sessions in tree
+  // Count active spawned agents in tree (forks and the root chat itself are
+  // regular sessions stuck at the default 'working' status — they must not
+  // consume MAX_CONCURRENT_SESSIONS slots)
   countActiveSessions: (rootSessionId: string): number => {
     const result = queryOne<{ count: number }>(
       `SELECT COUNT(*) as count FROM sessions
        WHERE (root_session_id = ? OR id = ?)
+       AND session_type = 'agent'
        AND agent_status IN ('working', 'waiting', 'blocked', 'pending_review', 'clarification_requested')`,
       [rootSessionId, rootSessionId]
     );
