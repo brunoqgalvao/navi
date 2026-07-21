@@ -245,13 +245,11 @@
 
 <div class="h-full flex flex-col bg-white dark:bg-gray-900 text-sm">
   <!-- Header -->
-  <div class="p-3 border-b border-gray-200 dark:border-gray-700">
-    <h2 class="font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
-      <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-      </svg>
-      Context
-    </h2>
+  <div class="h-10 px-3 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 bg-gray-50/50 dark:bg-gray-800 shrink-0">
+    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+    </svg>
+    <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Context</span>
   </div>
 
   <div class="flex-1 overflow-y-auto">
@@ -278,11 +276,11 @@
             class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               <span class="text-xs font-medium text-gray-700 dark:text-gray-300">Artifacts</span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200/70 dark:bg-gray-700 text-gray-600 dark:text-gray-300 tabular-nums">
                 {artifacts.length}
               </span>
             </div>
@@ -315,12 +313,12 @@
             class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
               </svg>
               <span class="text-xs font-medium text-gray-700 dark:text-gray-300">Files Read</span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200/70 dark:bg-gray-700 text-gray-600 dark:text-gray-300 tabular-nums">
                 {filesRead.length}
               </span>
             </div>
@@ -353,11 +351,11 @@
             class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               <span class="text-xs font-medium text-gray-700 dark:text-gray-300">Searches</span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200/70 dark:bg-gray-700 text-gray-600 dark:text-gray-300 tabular-nums">
                 {searches.length}
               </span>
             </div>
@@ -372,7 +370,7 @@
               {:else}
                 {#each searches as search}
                   <div class="flex items-center gap-2 px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                    <span class="text-[10px] px-1 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 font-mono shrink-0">
+                    <span class="text-[10px] px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono shrink-0">
                       {search.tool}
                     </span>
                     <code class="flex-1 truncate text-xs text-gray-600 dark:text-gray-400">{truncate(search.pattern, 30)}</code>
@@ -390,11 +388,11 @@
             class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
               </svg>
               <span class="text-xs font-medium text-gray-700 dark:text-gray-300">Web</span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200/70 dark:bg-gray-700 text-gray-600 dark:text-gray-300 tabular-nums">
                 {webItems.length}
               </span>
             </div>
@@ -409,7 +407,7 @@
               {:else}
                 {#each webItems as item}
                   <div class="flex items-center gap-2 px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                    <span class="text-[10px] px-1 py-0.5 rounded {item.type === 'search' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' : 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400'} font-mono shrink-0">
+                    <span class="text-[10px] px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono shrink-0">
                       {item.type === "search" ? "search" : "fetch"}
                     </span>
                     <span class="flex-1 truncate text-xs text-gray-600 dark:text-gray-400">{truncate(item.url, 35)}</span>
@@ -427,12 +425,12 @@
             class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <polyline points="4 17 10 11 4 5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 <line x1="12" y1="19" x2="20" y2="19" stroke-width="2" stroke-linecap="round" />
               </svg>
               <span class="text-xs font-medium text-gray-700 dark:text-gray-300">Commands</span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200/70 dark:bg-gray-700 text-gray-600 dark:text-gray-300 tabular-nums">
                 {commands.length}
               </span>
             </div>
