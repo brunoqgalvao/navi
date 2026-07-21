@@ -15,7 +15,6 @@ import { handleProjectRoutes } from "./routes/projects";
 import { handleSessionRoutes } from "./routes/sessions";
 import { handleMessageRoutes } from "./routes/messages";
 import { handleSkillRoutes } from "./routes/skills";
-import { handleMarketplaceRoutes } from "./routes/marketplace";
 import { handleAgentRoutes } from "./routes/agents";
 import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal";
 import { handleProxyRoutes } from "./routes/proxy";
@@ -422,10 +421,6 @@ const server = Bun.serve({
 
     // Skill routes
     response = await handleSkillRoutes(url, method, req);
-    if (response) return response;
-
-    // Marketplace routes (skills.sh integration)
-    response = await handleMarketplaceRoutes(url, method, req);
     if (response) return response;
 
     // Hooks routes (lifecycle hooks from .claude/hooks/)
