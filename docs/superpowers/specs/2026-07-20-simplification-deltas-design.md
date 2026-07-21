@@ -76,6 +76,15 @@ Same method as Phase 1, which worked: a fresh git worktree branch (the live chec
 | Per-project skill toggle regresses SDK session wiring | Keep existing persistence/lookup path; test a session with a disabled skill |
 | Losing wanted marketplace installs | None needed — installing a skill is `git clone`/copy into `.claude/skills/`, documented in STATUS.md |
 
-## 8. Out of scope (explicitly)
+## 8. Execution errata (2026-07-21)
+
+Found while executing; the plan deviated from the letter of §3 in these ways:
+
+- `StreamingPreview.svelte` is the **chat streaming renderer** (in-flight assistant blocks), not preview-stack code — misclassified by name in §2. It was **kept**.
+- The RightPanel/App panel-mode member `"preview"` is the files+Preview split view (file preview). Only `"preview-unified"` was removed.
+- Two additional consumers surfaced and were handled: `Settings.svelte` had a whole "Previews" tab (container preview management — removed) and `WorktreeHeader.svelte` (preview start/stop per worktree) turned out to have zero importers and was deleted as an orphan.
+- `main.ts` injected the branch-indicator script from the preview stack — removed.
+
+## 9. Out of scope (explicitly)
 
 Everything in the refocus spec's remaining phases (gateway hardening, session stabilization, workflow engine rebuild) — unchanged and still pending. New browser-panel features beyond URL + local file rendering. Skill authoring tools.

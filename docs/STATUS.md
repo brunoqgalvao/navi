@@ -2,7 +2,7 @@
 
 > Feature inventory and status tracking
 
-Last updated: June 16, 2026 (post-demolition refocus)
+Last updated: July 21, 2026 (post simplification deltas)
 
 > **2026-06 refocus:** Navi was cut down to its core. A pile of half-finished
 > features got demolished (see [Removed in 2026-06 refocus](#removed-in-2026-06-refocus)).
@@ -69,13 +69,19 @@ multiple AI agents working in parallel.
 | Feature | Location | Notes |
 |---------|----------|-------|
 | Skill loader | `routes/skills.ts`, `server/skills.ts` | Load from `.claude/skills/` |
+| Skills panel | `src/lib/components/SkillsPanel.svelte` | Flat list; global + per-project toggle, reveal, delete |
 | Core skills | See [Skills Inventory](#skills-inventory) | |
 
-### Preview System
+Installing a skill = drop its folder into `~/.claude/skills/` (global) or
+`.claude/skills/` (project), then rescan. There is no marketplace/import UI.
+
+### Browser Panel (preview surface)
 | Feature | Location | Notes |
 |---------|----------|-------|
-| Native preview | `services/native-preview.ts` | Dev server preview |
-| Preview proxy | `routes/preview-proxy.ts` | Proxy for previews |
+| Browser/file preview | `src/lib/Preview.svelte` + `WorkspacePanel.svelte` | Renders URLs (direct, no proxy) and local files (markdown, images, HTML, JSON, 3D) |
+
+Navi no longer runs, proxies, or port-manages dev servers. Start your dev server
+yourself (terminal panel works); paste the URL into the browser panel.
 
 ### MCP
 **Model Context Protocol** — the standards-first integration layer.
@@ -99,7 +105,7 @@ Working features that don't need active development.
 | Extension registry | `src/lib/core/registries.ts` | Sidebar panel registry |
 | Extensions panel | `features/extensions/` | Right panel tabs |
 
-Built-in panels: Files, Preview, Git, Terminal, Processes, Context, Browser/Browser-preview.
+Built-in panels: Files, Browser, Git, Terminal, Processes, Context.
 
 ### Commands
 | Feature | Location | Notes |
@@ -158,6 +164,21 @@ See the refocus spec for the intended shape.
 | `cron` | Scheduled tasks |
 
 ---
+
+## Removed in 2026-07 simplification deltas
+
+Second subtraction pass (spec:
+[`2026-07-20-simplification-deltas-design.md`](superpowers/specs/2026-07-20-simplification-deltas-design.md)).
+
+| Removed feature | What it was |
+|-----------------|-------------|
+| Preview stack | Dev-server spawn, framework detection, container previews (Docker/Colima), port-manager + LLM port-fixer, preview proxy, worktree previews (~7k LoC) |
+| Skills marketplace | skills.sh browse/install UI + route |
+| Skill import/export/editor UI | Import wizard, URL import, zip export, in-app SKILL.md editor, skill library browser |
+| Settings "Previews" tab | Container preview management in Settings |
+
+The browser panel (URL + local file rendering) is the only preview surface.
+Skills are managed by one flat panel (list, toggle, reveal, delete).
 
 ## Removed in 2026-06 refocus
 

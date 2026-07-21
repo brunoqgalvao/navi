@@ -14,11 +14,17 @@ VERY IMPORTANT CONTEXT:
 Navi is an **independent, standardizing harness** for interacting with coding agents. While currently focused on Claude Agent SDK, we secondarily support Codex and Gemini.
 
 > **2026-06 refocus:** Navi was deliberately cut down to its core (chat/sessions,
-> multi-agent orchestration, terminal, git, skills, preview, MCP). A lot of
+> multi-agent orchestration, terminal, git, skills, browser, MCP). A lot of
 > half-baked surface area got demolished. The why-and-what lives in
 > [`docs/superpowers/specs/2026-06-12-navi-refocus-design.md`](docs/superpowers/specs/2026-06-12-navi-refocus-design.md);
 > the current feature inventory is in [`docs/STATUS.md`](docs/STATUS.md). If this
 > file disagrees with reality, reality wins — fix this file.
+>
+> **2026-07 simplification deltas:** the preview/dev-server stack was deleted
+> outright (browser panel is the only preview surface; start dev servers
+> yourself), the skills marketplace/import/editor UI collapsed into one flat
+> SkillsPanel, and the context panel was restyled. Spec:
+> [`docs/superpowers/specs/2026-07-20-simplification-deltas-design.md`](docs/superpowers/specs/2026-07-20-simplification-deltas-design.md).
 
 ### Core Mission
 
@@ -42,7 +48,7 @@ The goal: patterns proven in Navi should eventually standardize across Claude, C
 #### 2. Rich UI on Standards
 Provide convenient harnesses and UI that abstract complexity:
 - **Workspaces & Sessions** — navigate between many agents/projects
-- **Extensions** — composable sidebar panels (Files, Git, Terminal, Preview)
+- **Extensions** — composable sidebar panels (Files, Browser, Git, Terminal)
 - **Inline Widgets** — rich rendering in chat (diagrams, charts, interactive UI)
 - **Integrations** — OAuth flows abstracted from the user
 - **Multi-account management** — API keys, providers, credentials
@@ -111,7 +117,7 @@ Navi has **7 distinct component categories** defined in `src/lib/core/`:
 
 **Important: Extensions vs Global Settings Feature Toggles**
 
-- **Extensions** are **session/project-scoped** panels. They appear in the right sidebar, can be enabled/disabled per project, and are relevant to the current chat context (Files, Git, Terminal, Preview, etc.).
+- **Extensions** are **session/project-scoped** panels. They appear in the right sidebar, can be enabled/disabled per project, and are relevant to the current chat context (Files, Browser, Git, Terminal, etc.).
 - **Global Settings Features** are **app-wide toggles** (Settings → Features tab). Use these for features that monitor or affect the entire app, not specific sessions. Examples: Resource Monitor, Debug Mode, Advanced Mode, Telemetry.
 
 When adding a new panel/feature:
@@ -154,7 +160,7 @@ See `docs/STATUS.md` for complete feature inventory. Quick summary (post-2026-06
 
 | Status | Features |
 |--------|----------|
-| **CORE** | Sessions, Projects, **Multi-Agent Orchestration**, Terminal, Git, Skills, Preview, MCP |
+| **CORE** | Sessions, Projects, **Multi-Agent Orchestration**, Terminal, Git, Skills, Browser, MCP |
 | **STABLE** | Extensions, Commands, Plugins, Raw Credentials, Backend Selector |
 | **IN REBUILD** | Workflows |
 
@@ -253,12 +259,11 @@ const gitExt = extensionRegistry.getByPanelMode("git");
 | ID | Panel Mode | Icon | Purpose |
 |----|------------|------|---------|
 | `files` | files | 📁 | File browser, project navigation |
-| `preview` | preview-unified | 👁️ | URL/file preview panel |
 | `git` | git | 🔀 | Git status, branches, commits |
 | `terminal` | terminal | 💻 | Terminal output viewer |
 | `processes` | processes | ⚙️ | Background process manager |
 | `context` | context | 🧠 | Session context viewer |
-| `browser` | browser / browser-preview | 🌐 | Browser automation surface |
+| `browser` | browser | 🌐 | Browser + URL/file preview surface |
 
 #### Creating a New Extension
 
