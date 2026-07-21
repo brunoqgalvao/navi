@@ -54,14 +54,16 @@ bun install --cwd packages/navi-app
 
 **Files:**
 - Delete: `src/lib/components/NativePreviewPanel.svelte`, `src/lib/components/ContainerPreviewPanel.svelte`, `src/lib/components/PortManagerPreviewPanel.svelte`, `src/lib/components/PreviewPanel.svelte`, `src/lib/components/StreamingPreview.svelte`, `src/lib/components/PreviewButton.svelte` (if unused elsewhere — inventory decides)
-- Modify: `src/lib/layout/RightPanel.svelte`, `src/lib/components/ChatView.svelte`, `src/App.svelte`, `src/lib/core/registries.ts`, `src/lib/features/extensions/registry.ts`, `src/lib/api.ts`
+- Modify: `src/lib/layout/RightPanel.svelte`, `src/lib/components/ChatView.svelte`, `src/App.svelte`, `src/lib/core/registries.ts`, `src/lib/core/types.ts`, `src/lib/features/extensions/registry.ts`, `src/lib/api.ts`, `src/lib/Preview.svelte` (keep file, but fix proxy coupling)
 
-- [ ] **Step 1: Inventory.** `grep -rn "PreviewPanel\|StreamingPreview\|PreviewButton\|preview-unified\|containerPreviewUrl\|browser-preview" src/` — hits must fall in delete/modify-listed files.
+- [ ] **Step 1: Inventory.** `grep -rn "PreviewPanel\|StreamingPreview\|PreviewButton\|preview-unified\|containerPreviewUrl\|browser-preview\|preview-proxy\|api/preview" src/` — hits must fall in delete/modify-listed files.
 - [ ] **Step 2: RightPanel** — remove `PreviewPanel` import, the `"preview-unified"` union member and its render branch, and container-preview props (`containerPreviewUrl`, `worktreeBranch` if preview-only). Keep `"preview"` mode + split view + `Preview.svelte` import.
 - [ ] **Step 3: ChatView** — remove `StreamingPreview` import and its render site.
 - [ ] **Step 4: App.svelte** — remove `"preview-unified"` from `RightPanelMode`, preview-stack state/handlers (container/native/port-manager URLs, preview start/stop calls). Keep file-preview (`previewSource`) plumbing and `"preview"` mode.
 - [ ] **Step 5: Registries** — in `src/lib/core/registries.ts` delete the `preview` entry (panelMode `preview-unified`) and the `browser-preview` placeholder; mirror in `src/lib/features/extensions/registry.ts`.
 - [ ] **Step 6: api.ts** — remove client sections for native/container/port-manager preview and port-fixer endpoints.
+- [ ] **Step 6b: Preview.svelte proxy fix (review finding)** — `getProxiedUrl` routes localhost URLs through the deleted `/api/preview/proxy/:port` route; change the local-URL branch to return the URL unchanged (drop inspector-injection proxying). Grep `api/preview` afterwards → zero hits.
+- [ ] **Step 6c: core/types.ts** — remove the `"preview-unified"` and `"browser-preview"` union members (keep `"preview"`).
 - [ ] **Step 7: Delete component files**, rerun Step 1 grep — zero hits outside keeps.
 - [ ] **Step 8: Verify + commit** — gates; `git commit -m "deltas: remove frontend preview panels; browser panel is the only preview surface"`.
 
@@ -86,7 +88,7 @@ bun install --cwd packages/navi-app
 - Delete: `src/lib/components/SkillMarketplace.svelte`, `SkillCommandInstall.svelte`, `SkillImport.svelte`, `SkillLibrary.svelte`, `SkillsAndAgentsLibrary.svelte`, `SkillEditor.svelte`, `ProjectSkillSelector.svelte`, `SkillCard.svelte`
 - Modify: `src/lib/components/Settings.svelte`, `src/lib/components/ProjectSettings.svelte`, `src/lib/api.ts`
 
-- [ ] **Step 1: Write `SkillsPanel.svelte`** — props `{ projectId?: string | null }`. On mount: `skillsApi.list()` (+ project-enabled list when `projectId`). Renders flat rows grouped by origin (Global `~/.claude/skills` / Project `.claude/skills`): name, description, toggle, open-folder button (`/skills/:id/open`), delete button with confirm. Toggle logic: `projectId` ? `enableForProject`/`disableForProject` : `enable`/`disable`. Optimistic updates per house pattern (flip state, revert on catch). Styling: same row/toggle classes as Settings feature toggles.
+- [ ] **Step 1: Write `SkillsPanel.svelte`** — props `{ projectId?: string | null }`. On mount: `skillsApi.list()` (+ project-enabled list when `projectId`). Renders flat rows grouped by origin (Global `~/.claude/skills` / Project `.claude/skills`): name, description, toggle, open-folder button (`/skills/:id/open`), delete button with confirm. Toggle logic: `projectId` ? `skillsApi.enableForProject`/`disableForProject` : the global enable members (check exact names in api.ts — they are `enableGlobal`/`disableGlobal`-style, do not invent new ones). Optimistic updates per house pattern (flip state, revert on catch). Styling: same row/toggle classes as Settings feature toggles.
 - [ ] **Step 2: Settings.svelte** — replace `SkillLibrary` import/usage with `<SkillsPanel />` (global scope); drop "Skill Library" copy for "Skills".
 - [ ] **Step 3: ProjectSettings.svelte** — replace `ProjectSkillSelector`/`SkillEditor`/`SkillLibrary` usage and their modal state with `<SkillsPanel projectId={project.id} />`.
 - [ ] **Step 4: api.ts** — delete `marketplaceApi` and skillsApi members for import/import-url/generate/examples/export/categories; keep list/enable/disable/project-enable/open/delete/document/files/sync.
@@ -100,12 +102,12 @@ bun install --cwd packages/navi-app
 
 - [ ] **Step 1:** Read `src/lib/features/git/components/GitPanel.svelte` (or the files panel) and note its section-header, row, spacing, and accent classes.
 - [ ] **Step 2:** Restyle ContextPanel markup/classes to match (accent-* tokens, text scale, borders, dark-mode pairs). **No script-block changes** — diff must be template/class only.
-- [ ] **Step 3: Verify + commit** — `bun run check`; `git commit -m "deltas: restyle ContextPanel to house design language"`.
+- [ ] **Step 3: Verify + commit** — full gates (check/test/smoke); `git commit -m "deltas: restyle ContextPanel to house design language"`.
 
 ### Task 6: Docs + final sweep
 
 - [ ] **Step 1:** Update `CLAUDE.md` (extensions table: drop preview row; feature status; skills section) and `docs/STATUS.md` (move preview stack + skills marketplace to "Removed", note browser panel as the preview surface).
-- [ ] **Step 2:** Final sweep: `grep -rniE "marketplace|native-preview|port-fixer|preview-unified|container-preview" packages/navi-app/src packages/navi-app/server` → zero hits.
+- [ ] **Step 2:** Final sweep: `grep -rniE "marketplace|native-preview|port-fixer|preview-unified|container-preview|preview-proxy|api/preview" packages/navi-app/src packages/navi-app/server` → zero hits.
 - [ ] **Step 3: Verify + commit** — gates; `git commit -m "deltas: docs updated to post-simplification reality"`.
 
 ### Task 7: Merge
