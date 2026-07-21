@@ -8,9 +8,10 @@ lsof -ti:"$PORT" | xargs kill -9 2>/dev/null || true
 bun run server/index.ts "$PORT" &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
-for i in $(seq 1 30); do
+# Boot can take ~20s when the DB is large; allow up to 60s.
+for i in $(seq 1 60); do
   curl -sf "http://localhost:$PORT/api/projects" >/dev/null 2>&1 && break
-  sleep 0.5
+  sleep 1
 done
 curl -sf "http://localhost:$PORT/api/projects" >/dev/null
 curl -sf "http://localhost:$PORT/api/models" | grep -q "claude"
