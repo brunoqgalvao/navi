@@ -124,6 +124,18 @@ export function moveFolder(id: string, parentId: string | null): void {
   });
 }
 
+export function toggleFolderArchive(folder: WorkspaceFolder): void {
+  const newArchived = !folder.archived;
+  const folders = callbacks?.getWorkspaceFolders() || [];
+  const previousFolders = folders;
+  callbacks?.setWorkspaceFolders(
+    folders.map(f => f.id === folder.id ? { ...f, archived: newArchived ? 1 : 0 } : f)
+  );
+  api.folders.setArchived(folder.id, newArchived).catch(() => {
+    callbacks?.setWorkspaceFolders(previousFolders);
+  });
+}
+
 export function toggleFolderPin(folder: WorkspaceFolder): void {
   const newPinned = !folder.pinned;
   const folders = callbacks?.getWorkspaceFolders() || [];

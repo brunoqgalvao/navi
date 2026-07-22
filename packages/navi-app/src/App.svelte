@@ -159,6 +159,7 @@
     setProjectFolder as setProjectFolderAction,
     reorderFolders as reorderFoldersAction,
     toggleFolderPin as toggleFolderPinAction,
+    toggleFolderArchive as toggleFolderArchiveAction,
     loadSessionFolders as loadSessionFoldersAction,
     createSessionFolder as createSessionFolderAction,
     updateSessionFolder as updateSessionFolderAction,
@@ -1633,6 +1634,11 @@ Please walk me through the setup step by step. When I have the credentials, save
   async function toggleFolderPin(folder: WorkspaceFolder, e: Event) {
     e.stopPropagation();
     await toggleFolderPinAction(folder);
+  }
+
+  function toggleFolderArchive(folder: WorkspaceFolder, e: Event) {
+    e.stopPropagation();
+    toggleFolderArchiveAction(folder);
   }
 
   $effect(() => {
@@ -3803,6 +3809,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     onProjectSetFolder={setProjectFolder}
     onFolderReorder={reorderFolders}
     onToggleFolderPin={toggleFolderPin}
+    onToggleFolderArchive={toggleFolderArchive}
     onNewProjectInFolder={(folderId) => { newProjectTargetFolderId = folderId; showNewProjectModal = true; }}
     sessionFolders={sessionFolders}
     onSessionFolderCreate={async (name) => createSessionFolderAction($session.projectId!, name)}

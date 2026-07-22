@@ -45,6 +45,7 @@ export {
   setProjectFolder,
   reorderFolders,
   toggleFolderPin,
+  toggleFolderArchive,
   type FolderActionCallbacks,
 } from "./folder-actions";
 

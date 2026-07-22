@@ -68,6 +68,7 @@
     onProjectSetFolder: (projectId: string, folderId: string | null) => void;
     onFolderReorder: (order: string[]) => void;
     onToggleFolderPin: (folder: WorkspaceFolder, e: Event) => void;
+    onToggleFolderArchive: (folder: WorkspaceFolder, e: Event) => void;
     onNewProjectInFolder: (folderId: string) => void;
     // Session folder callbacks
     sessionFolders?: SessionFolder[];
@@ -163,6 +164,7 @@
     onProjectSetFolder,
     onFolderReorder,
     onToggleFolderPin,
+    onToggleFolderArchive,
     onNewProjectInFolder,
     // Session folder props
     sessionFolders = [],
@@ -427,6 +429,7 @@
   let foldersByParent = $derived.by(() => {
     const map = new Map<string | null, WorkspaceFolder[]>();
     for (const folder of folders) {
+      if (folder.archived && !$showArchivedWorkspaces) continue;
       const parentId = folder.parent_id || null;
       const existing = map.get(parentId) || [];
       existing.push(folder);
@@ -1365,7 +1368,7 @@
                         onclick={(e) => e.stopPropagation()}
                       />
                     {:else}
-                      <span class="flex-1 text-[12px] font-medium text-gray-600 dark:text-gray-400 truncate">{folder.name}</span>
+                      <span class="flex-1 text-[12px] font-medium truncate {folder.archived ? 'text-gray-400 dark:text-gray-500 italic' : 'text-gray-600 dark:text-gray-400'}">{folder.name}</span>
                     {/if}
                     {#if folderStatusMap.get(folder.id)?.attentionCount || folderStatusMap.get(folder.id)?.runningCount}
                       <WorkspaceCountBadge
@@ -1416,6 +1419,10 @@
                             {/each}
                           {/if}
                           <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+                          <button onclick={(e) => { onToggleFolderArchive(folder, e); folderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                            {folder.archived ? 'Unarchive' : 'Archive'}
+                          </button>
                           <button onclick={(e) => { e.stopPropagation(); onFolderDelete(folder.id); folderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                             Delete

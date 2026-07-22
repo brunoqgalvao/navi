@@ -422,6 +422,10 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_workspace_folders_order ON workspace_folders(sort_order);
   `);
 
+  // Migration: add archived column to workspace_folders (for existing databases)
+  try {
+    db.run("ALTER TABLE workspace_folders ADD COLUMN archived INTEGER DEFAULT 0");
+  } catch {}
   // Migration: add pinned column to workspace_folders (for existing databases)
   try {
     db.run("ALTER TABLE workspace_folders ADD COLUMN pinned INTEGER DEFAULT 0");
@@ -1123,6 +1127,7 @@ export interface WorkspaceFolder {
   sort_order: number;
   collapsed: number;
   pinned: number;
+  archived: number;
   created_at: number;
   updated_at: number;
 }
@@ -1155,6 +1160,8 @@ export const workspaceFolders = {
     run("UPDATE workspace_folders SET parent_id = ?, updated_at = ? WHERE parent_id = ?", [parentId, Date.now(), id]);
     run("DELETE FROM workspace_folders WHERE id = ?", [id]);
   },
+  setArchived: (id: string, archived: boolean) =>
+    run("UPDATE workspace_folders SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
   updateOrder: (id: string, sortOrder: number) =>
     run("UPDATE workspace_folders SET sort_order = ? WHERE id = ?", [sortOrder, id]),
   move: (id: string, parentId: string | null, sortOrder: number) =>
