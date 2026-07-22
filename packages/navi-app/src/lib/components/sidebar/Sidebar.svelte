@@ -75,6 +75,7 @@
     onSessionFolderCreate?: (name: string) => Promise<SessionFolder>;
     onSessionFolderUpdate?: (id: string, name: string) => void;
     onSessionFolderDelete?: (id: string) => void;
+    onToggleSessionFolderArchive?: (folder: SessionFolder) => void;
     onSessionFolderToggleCollapse?: (id: string, collapsed: boolean) => void;
     onSessionSetFolder?: (sessionId: string, folderId: string | null) => void;
     onSessionFolderReorder?: (order: string[]) => void;
@@ -171,6 +172,7 @@
     onSessionFolderCreate,
     onSessionFolderUpdate,
     onSessionFolderDelete,
+    onToggleSessionFolderArchive,
     onSessionFolderToggleCollapse,
     onSessionSetFolder,
     onSessionFolderReorder,
@@ -423,6 +425,10 @@
     if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
     return (a.created_at || 0) - (b.created_at || 0);
   }
+
+  let visibleSessionFolders = $derived(
+    sessionFolders.filter((f) => !f.archived || $showArchivedWorkspaces)
+  );
 
   let folderMap = $derived.by(() => new Map(folders.map((folder) => [folder.id, folder])));
 
@@ -1921,7 +1927,7 @@
             {/if}
 
             <!-- Session folders -->
-            {#each sessionFolders as folder (folder.id)}
+            {#each visibleSessionFolders as folder (folder.id)}
               {@const folderSessions = getSessionsInFolder(folder.id)}
               {@const isCollapsed = folder.collapsed === 1}
               {@const isDropTarget = dragOverSessionFolderId === folder.id}
@@ -1952,7 +1958,7 @@
                       onblur={saveEditingSessionFolder}
                     />
                   {:else}
-                    <span class="flex-1 text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{folder.name}</span>
+                    <span class="flex-1 text-xs font-medium truncate {folder.archived ? 'text-gray-400 dark:text-gray-500 italic' : 'text-gray-700 dark:text-gray-300'}">{folder.name}</span>
                   {/if}
                   <span class="text-[10px] text-gray-400">{folderSessions.length}</span>
                   <!-- Folder menu -->
@@ -1968,6 +1974,10 @@
                         <button onclick={(e) => startEditSessionFolder(folder, e)} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                           Rename
+                        </button>
+                        <button onclick={(e) => { e.stopPropagation(); onToggleSessionFolderArchive?.(folder); sessionFolderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                          {folder.archived ? 'Unarchive' : 'Archive'}
                         </button>
                         <button onclick={(e) => { e.stopPropagation(); onSessionFolderDelete?.(folder.id); sessionFolderMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 flex items-center gap-2">
                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
@@ -2145,7 +2155,7 @@
                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                           {sess.marked_for_review ? 'Clear review mark' : 'Mark for review'}
                         </button>
-                        {#if onSessionSetFolder && sessionFolders.length > 0}
+                        {#if onSessionSetFolder && visibleSessionFolders.length > 0}
                           <div class="relative group/move">
                             <button class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 justify-between">
                               <span class="flex items-center gap-2">
@@ -2162,7 +2172,7 @@
                                 </button>
                                 <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
                               {/if}
-                              {#each sessionFolders as folder}
+                              {#each visibleSessionFolders as folder}
                                 <button onclick={(e) => { e.stopPropagation(); onSessionSetFolder(sess.id, folder.id); sessionMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 {sess.folder_id === folder.id ? 'bg-gray-50 dark:bg-gray-700' : ''}">
                                   <svg class="w-4 h-4 text-amber-500" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                                   <span class="truncate">{folder.name}</span>

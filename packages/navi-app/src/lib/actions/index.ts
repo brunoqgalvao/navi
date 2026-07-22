@@ -60,6 +60,7 @@ export {
   setSessionFolder,
   reorderSessionFolders,
   toggleSessionFolderPin,
+  toggleSessionFolderArchive,
   type SessionFolderActionCallbacks,
 } from "./session-folder-actions";
 

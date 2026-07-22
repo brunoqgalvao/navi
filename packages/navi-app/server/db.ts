@@ -573,6 +573,11 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN folder_id TEXT REFERENCES session_folders(id)");
   } catch {}
 
+  // Migration: add archived column to session_folders (for existing databases)
+  try {
+    db.run("ALTER TABLE session_folders ADD COLUMN archived INTEGER DEFAULT 0");
+  } catch {}
+
   // Workflows - workspace-owned automation definitions with session-backed run history
   db.run(`
     CREATE TABLE IF NOT EXISTS workflows (
@@ -1180,6 +1185,7 @@ export interface SessionFolder {
   sort_order: number;
   collapsed: number;
   pinned: number;
+  archived: number;
   created_at: number;
   updated_at: number;
 }
@@ -1205,6 +1211,8 @@ export const sessionFolders = {
     run("UPDATE session_folders SET collapsed = ? WHERE id = ?", [collapsed ? 1 : 0, id]),
   togglePin: (id: string, pinned: boolean) =>
     run("UPDATE session_folders SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
+  setArchived: (id: string, archived: boolean) =>
+    run("UPDATE session_folders SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
 };
 
 export interface Workflow {

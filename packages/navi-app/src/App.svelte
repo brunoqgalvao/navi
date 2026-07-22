@@ -164,6 +164,7 @@
     createSessionFolder as createSessionFolderAction,
     updateSessionFolder as updateSessionFolderAction,
     deleteSessionFolder as deleteSessionFolderAction,
+    toggleSessionFolderArchive as toggleSessionFolderArchiveAction,
     toggleSessionFolderCollapse as toggleSessionFolderCollapseAction,
     setSessionFolder as setSessionFolderAction,
     reorderSessionFolders as reorderSessionFoldersAction,
@@ -3815,6 +3816,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     onSessionFolderCreate={async (name) => createSessionFolderAction($session.projectId!, name)}
     onSessionFolderUpdate={updateSessionFolderAction}
     onSessionFolderDelete={deleteSessionFolderAction}
+    onToggleSessionFolderArchive={toggleSessionFolderArchiveAction}
     onSessionFolderToggleCollapse={toggleSessionFolderCollapseAction}
     onSessionSetFolder={setSessionFolderAction}
     onSessionFolderReorder={(order) => reorderSessionFoldersAction($session.projectId!, order)}

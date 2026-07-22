@@ -408,6 +408,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ collapsed }),
       }),
+    setArchived: (id: string, archived: boolean) =>
+      request<SessionFolder>(`/session-folders/${id}/archive`, {
+        method: "POST",
+        body: JSON.stringify({ archived }),
+      }),
     togglePin: (id: string, pinned: boolean) =>
       request<SessionFolder>(`/session-folders/${id}/pin`, {
         method: "POST",

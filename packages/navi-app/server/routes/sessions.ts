@@ -1129,6 +1129,15 @@ ${transcript}`;
     return json(sessionFolders.get(id));
   }
 
+  // Toggle archived
+  const sessionFolderArchiveMatch = url.pathname.match(/^\/api\/session-folders\/([^/]+)\/archive$/);
+  if (sessionFolderArchiveMatch && method === "POST") {
+    const id = sessionFolderArchiveMatch[1];
+    const body = await req.json();
+    sessionFolders.setArchived(id, !!body.archived);
+    return json(sessionFolders.get(id));
+  }
+
   // Reorder folders
   const sessionFoldersReorderMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/session-folders\/reorder$/);
   if (sessionFoldersReorderMatch && method === "POST") {

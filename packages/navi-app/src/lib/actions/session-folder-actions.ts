@@ -84,6 +84,16 @@ export function reorderSessionFolders(projectId: string, order: string[]): void 
   });
 }
 
+export function toggleSessionFolderArchive(folder: SessionFolder): void {
+  const newArchived = !folder.archived;
+  const folders = callbacks?.getSessionFolders() || [];
+  const previousFolders = folders;
+  callbacks?.setSessionFolders(folders.map(f => f.id === folder.id ? { ...f, archived: newArchived ? 1 : 0 } : f));
+  api.sessionFolders.setArchived(folder.id, newArchived).catch(() => {
+    callbacks?.setSessionFolders(previousFolders);
+  });
+}
+
 export function toggleSessionFolderPin(folder: SessionFolder): void {
   const newPinned = !folder.pinned;
   const folders = callbacks?.getSessionFolders() || [];
