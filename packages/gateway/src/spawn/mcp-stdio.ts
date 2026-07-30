@@ -15,6 +15,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+/**
+ * Cast a Zod 4 schema shape to the Zod 3 shape expected by @modelcontextprotocol/sdk.
+ * The SDK bundles Zod 3 internally; we use Zod 4 in this package. Runtime compatible.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mcpSchema<T extends Record<string, z.ZodTypeAny>>(shape: T): any {
+  return shape;
+}
+
 const spawnUrl = process.env.NAVI_SPAWN_URL;
 const spawnToken = process.env.NAVI_SPAWN_TOKEN;
 
@@ -51,7 +60,7 @@ const server = new McpServer({
 server.tool(
   "spawn_agent",
   "Spawn a new AI agent on the specified backend to complete a task. Returns the agent ID.",
-  {
+  mcpSchema({
     backend: z.enum(["claude", "codex", "gemini"]),
     task: z.string(),
     model: z.string().optional(),
@@ -60,8 +69,8 @@ server.tool(
       .enum(["prompt", "acceptEdits", "acceptAll", "readOnly"])
       .optional(),
     parentId: z.string().optional(),
-  },
-  async (args) => {
+  }),
+  async (args: Record<string, unknown>) => {
     try {
       const result = await callControl("/spawn", args);
       return {
@@ -108,8 +117,8 @@ server.tool(
 server.tool(
   "get_agent_result",
   "Get the result of a spawned agent.",
-  { id: z.string() },
-  async (args) => {
+  mcpSchema({ id: z.string() }),
+  async (args: Record<string, unknown>) => {
     try {
       const result = await callControl("/result", args);
       return {
@@ -132,8 +141,8 @@ server.tool(
 server.tool(
   "send_to_agent",
   "Send a follow-up message to a running agent.",
-  { id: z.string(), message: z.string() },
-  async (args) => {
+  mcpSchema({ id: z.string(), message: z.string() }),
+  async (args: Record<string, unknown>) => {
     try {
       const result = await callControl("/send", args);
       return {
@@ -156,11 +165,11 @@ server.tool(
 server.tool(
   "respond_to_permission",
   "Respond to a bubbled permission-request from a child agent.",
-  {
+  mcpSchema({
     requestId: z.string(),
     decision: z.enum(["allow", "allow-session", "deny"]),
-  },
-  async (args) => {
+  }),
+  async (args: Record<string, unknown>) => {
     try {
       const result = await callControl("/respond", args);
       return {

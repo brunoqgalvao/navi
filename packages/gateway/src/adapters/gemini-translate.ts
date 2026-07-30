@@ -146,12 +146,14 @@ export function toolCallToStartEvent(
   update: AcpSessionUpdate & { sessionUpdate: "tool_call" },
   sessionId: string
 ): GatewayEvent {
+  // Cast to the concrete tool_call variant — the union intersection doesn't narrow automatically.
+  const u = update as Extract<AcpSessionUpdate, { sessionUpdate: "tool_call" }>;
   return {
     type: "tool-start",
     sessionId,
-    toolId: update.toolCallId,
-    tool: update.title ?? update.toolCallId,
-    input: update.rawInput ?? null,
+    toolId: u.toolCallId,
+    tool: u.title ?? u.toolCallId,
+    input: u.rawInput ?? null,
   };
 }
 

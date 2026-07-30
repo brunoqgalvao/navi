@@ -137,12 +137,12 @@ describe("BackendRegistry", () => {
     registry.register(makeBackend("claude", { installed: true, authed: true }));
 
     const results1 = await registry.detectInstalled();
-    results1.set("fake-backend", { installed: true, authed: true });
+    results1.set("fake-backend" as BackendId, { installed: true, authed: true });
     results1.delete("claude");
 
     const results2 = await registry.detectInstalled();
     expect(results2.has("claude")).toBe(true);
-    expect(results2.has("fake-backend")).toBe(false);
+    expect(results2.has("fake-backend" as BackendId)).toBe(false);
   });
 
   test("mixed result: one backend succeeds, one rejects; both appear in results and cache is populated", async () => {
@@ -150,25 +150,25 @@ describe("BackendRegistry", () => {
     let failDetectCount = 0;
 
     const successBackend: AgentBackend = {
-      id: "success-backend",
-      capabilities: makeBackend("success-backend").capabilities,
+      id: "success-backend" as BackendId,
+      capabilities: makeBackend("claude").capabilities,
       async detect(): Promise<DetectResult> {
         successDetectCount++;
         return { installed: true, authed: true, version: "1.0" };
       },
-      createSession: makeBackend("success-backend").createSession,
-      resumeSession: makeBackend("success-backend").resumeSession,
+      createSession: makeBackend("claude").createSession,
+      resumeSession: makeBackend("claude").resumeSession,
     };
 
     const failBackend: AgentBackend = {
-      id: "fail-backend",
-      capabilities: makeBackend("fail-backend").capabilities,
+      id: "fail-backend" as BackendId,
+      capabilities: makeBackend("claude").capabilities,
       async detect(): Promise<DetectResult> {
         failDetectCount++;
         throw new Error("setup failed");
       },
-      createSession: makeBackend("fail-backend").createSession,
-      resumeSession: makeBackend("fail-backend").resumeSession,
+      createSession: makeBackend("claude").createSession,
+      resumeSession: makeBackend("claude").resumeSession,
     };
 
     const registry = new BackendRegistry();
@@ -178,14 +178,14 @@ describe("BackendRegistry", () => {
     const results = await registry.detectInstalled();
 
     // Both entries should exist
-    expect(results.has("success-backend")).toBe(true);
-    expect(results.has("fail-backend")).toBe(true);
+    expect(results.has("success-backend" as BackendId)).toBe(true);
+    expect(results.has("fail-backend" as BackendId)).toBe(true);
 
     // Success entry has correct data
-    expect(results.get("success-backend")).toEqual({ installed: true, authed: true, version: "1.0" });
+    expect(results.get("success-backend" as BackendId)).toEqual({ installed: true, authed: true, version: "1.0" });
 
     // Fail entry has installed:false and fixHint
-    const failEntry = results.get("fail-backend");
+    const failEntry = results.get("fail-backend" as BackendId);
     expect(failEntry).toBeDefined();
     expect(failEntry!.installed).toBe(false);
     expect(failEntry!.authed).toBe(false);
@@ -196,6 +196,6 @@ describe("BackendRegistry", () => {
     const results2 = await registry.detectInstalled();
     expect(successDetectCount).toBe(1);
     expect(failDetectCount).toBe(1);
-    expect(results2.get("success-backend")).toEqual({ installed: true, authed: true, version: "1.0" });
+    expect(results2.get("success-backend" as BackendId)).toEqual({ installed: true, authed: true, version: "1.0" });
   });
 });

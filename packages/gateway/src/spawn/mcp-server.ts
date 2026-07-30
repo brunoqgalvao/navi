@@ -23,6 +23,16 @@ import { z } from "zod";
 import type { AgentTree } from "./tree.js";
 import type { McpServerConfig, BackendId, SessionOptions } from "../types.js";
 
+/**
+ * Cast a Zod 4 schema shape to the Zod 3 shape expected by @modelcontextprotocol/sdk.
+ * The SDK ships with its own bundled Zod 3 types; we use Zod 4 in this package.
+ * The runtime shapes are compatible — only the TypeScript types diverge.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mcpSchema<T extends Record<string, z.ZodTypeAny>>(shape: T): any {
+  return shape;
+}
+
 // ── Tool schemas ──────────────────────────────────────────────────────────────
 
 const SpawnAgentSchema = {
@@ -69,21 +79,21 @@ export function createSpawnMcpServer(tree: AgentTree): McpServer {
   server.tool(
     "spawn_agent",
     "Spawn a new AI agent on the specified backend to complete a task. Returns the agent ID.",
-    SpawnAgentSchema,
-    async (args) => {
+    mcpSchema(SpawnAgentSchema),
+    async (args: Record<string, unknown>) => {
       try {
         const result = tree.spawnAgent({
-          backend: args.backend as BackendId,
-          task: args.task,
-          model: args.model,
-          cwd: args.cwd,
-          permissionMode: args.permissionMode as
+          backend: args["backend"] as BackendId,
+          task: args["task"] as string,
+          model: args["model"] as string | undefined,
+          cwd: args["cwd"] as string | undefined,
+          permissionMode: args["permissionMode"] as
             | "prompt"
             | "acceptEdits"
             | "acceptAll"
             | "readOnly"
             | undefined,
-          parentId: args.parentId,
+          parentId: args["parentId"] as string | undefined,
         });
         return {
           content: [
@@ -127,9 +137,9 @@ export function createSpawnMcpServer(tree: AgentTree): McpServer {
   server.tool(
     "get_agent_result",
     "Get the result of a spawned agent. Returns {status, text, error}. If still running, status is 'running'.",
-    GetAgentResultSchema,
-    async (args) => {
-      const result = tree.getAgentResult(args.id);
+    mcpSchema(GetAgentResultSchema),
+    async (args: Record<string, unknown>) => {
+      const result = tree.getAgentResult(args["id"] as string);
       return {
         content: [
           {
@@ -144,10 +154,10 @@ export function createSpawnMcpServer(tree: AgentTree): McpServer {
   server.tool(
     "send_to_agent",
     "Send a follow-up message to a running agent.",
-    SendToAgentSchema,
-    async (args) => {
+    mcpSchema(SendToAgentSchema),
+    async (args: Record<string, unknown>) => {
       try {
-        tree.sendToAgent(args.id, args.message);
+        tree.sendToAgent(args["id"] as string, args["message"] as string);
         return {
           content: [
             {
@@ -173,11 +183,11 @@ export function createSpawnMcpServer(tree: AgentTree): McpServer {
   server.tool(
     "respond_to_permission",
     "Respond to a bubbled permission-request from a child agent.",
-    RespondToPermissionSchema,
-    async (args) => {
+    mcpSchema(RespondToPermissionSchema),
+    async (args: Record<string, unknown>) => {
       tree.respondToPermission(
-        args.requestId,
-        args.decision as "allow" | "allow-session" | "deny"
+        args["requestId"] as string,
+        args["decision"] as "allow" | "allow-session" | "deny"
       );
       return {
         content: [
@@ -295,7 +305,7 @@ export function startSpawnControlServer(tree: AgentTree, port?: number): Control
     },
   });
 
-  resolvedPort = server.port;
+  resolvedPort = server.port ?? listenPort;
 
   return {
     port: resolvedPort,

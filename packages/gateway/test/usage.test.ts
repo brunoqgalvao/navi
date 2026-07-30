@@ -25,7 +25,7 @@ describe("normalizeUsage", () => {
   });
 
   test("computes costUsd from PRICE_TABLE for known model", () => {
-    const entry = PRICE_TABLE["claude-sonnet-4-6"];
+    const entry = PRICE_TABLE["claude-sonnet-4-6"]!;
     expect(entry).toBeDefined();
 
     const inputTokens = 1_000_000;
@@ -58,7 +58,7 @@ describe("normalizeUsage", () => {
       inputTokens: 1_000_000,
       outputTokens: 0,
     });
-    const entry = PRICE_TABLE["claude-opus-4-1"];
+    const entry = PRICE_TABLE["claude-opus-4-1"]!;
     expect(entry).toBeDefined();
     expect(result.costUsd).toBeCloseTo(entry.inPerMTok, 8);
   });
@@ -70,7 +70,7 @@ describe("normalizeUsage", () => {
       inputTokens: 1_000_000,
       outputTokens: 0,
     });
-    const entry = PRICE_TABLE["claude-haiku-4-5"];
+    const entry = PRICE_TABLE["claude-haiku-4-5"]!;
     expect(entry).toBeDefined();
     expect(result.costUsd).toBeCloseTo(entry.inPerMTok, 8);
   });

@@ -167,7 +167,7 @@ async function handleServerRequest(msg: Record<string, unknown>): Promise<void> 
 
     const response = {
       outcome: allowOption
-        ? { outcome: "selected", optionId: allowOption["optionId"] ?? allowOption["id"] }
+        ? { outcome: "selected", optionId: (allowOption as Record<string, string>)["optionId"] ?? (allowOption as Record<string, string>)["id"] }
         : { outcome: "cancelled" },
     };
 

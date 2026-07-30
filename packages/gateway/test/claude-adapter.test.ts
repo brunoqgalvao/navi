@@ -91,12 +91,19 @@ function makeResultSuccess(overrides: Record<string, unknown> = {}): SDKMessage 
       costUSD: 0.00123,
       contextWindow: 200000,
       maxOutputTokens: 8192,
+      // NonNullableUsage requires these nullable fields
+      cache_creation: null,
+      inference_geo: null,
+      iterations: null,
+      output_tokens_details: null,
+      server_tool_use: null,
+      service_tier: null,
     },
     modelUsage: {},
     permission_denials: [],
     uuid: "uuid-3" as `${string}-${string}-${string}-${string}-${string}`,
     ...overrides,
-  } as SDKMessage;
+  } as unknown as SDKMessage;
 }
 
 function makeResultError(overrides: Record<string, unknown> = {}): SDKMessage {
@@ -119,13 +126,20 @@ function makeResultError(overrides: Record<string, unknown> = {}): SDKMessage {
       costUSD: 0,
       contextWindow: 200000,
       maxOutputTokens: 8192,
+      // NonNullableUsage requires these nullable fields
+      cache_creation: null,
+      inference_geo: null,
+      iterations: null,
+      output_tokens_details: null,
+      server_tool_use: null,
+      service_tier: null,
     },
     modelUsage: {},
     permission_denials: [],
     errors: ["something broke"],
     uuid: "uuid-4" as `${string}-${string}-${string}-${string}-${string}`,
     ...overrides,
-  } as SDKMessage;
+  } as unknown as SDKMessage;
 }
 
 function makeUserMsgWithToolResult(
@@ -367,7 +381,7 @@ describe("ClaudeSession permission pending-map", () => {
       makeResultSuccess(),
     ];
 
-    const fakeQuery: FakeQueryFn = function* (params) {
+    const fakeQuery: FakeQueryFn = function* (params: Parameters<FakeQueryFn>[0]) {
       capturedCanUseTool = params.options?.canUseTool;
       for (const msg of fakeMessages) {
         yield msg;

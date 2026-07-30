@@ -31,6 +31,15 @@ import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+/**
+ * Cast a Zod 4 schema shape to the Zod 3 shape expected by @modelcontextprotocol/sdk.
+ * The SDK bundles Zod 3 internally; we use Zod 4 in this package. Runtime compatible.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mcpSchema<T extends Record<string, z.ZodTypeAny>>(shape: T): any {
+  return shape;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface SkillIndexEntry {
@@ -203,9 +212,9 @@ export function registerUseSkillTool(
   mcpServer.tool(
     "use_skill",
     "Retrieve the full instructions for a named skill. Call this before using any skill.",
-    { name: z.string().describe("The skill name to look up") },
-    async (args) => {
-      const entry = byName.get(args.name);
+    mcpSchema({ name: z.string().describe("The skill name to look up") }),
+    async (args: Record<string, unknown>) => {
+      const entry = byName.get(args["name"] as string);
       if (!entry) {
         const available = Array.from(byName.keys()).join(", ");
         return {

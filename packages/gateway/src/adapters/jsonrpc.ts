@@ -49,12 +49,16 @@ export type NotificationHandler = (method: string, params: unknown) => void;
 
 // ── JsonRpcClient ─────────────────────────────────────────────────────────────
 
+/** Called with every raw JSON line received from the server (before parsing). */
+export type RawLineHandler = (direction: "recv" | "send", line: string) => void;
+
 export class JsonRpcClient {
   private _proc: ChildProcess;
   private _nextId = 1;
   private _pending = new Map<JsonRpcId, { resolve: (r: unknown) => void; reject: (e: Error) => void }>();
   private _serverRequestHandler: ServerRequestHandler | null = null;
   private _notificationHandler: NotificationHandler | null = null;
+  private _rawLineHandler: RawLineHandler | null = null;
   private _lineBuffer = "";
   private _closed = false;
   private _closeWaiters: Array<() => void> = [];
@@ -122,6 +126,7 @@ export class JsonRpcClient {
     if (process.env["NAVI_GATEWAY_DEBUG"] === "1") {
       process.stderr.write(`[jsonrpc:recv] ${line}\n`);
     }
+    this._rawLineHandler?.("recv", line);
     let msg: JsonRpcIncoming;
     try {
       msg = JSON.parse(line) as JsonRpcIncoming;
@@ -192,6 +197,7 @@ export class JsonRpcClient {
     if (process.env["NAVI_GATEWAY_DEBUG"] === "1") {
       process.stderr.write(`[jsonrpc:send] ${line}`);
     }
+    this._rawLineHandler?.("send", line.trimEnd());
     try {
       this._proc.stdin!.write(line);
     } catch {
@@ -282,6 +288,15 @@ export class JsonRpcClient {
   /** Register a handler for server notifications. */
   onNotification(handler: NotificationHandler): void {
     this._notificationHandler = handler;
+  }
+
+  /**
+   * Register a raw-line tap handler. Called with every JSON line sent/received
+   * before it is parsed or dispatched. Useful for fixture recording.
+   * direction: "recv" = server → client; "send" = client → server.
+   */
+  onRaw(handler: RawLineHandler): void {
+    this._rawLineHandler = handler;
   }
 
   /** Wait until the underlying process closes. */
