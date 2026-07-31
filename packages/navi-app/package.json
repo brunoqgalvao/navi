@@ -1,7 +1,7 @@
 {
   "name": "navi-app",
-  "version": "2.0.0",
-  "description": "Navi \u2014 the local AI coding assistant UI. Already on it.",
+  "version": "2.0.1",
+  "description": "Navi — the local AI coding assistant UI. Already on it.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,19 +17,19 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
     "test:api": "node scripts/run-with-bun.mjs run server/test-api.ts",
-    "test:api:verbose": "node scripts/run-with-bun.mjs run server/test-api.ts --verbose",
-    "test:server": "NAVI_DATA_DIR=$(mktemp -d /tmp/navi-test.XXXXXX) bun test server/ shared/"
+    "test:api:verbose": "node scripts/run-with-bun.mjs run server/test-api.ts --verbose"
   },
   "license": "MIT",
   "bin": {
-    "navi": "./bin/navi.ts"
+    "navi": "./bin/navi.ts",
+    "navi-integrations": "./server/integrations/cli.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.15",
     "@ai-sdk/google": "^3.0.10",
     "@ai-sdk/openai": "^3.0.12",
     "@anthropic-ai/claude-agent-sdk": "^0.1.75",
-    "@anthropic-ai/claude-code": "2.1.198",
+    "@anthropic-ai/claude-code": "2.1.138",
     "@anthropic-ai/sdk": "^0.71.2",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.11",
@@ -59,6 +59,7 @@
     "codemirror": "^6.0.2",
     "croner": "^9.1.0",
     "diff": "^8.0.2",
+    "e2b": "^2.9.1",
     "gray-matter": "^4.0.3",
     "highlight.js": "^11.11.1",
     "html2canvas": "^1.4.1",
