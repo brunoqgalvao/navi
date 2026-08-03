@@ -619,34 +619,36 @@
         </div>
 
       {:else if item.type === "thinking"}
-        {@const thinking = (item as ThinkingBlock).thinking}
-        {@const expanded = expandedBlocks.has(idx)}
-        <div class="rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50/20 dark:bg-purple-900/20 overflow-hidden">
-          <button
-            onclick={() => toggleBlock(idx)}
-            class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
-          >
-            <span class="text-xs">💭</span>
-            <span class="text-xs font-medium text-purple-700 dark:text-purple-300">Thinking</span>
-            <span class="text-xs text-purple-400 dark:text-purple-500 truncate flex-1">
-              {thinking.slice(0, 60)}{thinking.length > 60 ? "..." : ""}
-            </span>
-            <svg
-              class="w-3.5 h-3.5 text-purple-400 dark:text-purple-600 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        {@const thinking = ((item as ThinkingBlock).thinking || "").trim()}
+        {#if thinking}
+          {@const expanded = expandedBlocks.has(idx)}
+          {@const preview = thinking.split("\n")[0].slice(0, 80)}
+          <div class="group/think py-0.5">
+            <button
+              onclick={() => toggleBlock(idx)}
+              class="flex items-center gap-1.5 max-w-full text-left text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
             >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-          {#if expanded}
-            <div class="px-3 pb-2 pt-1 border-t border-purple-100 dark:border-purple-800 relative">
-              <div class="absolute top-1 right-3">
-                <CopyButton text={thinking} />
+              <span class="shrink-0 font-medium">Thinking</span>
+              {#if !expanded}
+                <span class="truncate text-gray-300 dark:text-gray-600">· {preview}</span>
+              {/if}
+              <svg
+                class="w-3 h-3 shrink-0 opacity-0 group-hover/think:opacity-100 transition-all {expanded ? 'rotate-90 opacity-100' : ''}"
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            {#if expanded}
+              <div class="relative mt-1.5 pl-3 border-l border-gray-200 dark:border-gray-700">
+                <div class="absolute top-0 right-0 opacity-0 group-hover/think:opacity-100 transition-opacity">
+                  <CopyButton text={thinking} />
+                </div>
+                <div class="text-xs leading-relaxed text-gray-500 dark:text-gray-400 whitespace-pre-wrap max-h-64 overflow-y-auto pr-8">{thinking}</div>
               </div>
-              <pre class="text-xs text-purple-700 dark:text-purple-300 whitespace-pre-wrap font-mono bg-purple-50 dark:bg-purple-900/30 rounded p-2 pr-8 max-h-48 overflow-y-auto">{thinking}</pre>
-            </div>
-          {/if}
-        </div>
+            {/if}
+          </div>
+        {/if}
 
       {/if}
     {/each}
