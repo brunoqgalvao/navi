@@ -128,6 +128,8 @@
   import ContextOverflowModal from "./lib/components/ContextOverflowModal.svelte";
   import Sidebar from "./lib/components/sidebar/Sidebar.svelte";
   import { initializeRegistry, projectExtensions, ExtensionToolbar, ExtensionSettingsModal } from "./lib/features/extensions";
+  import { AccountsBadge } from "./lib/features/accounts";
+  import { UpdateBadge } from "./lib/features/update";
   import { handleSessionHierarchyWSEvent, parseEscalation } from "./lib/features/session-hierarchy";
   import SessionBreadcrumbs from "./lib/features/session-hierarchy/components/SessionBreadcrumbs.svelte";
   import EscalationBanner from "./lib/features/session-hierarchy/components/EscalationBanner.svelte";
@@ -3849,8 +3851,10 @@ Please walk me through the setup step by step. When I have the credentials, save
     </div>
 
     <!-- Toolbar Buttons -->
-    {#if currentProject}
-    <div class="absolute top-3 right-3 z-20 flex gap-1">
+    <div class="absolute top-3 right-3 z-20 flex gap-1 items-stretch">
+      <UpdateBadge />
+      <AccountsBadge />
+      {#if currentProject}
       {#if $advancedMode}
       <button
         onclick={() => showDebugInfo = true}
@@ -3867,8 +3871,8 @@ Please walk me through the setup step by step. When I have the credentials, save
         onExtensionClick={handleExtensionClick}
         onOpenSettings={() => showExtensionSettings = true}
       />
+      {/if}
     </div>
-    {/if}
 
     <!-- Extension Settings Modal -->
     {#if currentProject}

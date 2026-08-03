@@ -228,34 +228,36 @@
         <div class="space-y-2">
           <!-- Thinking blocks -->
           {#each thinking as think, thinkIdx}
-            {@const thinkId = `${msg.id}-think-${thinkIdx}`}
-            {@const isExpanded = expandedTools.has(thinkId)}
-            <div class="rounded-lg border border-purple-200 bg-purple-50/30 overflow-hidden">
-              <button
-                onclick={() => toggleTool(thinkId)}
-                class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-purple-50 transition-colors"
-              >
-                <span class="text-sm">💭</span>
-                <span class="text-sm font-medium text-purple-700">Thinking</span>
-                <span class="text-xs text-purple-400 truncate flex-1">
-                  {think.thinking.slice(0, 80)}{think.thinking.length > 80 ? "..." : ""}
-                </span>
-                <svg
-                  class="w-4 h-4 text-purple-400 transition-transform shrink-0 {isExpanded ? 'rotate-90' : ''}"
-                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            {@const thinkText = (think.thinking || "").trim()}
+            {#if thinkText}
+              {@const thinkId = `${msg.id}-think-${thinkIdx}`}
+              {@const isExpanded = expandedTools.has(thinkId)}
+              <div class="group/think py-0.5">
+                <button
+                  onclick={() => toggleTool(thinkId)}
+                  class="flex items-center gap-1.5 max-w-full text-left text-xs text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-              {#if isExpanded}
-                <div class="px-3 pb-3 pt-1 border-t border-purple-100 relative">
-                  <div class="absolute top-1 right-3">
-                    <CopyButton text={think.thinking} />
+                  <span class="shrink-0 font-medium">Thinking</span>
+                  {#if !isExpanded}
+                    <span class="truncate text-gray-300">· {thinkText.split("\n")[0].slice(0, 80)}</span>
+                  {/if}
+                  <svg
+                    class="w-3 h-3 shrink-0 opacity-0 group-hover/think:opacity-100 transition-all {isExpanded ? 'rotate-90 opacity-100' : ''}"
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+                {#if isExpanded}
+                  <div class="relative mt-1.5 pl-3 border-l border-gray-200">
+                    <div class="absolute top-0 right-0 opacity-0 group-hover/think:opacity-100 transition-opacity">
+                      <CopyButton text={thinkText} />
+                    </div>
+                    <div class="text-xs leading-relaxed text-gray-500 whitespace-pre-wrap max-h-64 overflow-y-auto pr-8">{thinkText}</div>
                   </div>
-                  <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono bg-purple-50 rounded p-3 pr-8 max-h-64 overflow-y-auto">{think.thinking}</pre>
-                </div>
-              {/if}
-            </div>
+                {/if}
+              </div>
+            {/if}
           {/each}
 
           <!-- Text content - the actual message -->

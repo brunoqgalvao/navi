@@ -9,6 +9,8 @@ import { handleSearchRoutes } from "./routes/search";
 import { handleUiControlRoutes } from "./routes/ui-control";
 import { handleAudioRoutes } from "./routes/audio";
 import { handleCostRoutes } from "./routes/costs";
+import { handleAccountsRoutes } from "./routes/accounts";
+import { handleUpdateRoutes } from "./routes/update";
 import { handleAuthRoutes } from "./routes/auth";
 import { handleConfigRoutes } from "./routes/config";
 import { handleProjectRoutes } from "./routes/projects";
@@ -390,6 +392,14 @@ const server = Bun.serve({
 
     // Cost routes
     response = await handleCostRoutes(url, method);
+    if (response) return response;
+
+    // Accounts & usage routes (ccx multi-account + codex)
+    response = await handleAccountsRoutes(url, method, req);
+    if (response) return response;
+
+    // Self-update routes (git-based OTA)
+    response = await handleUpdateRoutes(url, method, req);
     if (response) return response;
 
     // Auth routes

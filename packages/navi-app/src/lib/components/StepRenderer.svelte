@@ -76,7 +76,7 @@
   function getStepColor(type: StepType, isActive: boolean): string {
     if (isActive) {
       switch (type) {
-        case "thinking": return "border-l-purple-500 bg-purple-50/50";
+        case "thinking": return "border-l-gray-400 bg-gray-50/50";
         case "text": return "border-l-blue-500 bg-blue-50/30";
         case "tool_use": return "border-l-orange-500 bg-orange-50/30";
         case "tool_result": return "border-l-teal-500 bg-teal-50/30";
@@ -102,7 +102,7 @@
           {#if step.isStreaming && step.type === "text"}
             <span class="text-blue-600">{step.streamingText?.slice(-50) || "..."}</span>
           {:else if step.isStreaming && step.type === "thinking"}
-            <span class="text-purple-600 italic">thinking...</span>
+            <span class="text-gray-400 italic">thinking...</span>
           {:else}
             {getStepLabel(step)}
           {/if}
@@ -129,7 +129,7 @@
               <div class="absolute top-1 right-1">
                 <CopyButton text={(step.content as any).thinking || ""} />
               </div>
-              <pre class="text-xs text-purple-700 whitespace-pre-wrap font-mono bg-purple-50 rounded-lg p-3 pr-10 max-h-64 overflow-y-auto">{step.isStreaming ? step.streamingText : (step.content as any).thinking}</pre>
+              <div class="text-xs leading-relaxed text-gray-500 whitespace-pre-wrap border-l border-gray-200 pl-3 pr-10 max-h-64 overflow-y-auto">{step.isStreaming ? step.streamingText : (step.content as any).thinking}</div>
             </div>
           {:else if step.type === "text"}
             <div class="prose prose-sm max-w-none text-gray-800" onclick={(e) => e.stopPropagation()}>
