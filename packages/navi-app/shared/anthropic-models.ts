@@ -26,27 +26,27 @@ export const CLAUDE_OPUS_4_7 = "claude-opus-4-7";
 export const CLAUDE_SONNET_4_6 = "claude-sonnet-4-6";
 export const CLAUDE_HAIKU_4_5 = "claude-haiku-4-5";
 
-export const DEFAULT_CLAUDE_MODEL = CLAUDE_OPUS_5;
+export const DEFAULT_CLAUDE_MODEL = CLAUDE_FABLE_5;
 export const DEFAULT_CLAUDE_FAST_MODEL = CLAUDE_SONNET_5;
 export const DEFAULT_CLAUDE_LIGHT_MODEL = CLAUDE_HAIKU_4_5;
 
 const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
+  {
+    value: CLAUDE_FABLE_5,
+    displayName: "Claude Fable 5",
+    shortLabel: "Fable 5",
+    description: "Most capable Claude model",
+    provider: "anthropic",
+    aliases: ["default", "fable"],
+    order: 0,
+  },
   {
     value: CLAUDE_OPUS_5,
     displayName: "Claude Opus 5",
     shortLabel: "Opus 5",
     description: "Most capable for complex work",
     provider: "anthropic",
-    aliases: ["default", "opus"],
-    order: 0,
-  },
-  {
-    value: CLAUDE_FABLE_5,
-    displayName: "Claude Fable 5",
-    shortLabel: "Fable 5",
-    description: "Most capable widely released Claude model",
-    provider: "anthropic",
-    aliases: ["fable"],
+    aliases: ["opus"],
     order: 1,
   },
   {
