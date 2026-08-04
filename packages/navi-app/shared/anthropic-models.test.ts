@@ -3,9 +3,10 @@ import { describe, expect, test } from "bun:test";
 import {
   CLAUDE_FABLE_5,
   CLAUDE_HAIKU_4_5,
-  CLAUDE_OPUS_4_7,
   CLAUDE_OPUS_4_8,
+  CLAUDE_OPUS_5,
   CLAUDE_SONNET_4_6,
+  CLAUDE_SONNET_5,
   getCuratedAnthropicModels,
   mergeAnthropicModelOptions,
   normalizeAnthropicModelValue,
@@ -13,11 +14,16 @@ import {
 
 describe("normalizeAnthropicModelValue", () => {
   test("maps Claude SDK aliases to Navi's curated latest models", () => {
-    expect(normalizeAnthropicModelValue("default")).toBe(CLAUDE_OPUS_4_8);
-    expect(normalizeAnthropicModelValue("opus")).toBe(CLAUDE_OPUS_4_8);
+    expect(normalizeAnthropicModelValue("default")).toBe(CLAUDE_OPUS_5);
+    expect(normalizeAnthropicModelValue("opus")).toBe(CLAUDE_OPUS_5);
     expect(normalizeAnthropicModelValue("fable")).toBe(CLAUDE_FABLE_5);
-    expect(normalizeAnthropicModelValue("sonnet")).toBe(CLAUDE_SONNET_4_6);
+    expect(normalizeAnthropicModelValue("sonnet")).toBe(CLAUDE_SONNET_5);
     expect(normalizeAnthropicModelValue("haiku")).toBe(CLAUDE_HAIKU_4_5);
+  });
+
+  test("passes through previous-generation curated models", () => {
+    expect(normalizeAnthropicModelValue(CLAUDE_OPUS_4_8)).toBe(CLAUDE_OPUS_4_8);
+    expect(normalizeAnthropicModelValue(CLAUDE_SONNET_4_6)).toBe(CLAUDE_SONNET_4_6);
   });
 });
 
@@ -53,11 +59,12 @@ describe("mergeAnthropicModelOptions", () => {
       },
     ]);
 
-    expect(merged[0]?.value).toBe(CLAUDE_OPUS_4_8);
+    expect(merged[0]?.value).toBe(CLAUDE_OPUS_5);
     expect(merged[1]?.value).toBe(CLAUDE_FABLE_5);
-    expect(merged[2]?.value).toBe(CLAUDE_OPUS_4_7);
-    expect(merged[3]?.value).toBe(CLAUDE_SONNET_4_6);
-    expect(merged[4]?.value).toBe(CLAUDE_HAIKU_4_5);
-    expect(merged[5]?.value).toBe("claude-opus-4-6");
+    expect(merged[2]?.value).toBe(CLAUDE_SONNET_5);
+    expect(merged[3]?.value).toBe(CLAUDE_OPUS_4_8);
+    expect(merged[4]?.value).toBe(CLAUDE_SONNET_4_6);
+    expect(merged[5]?.value).toBe(CLAUDE_HAIKU_4_5);
+    expect(merged[6]?.value).toBe("claude-opus-4-6");
   });
 });
