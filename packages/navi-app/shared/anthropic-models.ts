@@ -9,6 +9,7 @@ type CuratedAnthropicModel = AnthropicModelOption & {
   aliases: readonly string[];
   order: number;
   shortLabel: string;
+  contextWindow: number;
 };
 
 type ModelOptionLike = {
@@ -18,24 +19,52 @@ type ModelOptionLike = {
   provider?: string;
 };
 
+export const CLAUDE_FABLE_5 = "claude-fable-5";
+export const CLAUDE_OPUS_5 = "claude-opus-5";
 export const CLAUDE_OPUS_4_8 = "claude-opus-4-8";
 export const CLAUDE_OPUS_4_7 = "claude-opus-4-7";
+export const CLAUDE_SONNET_5 = "claude-sonnet-5";
 export const CLAUDE_SONNET_4_6 = "claude-sonnet-4-6";
 export const CLAUDE_HAIKU_4_5 = "claude-haiku-4-5";
 
-export const DEFAULT_CLAUDE_MODEL = CLAUDE_OPUS_4_8;
-export const DEFAULT_CLAUDE_FAST_MODEL = CLAUDE_SONNET_4_6;
+export const DEFAULT_CLAUDE_MODEL = CLAUDE_OPUS_5;
+export const DEFAULT_CLAUDE_FAST_MODEL = CLAUDE_SONNET_5;
 export const DEFAULT_CLAUDE_LIGHT_MODEL = CLAUDE_HAIKU_4_5;
 
+// Context windows per docs: Fable 5 / Opus 5 / 4.x / Sonnet 5 / 4.6 are 1M; only Haiku 4.5 is 200K.
+const CONTEXT_1M = 1_000_000;
+const CONTEXT_200K = 200_000;
+
 const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
+  {
+    value: CLAUDE_FABLE_5,
+    displayName: "Claude Fable 5",
+    shortLabel: "Fable 5",
+    description: "Most capable for demanding reasoning",
+    provider: "anthropic",
+    aliases: ["fable"],
+    order: 0,
+    contextWindow: CONTEXT_1M,
+  },
+  {
+    value: CLAUDE_OPUS_5,
+    displayName: "Claude Opus 5",
+    shortLabel: "Opus 5",
+    description: "Most capable for complex work",
+    provider: "anthropic",
+    aliases: ["default", "opus"],
+    order: 1,
+    contextWindow: CONTEXT_1M,
+  },
   {
     value: CLAUDE_OPUS_4_8,
     displayName: "Claude Opus 4.8",
     shortLabel: "Opus 4.8",
-    description: "Most capable for complex work",
+    description: "Previous-generation Opus",
     provider: "anthropic",
-    aliases: ["default", "opus"],
-    order: 0,
+    aliases: [],
+    order: 2,
+    contextWindow: CONTEXT_1M,
   },
   {
     value: CLAUDE_OPUS_4_7,
@@ -44,16 +73,28 @@ const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
     description: "Previous Opus snapshot",
     provider: "anthropic",
     aliases: [],
-    order: 1,
+    order: 3,
+    contextWindow: CONTEXT_1M,
+  },
+  {
+    value: CLAUDE_SONNET_5,
+    displayName: "Claude Sonnet 5",
+    shortLabel: "Sonnet 5",
+    description: "Best balance of speed and capability",
+    provider: "anthropic",
+    aliases: ["sonnet"],
+    order: 4,
+    contextWindow: CONTEXT_1M,
   },
   {
     value: CLAUDE_SONNET_4_6,
     displayName: "Claude Sonnet 4.6",
     shortLabel: "Sonnet 4.6",
-    description: "Best balance of speed and capability",
+    description: "Previous-generation Sonnet",
     provider: "anthropic",
-    aliases: ["sonnet"],
-    order: 2,
+    aliases: [],
+    order: 5,
+    contextWindow: CONTEXT_1M,
   },
   {
     value: CLAUDE_HAIKU_4_5,
@@ -62,7 +103,8 @@ const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
     description: "Fastest for quick answers",
     provider: "anthropic",
     aliases: ["haiku"],
-    order: 3,
+    order: 6,
+    contextWindow: CONTEXT_200K,
   },
 ];
 
@@ -104,6 +146,23 @@ export function getAnthropicModelShortLabel(value: string | null | undefined): s
 
 export function getCuratedAnthropicModels(): AnthropicModelOption[] {
   return CURATED_ANTHROPIC_MODELS.map(stripModelMetadata);
+}
+
+/**
+ * Context window (in tokens) for an Anthropic model, or null when the model
+ * is unknown/not Anthropic. Falls back to family heuristics for model ids
+ * not in the curated list (e.g. dated snapshots).
+ */
+export function getAnthropicModelContextWindow(value: string | null | undefined): number | null {
+  const normalized = normalizeAnthropicModelValue(value);
+  if (!normalized) return null;
+
+  const curated = curatedByValue.get(normalized);
+  if (curated) return curated.contextWindow;
+
+  if (!/^claude/i.test(normalized)) return null;
+  if (/haiku/i.test(normalized)) return CONTEXT_200K;
+  return CONTEXT_1M;
 }
 
 export function mergeAnthropicModelOptions(models: readonly ModelOptionLike[]): ModelOptionLike[] {

@@ -13,6 +13,7 @@
   import { parseHash, onHashChange } from "./lib/router";
   import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
   import { setupGlobalErrorHandlers, pendingErrorReport, showError, showSuccess, type ErrorReport } from "./lib/errorHandler";
+  import { resolveContextWindow } from "./lib/context-window";
   import Preview from "./lib/Preview.svelte";
   import { marked, type Tokens } from "marked";
   import hljs from "highlight.js";
@@ -1155,8 +1156,9 @@
 
   const AUTO_COMPACT_THRESHOLD_PERCENT = 80;
 
-  // Context usage percentage for current session
-  const contextWindow = $derived(currentProject?.context_window || 200000);
+  // Context usage percentage for current session — derived from the session's
+  // model when known (Fable 5 = 1M, Haiku 4.5 = 200K, ...), else project config
+  const contextWindow = $derived(resolveContextWindow(modelSelection || $session.selectedModel, currentProject?.context_window));
   const usagePercent = $derived(contextWindow > 0 ? Math.min(100, Math.round(($session.inputTokens / contextWindow) * 100)) : 0);
   let activeSkills = $state<Skill[]>([]);
   let mcpServers = $state<McpServer[]>([]);
@@ -4368,7 +4370,7 @@ Please walk me through the setup step by step. When I have the credentials, save
                     <ContextWarning
                         {usagePercent}
                         inputTokens={$session.inputTokens}
-                        contextWindow={currentProject?.context_window || 200000}
+                        contextWindow={contextWindow}
                         isPruned={hasPrunedContext($session.sessionId)}
                         isRollback={hasRollbackContext($session.sessionId)}
                         isCompacting={$compactingSessionsStore.has($session.sessionId)}

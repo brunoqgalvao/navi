@@ -565,13 +565,39 @@ export const defaultBackend = writable<BackendId>("claude");
 
 // Reasoning effort per session (low, medium, high, extra high)
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+const REASONING_EFFORT_VALUES: ReasoningEffort[] = ["low", "medium", "high", "xhigh"];
+const DEFAULT_REASONING_EFFORT_KEY = "navi-default-reasoning-effort";
+
+// Default reasoning effort for new sessions — persisted so the user's last
+// choice carries over to future chats and app restarts.
+function createDefaultReasoningEffortStore() {
+  const stored = typeof window !== "undefined" ? localStorage.getItem(DEFAULT_REASONING_EFFORT_KEY) : null;
+  const initial: ReasoningEffort = REASONING_EFFORT_VALUES.includes(stored as ReasoningEffort)
+    ? (stored as ReasoningEffort)
+    : "medium";
+  const { subscribe, set } = writable<ReasoningEffort>(initial);
+
+  return {
+    subscribe,
+    set: (effort: ReasoningEffort) => {
+      set(effort);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(DEFAULT_REASONING_EFFORT_KEY, effort);
+      }
+    },
+  };
+}
+export const defaultReasoningEffort = createDefaultReasoningEffortStore();
+
 function createReasoningEffortStore() {
   const { subscribe, update } = writable<Map<string, ReasoningEffort>>(new Map());
 
   return {
     subscribe,
+    // Sessions without an explicit choice inherit the persisted default
     get: (sessionId: string, map: Map<string, ReasoningEffort>): ReasoningEffort => {
-      return map.get(sessionId) || "medium";
+      return map.get(sessionId) || get(defaultReasoningEffort);
     },
     set: (sessionId: string, effort: ReasoningEffort) =>
       update((map) => {
@@ -586,7 +612,6 @@ function createReasoningEffortStore() {
   };
 }
 export const sessionReasoningEffort = createReasoningEffortStore();
-export const defaultReasoningEffort = writable<ReasoningEffort>("medium");
 
 // Models for each backend (populated from API)
 export const backendModels = writable<Record<BackendId, ModelInfo[]>>({

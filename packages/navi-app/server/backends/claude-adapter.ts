@@ -85,6 +85,14 @@ export class ClaudeAdapter implements BackendAdapter {
 
     // Spawn the worker process
     const bunPath = resolveBunExecutable() ?? "bun";
+    // The Claude Code CLI reads CLAUDE_CODE_EFFORT_LEVEL (low | medium | high)
+    const rawEffort = options.backendOptions?.reasoningEffort;
+    const effort = typeof rawEffort === "string" ? rawEffort.trim().toLowerCase() : "";
+    const effortLevel = ["low", "medium", "high"].includes(effort)
+      ? effort
+      : effort === "xhigh"
+        ? "high"
+        : undefined;
     this.childProcess = spawn(bunPath, ["run", "--env-file=/dev/null", workerPath, inputJson], {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
@@ -96,6 +104,7 @@ export class ClaudeAdapter implements BackendAdapter {
         NAVI_DB_READONLY: "1",
         NAVI_AUTH_MODE: process.env.NAVI_AUTH_MODE || "api_key",
         NAVI_AUTH_SOURCE: process.env.NAVI_AUTH_SOURCE || "global_settings",
+        ...(effortLevel ? { CLAUDE_CODE_EFFORT_LEVEL: effortLevel } : {}),
       },
     });
 

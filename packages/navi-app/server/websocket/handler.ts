@@ -2397,8 +2397,22 @@ function convertNormalizedEventToUI(event: NormalizedEvent, sessionId?: string):
   }
 }
 
+/**
+ * Map the UI's reasoning effort to what the Claude Code CLI accepts via
+ * CLAUDE_CODE_EFFORT_LEVEL: "low" | "medium" | "high" (xhigh caps at high).
+ */
+function normalizeClaudeEffortLevel(effort?: string): string | null {
+  if (!effort) return null;
+  const normalized = effort.trim().toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+  if (normalized === "xhigh") return "high";
+  return null;
+}
+
 export function handleQueryWithProcess(ws: any, data: ClientMessage) {
-  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext, agentId, backend, planMode } = data;
+  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext, agentId, backend, planMode, reasoningEffort } = data;
 
   // Determine which backend to use (default: claude)
   const effectiveBackend: BackendId = backend ||
@@ -2606,6 +2620,12 @@ The user will explicitly approve the plan before any execution begins.
   delete workerEnv.ANTHROPIC_BASE_URL;
   delete workerEnv.NAVI_ANTHROPIC_API_KEY;
   delete workerEnv.NAVI_ANTHROPIC_BASE_URL;
+
+  // The Claude Code CLI reads CLAUDE_CODE_EFFORT_LEVEL (low | medium | high)
+  const claudeEffort = normalizeClaudeEffortLevel(reasoningEffort);
+  if (claudeEffort) {
+    workerEnv.CLAUDE_CODE_EFFORT_LEVEL = claudeEffort;
+  }
 
   const authResult = resolveNaviClaudeAuth(model);
   if (authResult.mode === "none") {
