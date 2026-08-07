@@ -198,17 +198,13 @@ export {
   type AuthState,
 } from "./auth";
 
-// Planning stores (Plan Mode)
+// Planning stores (plan rendering widgets)
 export {
-  planMode,
   sessionPlans,
   getPlanForSession,
   hasActivePlan,
-  PLAN_MODE_SYSTEM_PROMPT,
-  generatePlanModePrompt,
   type Plan,
   type PlanStep,
-  type PlanModeState,
 } from "./planning";
 
 // Chat input store

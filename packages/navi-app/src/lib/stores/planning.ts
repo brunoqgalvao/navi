@@ -1,8 +1,5 @@
 import { writable, derived, get } from "svelte/store";
 
-// Storage key
-const PLAN_MODE_KEY = "claude-code-ui-plan-mode";
-
 /**
  * A single step in a plan
  */
@@ -31,53 +28,6 @@ export interface Plan {
   approvedAt?: number;
   originalPrompt?: string; // What the user originally asked
   refinementHistory?: string[]; // Track refinement requests
-}
-
-/**
- * Plan mode state for the UI
- */
-export interface PlanModeState {
-  enabled: boolean;
-  currentPlanId: string | null;
-}
-
-/**
- * Create the plan mode store (global toggle)
- */
-function createPlanModeStore() {
-  const stored = typeof window !== "undefined" ? localStorage.getItem(PLAN_MODE_KEY) : null;
-  const { subscribe, set } = writable(stored === "true");
-
-  return {
-    subscribe,
-    toggle: () => {
-      let current = false;
-      subscribe(v => current = v)();
-      const newValue = !current;
-      if (typeof window !== "undefined") {
-        localStorage.setItem(PLAN_MODE_KEY, String(newValue));
-      }
-      set(newValue);
-    },
-    set: (value: boolean) => {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(PLAN_MODE_KEY, String(value));
-      }
-      set(value);
-    },
-    enable: () => {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(PLAN_MODE_KEY, "true");
-      }
-      set(true);
-    },
-    disable: () => {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(PLAN_MODE_KEY, "false");
-      }
-      set(false);
-    },
-  };
 }
 
 /**
@@ -361,7 +311,6 @@ function createSessionPlansStore() {
 }
 
 // Export store instances
-export const planMode = createPlanModeStore();
 export const sessionPlans = createSessionPlansStore();
 
 // Derived store: get current session's plan status
@@ -373,57 +322,4 @@ export function getPlanForSession(sessionId: string) {
 export function hasActivePlan(sessionId: string): boolean {
   const plan = get(sessionPlans).get(sessionId);
   return !!plan && ["draft", "reviewing", "approved"].includes(plan.status);
-}
-
-/**
- * System prompt addition for plan mode
- */
-export const PLAN_MODE_SYSTEM_PROMPT = `
-IMPORTANT: Plan Mode is ENABLED. You must NOT execute any code or make any changes.
-
-Instead, you MUST:
-1. Analyze the user's request thoroughly
-2. Create a detailed, step-by-step plan
-3. Present the plan using the TodoWrite tool with all steps as "pending"
-4. Wait for user approval before any execution
-
-Format your plan clearly:
-- Each step should be actionable and specific
-- Include what files will be affected
-- Note any potential risks or considerations
-- Estimate complexity (trivial/simple/moderate/complex) if helpful
-
-After presenting the plan, ask the user:
-"Would you like me to proceed with this plan, or would you like to refine it?"
-
-DO NOT:
-- Execute any code
-- Make any file changes
-- Run any commands
-- Use any tools except TodoWrite for planning
-
-The user will explicitly approve the plan before execution begins.
-`;
-
-/**
- * Generate a refined prompt including the plan context
- */
-export function generatePlanModePrompt(userMessage: string, existingPlan?: Plan): string {
-  if (!existingPlan) {
-    return `[PLAN MODE] ${userMessage}`;
-  }
-
-  // Include existing plan context for refinement
-  const planContext = existingPlan.steps
-    .map((s, i) => `${i + 1}. [${s.status}] ${s.content}`)
-    .join("\n");
-
-  return `[PLAN MODE - REFINEMENT]
-
-Current plan:
-${planContext}
-
-User's refinement request: ${userMessage}
-
-Please update the plan based on this feedback, presenting the revised plan using TodoWrite.`;
 }

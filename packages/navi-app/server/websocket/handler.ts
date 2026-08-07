@@ -20,13 +20,6 @@ import { DEFAULT_CLAUDE_LIGHT_MODEL } from "../../shared/anthropic-models";
 import { getAdapter, type BackendId, type NormalizedEvent } from "../backends";
 import { mcpSettings, getAllEnabledMcpServers } from "../services/mcp-settings";
 import { getCommandContent as getPluginCommandContent, loadAllPlugins } from "../services/plugin-loader";
-import {
-  executeSessionStartHooks,
-  executePostToolUseHooks,
-  executeStopHooks,
-  getPromptInjections,
-  hasHooksForEvent,
-} from "../services/hook-executor";
 import { runQueryHooks } from "../services/query-hooks";
 import { initPhaseTracker, setPhaseUpdateBroadcast, type ConversationPhase } from "../services/phase-tracker";
 import { createProjectInboxItem, processAssistantInboxDirectives } from "../services/inbox-service";
@@ -130,10 +123,10 @@ export interface ClientMessage {
   agentId?: string;
   // Backend selection (claude, codex, gemini)
   backend?: "claude" | "codex" | "gemini";
-  // Reasoning effort for non-Claude backends
+  // Reasoning effort (all backends)
   reasoningEffort?: string;
-  // Plan mode - Claude plans before acting, no execution until approved
-  planMode?: boolean;
+  // Optional cap on thinking tokens (Claude backend)
+  maxThinkingTokens?: number;
   // Question response fields
   questionRequestId?: string;
   answers?: Record<string, string | string[]>;
@@ -2157,6 +2150,11 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
   const project = projectId ? projects.get(projectId) : null;
   const workingDirectory = project?.path || process.cwd();
   const needsAutoTitle = session?.title === "New Chat" || session?.title === "New conversation";
+  // Effective effort: client value wins, else the session's persisted value
+  const effectiveEffort = reasoningEffort || session?.reasoning_effort || undefined;
+  if (sessionId && reasoningEffort && reasoningEffort !== session?.reasoning_effort) {
+    sessions.updateReasoningEffort(reasoningEffort, sessionId);
+  }
   const adapter = getAdapter(backendId);
   const resumeId =
     adapter.supportsResume && session?.backend_session_id
@@ -2216,7 +2214,7 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
       model,
       resume: resumeId,
       permissionMode: isAutoApprove ? "auto" : "confirm",
-      backendOptions: reasoningEffort ? { reasoningEffort } : undefined,
+      backendOptions: effectiveEffort ? { reasoningEffort: effectiveEffort } : undefined,
     })) {
       if (event.type === "backend_session" && sessionId) {
         sessions.updateBackendSessionState(
@@ -2412,7 +2410,7 @@ function normalizeClaudeEffortLevel(effort?: string): string | null {
 }
 
 export function handleQueryWithProcess(ws: any, data: ClientMessage) {
-  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext, agentId, backend, planMode, reasoningEffort } = data;
+  const { prompt, projectId, sessionId, claudeSessionId, allowedTools, model, historyContext, agentId, backend, reasoningEffort, maxThinkingTokens } = data;
 
   // Determine which backend to use (default: claude)
   const effectiveBackend: BackendId = backend ||
@@ -2486,26 +2484,6 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
     searchIndex.indexMessage(msgId, sessionId, JSON.stringify(prompt), now);
   }
 
-  // Plan mode system prompt - instructs Claude to plan only, no execution
-  const PLAN_MODE_INSTRUCTION = `
-[PLAN MODE ENABLED]
-You MUST operate in planning-only mode. DO NOT execute any code, make file changes, or run commands.
-
-Instead:
-1. Analyze the user's request thoroughly
-2. Create a detailed, step-by-step implementation plan
-3. Present the plan using the TodoWrite tool with all steps as "pending" status
-4. Each step should be specific and actionable (e.g., "Create auth middleware in src/middleware/auth.ts")
-5. Note which files will be created/modified for each step
-6. After presenting the plan, ask: "Ready to execute this plan, or would you like to refine it?"
-
-DO NOT use any tools except:
-- TodoWrite (to present the plan)
-- Read, Glob, Grep (to understand existing code for planning)
-
-The user will explicitly approve the plan before any execution begins.
-`;
-
   // Expand plugin commands if present (e.g., /owner/plugin:command args)
   const expandedPrompt = workingDirectory ? expandPluginCommands(prompt || "", workingDirectory) : prompt;
 
@@ -2513,29 +2491,8 @@ The user will explicitly approve the plan before any execution begins.
     ? `${historyContext}\n\nUser's new message:\n${expandedPrompt}`
     : expandedPrompt;
 
-  // Execute SessionStart hooks from enabled plugins (async, don't block)
-  if (workingDirectory && hasHooksForEvent(workingDirectory, "SessionStart")) {
-    executeSessionStartHooks(workingDirectory, sessionId).then((results) => {
-      const injections = getPromptInjections(results);
-      if (injections.length > 0) {
-        // Log hook injections (they're already sent to Claude via the prompt system)
-        console.log(`[Hooks] SessionStart injections for ${sessionId}:`, injections.length);
-      }
-      // Log any errors
-      for (const r of results) {
-        if (!r.result.success) {
-          console.error(`[Hooks] SessionStart hook error (${r.pluginId}):`, r.result.error);
-        }
-      }
-    }).catch(err => {
-      console.error("[Hooks] SessionStart error:", err);
-    });
-  }
-
-  // Inject plan mode instruction if enabled
-  if (planMode) {
-    effectivePrompt = `${PLAN_MODE_INSTRUCTION}\n\n${effectivePrompt}`;
-  }
+  // Hooks (SessionStart, PreToolUse, PostToolUse, Stop, PreQuery, PostQuery)
+  // now run natively inside the SDK agent loop — see services/sdk-hook-bridge.ts.
 
   const bundledWorkerPath = join(execDir, "..", "Resources", "resources", "query-worker.js");
   const bundledWorkerPathAlt = join(execDir, "..", "Resources", "query-worker.js");
@@ -2595,7 +2552,11 @@ The user will explicitly approve the plan before any execution begins.
     prompt: effectivePrompt,
     cwd: workingDirectory,
     resume: effectiveResumeId,
+    // Native SDK fork: forked sessions inherit the source claude_session_id
+    // and fork it on first query instead of continuing it
+    forkSession: session?.pending_fork === 1,
     model,
+    maxThinkingTokens,
     allowedTools: allowedTools || permissionSettings.allowedTools,
     sessionId,
     agentId, // Selected agent (e.g., "coder", "img3d")
@@ -2621,8 +2582,15 @@ The user will explicitly approve the plan before any execution begins.
   delete workerEnv.NAVI_ANTHROPIC_API_KEY;
   delete workerEnv.NAVI_ANTHROPIC_BASE_URL;
 
+  // Effective effort: client value wins, else the session's persisted value.
+  // Persist client-provided effort so it survives restarts.
+  const effectiveEffort = reasoningEffort || session?.reasoning_effort || undefined;
+  if (sessionId && reasoningEffort && reasoningEffort !== session?.reasoning_effort) {
+    sessions.updateReasoningEffort(reasoningEffort, sessionId);
+  }
+
   // The Claude Code CLI reads CLAUDE_CODE_EFFORT_LEVEL (low | medium | high)
-  const claudeEffort = normalizeClaudeEffortLevel(reasoningEffort);
+  const claudeEffort = normalizeClaudeEffortLevel(effectiveEffort);
   if (claudeEffort) {
     workerEnv.CLAUDE_CODE_EFFORT_LEVEL = claudeEffort;
   }
@@ -3153,18 +3121,7 @@ The user will explicitly approve the plan before any execution begins.
             }
             pendingQuestionsDb.deleteBySession(sessionId);
 
-            // Execute Stop hooks from enabled plugins (async, don't block)
-            if (workingDirectory && hasHooksForEvent(workingDirectory, "Stop")) {
-              executeStopHooks(workingDirectory, sessionId).then((results) => {
-                for (const r of results) {
-                  if (!r.result.success) {
-                    console.error(`[Hooks] Stop hook error (${r.pluginId}):`, r.result.error);
-                  }
-                }
-              }).catch(err => {
-                console.error("[Hooks] Stop error:", err);
-              });
-            }
+            // Stop hooks run natively inside the SDK agent loop (sdk-hook-bridge)
 
             // Run query hooks on complete (fire-and-forget) - e.g., phase tracking
             const freshMessages = messages.listBySession(sessionId);

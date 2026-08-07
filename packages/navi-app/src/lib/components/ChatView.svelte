@@ -4,7 +4,6 @@
   import UserCommandMessage from "./UserCommandMessage.svelte";
   import AssistantMessage from "./AssistantMessage.svelte";
   import PermissionRequest from "./PermissionRequest.svelte";
-  import QuestionPrompt from "./QuestionPrompt.svelte";
   import TodoProgress from "./TodoProgress.svelte";
   import StreamingPreview from "./StreamingPreview.svelte";
   import WorkingIndicator from "./WorkingIndicator.svelte";
@@ -59,7 +58,6 @@
     onAskCouncil?: (text: string) => void;
     onPermissionApprove?: (approveAll?: boolean) => void;
     onPermissionDeny?: () => void;
-    onQuestionAnswer?: (answers: Record<string, string | string[]>) => void;
     editingMessageId?: string | null;
     editingMessageContent?: string;
     // Background processes
@@ -114,7 +112,6 @@
     onAskCouncil,
     onPermissionApprove,
     onPermissionDeny,
-    onQuestionAnswer,
     editingMessageId = null,
     editingMessageContent = $bindable(""),
     onOpenProcesses,
@@ -518,14 +515,6 @@
         message={pendingPermissionRequest.message}
         onApprove={(approveAll) => onPermissionApprove?.(approveAll)}
         onDeny={() => onPermissionDeny?.()}
-      />
-    {/if}
-
-    {#if pendingQuestion}
-      <QuestionPrompt
-        requestId={pendingQuestion.requestId}
-        questions={pendingQuestion.questions}
-        onAnswer={(answers) => onQuestionAnswer?.(answers)}
       />
     {/if}
 

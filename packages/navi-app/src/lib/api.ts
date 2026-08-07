@@ -140,6 +140,7 @@ export interface Session {
   backend_session_id?: string | null;
   backend_session_metadata?: string | null;
   model: string | null;
+  reasoning_effort?: string | null;
   total_cost_usd: number;
   total_turns: number;
   input_tokens: number;
@@ -625,6 +626,7 @@ export const api = {
       data: {
         title?: string;
         model?: string;
+        reasoningEffort?: string;
         backend?: BackendId;
         agentId?: string | null;
         workflowId?: string | null;

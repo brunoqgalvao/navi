@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
-  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, planMode, autoCompactEnabled, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId, type ReasoningEffort } from "./lib/stores";
+  import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, executionModeStore, cloudExecutionStore, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, autoCompactEnabled, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type ExecutionMode, type BackendId, type ReasoningEffort } from "./lib/stores";
   import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
   import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill, type Workflow, type WorkflowGate, type WorkflowSchedule } from "./lib/api";
   import { mcpApi, type McpServer } from "./lib/features/mcp";
@@ -118,6 +118,7 @@
   import TourOverlay from "./lib/components/TourOverlay.svelte";
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
+  import QuestionPrompt from "./lib/components/QuestionPrompt.svelte";
   import CloudExecutionStatus from "./lib/components/CloudExecutionStatus.svelte";
   import WorkflowMonitorView from "./lib/features/workflows/components/WorkflowMonitorView.svelte";
   import ContextWarning from "./lib/components/ContextWarning.svelte";
@@ -2149,6 +2150,11 @@ Please walk me through the setup step by step. When I have the credentials, save
     if (s.backend) {
       sessionBackendStore.set(s.id, s.backend as BackendId);
     }
+
+    // Restore persisted reasoning effort (session-specific choice from DB)
+    if (s.reasoning_effort && !$sessionReasoningEffort.has(s.id)) {
+      sessionReasoningEffort.set(s.id, s.reasoning_effort as ReasoningEffort);
+    }
     // If session doesn't have a backend, check the map directly to see if we have a cached value
     // (The get() method returns "claude" as default, which could be wrong for a codex session)
 
@@ -2180,6 +2186,9 @@ Please walk me through the setup step by step. When I have the credentials, save
         // Always update backend from fresh session data (trust DB over cache)
         if (freshSession.backend) {
           sessionBackendStore.set(s.id, freshSession.backend as BackendId);
+        }
+        if (freshSession.reasoning_effort && !$sessionReasoningEffort.has(s.id)) {
+          sessionReasoningEffort.set(s.id, freshSession.reasoning_effort as ReasoningEffort);
         }
       }
     } catch {}
@@ -2980,8 +2989,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       agentId,
       backend,
       reasoningEffort: effort,
-      // Plan mode - Claude plans before acting
-      planMode: get(planMode),
       // Cloud execution options
       executionMode: execSettings.mode,
       cloudRepoUrl: execSettings.repoUrl,
@@ -4292,7 +4299,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                 }}
                 onPermissionApprove={handlePermissionApprove}
                 onPermissionDeny={handlePermissionDeny}
-                onQuestionAnswer={handleQuestionAnswer}
                 emptyState="continue"
                 onOpenProcesses={() => { showTerminal = true; rightPanelMode = 'processes'; }}
                 onSuggestionClick={(prompt) => { inputText = prompt; }}
@@ -4384,6 +4390,14 @@ Please walk me through the setup step by step. When I have the credentials, save
                 </div>
                 {/if}
 
+                <!-- Agent question replaces the composer (Claude Code style) -->
+                {#if pendingQuestion}
+                <QuestionPrompt
+                    requestId={pendingQuestion.requestId}
+                    questions={pendingQuestion.questions}
+                    onAnswer={handleQuestionAnswer}
+                />
+                {:else}
                 <ChatInput
                     bind:value={inputText}
                     disabled={!$isConnected}
@@ -4450,10 +4464,12 @@ Please walk me through the setup step by step. When I have the credentials, save
                     onReasoningEffortChange={(effort) => {
                       if ($session.sessionId) {
                         sessionReasoningEffort.set($session.sessionId, effort);
+                        api.sessions.update($session.sessionId, { reasoningEffort: effort }).catch(() => {});
                       }
                       defaultReasoningEffort.set(effort);
                     }}
                 />
+                {/if}
 
                 <div class="text-center mt-2">
                     <span class="text-[10px] text-gray-400">navi can make mistakes. Please verify important information.</span>

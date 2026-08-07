@@ -211,7 +211,7 @@ async function executeHook(
 /**
  * Get all enabled plugins for a project
  */
-function getEnabledPlugins(projectPath: string): LoadedPlugin[] {
+export function getEnabledPlugins(projectPath: string): LoadedPlugin[] {
   const projectSettings = readSettings(getProjectSettingsPath(projectPath));
   const userSettings = readSettings(getUserSettingsPath());
 

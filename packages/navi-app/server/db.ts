@@ -123,6 +123,12 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN favorite INTEGER DEFAULT 0");
   } catch {}
   try {
+    db.run("ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN pending_fork INTEGER DEFAULT 0");
+  } catch {}
+  try {
     db.run("CREATE INDEX IF NOT EXISTS idx_sessions_favorite ON sessions(favorite)");
   } catch {}
   try {
@@ -932,6 +938,8 @@ export interface Session {
   backend_session_id: string | null;
   backend_session_metadata: string | null;
   model: string | null;
+  reasoning_effort: string | null;
+  pending_fork?: number;
   total_cost_usd: number;
   total_turns: number;
   input_tokens: number;
@@ -1892,6 +1900,8 @@ export const sessions = {
     run("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", [title, updated_at, id]),
   updateModel: (model: string, id: string) =>
     run("UPDATE sessions SET model = ? WHERE id = ?", [model, id]),
+  updateReasoningEffort: (effort: string | null, id: string) =>
+    run("UPDATE sessions SET reasoning_effort = ? WHERE id = ?", [effort, id]),
   updateBackend: (backend: string, id: string) =>
     run("UPDATE sessions SET backend = ? WHERE id = ?", [backend, id]),
   updateBackendSessionState: (
@@ -1912,8 +1922,12 @@ export const sessions = {
   updateConversationPhase: (phase: string, id: string) =>
     run("UPDATE sessions SET conversation_phase = ? WHERE id = ?", [phase, id]),
   updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, inputTokens: number, outputTokens: number, updated_at: number, id: string) =>
-    run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
+    run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, pending_fork = 0, updated_at = ? WHERE id = ?",
         [claude_session_id, model, cost, turns, inputTokens, outputTokens, updated_at, id]),
+  // Native fork: inherit the source session's SDK session id; the first query
+  // passes forkSession:true so the SDK forks instead of continuing it
+  adoptClaudeSessionForFork: (claude_session_id: string, id: string) =>
+    run("UPDATE sessions SET claude_session_id = ?, pending_fork = 1 WHERE id = ?", [claude_session_id, id]),
   delete: (id: string) => run("DELETE FROM sessions WHERE id = ?", [id]),
   togglePin: (id: string, pinned: boolean) =>
     run("UPDATE sessions SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
@@ -2516,7 +2530,7 @@ export interface PermissionSettings {
 }
 
 export const DEFAULT_TOOLS = [
-  "Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Task", "TaskOutput"
+  "Read", "Write", "Edit", "Bash", "BashOutput", "KillShell", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Task", "TaskOutput"
 ];
 
 export const DANGEROUS_TOOLS = ["Bash", "Write", "Edit"];
@@ -2533,7 +2547,15 @@ export const globalSettings = {
     const raw = globalSettings.get("permissions");
     if (raw) {
       try {
-        return JSON.parse(raw);
+        const parsed: PermissionSettings = JSON.parse(raw);
+        // Background-shell companions ride along with Bash for settings
+        // saved before these tools existed
+        if (Array.isArray(parsed.allowedTools) && parsed.allowedTools.includes("Bash")) {
+          for (const tool of ["BashOutput", "KillShell"]) {
+            if (!parsed.allowedTools.includes(tool)) parsed.allowedTools.push(tool);
+          }
+        }
+        return parsed;
       } catch {}
     }
     return {

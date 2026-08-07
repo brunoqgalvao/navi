@@ -595,8 +595,8 @@ export class ClaudeClient {
     backend?: "claude" | "codex" | "gemini";
     // Reasoning effort (low, medium, high, xhigh)
     reasoningEffort?: string;
-    // Plan mode - Claude plans before acting
-    planMode?: boolean;
+    // Optional cap on thinking tokens (Claude backend)
+    maxThinkingTokens?: number;
     // Cloud execution options
     executionMode?: "local" | "cloud";
     cloudRepoUrl?: string;

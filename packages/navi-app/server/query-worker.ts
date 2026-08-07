@@ -10,6 +10,7 @@ import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions, getNaviAuthOverridesFr
 import { getAgentDefinition, inferAgentTypeFromRole } from "./agent-types";
 import { agentLoader, type ResolvedAgent, type AgentBundle } from "./services/agent-loader";
 import { buildSystemPromptAppend } from "./services/system-prompt-append";
+import { buildSdkHooks } from "./services/sdk-hook-bridge";
 import { getSdkUserMessageFlags } from "../shared/sdk-user-message";
 
 // Query workers run in separate Bun processes while the main server owns the
@@ -322,7 +323,11 @@ interface WorkerInput {
   prompt: string;
   cwd: string;
   resume?: string;
+  // Fork the resumed session into a new SDK session instead of continuing it
+  forkSession?: boolean;
   model?: string;
+  // Maximum thinking tokens for the SDK (optional; adaptive when unset)
+  maxThinkingTokens?: number;
   allowedTools?: string[];
   sessionId?: string;
   // Selected agent (e.g., "coder", "img3d") - if set, uses agent's system prompt
@@ -1611,7 +1616,7 @@ function isImageTooLargeError(error: unknown): boolean {
 }
 
 async function runQuery(input: WorkerInput): Promise<boolean> {
-  const { prompt, cwd, resume, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs } = input;
+  const { prompt, cwd, resume, forkSession, model, maxThinkingTokens, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs } = input;
   currentSessionIdForNaviContext = sessionId;
 
   // Debug: Log multiSession state
@@ -1863,6 +1868,8 @@ Example clarifying questions:
       "Write",
       "Edit",
       "Bash",
+      "BashOutput",
+      "KillShell",
       "Glob",
       "Grep",
       "WebFetch",
@@ -1997,12 +2004,22 @@ Example clarifying questions:
       sawAssistantOutput: boolean;
     };
 
+    // Navi hooks (.claude/hooks/*.md) run natively inside the SDK agent loop:
+    // PreToolUse can block tools (exit code 2), SessionStart/PreQuery inject context
+    const sdkHooks = buildSdkHooks(cwd);
+    if (sdkHooks) {
+      console.error(`[Worker] Native SDK hooks wired for events: ${Object.keys(sdkHooks).join(", ")}`);
+    }
+
     const executePrompt = async (promptToRun: string): Promise<QueryAttemptResult> => {
       const q = query({
         prompt: promptToRun,
         options: {
           cwd,
           resume,
+          ...(sdkHooks ? { hooks: sdkHooks as any } : {}),
+          ...(resume && forkSession ? { forkSession: true } : {}),
+          ...(typeof maxThinkingTokens === "number" ? { maxThinkingTokens } : {}),
           model: finalModel,
           tools: allTools,
           allowedTools: permissionSettings?.autoAcceptAll ? allTools : autoAllowedTools,

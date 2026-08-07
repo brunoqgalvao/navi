@@ -164,6 +164,9 @@ export async function handleSessionRoutes(
       if (body.model !== undefined) {
         sessions.updateModel(body.model, id);
       }
+      if (body.reasoningEffort !== undefined) {
+        sessions.updateReasoningEffort(body.reasoningEffort || null, id);
+      }
       if (body.backend !== undefined) {
         sessions.updateBackend(body.backend, id);
       }
@@ -361,8 +364,17 @@ export async function handleSessionRoutes(
 
     let newClaudeSessionId: string | null = null;
 
-    // Copy the Claude SDK session file if the source session has one
-    if (sourceSession.claude_session_id) {
+    // Native SDK fork: when forking from the tip of the conversation, no
+    // transcript surgery is needed — inherit the source claude_session_id and
+    // let the first query pass forkSession:true so the SDK forks it natively.
+    const lastMessageId = allMessages.length > 0 ? allMessages[allMessages.length - 1].id : null;
+    const isTipFork = !fromMessageId || fromMessageId === lastMessageId;
+
+    if (sourceSession.claude_session_id && isTipFork) {
+      sessions.adoptClaudeSessionForFork(sourceSession.claude_session_id, newSessionId);
+      newClaudeSessionId = sourceSession.claude_session_id;
+      console.log(`[Fork] Native SDK fork for ${newSessionId} (inherits ${sourceSession.claude_session_id}, forkSession on first query)`);
+    } else if (sourceSession.claude_session_id) {
       try {
         const { homedir } = await import("os");
         const { join } = await import("path");

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, type ModelInfo, type ReasoningEffort, planMode, loopModeEnabled, chatInputValue } from "../stores";
+  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, type ModelInfo, type ReasoningEffort, loopModeEnabled, chatInputValue } from "../stores";
   import { agents, type Agent } from "../stores/agents";
   import FileAttachment from "./FileAttachment.svelte";
   import ReferenceChip from "./ReferenceChip.svelte";
@@ -1053,22 +1053,12 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="relative group rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.6)] border transition-all duration-200 {isShellCommand(value) ? 'bg-[#1a1b26] border-[#3d59a1] focus-within:border-[#7aa2f7] shadow-[0_8px_30px_rgb(0,0,0,0.3)]' : $planMode ? 'bg-white dark:bg-gray-800 border-blue-400 dark:border-blue-500 shadow-[0_0_0_1px_rgba(59,130,246,0.1)]' : 'bg-white dark:bg-gray-800 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.8)]'} {isDraggingOver ? 'border-blue-400 bg-blue-50/30 dark:border-blue-500 dark:bg-blue-900/30' : isShellCommand(value) || $planMode ? '' : 'border-gray-200 dark:border-gray-700 focus-within:border-gray-300 dark:focus-within:border-gray-600'}"
+  class="relative group rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.6)] border transition-all duration-200 {isShellCommand(value) ? 'bg-[#1a1b26] border-[#3d59a1] focus-within:border-[#7aa2f7] shadow-[0_8px_30px_rgb(0,0,0,0.3)]' : 'bg-white dark:bg-gray-800 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.8)]'} {isDraggingOver ? 'border-blue-400 bg-blue-50/30 dark:border-blue-500 dark:bg-blue-900/30' : isShellCommand(value) ? '' : 'border-gray-200 dark:border-gray-700 focus-within:border-gray-300 dark:focus-within:border-gray-600'}"
   ondragenter={handleDragEnter}
   ondragleave={handleDragLeave}
   ondragover={handleDragOver}
   ondrop={handleDrop}
 >
-  <!-- Plan Mode ribbon -->
-  {#if $planMode && !isShellCommand(value)}
-    <div class="flex items-center justify-center gap-2 py-1.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-[11px] font-medium tracking-wide rounded-t-[11px]">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
-      </svg>
-      <span>PLAN MODE</span>
-    </div>
-  {/if}
-
   {#if isDraggingOver}
     <div class="absolute inset-0 flex items-center justify-center bg-blue-50/80 dark:bg-blue-900/80 rounded-xl z-10 pointer-events-none">
       <div class="flex items-center gap-2 text-blue-600 dark:text-blue-400">
@@ -1180,7 +1170,7 @@
       onpaste={handlePaste}
       onscroll={syncScroll}
       use:disableAutocorrect
-      placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : ($planMode ? `Describe what you want to build... ${backendMeta[backend].label} will plan first` : `Message ${backendMeta[backend].label}... (@ files, @terminal, @chat, ! shell)`)}
+      placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : `Message ${backendMeta[backend].label}... (@ files, @terminal, @chat, ! shell)`}
       {disabled}
       spellcheck="false"
       autocomplete="off"
@@ -1535,18 +1525,6 @@
           onBranchChange={onCloudBranchChange}
         />
       {/if}
-
-      <!-- Plan Mode toggle -->
-      <Tooltip text={$planMode ? 'Plan Mode: ON' : 'Plan Mode'} position="top">
-        <button
-          onclick={() => planMode.toggle()}
-          class="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 {$planMode ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-900/50' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
-          </svg>
-        </button>
-      </Tooltip>
 
       <!-- Loop/Until Done toggle (experimental) -->
       {#if $loopModeEnabled}
