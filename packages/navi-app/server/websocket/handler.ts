@@ -2505,6 +2505,16 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
 
   const mcpProjectPath = project?.path || workingDirectory;
 
+  // Queries that omit a model (agent children, workflows, reconnected clients)
+  // fall back to the session's persisted selection instead of the backend default.
+  const effectiveModel = model || session?.model || undefined;
+  // Effective effort: client value wins, else the session's persisted value.
+  // Persist client-provided effort so it survives restarts.
+  const effectiveEffort = reasoningEffort || session?.reasoning_effort || undefined;
+  if (sessionId && reasoningEffort && reasoningEffort !== session?.reasoning_effort) {
+    sessions.updateReasoningEffort(reasoningEffort, sessionId);
+  }
+
   const inputJson = JSON.stringify({
     prompt: effectivePrompt,
     cwd: workingDirectory,
@@ -2537,13 +2547,6 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
   const workerEnv = { ...process.env };
   workerEnv.NAVI_DB_READONLY = "1";
   clearClaudeAuthEnv(workerEnv);
-
-  // Effective effort: client value wins, else the session's persisted value.
-  // Persist client-provided effort so it survives restarts.
-  const effectiveEffort = reasoningEffort || session?.reasoning_effort || undefined;
-  if (sessionId && reasoningEffort && reasoningEffort !== session?.reasoning_effort) {
-    sessions.updateReasoningEffort(reasoningEffort, sessionId);
-  }
 
   // The Claude Code CLI reads CLAUDE_CODE_EFFORT_LEVEL (low | medium | high)
   const claudeEffort = normalizeClaudeEffortLevel(effectiveEffort);
