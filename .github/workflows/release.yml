@@ -9,8 +9,6 @@ env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
   SERVICE_NAME: navi-landing
-  # TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-  # need to be set in GitHub Secrets for updater signing to work
 
 jobs:
   # Get version from package.json. Auto-bumps the patch if the version was
@@ -59,7 +57,9 @@ jobs:
             echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
           fi
 
-  # Build CLI tarball (lightweight, no git/tauri needed)
+  # Build CLI tarball — the only distributable. Browser OTA for git installs
+  # updates via git pull (server/routes/update.ts); tarball installs update
+  # via this asset (bin/navi.ts `navi update` and /api/update fallback).
   build-cli:
     needs: [get-version]
     runs-on: ubuntu-latest
@@ -78,7 +78,6 @@ jobs:
           cp -r packages/navi-app "$STAGING/navi-app"
 
           # Remove stuff users don't need
-          rm -rf "$STAGING/navi-app/src-tauri"
           rm -rf "$STAGING/navi-app/node_modules"
           rm -rf "$STAGING/navi-app/build"
           rm -rf "$STAGING/navi-app/.tmp*"
@@ -95,188 +94,27 @@ jobs:
           name: navi-cli
           path: navi-cli-*.tar.gz
 
-  # Build Tauri app for all platforms
-  build-tauri:
-    needs: [get-version]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Only macOS ARM64 for now - other platforms need navi-server binaries
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            artifact_name: macos-arm64
-          # TODO: Add these when we have cross-platform navi-server binaries
-          # - platform: macos-15
-          #   target: x86_64-apple-darwin
-          #   artifact_name: macos-x64
-          # - platform: ubuntu-22.04
-          #   target: x86_64-unknown-linux-gnu
-          #   artifact_name: linux-x64
-          # - platform: windows-latest
-          #   target: x86_64-pc-windows-msvc
-          #   artifact_name: windows-x64
-
-    runs-on: ${{ matrix.platform }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Pull latest changes
-        run: git pull origin main
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Install dependencies
-        working-directory: packages/navi-app
-        run: bun install
-
-      - name: Copy bun binary for Tauri
-        working-directory: packages/navi-app/src-tauri
-        shell: bash
-        run: |
-          # Create binaries directory if it doesn't exist
-          mkdir -p binaries
-
-          # Get the bun binary path and copy it with the correct target name
-          BUN_PATH=$(which bun)
-          TARGET="${{ matrix.target }}"
-
-          # Copy bun with the target-specific name
-          cp "$BUN_PATH" "binaries/bun-$TARGET"
-          chmod +x "binaries/bun-$TARGET"
-
-          echo "Copied bun to binaries/bun-$TARGET"
-          ls -la binaries/
-
-      - name: Prepare Tauri resources
-        working-directory: packages/navi-app
-        shell: bash
-        run: |
-          TARGET="${{ matrix.target }}"
-
-          # Copy claude-agent-sdk from node_modules to resources
-          mkdir -p src-tauri/resources/claude-agent-sdk
-          cp -r node_modules/@anthropic-ai/claude-agent-sdk/* src-tauri/resources/claude-agent-sdk/
-          echo "✓ Copied claude-agent-sdk to resources"
-
-          # Build query worker
-          bun build ./server/query-worker.ts --outfile src-tauri/resources/query-worker.js --target bun
-          echo "✓ Built query-worker.js"
-
-          # Build navi-server sidecar
-          case "$TARGET" in
-            aarch64-apple-darwin)
-              BUN_TARGET="bun-darwin-arm64"
-              ;;
-            x86_64-apple-darwin)
-              BUN_TARGET="bun-darwin-x64"
-              ;;
-            x86_64-unknown-linux-gnu)
-              BUN_TARGET="bun-linux-x64"
-              ;;
-            x86_64-pc-windows-msvc)
-              BUN_TARGET="bun-windows-x64"
-              ;;
-          esac
-          bun build ./server/index.ts --compile --outfile "src-tauri/binaries/navi-server-$TARGET" --target "$BUN_TARGET"
-          echo "✓ Built navi-server-$TARGET"
-
-          echo ""
-          echo "=== Binaries ==="
-          ls -la src-tauri/binaries/
-          echo ""
-          echo "=== Resources ==="
-          ls -la src-tauri/resources/
-
-      - name: Build Tauri
-        working-directory: packages/navi-app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          echo "Building Tauri app with updater signing..."
-          bun run tauri build --target ${{ matrix.target }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: navi-${{ matrix.artifact_name }}
-          path: |
-            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
-            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.tar.gz
-            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.tar.gz.sig
-            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
-            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage.sig
-            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
-            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi.sig
-            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
-            packages/navi-app/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe.sig
-
-  # Create GitHub Release
+  # Create GitHub Release with the CLI tarball
   create-release:
-    needs: [get-version, build-cli, build-tauri]
-    if: always() && needs.build-cli.result == 'success'
+    needs: [get-version, build-cli]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      release_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Display structure of downloaded files
-        run: find artifacts -type f
-
       - name: Prepare release assets
-        id: prepare
         run: |
           mkdir -p release-assets
-
-          VERSION="${{ needs.get-version.outputs.version }}"
-
-          # CLI tarball
           find artifacts -name "navi-cli-*.tar.gz" -exec cp {} release-assets/ \;
-
-          # Find and copy all release files with proper names
-          find artifacts -name "*.dmg" -exec cp {} release-assets/ \;
-          find artifacts -name "*.tar.gz" -exec cp {} release-assets/ \;
-          find artifacts -name "*.tar.gz.sig" -exec cp {} release-assets/ \;
-          find artifacts -name "*.AppImage" -exec cp {} release-assets/ \;
-          find artifacts -name "*.AppImage.sig" -exec cp {} release-assets/ \;
-          find artifacts -name "*.msi" -exec cp {} release-assets/ \;
-          find artifacts -name "*.msi.sig" -exec cp {} release-assets/ \;
-          find artifacts -name "*-setup.exe" -exec cp {} release-assets/ \;
-          find artifacts -name "*-setup.exe.sig" -exec cp {} release-assets/ \;
-
           ls -la release-assets/
 
       - name: Create GitHub Release
-        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.get-version.outputs.version }}
@@ -288,19 +126,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Deploy landing page and publish update manifest
+  # Deploy landing page
   deploy:
-    needs: [get-version, build-cli, build-tauri, create-release]
+    needs: [create-release]
     if: always() && needs.create-release.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
 
       - name: Auth to Google Cloud
         uses: google-github-actions/auth@v2
@@ -309,73 +142,6 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-
-      - name: Organize downloads for landing page
-        run: |
-          mkdir -p packages/landing-page/public/downloads
-          find artifacts -type f \( -name "*.dmg" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" \) -exec cp {} packages/landing-page/public/downloads/ \;
-          ls -la packages/landing-page/public/downloads/
-
-      - name: Upload releases to GCS
-        run: |
-          echo "Uploading release artifacts to GCS bucket..."
-          for file in packages/landing-page/public/downloads/*; do
-            if [ -f "$file" ]; then
-              gsutil cp "$file" gs://navi-releases/
-              echo "Uploaded: $(basename $file)"
-            fi
-          done
-          echo "GCS uploads complete. Files available at https://storage.googleapis.com/navi-releases/"
-
-      - name: Generate update manifest
-        id: manifest
-        run: |
-          VERSION="${{ needs.get-version.outputs.version }}"
-          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          BASE_URL="https://github.com/${{ github.repository }}/releases/download/v$VERSION"
-
-          # Initialize platforms JSON
-          PLATFORMS="{}"
-
-          # Check for macOS ARM64 signature
-          MACOS_ARM_SIG=$(find artifacts -path "*aarch64*" -name "*.tar.gz.sig" -exec cat {} \; 2>/dev/null || echo "")
-          if [ -n "$MACOS_ARM_SIG" ]; then
-            PLATFORMS=$(echo "$PLATFORMS" | jq --arg url "$BASE_URL/Navi.app.tar.gz" --arg sig "$MACOS_ARM_SIG" '. + {"darwin-aarch64": {"url": $url, "signature": $sig}}')
-          fi
-
-          # Check for macOS x64 signature
-          MACOS_X64_SIG=$(find artifacts -path "*x86_64-apple*" -name "*.tar.gz.sig" -exec cat {} \; 2>/dev/null || echo "")
-          if [ -n "$MACOS_X64_SIG" ]; then
-            PLATFORMS=$(echo "$PLATFORMS" | jq --arg url "$BASE_URL/Navi-x86_64.app.tar.gz" --arg sig "$MACOS_X64_SIG" '. + {"darwin-x86_64": {"url": $url, "signature": $sig}}')
-          fi
-
-          # Check for Windows signature
-          WINDOWS_SIG=$(find artifacts -name "*-setup.exe.sig" -exec cat {} \; 2>/dev/null || echo "")
-          if [ -n "$WINDOWS_SIG" ]; then
-            PLATFORMS=$(echo "$PLATFORMS" | jq --arg url "$BASE_URL/Navi_${VERSION}_x64-setup.exe" --arg sig "$WINDOWS_SIG" '. + {"windows-x86_64": {"url": $url, "signature": $sig}}')
-          fi
-
-          # Check for Linux signature
-          LINUX_SIG=$(find artifacts -name "*.AppImage.sig" -exec cat {} \; 2>/dev/null || echo "")
-          if [ -n "$LINUX_SIG" ]; then
-            PLATFORMS=$(echo "$PLATFORMS" | jq --arg url "$BASE_URL/Navi_${VERSION}_amd64.AppImage" --arg sig "$LINUX_SIG" '. + {"linux-x86_64": {"url": $url, "signature": $sig}}')
-          fi
-
-          # Create the manifest
-          MANIFEST=$(jq -n \
-            --arg version "$VERSION" \
-            --arg notes "Release v$VERSION" \
-            --arg pub_date "$PUB_DATE" \
-            --argjson platforms "$PLATFORMS" \
-            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}')
-
-          echo "$MANIFEST" > update-manifest.json
-          cat update-manifest.json
-
-          # Save for later step
-          echo "manifest<<EOF" >> $GITHUB_OUTPUT
-          echo "$MANIFEST" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
@@ -412,29 +178,3 @@ jobs:
             --cpu 1 \
             --min-instances 0 \
             --max-instances 10
-
-      - name: Publish update manifest
-        run: |
-          API_URL="https://navi-landing-639638599480.us-central1.run.app/api/releases"
-
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL" \
-            -H "Authorization: Bearer ${{ secrets.NAVI_ADMIN_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d @update-manifest.json)
-
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-
-          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 201 ]; then
-            echo "Successfully published update manifest"
-            echo "Response: $BODY"
-          else
-            echo "Warning: Failed to publish update manifest: HTTP $HTTP_CODE"
-            echo "Response: $BODY"
-            # Don't fail the job, landing page is already deployed
-          fi
-
-      - name: Verify update endpoint
-        run: |
-          echo "Verifying update endpoint..."
-          curl -s "https://navi-landing-639638599480.us-central1.run.app/api/updates/latest.json" | jq .

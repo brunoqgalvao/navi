@@ -6,7 +6,6 @@
     "dev": "bun run --cwd packages/navi-app dev:all",
     "dev:app": "bun run --cwd packages/navi-app dev:all",
     "dev:nowatch": "bun run --cwd packages/navi-app dev:nowatch",
-    "dev:tauri": "bun run --cwd packages/navi-app tauri:dev",
     "dev:landing": "bun run --cwd packages/landing-page dev",
     "kill": "bash scripts/kill-ports.sh",
     "build": "bun run --cwd packages/navi-app build && bun run --cwd packages/landing-page build",

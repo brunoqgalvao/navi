@@ -1,7 +1,8 @@
 <script lang="ts">
   import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project } from "../api";
   import { onMount } from "svelte";
-  import { advancedMode, debugMode, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod, updateStore, updateAvailable, isCheckingUpdate, currentAppVersion, updateError, isDownloadingUpdate, updateDownloadProgress } from "../stores";
+  import { getUpdateStatus, applyUpdate, type UpdateStatus } from "../features/update";
+  import { advancedMode, debugMode, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod } from "../stores";
   import SkillsPanel from "./SkillsPanel.svelte";
   import MultiSelect from "./MultiSelect.svelte";
   import CommandSettings from "../features/commands/components/CommandSettings.svelte";
@@ -110,7 +111,9 @@
   let claudeMdLoaded = $state(false);
 
   // Update check state
-  let updateCheckResult = $state<"up-to-date" | "available" | null>(null);
+  let updateStatus = $state<UpdateStatus | null>(null);
+  let checkingUpdates = $state(false);
+  let applyingUpdate = $state(false);
   let updateCheckError = $state<string | null>(null);
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
@@ -127,8 +130,7 @@
   ];
 
   onMount(() => {
-    // Ensure we have the current app version
-    updateStore.getCurrentVersion();
+    getUpdateStatus().then((st) => (updateStatus = st)).catch(() => {});
   });
 
   $effect(() => {
@@ -437,15 +439,32 @@
   }
 
   async function handleCheckForUpdates() {
-    updateCheckResult = null;
     updateCheckError = null;
-    const result = await updateStore.checkForUpdates();
-    if (result.error) {
-      updateCheckError = result.error;
-    } else if (result.hasUpdate) {
-      updateCheckResult = "available";
-    } else {
-      updateCheckResult = "up-to-date";
+    checkingUpdates = true;
+    try {
+      updateStatus = await getUpdateStatus(true);
+      if (updateStatus.error) updateCheckError = updateStatus.error;
+    } catch (e) {
+      updateCheckError = e instanceof Error ? e.message : String(e);
+    } finally {
+      checkingUpdates = false;
+    }
+  }
+
+  async function handleApplyUpdate() {
+    updateCheckError = null;
+    applyingUpdate = true;
+    try {
+      const res = await applyUpdate();
+      if (!res.restarting) {
+        updateCheckError = res.message || "Updated. Restart Navi manually to finish.";
+        applyingUpdate = false;
+        handleCheckForUpdates();
+      }
+      // If restarting, the server drops and the app reconnects on the new version.
+    } catch (e) {
+      updateCheckError = e instanceof Error ? e.message : String(e);
+      applyingUpdate = false;
     }
   }
 </script>
@@ -1032,93 +1051,63 @@
               </div>
 
               <div class="space-y-4">
-                <!-- Check for Updates -->
+                <!-- Software Updates (git-based OTA) -->
                 <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                   <div class="flex items-center justify-between">
                     <div>
                       <h5 class="font-medium text-gray-900 dark:text-gray-100">Software Updates</h5>
                       <p class="text-sm text-gray-500 dark:text-gray-400">
-                        {#if $currentAppVersion}
-                          Current version: v{$currentAppVersion}
+                        {#if updateStatus}
+                          v{updateStatus.version} · {updateStatus.branch}@{updateStatus.commit}
                         {:else}
                           Check for new versions of Navi
                         {/if}
                       </p>
                     </div>
-                    <div class="flex items-center gap-3">
-                      {#if $updateAvailable}
-                        <span class="text-xs font-medium text-blue-700 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2.5 py-1 rounded-full">
-                          v{$updateAvailable.version} available
-                        </span>
-                      {:else if updateCheckResult === "up-to-date"}
-                        <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">
-                          Up to date
-                        </span>
-                      {/if}
-                    </div>
+                    {#if updateStatus && updateStatus.behind > 0}
+                      <span class="text-xs font-medium text-blue-700 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2.5 py-1 rounded-full">
+                        {updateStatus.behind} commit{updateStatus.behind === 1 ? "" : "s"} behind
+                      </span>
+                    {:else if updateStatus && updateStatus.behind === 0 && !updateStatus.error}
+                      <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">
+                        Up to date
+                      </span>
+                    {/if}
                   </div>
 
                   <div class="mt-4 space-y-3">
-                    {#if $isDownloadingUpdate}
-                      <div class="flex items-center gap-3">
-                        <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                          <div
-                            class="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
-                            style="width: {$updateDownloadProgress}%"
-                          ></div>
-                        </div>
-                        <span class="text-sm font-medium text-gray-600 dark:text-gray-300">{$updateDownloadProgress}%</span>
-                      </div>
-                      <p class="text-sm text-gray-500 dark:text-gray-400">Downloading update... App will restart automatically.</p>
-                    {:else if $updateAvailable}
-                      <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-3">
+                      {#if updateStatus && updateStatus.behind > 0}
                         <button
-                          onclick={() => updateStore.downloadAndInstall()}
-                          class="text-sm font-medium bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg px-4 py-2 hover:from-blue-600 hover:to-purple-600 transition-all"
+                          onclick={handleApplyUpdate}
+                          disabled={applyingUpdate}
+                          class="text-sm font-medium bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg px-4 py-2 hover:from-blue-600 hover:to-purple-600 transition-all disabled:opacity-50"
                         >
-                          Install v{$updateAvailable.version} & Restart
+                          {applyingUpdate ? "Updating… app will restart" : "Update & Restart"}
                         </button>
-                        <button
-                          onclick={handleCheckForUpdates}
-                          disabled={$isCheckingUpdate}
-                          class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors disabled:opacity-50"
-                        >
-                          {$isCheckingUpdate ? "Checking..." : "Check Again"}
-                        </button>
-                      </div>
-                      {#if $updateAvailable.notes && $updateAvailable.notes !== "No release notes available"}
-                        <div class="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 mt-2">
-                          <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">What's New</p>
-                          <p class="text-sm text-gray-700 dark:text-gray-300">{$updateAvailable.notes}</p>
-                        </div>
                       {/if}
-                    {:else}
                       <button
                         onclick={handleCheckForUpdates}
-                        disabled={$isCheckingUpdate}
-                        class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors disabled:opacity-50 flex items-center gap-2"
+                        disabled={checkingUpdates || applyingUpdate}
+                        class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors disabled:opacity-50"
                       >
-                        {#if $isCheckingUpdate}
-                          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Checking...
-                        {:else}
-                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                          Check for Updates
-                        {/if}
+                        {checkingUpdates ? "Checking..." : "Check for Updates"}
                       </button>
+                    </div>
+
+                    {#if updateStatus && updateStatus.behind > 0 && updateStatus.commits.length > 0}
+                      <div class="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
+                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Incoming</p>
+                        <ul class="space-y-0.5">
+                          {#each updateStatus.commits.slice(0, 8) as c}
+                            <li class="text-sm text-gray-700 dark:text-gray-300"><span class="font-mono text-xs text-gray-400">{c.hash}</span> {c.subject}</li>
+                          {/each}
+                        </ul>
+                      </div>
                     {/if}
 
                     {#if updateCheckError}
                       <p class="text-sm text-red-600 dark:text-red-400">{updateCheckError}</p>
-                    {/if}
-
-                    {#if $updateError}
-                      <p class="text-sm text-red-600 dark:text-red-400">{$updateError}</p>
                     {/if}
                   </div>
                 </div>

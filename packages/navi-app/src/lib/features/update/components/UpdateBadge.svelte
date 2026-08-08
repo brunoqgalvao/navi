@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { getUpdateStatus, applyUpdate, type UpdateStatus } from "../api";
   import { showError } from "$lib/errorHandler";
+  import { api } from "$lib/api";
 
   let status = $state<UpdateStatus | null>(null);
   let open = $state(false);
@@ -25,6 +26,16 @@
   });
 
   async function handleUpdate() {
+    // Updating restarts the whole service, which kills running agent sessions
+    try {
+      const active = await api.sessions.active();
+      const running = active.length;
+      if (running > 0 && !confirm(`${running} session${running === 1 ? " is" : "s are"} still running — updating will restart Navi and stop ${running === 1 ? "it" : "them"}. Continue?`)) {
+        return;
+      }
+    } catch {
+      // If we can't check, proceed — the user asked for the update
+    }
     updating = true;
     try {
       const res = await applyUpdate();

@@ -117,7 +117,6 @@
   import SessionDebug from "./lib/components/SessionDebug.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import TitleSuggestion from "./lib/components/TitleSuggestion.svelte";
-  import UpdateChecker from "./lib/components/UpdateChecker.svelte";
   import ConnectivityBanner from "./lib/components/ConnectivityBanner.svelte";
   import ResourceMonitor from "./lib/components/ResourceMonitor.svelte";
   import ProjectEmptyState from "./lib/components/ProjectEmptyState.svelte";
@@ -4619,7 +4618,6 @@ Please walk me through the setup step by step. When I have the credentials, save
 {/if}
 
 <NotificationToast />
-<UpdateChecker />
 {#if serverReady && !serverError}
   <ConnectivityBanner />
 {/if}

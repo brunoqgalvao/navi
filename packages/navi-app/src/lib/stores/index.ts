@@ -133,20 +133,6 @@ export {
 // Error handling (re-export for convenience)
 export { showError, showWarning, showSuccess, showInfo, pendingErrorReport } from "../errorHandler";
 
-// Update store
-export {
-  updateStore,
-  updateAvailable,
-  isCheckingUpdate,
-  isDownloadingUpdate,
-  updateDownloadProgress,
-  updateError,
-  showUpdateBanner,
-  currentAppVersion,
-  type UpdateInfo,
-  type UpdateState,
-} from "./update";
-
 // Workspace stores (centralized state for action modules)
 export {
   sidebarProjects,
