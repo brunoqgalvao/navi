@@ -70,6 +70,14 @@ export async function handleFolderRoutes(url: URL, method: string, req: Request)
     return json(workspaceFolders.get(id));
   }
 
+  const folderArchiveMatch = url.pathname.match(/^\/api\/folders\/([^/]+)\/archive$/);
+  if (folderArchiveMatch && method === "POST") {
+    const id = folderArchiveMatch[1];
+    const body = await req.json();
+    workspaceFolders.setArchived(id, !!body.archived);
+    return json(workspaceFolders.get(id));
+  }
+
   const folderPinMatch = url.pathname.match(/^\/api\/folders\/([^/]+)\/pin$/);
   if (folderPinMatch && method === "POST") {
     const id = folderPinMatch[1];

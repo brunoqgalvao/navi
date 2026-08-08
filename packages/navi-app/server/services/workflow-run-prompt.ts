@@ -60,8 +60,7 @@ export function buildWorkflowRunPrompt({
   parts.push(
     "",
     "Run the workflow now and leave a useful transcript of what you did.",
-    'If the user needs to do something for the workflow to continue, add an `inbox-item` JSON block in your final response so Navi creates a workspace inbox request.',
-    "Use inbox items for blocked auth, approvals, missing credentials, unanswered questions, or required human review."
+    "If the user needs to do something for the workflow to continue, state it clearly in your final response so it is visible in the run transcript."
   );
 
   return parts.join("\n");

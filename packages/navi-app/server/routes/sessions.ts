@@ -2,7 +2,6 @@ import { json } from "../utils/response";
 import { projects, sessions, messages, searchIndex, pendingQuestions, sessionHierarchy, sessionFolders, workflows, workflowRuns, workItems, type Message } from "../db";
 import { enableUntilDone, disableUntilDone, getUntilDoneSessions, cleanupSessionState, skipSessionWait, getActiveWaits } from "../websocket/handler";
 import { pruneClaudeSessionArtifacts } from "../services/claude-session-storage";
-import { nativePreviewService } from "../services/native-preview";
 import { sessionManager } from "../services/session-manager";
 import { pruneArchivedSessionArtifacts } from "../services/storage-maintenance";
 import { DEFAULT_CLAUDE_FAST_MODEL } from "../../shared/anthropic-models";
@@ -20,6 +19,48 @@ function extractTextFromStoredContent(content: string): string {
         .join("\n");
     }
     return "";
+  } catch {
+    return content;
+  }
+}
+
+// Recall-aware extraction: agentic sessions store most of their state in tool_use /
+// tool_result blocks, which extractTextFromStoredContent drops. For recall (inspect
+// scope=last/search/full) we render tool activity as text so recent context and
+// search are not blank in tool-heavy sessions.
+function extractRecallTextFromStoredContent(content: string): string {
+  try {
+    const parsed = JSON.parse(content);
+    if (typeof parsed === "string") {
+      return parsed;
+    }
+    if (!Array.isArray(parsed)) {
+      return "";
+    }
+    return parsed
+      .map((block: any) => {
+        if (block?.type === "text" && typeof block.text === "string") {
+          return block.text;
+        }
+        if (block?.type === "tool_use") {
+          const input = block.input ? JSON.stringify(block.input) : "";
+          return `[tool] ${block.name || "unknown"} ${input.slice(0, 300)}`.trim();
+        }
+        if (block?.type === "tool_result") {
+          const inner = Array.isArray(block.content)
+            ? block.content
+                .filter((c: any) => c?.type === "text" && typeof c.text === "string")
+                .map((c: any) => c.text)
+                .join("\n")
+            : typeof block.content === "string"
+              ? block.content
+              : "";
+          return inner ? `[tool result] ${inner.slice(0, 500)}` : "";
+        }
+        return "";
+      })
+      .filter((text: string) => text.length > 0)
+      .join("\n");
   } catch {
     return content;
   }
@@ -90,6 +131,45 @@ function buildSessionContinuationHandoff(sessionId: string): string | undefined 
     "",
     "Continue from here instead of restarting the task.",
   ].join("\n");
+}
+
+type ContextReductionMethod = "compact" | "prune" | "prune-then-compact";
+type ContextReductionReason = "threshold" | "overflow" | "manual";
+type ContextReductionNextAction = "sdk_compact" | "continue" | "none";
+
+const CONTEXT_REDUCTION_METHODS = new Set(["compact", "prune", "prune-then-compact"]);
+const CONTEXT_REDUCTION_REASONS = new Set(["threshold", "overflow", "manual"]);
+
+function normalizeContextReductionMethod(value: unknown): ContextReductionMethod {
+  return typeof value === "string" && CONTEXT_REDUCTION_METHODS.has(value)
+    ? value as ContextReductionMethod
+    : "compact";
+}
+
+function normalizeContextReductionReason(value: unknown): ContextReductionReason {
+  return typeof value === "string" && CONTEXT_REDUCTION_REASONS.has(value)
+    ? value as ContextReductionReason
+    : "manual";
+}
+
+function estimateHandoffTokens(historyContext: string | undefined): number {
+  if (!historyContext) {
+    return 0;
+  }
+  return Math.min(10000, Math.max(1000, Math.round(historyContext.length / 4)));
+}
+
+function persistContextReset(
+  sessionId: string,
+  method: ContextReductionMethod,
+  reason: ContextReductionReason
+): { historyContext?: string; estimatedInputTokens: number } {
+  const historyContext = buildSessionContinuationHandoff(sessionId);
+  const estimatedInputTokens = estimateHandoffTokens(historyContext);
+  sessions.clearBackendSessionState(sessionId);
+  sessions.setPendingContextHandoff(sessionId, historyContext ?? null, method, reason);
+  sessions.resetTokenCounts(sessionId, estimatedInputTokens, 0);
+  return { historyContext, estimatedInputTokens };
 }
 
 export function createSessionApprovedAllSet(): Set<string> {
@@ -170,6 +250,9 @@ export async function handleSessionRoutes(
       if (body.backend !== undefined) {
         sessions.updateBackend(body.backend, id);
       }
+      if (body.reasoningEffort !== undefined) {
+        sessions.updateReasoningEffort(body.reasoningEffort, id);
+      }
       if (
         body.agentId !== undefined ||
         body.workflowId !== undefined ||
@@ -193,8 +276,6 @@ export async function handleSessionRoutes(
       const workflow = workflows.getByRootSession(id);
       // Clean up server-side state (WebSocket maps, active processes, etc.) before deleting
       cleanupSessionState(id);
-      // Stop any running preview for this session
-      await nativePreviewService.stopForSession(id);
       // Clean up session manager runtime state
       sessionManager.cleanup(id);
       if (workflow) {
@@ -295,11 +376,103 @@ export async function handleSessionRoutes(
       return json({ error: "Session not found" }, 404);
     }
     // Clear backend-specific session state so the next query starts fresh.
-    sessions.clearBackendSessionState(id);
+    const reset = persistContextReset(id, "prune", "manual");
     return json({
       success: true,
       sessionReset: true,
-      historyContext: buildSessionContinuationHandoff(id),
+      historyContext: reset.historyContext,
+      estimatedInputTokens: reset.estimatedInputTokens,
+    });
+  }
+
+  const reduceContextMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/reduce-context$/);
+  if (reduceContextMatch && method === "POST") {
+    const sessionId = reduceContextMatch[1];
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return json({ error: "Session not found" }, 404);
+    }
+
+    const project = projects.get(session.project_id);
+    if (!project) {
+      return json({ error: "Project not found" }, 404);
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const requestedMethod = normalizeContextReductionMethod(body.method);
+    const reason = normalizeContextReductionReason(body.reason);
+    const effectiveMethod: ContextReductionMethod =
+      reason === "overflow" && requestedMethod === "compact"
+        ? "prune-then-compact"
+        : requestedMethod;
+
+    if (effectiveMethod === "compact" && reason !== "overflow") {
+      return json({
+        success: true,
+        method: requestedMethod,
+        effectiveMethod,
+        reason,
+        nextAction: "sdk_compact" satisfies ContextReductionNextAction,
+        sessionReset: false,
+        prunedCount: 0,
+        tokensSaved: 0,
+        prunedToolUseIds: [],
+      });
+    }
+
+    const preserveRecentCount = body.preserveRecentCount ?? 0;
+    const maxPrunedLength = body.maxPrunedLength ?? 200;
+    let foundArtifacts = false;
+    let prunedCount = 0;
+    let tokensSaved = 0;
+    let prunedToolUseIds: string[] = [];
+
+    if (session.claude_session_id) {
+      const pruneResult = await pruneClaudeSessionArtifacts({
+        claudeSessionId: session.claude_session_id,
+        candidateProjectPaths: [session.worktree_path, project.path],
+        preserveRecentCount,
+        maxPrunedLength,
+      });
+
+      foundArtifacts = pruneResult.foundArtifacts;
+      prunedCount = pruneResult.prunedCount;
+      tokensSaved = Math.round(pruneResult.charsSaved / 4);
+      prunedToolUseIds = pruneResult.prunedToolUseIds;
+    }
+
+    const shouldReset = prunedCount > 0 || reason === "overflow";
+    if (!shouldReset) {
+      return json({
+        success: false,
+        error: foundArtifacts
+          ? "No large tool outputs found to prune"
+          : "Claude session file not found",
+        method: requestedMethod,
+        effectiveMethod,
+        reason,
+        nextAction: "none" satisfies ContextReductionNextAction,
+        sessionReset: false,
+        prunedCount,
+        tokensSaved,
+        prunedToolUseIds,
+      });
+    }
+
+    const reset = persistContextReset(sessionId, effectiveMethod, reason);
+
+    return json({
+      success: true,
+      method: requestedMethod,
+      effectiveMethod,
+      reason,
+      nextAction: "continue" satisfies ContextReductionNextAction,
+      sessionReset: true,
+      prunedCount,
+      tokensSaved,
+      prunedToolUseIds,
+      historyContext: reset.historyContext,
+      estimatedInputTokens: reset.estimatedInputTokens,
     });
   }
 
@@ -552,9 +725,12 @@ export async function handleSessionRoutes(
 
     // Helper to extract text from message content
     if (scope === "summary") {
-      // Return first user message + last assistant message as summary
-      const firstUser = allMessages.find(m => m.role === "user");
-      const lastAssistant = [...allMessages].reverse().find(m => m.role === "assistant");
+      // Return first user message + last assistant message as summary,
+      // skipping tool-only rows that have no narrative text.
+      const hasNarrativeText = (m: { content: string }) =>
+        extractTextFromStoredContent(m.content).trim().length > 0;
+      const firstUser = allMessages.find(m => m.role === "user" && hasNarrativeText(m));
+      const lastAssistant = [...allMessages].reverse().find(m => m.role === "assistant" && hasNarrativeText(m));
 
       return json({
         metadata,
@@ -566,13 +742,18 @@ export async function handleSessionRoutes(
     }
 
     if (scope === "last") {
-      // Return last N messages
-      const recentMessages = allMessages.slice(-lastN).map(m => ({
-        id: m.id,
-        role: m.role,
-        text: extractTextFromStoredContent(m.content),
-        timestamp: m.timestamp,
-      }));
+      // Return last N messages with recallable content (tool-only rows render
+      // as tool summaries; rows with no extractable content are skipped so a
+      // tool-heavy session doesn't return N blanks).
+      const recentMessages = allMessages
+        .map(m => ({
+          id: m.id,
+          role: m.role,
+          text: extractRecallTextFromStoredContent(m.content).trim(),
+          timestamp: m.timestamp,
+        }))
+        .filter(m => m.text.length > 0)
+        .slice(-lastN);
 
       return json({
         metadata,
@@ -581,17 +762,19 @@ export async function handleSessionRoutes(
     }
 
     if (scope === "search" && searchQuery) {
-      // Search within this chat's messages
+      // Search within this chat's messages, including tool calls/results where
+      // most agentic session state actually lives.
       const query = searchQuery.toLowerCase();
       const matches = allMessages
-        .filter(m => extractTextFromStoredContent(m.content).toLowerCase().includes(query))
-        .slice(0, 10)
         .map(m => ({
           id: m.id,
           role: m.role,
-          text: extractTextFromStoredContent(m.content).slice(0, 300),
+          text: extractRecallTextFromStoredContent(m.content),
           timestamp: m.timestamp,
-        }));
+        }))
+        .filter(m => m.text.toLowerCase().includes(query))
+        .slice(0, 10)
+        .map(m => ({ ...m, text: m.text.slice(0, 300) }));
 
       return json({
         metadata,
@@ -705,7 +888,7 @@ export async function handleSessionRoutes(
 
     try {
       const body = await req.json().catch(() => ({}));
-      const preserveRecentCount = body.preserveRecentCount ?? 5;
+      const preserveRecentCount = body.preserveRecentCount ?? 0;
       const maxPrunedLength = body.maxPrunedLength ?? 200;
 
       const result = await pruneClaudeSessionArtifacts({
@@ -720,9 +903,11 @@ export async function handleSessionRoutes(
       }
 
       const tokensSaved = Math.round(result.charsSaved / 4);
+      const success = result.prunedCount > 0;
 
       return json({
-        success: true,
+        success,
+        error: success ? undefined : "No large tool outputs found to prune",
         prunedCount: result.prunedCount,
         tokensSaved,
         prunedToolUseIds: result.prunedToolUseIds,
@@ -953,6 +1138,15 @@ ${transcript}`;
     const id = sessionFolderPinMatch[1];
     const body = await req.json();
     sessionFolders.togglePin(id, body.pinned);
+    return json(sessionFolders.get(id));
+  }
+
+  // Toggle archived
+  const sessionFolderArchiveMatch = url.pathname.match(/^\/api\/session-folders\/([^/]+)\/archive$/);
+  if (sessionFolderArchiveMatch && method === "POST") {
+    const id = sessionFolderArchiveMatch[1];
+    const body = await req.json();
+    sessionFolders.setArchived(id, !!body.archived);
     return json(sessionFolders.get(id));
   }
 

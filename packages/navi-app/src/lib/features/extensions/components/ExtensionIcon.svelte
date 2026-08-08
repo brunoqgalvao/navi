@@ -31,10 +31,6 @@
   <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
   </svg>
-{:else if icon === "layout-kanban"}
-  <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-  </svg>
 {:else if icon === "play"}
   <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <polygon stroke-linecap="round" stroke-linejoin="round" stroke-width="2" points="5,3 19,12 5,21" />
@@ -62,11 +58,6 @@
 {:else if icon === "layers"}
   <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
     <path stroke-linecap="round" stroke-linejoin="round" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-  </svg>
-{:else if icon === "inbox"}
-  <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-    <path stroke-linecap="round" stroke-linejoin="round" d="M4 5h16v10l-2 4H6l-2-4V5z" />
-    <path stroke-linecap="round" stroke-linejoin="round" d="M4 14h4l2 3h4l2-3h4" />
   </svg>
 {:else}
   <!-- Fallback: puzzle piece -->

@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type ExecutionMode, type BackendId, type ModelInfo, type ReasoningEffort, loopModeEnabled, chatInputValue } from "../stores";
+  import { attachedFiles, textReferences, terminalReferences, chatReferences, type AttachedFile, type TerminalReference, type ChatReference, type BackendId, type ModelInfo, type ReasoningEffort, loopModeEnabled, chatInputValue } from "../stores";
   import { agents, type Agent } from "../stores/agents";
   import FileAttachment from "./FileAttachment.svelte";
   import ReferenceChip from "./ReferenceChip.svelte";
   import TerminalReferenceChip from "./TerminalReferenceChip.svelte";
   import ChatReferenceChip from "./ChatReferenceChip.svelte";
   import AudioRecorder from "./AudioRecorder.svelte";
-  import CloudExecutionToggle from "./CloudExecutionToggle.svelte";
   import ModelReasoningSelector from "./ModelReasoningSelector.svelte";
   import Tooltip from "./Tooltip.svelte";
   import { getApiBase } from "../config";
+  import { isZaiModel } from "../../../shared/zai-models";
 
   interface FileEntry {
     name: string;
@@ -67,10 +67,6 @@
     // Worktree mode - for existing sessions with worktree
     worktreeBranch?: string | null;
     worktreeBaseBranch?: string | null;
-    // Cloud execution mode
-    executionMode?: ExecutionMode;
-    cloudBranch?: string;
-    cloudBranches?: string[];
     onSubmit: () => void;
     onStop?: () => void;
     onPreview?: (path: string) => void;
@@ -84,15 +80,13 @@
     onCreateWithWorktree?: (description: string, message: string) => void;
     onMergeWorktree?: () => void;
     onArchiveSession?: () => void;
-    onExecutionModeChange?: (mode: ExecutionMode) => void;
-    onCloudBranchChange?: (branch: string) => void;
     // Backend selection (claude, codex, gemini)
     backend?: BackendId;
     selectedModel?: string;
     backendModels?: Record<BackendId, ModelInfo[]>;
     onBackendChange?: (backend: BackendId) => void;
     onModelSelect?: (model: string) => void;
-    // Reasoning effort (low, medium, high, xhigh)
+    // Reasoning effort (low, medium, high, xhigh, max)
     reasoningEffort?: ReasoningEffort;
     onReasoningEffortChange?: (effort: ReasoningEffort) => void;
     // Slash commands from SDK
@@ -101,7 +95,7 @@
     onUICommand?: (command: string, args?: string) => boolean; // Return true if handled
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, executionMode = "local", cloudBranch = "main", cloudBranches = [], backend = "claude", selectedModel = "", backendModels = { claude: [], codex: [], gemini: [] }, reasoningEffort = "medium", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onExecutionModeChange, onCloudBranchChange, onBackendChange, onModelSelect, onReasoningEffortChange, slashCommands = [], onUICommand }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, backend = "claude", selectedModel = "", backendModels = { claude: [], codex: [], gemini: [] }, reasoningEffort = "medium", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onBackendChange, onModelSelect, onReasoningEffortChange, slashCommands = [], onUICommand }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
@@ -113,6 +107,15 @@
     codex: { label: "Codex" },
     gemini: { label: "Gemini" },
   };
+
+  function getActiveProviderLabel(): string {
+    if (backend !== "claude") {
+      return backendMeta[backend].label;
+    }
+
+    const model = backendModels.claude?.find((candidate) => candidate.value === selectedModel);
+    return model?.provider === "zai" || isZaiModel(selectedModel) ? "Z.ai" : "Claude";
+  }
 
   function handleToggle() {
     worktreeEnabled = !worktreeEnabled;
@@ -153,7 +156,6 @@
     "config",
     "bug",
     "status",
-    "council",
     "loop",
     "batch",
     "agent",
@@ -265,7 +267,6 @@
     { name: "bug", description: "Report a bug or issue", isBuiltIn: true },
     { name: "config", description: "Open configuration settings", isBuiltIn: true },
     { name: "status", description: "Show connection, model, and session status", isBuiltIn: true },
-    { name: "council", description: "Open the council panel for multi-model comparison", isBuiltIn: true },
     { name: "loop", description: "Open the long-running loop runner for the current prompt", isBuiltIn: true },
     { name: "batch", description: "Fan out worktree-backed sessions for multiple scoped tasks", isBuiltIn: true },
     { name: "agent", description: "Open the agent builder or prefill an @agent prompt", isBuiltIn: true },
@@ -1170,7 +1171,7 @@
       onpaste={handlePaste}
       onscroll={syncScroll}
       use:disableAutocorrect
-      placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : `Message ${backendMeta[backend].label}... (@ files, @terminal, @chat, ! shell)`}
+      placeholder={loading ? (queuedCount > 0 ? `${queuedCount} message${queuedCount > 1 ? 's' : ''} queued...` : "Type to queue message...") : `Message ${getActiveProviderLabel()}... (@ files, @terminal, @chat, ! shell)`}
       {disabled}
       spellcheck="false"
       autocomplete="off"
@@ -1514,17 +1515,6 @@
         {onReasoningEffortChange}
       />
 
-      <!-- Cloud Execution Toggle -->
-      {#if onExecutionModeChange}
-        <CloudExecutionToggle
-          mode={executionMode}
-          branch={cloudBranch}
-          branches={cloudBranches}
-          {isGitRepo}
-          onModeChange={onExecutionModeChange}
-          onBranchChange={onCloudBranchChange}
-        />
-      {/if}
 
       <!-- Loop/Until Done toggle (experimental) -->
       {#if $loopModeEnabled}

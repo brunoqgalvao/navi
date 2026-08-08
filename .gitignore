@@ -22,3 +22,7 @@ packages/landing-page/public/downloads/
 
 # Git worktrees managed by Navi
 .worktrees/
+
+# Generated agent-compat artifacts (copies of .claude/ for other harnesses)
+.agents/
+.codex/

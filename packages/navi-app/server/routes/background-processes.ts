@@ -31,11 +31,10 @@ export type BackgroundProcessStatus = "running" | "completed" | "failed" | "kill
 
 export interface BackgroundProcess {
   id: string;
-  type: "bash" | "task" | "dev_server" | "container_preview";
+  type: "bash" | "task" | "dev_server";
   command: string;
   cwd: string;
   pid?: number;
-  containerId?: string;  // For container previews
   sessionId?: string;
   projectId?: string;
   startedAt: number;
@@ -397,13 +396,12 @@ export function removeBackgroundProcess(id: string): boolean {
 }
 
 /**
- * Get all background processes (including container previews)
+ * Get all background processes
  */
 export async function listBackgroundProcesses(filter?: {
   sessionId?: string;
   projectId?: string;
   status?: BackgroundProcessStatus;
-  includeContainers?: boolean;
 }): Promise<Omit<BackgroundProcess, "process">[]> {
   let processes = Array.from(backgroundProcesses.values());
 
@@ -418,57 +416,7 @@ export async function listBackgroundProcesses(filter?: {
     processes = processes.filter(p => p.status === filter.status);
   }
 
-  const result = processes.map(sanitizeProcessForApi);
-
-  // Include container previews if requested (default: true)
-  if (filter?.includeContainers !== false) {
-    const containerPreviews = await getContainerPreviewsAsProcesses(filter);
-    result.push(...containerPreviews);
-  }
-
-  return result;
-}
-
-/**
- * Get container previews formatted as BackgroundProcess
- */
-async function getContainerPreviewsAsProcesses(filter?: {
-  sessionId?: string;
-  projectId?: string;
-  status?: BackgroundProcessStatus;
-}): Promise<Omit<BackgroundProcess, "process">[]> {
-  try {
-    // Import preview service dynamically to avoid circular deps
-    const { previewService } = await import("../services/preview");
-    const previews = previewService.listPreviews();
-
-    return previews
-      .filter(p => {
-        if (filter?.sessionId && p.sessionId !== filter.sessionId && p.sessionId !== "global") return false;
-        if (filter?.projectId && p.projectId !== filter.projectId) return false;
-        if (filter?.status && p.status !== filter.status) return false;
-        return true;
-      })
-      .map(p => ({
-        id: `container-${p.id}`,
-        type: "container_preview" as const,
-        command: p.framework?.devCommand || "docker container",
-        cwd: p.path,
-        containerId: p.containerId,
-        sessionId: p.sessionId,
-        projectId: p.projectId,
-        startedAt: p.startedAt || Date.now(),
-        status: p.status as BackgroundProcessStatus,
-        output: [],
-        outputSize: 0,
-        ports: [p.internalPort],
-        label: `Preview: ${p.slug}`,
-        url: p.url,
-      }));
-  } catch (e) {
-    // Preview service might not be initialized
-    return [];
-  }
+  return processes.map(sanitizeProcessForApi);
 }
 
 /**
@@ -578,14 +526,13 @@ export async function handleBackgroundProcessRoutes(
   method: string,
   req: Request
 ): Promise<Response | null> {
-  // List all background processes (including container previews)
+  // List all background processes
   if (url.pathname === "/api/background-processes" && method === "GET") {
     const sessionId = url.searchParams.get("sessionId") || undefined;
     const projectId = url.searchParams.get("projectId") || undefined;
     const status = url.searchParams.get("status") as BackgroundProcessStatus | undefined;
-    const includeContainers = url.searchParams.get("includeContainers") !== "false";
 
-    const processes = await listBackgroundProcesses({ sessionId, projectId, status, includeContainers });
+    const processes = await listBackgroundProcesses({ sessionId, projectId, status });
     return json(processes);
   }
 
@@ -634,18 +581,6 @@ export async function handleBackgroundProcessRoutes(
     const id = url.pathname.split("/")[3];
     const lines = parseInt(url.searchParams.get("lines") || "100");
 
-    // Handle container preview logs
-    if (id.startsWith("container-")) {
-      const containerId = id.replace("container-", "");
-      try {
-        const { previewService } = await import("../services/preview");
-        const logs = await previewService.getLogs(containerId, lines);
-        return json({ output: logs, totalLines: logs.length });
-      } catch (e: any) {
-        return json({ output: [], totalLines: 0, error: e.message });
-      }
-    }
-
     const output = getProcessOutput(id, lines);
     return json({ output, totalLines: output.length });
   }
@@ -655,18 +590,6 @@ export async function handleBackgroundProcessRoutes(
     const id = url.pathname.split("/").pop()!;
     const body = await req.json().catch(() => ({}));
     const { signal = "SIGTERM", remove = false } = body;
-
-    // Handle container preview kills
-    if (id.startsWith("container-")) {
-      const containerId = id.replace("container-", "");
-      try {
-        const { previewService } = await import("../services/preview");
-        await previewService.stopPreview(containerId);
-        return json({ success: true, type: "container_preview" });
-      } catch (e: any) {
-        return json({ error: e.message || "Failed to stop container" }, 500);
-      }
-    }
 
     if (remove) {
       const removed = removeBackgroundProcess(id);

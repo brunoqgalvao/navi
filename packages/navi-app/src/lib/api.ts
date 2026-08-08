@@ -12,6 +12,7 @@ export interface WorkspaceFolder {
   sort_order: number;
   collapsed: number;
   pinned?: number;
+  archived?: number;
   created_at: number;
   updated_at: number;
 }
@@ -24,6 +25,7 @@ export interface SessionFolder {
   sort_order: number;
   collapsed: number;
   pinned?: number;
+  archived?: number;
   created_at: number;
   updated_at: number;
 }
@@ -140,11 +142,17 @@ export interface Session {
   backend_session_id?: string | null;
   backend_session_metadata?: string | null;
   model: string | null;
-  reasoning_effort?: string | null;
   total_cost_usd: number;
   total_turns: number;
   input_tokens: number;
   output_tokens: number;
+  // Context window the runtime reported for this session's model.
+  context_window?: number | null;
+  max_output_tokens?: number | null;
+  pending_context_handoff?: string | null;
+  pending_context_method?: string | null;
+  pending_context_reason?: string | null;
+  context_reduced_at?: number | null;
   pinned?: number;
   sort_order?: number;
   auto_accept_all?: number;
@@ -172,6 +180,8 @@ export interface Session {
   deliverable?: string | null;
   // Multi-backend support
   backend?: BackendId | null;
+  // Per-session reasoning effort tier
+  reasoning_effort?: "low" | "medium" | "high" | "xhigh" | "max" | null;
   // Folder grouping
   folder_id?: string | null;
   // Agent workspace links
@@ -224,35 +234,6 @@ export interface WorkItemEvent {
   content: string | null;
   metadata: string | null;
   created_at: number;
-}
-
-export type InboxItemStatus = "open" | "acknowledged" | "resolved" | "dismissed";
-export type InboxItemPriority = "low" | "medium" | "high" | "urgent";
-export type InboxItemKind = "report" | "question" | "attention" | "approval" | "delivery";
-
-export interface InboxItem {
-  id: string;
-  project_id: string;
-  kind: InboxItemKind;
-  title: string;
-  body: string | null;
-  status: InboxItemStatus;
-  priority: InboxItemPriority;
-  source_agent_id: string | null;
-  source_session_id: string | null;
-  work_item_id: string | null;
-  requires_response: number;
-  response_options: string | null;
-  metadata: string | null;
-  created_at: number;
-  updated_at: number;
-  resolved_at: number | null;
-}
-
-export interface InboxItemWithProject extends InboxItem {
-  project_name: string | null;
-  project_path: string | null;
-  project_archived: number | null;
 }
 
 export interface ActiveSessionStatus {
@@ -389,6 +370,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ collapsed }),
       }),
+    setArchived: (id: string, archived: boolean) =>
+      request<WorkspaceFolder>(`/folders/${id}/archive`, {
+        method: "POST",
+        body: JSON.stringify({ archived }),
+      }),
     togglePin: (id: string, pinned: boolean) =>
       request<WorkspaceFolder>(`/folders/${id}/pin`, {
         method: "POST",
@@ -421,6 +407,11 @@ export const api = {
       request<SessionFolder>(`/session-folders/${id}/collapse`, {
         method: "POST",
         body: JSON.stringify({ collapsed }),
+      }),
+    setArchived: (id: string, archived: boolean) =>
+      request<SessionFolder>(`/session-folders/${id}/archive`, {
+        method: "POST",
+        body: JSON.stringify({ archived }),
       }),
     togglePin: (id: string, pinned: boolean) =>
       request<SessionFolder>(`/session-folders/${id}/pin`, {
@@ -552,54 +543,6 @@ export const api = {
       }),
   },
 
-  inbox: {
-    listAll: () => request<InboxItemWithProject[]>("/inbox"),
-    list: (projectId: string) => request<InboxItem[]>(`/projects/${projectId}/inbox`),
-    get: (id: string) => request<InboxItem>(`/inbox/${id}`),
-    create: (
-      projectId: string,
-      data: {
-        kind: InboxItemKind;
-        title: string;
-        body?: string | null;
-        status?: InboxItemStatus;
-        priority?: InboxItemPriority;
-        sourceAgentId?: string | null;
-        sourceSessionId?: string | null;
-        workItemId?: string | null;
-        requiresResponse?: boolean;
-        responseOptions?: unknown;
-        metadata?: unknown;
-      }
-    ) =>
-      request<InboxItem>(`/projects/${projectId}/inbox`, {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
-    update: (
-      id: string,
-      data: {
-        kind?: InboxItemKind;
-        title?: string;
-        body?: string | null;
-        status?: InboxItemStatus;
-        priority?: InboxItemPriority;
-        sourceAgentId?: string | null;
-        sourceSessionId?: string | null;
-        workItemId?: string | null;
-        requiresResponse?: boolean;
-        responseOptions?: unknown;
-        metadata?: unknown;
-        resolvedAt?: number | null;
-      }
-    ) =>
-      request<InboxItem>(`/inbox/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      }),
-    delete: (id: string) => request<{ success: boolean }>(`/inbox/${id}`, { method: "DELETE" }),
-  },
-
   sessions: {
     list: (projectId: string, includeArchived: boolean = false) =>
       request<Session[]>(`/projects/${projectId}/sessions${includeArchived ? '?includeArchived=true' : ''}`),
@@ -626,8 +569,8 @@ export const api = {
       data: {
         title?: string;
         model?: string;
-        reasoningEffort?: string;
         backend?: BackendId;
+        reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | null;
         agentId?: string | null;
         workflowId?: string | null;
         workItemId?: string | null;
@@ -679,7 +622,7 @@ export const api = {
         body: JSON.stringify({ order }),
       }),
     resetContext: (id: string) =>
-      request<{ success: boolean; sessionReset: boolean; historyContext?: string }>(`/sessions/${id}/reset-context`, {
+      request<{ success: boolean; sessionReset: boolean; historyContext?: string; estimatedInputTokens?: number }>(`/sessions/${id}/reset-context`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
@@ -710,6 +653,32 @@ export const api = {
           body: JSON.stringify(options || {}),
         }
       ),
+    reduceContext: (
+      id: string,
+      options: {
+        method: "compact" | "prune" | "prune-then-compact";
+        reason: "threshold" | "overflow" | "manual";
+        preserveRecentCount?: number;
+        maxPrunedLength?: number;
+      }
+    ) =>
+      request<{
+        success: boolean;
+        error?: string;
+        method: "compact" | "prune" | "prune-then-compact";
+        effectiveMethod: "compact" | "prune" | "prune-then-compact";
+        reason: "threshold" | "overflow" | "manual";
+        nextAction: "sdk_compact" | "continue" | "none";
+        sessionReset: boolean;
+        prunedCount: number;
+        tokensSaved: number;
+        prunedToolUseIds: string[];
+        historyContext?: string;
+        estimatedInputTokens?: number;
+      }>(`/sessions/${id}/reduce-context`, {
+        method: "POST",
+        body: JSON.stringify(options),
+      }),
     getPendingQuestion: (id: string) =>
       request<{
         id: string;
@@ -812,7 +781,7 @@ export const api = {
   },
 
   models: {
-    list: () => request<Array<{ value: string; displayName: string; description: string }>>("/models"),
+    list: () => request<Array<{ value: string; displayName: string; description: string; provider?: string }>>("/models"),
   },
 
   auth: {
@@ -828,6 +797,7 @@ export const api = {
         preferredAuth: "oauth" | "api_key" | null;
         hasZaiKey: boolean;
         zaiKeyPreview: string | null;
+        zaiKeySource: "settings" | "environment" | null;
       }>("/auth/status"),
     setApiKey: (apiKey: string) =>
       request<{ success: boolean }>("/auth/api-key", {
@@ -1093,47 +1063,6 @@ export const skillsApi = {
   }),
   syncGlobal: () => request<{ synced: string[]; skipped: string[]; errors: string[]; total_global: number }>("/skills/sync-global", { method: "POST" }),
   listGlobal: () => request<Array<{ slug: string; name: string; description: string; path: string }>>("/skills/global"),
-  createExamples: () =>
-    request<{ success: boolean; created: string[] }>("/skills/examples", { method: "POST" }),
-  async importFile(file: File, useAi: boolean = false): Promise<Skill> {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("useAi", String(useAi));
-    const res = await fetch(`${getApiBaseUrl()}/skills/import`, {
-      method: "POST",
-      body: formData,
-    });
-    if (!res.ok) {
-      const data = await res.json().catch((parseError) => {
-        console.error("[API] Failed to parse skill import error:", parseError);
-        return {};
-      });
-      throw new Error(data.error || `Import failed: ${res.status}`);
-    }
-    return res.json();
-  },
-  importUrl: (url: string, useAi: boolean = false) =>
-    request<Skill>("/skills/import-url", {
-      method: "POST",
-      body: JSON.stringify({ url, useAi }),
-    }),
-  async exportZip(id: string, slug: string): Promise<void> {
-    const res = await fetch(`${getApiBaseUrl()}/skills/${id}/export`);
-    if (!res.ok) {
-      const data = await res.json().catch((parseError) => {
-        console.error("[API] Failed to parse skill export error:", parseError);
-        return {};
-      });
-      throw new Error(data.error || `Export failed: ${res.status}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${slug}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
-  },
   sync: (id: string, scope: "global" | "project", projectId?: string) =>
     request<{ success: boolean; hash: string }>(`/skills/${id}/sync`, {
       method: "POST",
@@ -1156,8 +1085,6 @@ export const skillsApi = {
       method: "POST",
       body: JSON.stringify({ editor }),
     }),
-  // Categories
-  listCategories: () => request<SkillCategory[]>("/skills/categories"),
   // Default enabled (auto-enable for new projects)
   listDefaultEnabled: () => request<Skill[]>("/skills/default-enabled"),
   setDefaultEnabled: (id: string, enabled: boolean) =>
@@ -1166,60 +1093,6 @@ export const skillsApi = {
     }),
 };
 
-// Marketplace (skills.sh integration)
-export interface MarketplaceSkill {
-  id: string;
-  name: string;
-  description: string;
-  owner: string;
-  repo: string;
-  installs: number;
-  stars?: number;
-  version?: string;
-  category?: string;
-  author?: string;
-}
-
-export interface MarketplaceSearchResult {
-  skills: MarketplaceSkill[];
-  total: number;
-  query: string;
-}
-
-export interface MarketplaceInstallResult {
-  success: boolean;
-  source: string;
-  global: boolean;
-  scope?: "global" | "project";
-  requestedSkill?: string | null;
-  output: string;
-}
-
-export const marketplaceApi = {
-  search: (query: string, limit = 50) =>
-    request<MarketplaceSearchResult>(`/marketplace/search?q=${encodeURIComponent(query)}&limit=${limit}`),
-  trending: () =>
-    request<{ skills: MarketplaceSkill[]; total: number }>("/marketplace/trending"),
-  info: (owner: string, repo: string, skill: string) =>
-    request<MarketplaceSkill>(`/marketplace/info/${owner}/${repo}/${skill}`),
-  install: (source: string, global = true, projectPath?: string) =>
-    request<MarketplaceInstallResult>("/marketplace/install", {
-      method: "POST",
-      body: JSON.stringify({ source, global, projectPath }),
-    }),
-  installCommand: (command: string, global = true, projectPath?: string) =>
-    request<MarketplaceInstallResult>("/marketplace/install", {
-      method: "POST",
-      body: JSON.stringify({ command, global, projectPath }),
-    }),
-  uninstall: (name: string, global = true) =>
-    request<{ success: boolean; name: string; output: string }>("/marketplace/uninstall", {
-      method: "POST",
-      body: JSON.stringify({ name, global }),
-    }),
-  installed: () =>
-    request<{ skills: MarketplaceSkill[]; total: number }>("/marketplace/installed"),
-};
 
 export interface SkillFileInfo {
   name: string;
@@ -1234,7 +1107,7 @@ export interface Agent {
   slug: string;
   name: string;
   description: string;
-  model?: "haiku" | "sonnet" | "opus";
+  model?: "haiku" | "sonnet" | "opus" | "fable";
   tools?: string[];
   body: string;
   scope: "global" | "project";
@@ -1248,7 +1121,7 @@ export interface Agent {
 export interface CreateAgentInput {
   name: string;
   description?: string;
-  model?: "haiku" | "sonnet" | "opus";
+  model?: "haiku" | "sonnet" | "opus" | "fable";
   tools?: string[];
   instructions?: string;
   format?: "simple" | "bundle";
@@ -1259,7 +1132,7 @@ export interface CreateAgentInput {
 export interface UpdateAgentInput {
   name?: string;
   description?: string;
-  model?: "haiku" | "sonnet" | "opus";
+  model?: "haiku" | "sonnet" | "opus" | "fable";
   tools?: string[];
   instructions?: string;
   format?: "simple" | "bundle";
@@ -1831,318 +1704,6 @@ export const worktreeApi = {
   // ⚠️ END EXPERIMENTAL preview methods
 };
 
-/**
- * Container Preview API
- *
- * Containerized preview system using Colima/Docker.
- * Runs dev servers in isolated containers with Traefik routing.
- */
-export interface ContainerPreview {
-  id: string;
-  sessionId: string;
-  url: string;
-  slug: string;
-  status: "pending" | "starting" | "running" | "paused" | "stopped" | "error";
-  branch: string;
-  framework?: string;
-  startedAt?: number;
-  error?: string;
-}
-
-export interface ContainerPreviewStatus {
-  running: boolean;
-  exists?: boolean;
-  status?: string;
-  url?: string;
-  slug?: string;
-  branch?: string;
-  framework?: string;
-  startedAt?: number;
-  error?: string;
-}
-
-export interface PreviewSystemStatus {
-  initialized: boolean;
-  runtime: {
-    runtime: "colima" | "docker" | "orbstack" | "none";
-    version?: string;
-    running: boolean;
-  };
-  proxyRunning: boolean;
-  containerCount: number;
-  proxyPort: number;
-  maxContainers: number;
-}
-
-export const containerPreviewApi = {
-  /** Get preview system status (runtime detection, proxy status) */
-  getSystemStatus: () => request<PreviewSystemStatus>("/preview/status"),
-
-  /** Initialize the preview system (detect runtime, restore containers) */
-  initialize: () =>
-    request<{
-      success: boolean;
-      runtime: string;
-      version?: string;
-      running: boolean;
-      error?: string;
-      instructions?: string;
-    }>("/preview/initialize", { method: "POST" }),
-
-  /** List all active container previews */
-  list: () => request<ContainerPreview[]>("/preview/list"),
-
-  /** Start a containerized preview for a session */
-  start: (sessionId: string) =>
-    request<{
-      success: boolean;
-      preview?: {
-        id: string;
-        url: string;
-        slug: string;
-        status: string;
-        branch: string;
-        framework?: string;
-      };
-      error?: string;
-      instructions?: string;
-    }>(`/sessions/${sessionId}/preview/container`, { method: "POST" }),
-
-  /** Stop a containerized preview for a session */
-  stop: (sessionId: string) =>
-    request<{ success: boolean }>(`/sessions/${sessionId}/preview/container`, {
-      method: "DELETE",
-    }),
-
-  /** Get container preview status for a session */
-  getStatus: (sessionId: string) =>
-    request<ContainerPreviewStatus>(`/sessions/${sessionId}/preview/container`),
-
-  /** Get container preview logs */
-  getLogs: (sessionId: string, tail = 100) =>
-    request<{ logs: string[] }>(
-      `/sessions/${sessionId}/preview/container/logs?tail=${tail}`
-    ),
-
-  /** Pause a container preview */
-  pause: (sessionId: string) =>
-    request<{ success: boolean }>(
-      `/sessions/${sessionId}/preview/container/pause`,
-      { method: "POST" }
-    ),
-
-  /** Unpause a container preview */
-  unpause: (sessionId: string) =>
-    request<{ success: boolean }>(
-      `/sessions/${sessionId}/preview/container/unpause`,
-      { method: "POST" }
-    ),
-
-  // Branch-scoped APIs (preferred)
-
-  /** Get container preview status by branch */
-  getStatusByBranch: (projectId: string, branch: string) =>
-    request<ContainerPreviewStatus>(
-      `/projects/${projectId}/preview/branch/${encodeURIComponent(branch)}`
-    ),
-
-  /** Stop container preview by branch */
-  stopByBranch: (projectId: string, branch: string) =>
-    request<{ success: boolean }>(
-      `/projects/${projectId}/preview/branch/${encodeURIComponent(branch)}`,
-      { method: "DELETE" }
-    ),
-
-  /** Reset cached preview config (forces re-detection on next start) */
-  resetConfig: (projectId: string) =>
-    request<{ success: boolean; message: string }>(
-      `/projects/${projectId}/preview/config`,
-      { method: "DELETE" }
-    ),
-};
-
-/**
- * Native Preview API
- * Lightweight preview system that runs dev servers natively (no Docker).
- * One preview at a time, auto-switches when changing worktrees.
- */
-export interface NativePreviewStatus {
-  running: boolean;
-  sessionId?: string;
-  projectId?: string;
-  projectPath?: string;
-  branch?: string;
-  port?: number;
-  url?: string;
-  status?: "starting" | "running" | "error";
-  framework?: string;
-  error?: string;
-  startedAt?: number;
-}
-
-export interface PreviewComplianceResult {
-  canPreview: boolean;
-  reason?: string;
-  framework?: string;
-  suggestions?: string[];
-  /** If package.json was found in a subfolder, this is the resolved path */
-  resolvedPath?: string;
-  /** If true, dependencies will be auto-installed on start */
-  needsInstall?: boolean;
-}
-
-/**
- * Port conflict info returned when a port is already in use
- */
-export interface PortConflictInfo {
-  hasConflict: true;
-  requestedPort: number;
-  alternativePort: number;
-  conflictProcess: {
-    pid: number;
-    name: string;
-    isDevServer: boolean;
-    isSameWorkspace: boolean;  // true if same project different branch
-  };
-}
-
-/**
- * Native preview start result - either success, conflict requiring user choice, or error
- */
-export type NativePreviewStartResult =
-  | { success: true; port: number; url: string; framework: string; resolvedPath?: string }
-  | { success: false; conflict: PortConflictInfo }
-  | { success: false; error: string; suggestions?: string[] };
-
-export const nativePreviewApi = {
-  /** Check if preview is possible for a session (compliance check) */
-  checkCompliance: (sessionId: string) =>
-    request<PreviewComplianceResult>(
-      `/sessions/${sessionId}/preview/native/compliance`
-    ),
-
-  /** Start native preview for a session */
-  start: (sessionId: string) =>
-    request<NativePreviewStartResult>(
-      `/sessions/${sessionId}/preview/native`,
-      { method: "POST" }
-    ),
-
-  /** Resolve a port conflict by choosing an action */
-  resolveConflict: (sessionId: string, action: 'use_alternative' | 'kill_and_use_original') =>
-    request<NativePreviewStartResult>(
-      `/sessions/${sessionId}/preview/native/resolve-conflict`,
-      { method: "POST", body: JSON.stringify({ action }) }
-    ),
-
-  /** Stop native preview */
-  stop: (sessionId: string) =>
-    request<{ success: boolean }>(
-      `/sessions/${sessionId}/preview/native`,
-      { method: "DELETE" }
-    ),
-
-  /** Get native preview status for a session */
-  getStatus: (sessionId: string) =>
-    request<NativePreviewStatus>(`/sessions/${sessionId}/preview/native`),
-
-  /** Get logs from native preview */
-  getLogs: (sessionId: string, tail = 50) =>
-    request<{ logs: string[] }>(
-      `/sessions/${sessionId}/preview/native/logs?tail=${tail}`
-    ),
-
-  /** Get global native preview status */
-  getGlobalStatus: () =>
-    request<NativePreviewStatus>("/preview/native/status"),
-};
-
-/**
- * Port Manager Preview API
- * LLM-powered port orchestration for running multiple dev servers without conflicts.
- * Supports multiple instances across different worktrees/branches.
- */
-export interface PortAllocation {
-  primary: number;
-  backend?: number;
-  additional?: number[];
-}
-
-export interface PortManagerPreviewStatus {
-  running: boolean;
-  id?: string;
-  sessionId?: string;
-  branch?: string;
-  ports?: PortAllocation;
-  url?: string;
-  status?: "starting" | "running" | "error";
-  framework?: string;
-  error?: string;
-}
-
-export interface PortManagerPreviewInfo {
-  id: string;
-  sessionId: string;
-  projectId: string;
-  branch: string;
-  ports: PortAllocation;
-  status: string;
-  framework: string;
-  startedAt: number;
-}
-
-export const portManagerPreviewApi = {
-  /** Start port manager preview for a session */
-  start: (sessionId: string, useLlm: boolean = true) =>
-    request<{ success: boolean; id?: string; ports?: PortAllocation; url?: string; error?: string }>(
-      `/sessions/${sessionId}/preview/port-manager`,
-      { method: "POST", body: JSON.stringify({ useLlm }) }
-    ),
-
-  /** Stop port manager preview for a session */
-  stop: (sessionId: string) =>
-    request<{ success: boolean }>(
-      `/sessions/${sessionId}/preview/port-manager`,
-      { method: "DELETE" }
-    ),
-
-  /** Get port manager preview status for a session */
-  getStatus: (sessionId: string) =>
-    request<PortManagerPreviewStatus>(`/sessions/${sessionId}/preview/port-manager`),
-
-  /** Get logs from port manager preview */
-  getLogs: (sessionId: string, tail = 50) =>
-    request<{ logs: string[] }>(
-      `/sessions/${sessionId}/preview/port-manager/logs?tail=${tail}`
-    ),
-
-  /** List all running port manager previews */
-  list: () =>
-    request<PortManagerPreviewInfo[]>("/port-manager-preview/list"),
-
-  /** Get allocated ports map */
-  getAllocatedPorts: () =>
-    request<{ ports: { port: number; previewId: string }[] }>("/port-manager-preview/ports"),
-
-  /** Stop a specific preview by ID */
-  stopById: (previewId: string) =>
-    request<{ success: boolean }>(
-      `/port-manager-preview/${encodeURIComponent(previewId)}`,
-      { method: "DELETE" }
-    ),
-
-  /** Get status of a specific preview by ID */
-  getStatusById: (previewId: string) =>
-    request<PortManagerPreviewStatus>(
-      `/port-manager-preview/${encodeURIComponent(previewId)}`
-    ),
-
-  /** Get logs for a specific preview by ID */
-  getLogsById: (previewId: string, tail = 50) =>
-    request<{ logs: string[] }>(
-      `/port-manager-preview/${encodeURIComponent(previewId)}/logs?tail=${tail}`
-    ),
-};
 
 // =============================================================================
 // Backend API (Multi-backend support: Claude, Codex, Gemini)

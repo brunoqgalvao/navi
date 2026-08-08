@@ -76,6 +76,11 @@ export interface HandlerCallbacks {
   onError?: (sessionId: string, error: string) => void;
   onContextOverflow?: (sessionId: string, autoRetry: boolean) => void;
   onComplete?: (sessionId: string, data: { costUsd: number; usage?: MessageUsage }) => void;
+  onAssistantUsage?: (sessionId: string, usage: MessageUsage) => void;
+  onContextInfo?: (
+    sessionId: string,
+    info: { contextWindow?: number; maxOutputTokens?: number }
+  ) => void;
   onPermissionRequest?: (data: { requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string }) => void;
   onAskUserQuestion?: (data: AskUserQuestionData) => void;
   onTodoUpdate?: (sessionId: string, todos: TodoItem[]) => void;

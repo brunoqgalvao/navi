@@ -13,11 +13,11 @@ import {
 
 describe("normalizeAnthropicModelValue", () => {
   test("maps Claude SDK aliases to Navi's curated latest models", () => {
-    expect(normalizeAnthropicModelValue("default")).toBe(CLAUDE_OPUS_5);
+    expect(normalizeAnthropicModelValue("default")).toBe(CLAUDE_FABLE_5);
+    expect(normalizeAnthropicModelValue("fable")).toBe(CLAUDE_FABLE_5);
     expect(normalizeAnthropicModelValue("opus")).toBe(CLAUDE_OPUS_5);
     expect(normalizeAnthropicModelValue("sonnet")).toBe(CLAUDE_SONNET_5);
     expect(normalizeAnthropicModelValue("haiku")).toBe(CLAUDE_HAIKU_4_5);
-    expect(normalizeAnthropicModelValue("fable")).toBe(CLAUDE_FABLE_5);
   });
 });
 

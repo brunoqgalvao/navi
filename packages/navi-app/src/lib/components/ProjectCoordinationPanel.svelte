@@ -4,10 +4,6 @@
     api,
     agentsApi,
     type Agent,
-    type InboxItem,
-    type InboxItemKind,
-    type InboxItemPriority,
-    type InboxItemStatus,
     type Session,
     type WorkItem,
     type WorkItemEvent,
@@ -32,7 +28,6 @@
 
   let loading = $state(true);
   let workItems = $state<WorkItem[]>([]);
-  let inboxItems = $state<InboxItem[]>([]);
   let agents = $state<Agent[]>([]);
 
   let workItemModalOpen = $state(false);
@@ -46,16 +41,6 @@
   let workItemPriority = $state<WorkItemPriority>("medium");
   let workItemAssigneeId = $state("");
   let workItemAcceptanceCriteria = $state("");
-
-  let inboxModalOpen = $state(false);
-  let editingInboxItem = $state<InboxItem | null>(null);
-  let inboxKind = $state<InboxItemKind>("report");
-  let inboxTitle = $state("");
-  let inboxBody = $state("");
-  let inboxPriority = $state<InboxItemPriority>("medium");
-  let inboxStatus = $state<InboxItemStatus>("open");
-  let inboxRequiresResponse = $state(false);
-  let inboxLinkedWorkItemId = $state("");
 
   let agentEditorOpen = $state(false);
   let editingAgent = $state<Agent | null>(null);
@@ -82,40 +67,23 @@
     cancelled: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
   };
 
-  const priorityClasses: Record<WorkItemPriority | InboxItemPriority, string> = {
+  const priorityClasses: Record<WorkItemPriority, string> = {
     low: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
     medium: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
     high: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
     urgent: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
   };
 
-  const inboxKindClasses: Record<InboxItemKind, string> = {
-    report: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-    question: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    attention: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
-    approval: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",
-    delivery: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  };
-
-  const inboxStatusClasses: Record<InboxItemStatus, string> = {
-    open: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
-    acknowledged: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    resolved: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-    dismissed: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  };
-
   async function loadAll(activeProjectId: string) {
     loading = true;
     try {
-      const [nextWorkItems, nextInboxItems, nextAgents] = await Promise.all([
+      const [nextWorkItems, nextAgents] = await Promise.all([
         api.workItems.list(activeProjectId),
-        api.inbox.list(activeProjectId),
         agentsApi.listForProject(activeProjectId),
       ]);
 
       if (activeProjectId !== projectId) return;
       workItems = nextWorkItems;
-      inboxItems = nextInboxItems;
       agents = nextAgents;
     } catch (error) {
       console.error("Failed to load project coordination state:", error);
@@ -148,15 +116,6 @@
     workItems = [item, ...workItems];
   }
 
-  function upsertInboxItem(item: InboxItem) {
-    const existingIndex = inboxItems.findIndex((candidate) => candidate.id === item.id);
-    if (existingIndex >= 0) {
-      inboxItems = inboxItems.map((candidate) => (candidate.id === item.id ? item : candidate));
-      return;
-    }
-    inboxItems = [item, ...inboxItems];
-  }
-
   function upsertAgent(agent: Agent) {
     const existingIndex = agents.findIndex((candidate) => candidate.id === agent.id);
     if (existingIndex >= 0) {
@@ -178,17 +137,6 @@
     workItemNote = "";
   }
 
-  function resetInboxForm(item: InboxItem | null = null) {
-    editingInboxItem = item;
-    inboxKind = item?.kind ?? "report";
-    inboxTitle = item?.title ?? "";
-    inboxBody = item?.body ?? "";
-    inboxPriority = item?.priority ?? "medium";
-    inboxStatus = item?.status ?? "open";
-    inboxRequiresResponse = Boolean(item?.requires_response);
-    inboxLinkedWorkItemId = item?.work_item_id ?? "";
-  }
-
   async function openWorkItemEditor(item: WorkItem | null = null) {
     resetWorkItemForm(item);
     workItemModalOpen = true;
@@ -203,11 +151,6 @@
     } finally {
       loadingWorkItemEvents = false;
     }
-  }
-
-  function openInboxEditor(item: InboxItem | null = null) {
-    resetInboxForm(item);
-    inboxModalOpen = true;
   }
 
   async function saveWorkItem() {
@@ -308,71 +251,6 @@
     }
   }
 
-  async function saveInboxItem() {
-    if (!inboxTitle.trim()) {
-      showError({ title: "Inbox title required", message: "Give the inbox item a short title first." });
-      return;
-    }
-
-    try {
-      const payload = {
-        kind: inboxKind,
-        title: inboxTitle.trim(),
-        body: inboxBody.trim() || null,
-        priority: inboxPriority,
-        status: inboxStatus,
-        requiresResponse: inboxRequiresResponse,
-        workItemId: inboxLinkedWorkItemId || null,
-      };
-
-      const saved = editingInboxItem
-        ? await api.inbox.update(editingInboxItem.id, payload)
-        : await api.inbox.create(projectId, payload);
-
-      upsertInboxItem(saved);
-      inboxModalOpen = false;
-      showSuccess(editingInboxItem ? "Inbox item updated" : "Inbox item created");
-    } catch (error) {
-      console.error("Failed to save inbox item:", error);
-      showError({
-        title: "Failed to save inbox item",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  async function updateInboxStatus(item: InboxItem, status: InboxItemStatus) {
-    try {
-      const updated = await api.inbox.update(item.id, { status });
-      upsertInboxItem(updated);
-    } catch (error) {
-      console.error("Failed to update inbox item:", error);
-      showError({
-        title: "Failed to update inbox item",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  async function deleteInboxItem() {
-    if (!editingInboxItem) return;
-    const currentItem = editingInboxItem;
-    if (!confirm(`Delete "${currentItem.title}"?`)) return;
-
-    try {
-      await api.inbox.delete(currentItem.id);
-      inboxItems = inboxItems.filter((item) => item.id !== currentItem.id);
-      inboxModalOpen = false;
-      showSuccess("Inbox item deleted");
-    } catch (error) {
-      console.error("Failed to delete inbox item:", error);
-      showError({
-        title: "Failed to delete inbox item",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
   function openCreateAgent() {
     editingAgent = null;
     agentEditorOpen = true;
@@ -426,10 +304,6 @@
       .slice(0, 4)
   );
 
-  const activeInboxItems = $derived.by(() =>
-    inboxItems.filter((item) => item.status === "open" || item.status === "acknowledged")
-  );
-
   const workflowCountByAgent = $derived.by(() => {
     const counts = new Map<string, number>();
     for (const workflow of workflows) {
@@ -471,10 +345,9 @@
   const coordinationStats = $derived.by(() => {
     const blockedCount = openWorkItems.filter((item) => item.status === "blocked").length;
     const waitingHumanCount = openWorkItems.filter((item) => item.status === "waiting_human").length;
-    const openInboxCount = activeInboxItems.length;
     return [
       { label: "Open tickets", value: openWorkItems.length, tone: "text-slate-900 dark:text-white" },
-      { label: "Need human", value: waitingHumanCount + openInboxCount, tone: "text-amber-700 dark:text-amber-300" },
+      { label: "Need human", value: waitingHumanCount, tone: "text-amber-700 dark:text-amber-300" },
       { label: "Blocked", value: blockedCount, tone: "text-rose-700 dark:text-rose-300" },
       { label: "Agents", value: agents.length, tone: "text-indigo-700 dark:text-indigo-300" },
     ];
@@ -499,7 +372,7 @@
           <h2 class="text-base font-semibold text-slate-900 dark:text-white">Coordination</h2>
         </div>
         <p class="max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-          Tickets hold durable work, inbox items collect attention, and agents own workflows. Sessions still stay available for ad hoc execution.
+          Tickets hold durable work and agents own workflows. Sessions still stay available for ad hoc execution.
         </p>
       </div>
 
@@ -512,15 +385,6 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           New ticket
-        </button>
-        <button
-          onclick={() => openInboxEditor()}
-          class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-amber-300 hover:text-amber-700 dark:border-white/10 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:border-amber-500/50 dark:hover:text-amber-300"
-        >
-          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-          Log inbox item
         </button>
         <button
           onclick={openCreateAgent}
@@ -548,7 +412,7 @@
         {/each}
       </div>
 
-      <div class="mt-4 grid gap-4 xl:grid-cols-[1.65fr_minmax(0,1fr)]">
+      <div class="mt-4 grid gap-4">
         <section class="rounded-3xl border border-slate-200/70 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
           <div class="flex items-center justify-between gap-3">
             <div>
@@ -638,79 +502,6 @@
           {/if}
         </section>
 
-        <section class="rounded-3xl border border-slate-200/70 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <h3 class="text-sm font-semibold text-slate-900 dark:text-white">Inbox</h3>
-              <p class="text-xs text-slate-500 dark:text-slate-400">Reports, approvals, questions, and anything that needs attention.</p>
-            </div>
-            <span class="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500 shadow-sm dark:bg-slate-900 dark:text-slate-300">
-              {activeInboxItems.length} active
-            </span>
-          </div>
-
-          <div class="mt-4 space-y-3">
-            {#if activeInboxItems.length === 0}
-              <div class="rounded-2xl border border-dashed border-slate-300/80 bg-white/70 px-4 py-8 text-center text-sm text-slate-400 dark:border-white/10 dark:bg-slate-950/20 dark:text-slate-500">
-                No open inbox items.
-              </div>
-            {:else}
-              {#each activeInboxItems.slice(0, 6) as item}
-                <div class="rounded-2xl border border-slate-200/70 bg-white px-4 py-3 shadow-sm dark:border-white/10 dark:bg-slate-950/30">
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="min-w-0 flex-1">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <span class={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${inboxKindClasses[item.kind]}`}>
-                          {item.kind}
-                        </span>
-                        <span class={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${inboxStatusClasses[item.status]}`}>
-                          {item.status}
-                        </span>
-                        <span class={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${priorityClasses[item.priority]}`}>
-                          {item.priority}
-                        </span>
-                      </div>
-                      <button
-                        onclick={() => openInboxEditor(item)}
-                        class="mt-2 text-left text-sm font-semibold text-slate-900 transition-colors hover:text-amber-700 dark:text-white dark:hover:text-amber-300"
-                      >
-                        {item.title}
-                      </button>
-                      {#if item.body}
-                        <p class="mt-1 line-clamp-2 text-sm text-slate-500 dark:text-slate-400">{item.body}</p>
-                      {/if}
-                      <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-400 dark:text-slate-500">
-                        <span>Created <RelativeTime timestamp={item.created_at} /></span>
-                        {#if item.work_item_id}
-                          <span class="rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-800">
-                            linked to {workItems.find((workItem) => workItem.id === item.work_item_id)?.title ?? "ticket"}
-                          </span>
-                        {/if}
-                      </div>
-                    </div>
-
-                    <div class="flex shrink-0 items-center gap-2">
-                      {#if item.status === "open"}
-                        <button
-                          onclick={() => updateInboxStatus(item, "acknowledged")}
-                          class="rounded-full border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 dark:border-white/10 dark:text-slate-300 dark:hover:border-white/20 dark:hover:text-white"
-                        >
-                          Acknowledge
-                        </button>
-                      {/if}
-                      <button
-                        onclick={() => updateInboxStatus(item, "resolved")}
-                        class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-medium text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
-                      >
-                        Resolve
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              {/each}
-            {/if}
-          </div>
-        </section>
       </div>
 
       <section class="mt-4 rounded-3xl border border-slate-200/70 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
@@ -982,110 +773,6 @@
           class="rounded-full bg-slate-900 px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
         >
           {editingWorkItem ? "Save ticket" : "Create ticket"}
-        </button>
-      </div>
-    </div>
-  {/snippet}
-</Modal>
-
-<Modal open={inboxModalOpen} onClose={() => (inboxModalOpen = false)} title={editingInboxItem ? "Edit Inbox Item" : "New Inbox Item"}>
-  {#snippet children()}
-    <div class="space-y-4">
-      <div class="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Kind</label>
-          <select
-            bind:value={inboxKind}
-            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-amber-400 focus:ring-2 focus:ring-amber-400/15 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:focus:border-amber-500"
-          >
-            {#each ["report", "question", "attention", "approval", "delivery"] as value}
-              <option value={value}>{value}</option>
-            {/each}
-          </select>
-        </div>
-        <div>
-          <label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Priority</label>
-          <select
-            bind:value={inboxPriority}
-            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-amber-400 focus:ring-2 focus:ring-amber-400/15 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:focus:border-amber-500"
-          >
-            {#each ["low", "medium", "high", "urgent"] as value}
-              <option value={value}>{value}</option>
-            {/each}
-          </select>
-        </div>
-        <div class="sm:col-span-2">
-          <label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Title</label>
-          <input
-            bind:value={inboxTitle}
-            placeholder="What needs attention?"
-            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-amber-400 focus:ring-2 focus:ring-amber-400/15 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:focus:border-amber-500"
-          />
-        </div>
-        <div class="sm:col-span-2">
-          <label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Body</label>
-          <textarea
-            bind:value={inboxBody}
-            rows="5"
-            placeholder="Summarize the question, approval, or report."
-            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-amber-400 focus:ring-2 focus:ring-amber-400/15 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:focus:border-amber-500"
-          ></textarea>
-        </div>
-        <div>
-          <label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Status</label>
-          <select
-            bind:value={inboxStatus}
-            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-amber-400 focus:ring-2 focus:ring-amber-400/15 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:focus:border-amber-500"
-          >
-            {#each ["open", "acknowledged", "resolved", "dismissed"] as value}
-              <option value={value}>{value}</option>
-            {/each}
-          </select>
-        </div>
-        <div>
-          <label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Linked ticket</label>
-          <select
-            bind:value={inboxLinkedWorkItemId}
-            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-amber-400 focus:ring-2 focus:ring-amber-400/15 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:focus:border-amber-500"
-          >
-            <option value="">None</option>
-            {#each workItems as item}
-              <option value={item.id}>{item.title}</option>
-            {/each}
-          </select>
-        </div>
-      </div>
-
-      <label class="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-2.5 text-sm text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-300">
-        <input type="checkbox" bind:checked={inboxRequiresResponse} class="rounded border-slate-300 text-amber-500 focus:ring-amber-400/20" />
-        Requires explicit user response
-      </label>
-    </div>
-  {/snippet}
-  {#snippet footer()}
-    <div class="flex w-full items-center justify-between gap-3">
-      <div>
-        {#if editingInboxItem}
-          <button
-            onclick={deleteInboxItem}
-            class="rounded-full border border-rose-200 px-3.5 py-2 text-sm font-medium text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:hover:bg-rose-500/10"
-          >
-            Delete
-          </button>
-        {/if}
-      </div>
-      <div class="flex items-center gap-2">
-        <button
-          onclick={() => (inboxModalOpen = false)}
-          class="rounded-full border border-slate-200 px-3.5 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 dark:border-white/10 dark:text-slate-300 dark:hover:border-white/20 dark:hover:text-white"
-        >
-          Cancel
-        </button>
-        <button
-          onclick={saveInboxItem}
-          class="rounded-full bg-slate-900 px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-        >
-          {editingInboxItem ? "Save inbox item" : "Create inbox item"}
         </button>
       </div>
     </div>

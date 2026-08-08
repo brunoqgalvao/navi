@@ -23,8 +23,8 @@ export const CONTEXT_MAX_USER_MSG_LENGTH = 500;
 /** Max characters for assistant text in pruned context */
 export const CONTEXT_MAX_ASSISTANT_TEXT_LENGTH = 1000;
 
-/** Number of recent messages to preserve full tool results (the rest get pruned) */
-export const TOOL_RESULT_PRESERVE_RECENT_COUNT = 5;
+/** Number of recent raw tool-result messages to preserve during explicit pruning */
+export const TOOL_RESULT_PRESERVE_RECENT_COUNT = 0;
 
 /** Max characters for pruned tool result summary */
 export const TOOL_RESULT_PRUNED_MAX_LENGTH = 200;

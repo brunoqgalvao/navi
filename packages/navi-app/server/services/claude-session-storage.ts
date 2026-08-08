@@ -38,6 +38,10 @@ export function buildPrunedSummary(originalContent: string, maxPrunedLength: num
   return originalContent.slice(0, Math.max(0, maxPrunedLength - 30)) + `... [${originalContent.length} chars pruned]`;
 }
 
+function isPrunedSummaryContent(content: string): boolean {
+  return content.includes("chars pruned]");
+}
+
 function dedupeStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
 }
@@ -190,6 +194,10 @@ function pruneToolResultBlocks(
       ? block.content
       : JSON.stringify(block.content);
 
+    if (block.pruned === true || isPrunedSummaryContent(originalContent)) {
+      return block;
+    }
+
     if (originalContent.length <= maxPrunedLength) {
       return block;
     }
@@ -205,6 +213,8 @@ function pruneToolResultBlocks(
     return {
       ...block,
       content: summary,
+      pruned: true,
+      original_chars: originalContent.length,
     };
   });
 
@@ -220,7 +230,15 @@ function pruneToolUseResultPayload(
     return { changed: false, value: payload };
   }
 
+  if (payload && typeof payload === "object" && (payload as Record<string, unknown>).pruned === true) {
+    return { changed: false, value: payload };
+  }
+
   const serialized = typeof payload === "string" ? payload : JSON.stringify(payload);
+  if (isPrunedSummaryContent(serialized)) {
+    return { changed: false, value: payload };
+  }
+
   if (serialized.length <= maxPrunedLength) {
     return { changed: false, value: payload };
   }
@@ -245,6 +263,27 @@ function pruneToolUseResultPayload(
   return { changed: true, value: nextValue };
 }
 
+function pruneToolUseResultFields(
+  container: Record<string, unknown> | null | undefined,
+  maxPrunedLength: number,
+  counters: PruneCounters
+): boolean {
+  if (!container || typeof container !== "object") {
+    return false;
+  }
+
+  let modified = false;
+  for (const key of ["toolUseResult", "tool_use_result"]) {
+    if (!Object.prototype.hasOwnProperty.call(container, key)) continue;
+    const result = pruneToolUseResultPayload(container[key], maxPrunedLength, counters);
+    if (result.changed) {
+      container[key] = result.value;
+      modified = true;
+    }
+  }
+  return modified;
+}
+
 async function pruneToolResultFiles(
   toolResultsDirs: string[],
   prunedToolUseIds: Set<string>,
@@ -257,7 +296,7 @@ async function pruneToolResultFiles(
   const pruneFile = async (filePath: string): Promise<void> => {
     if (!(await isFile(filePath))) return;
     const originalContent = await readFile(filePath, "utf-8");
-    if (originalContent.length <= maxPrunedLength) return;
+    if (originalContent.length <= maxPrunedLength || isPrunedSummaryContent(originalContent)) return;
     const summary = buildPrunedSummary(originalContent, maxPrunedLength);
     await writeFile(filePath, summary + "\n");
     prunedCount++;
@@ -323,7 +362,7 @@ export interface PruneClaudeSessionArtifactsResult {
 export async function pruneClaudeSessionArtifacts(
   options: PruneClaudeSessionArtifactsOptions
 ): Promise<PruneClaudeSessionArtifactsResult> {
-  const preserveRecentCount = options.preserveRecentCount ?? 5;
+  const preserveRecentCount = options.preserveRecentCount ?? 0;
   const maxPrunedLength = options.maxPrunedLength ?? 200;
 
   const { sessionFile, toolResultsDirs } = await resolveClaudeSessionArtifacts(
@@ -361,9 +400,12 @@ export async function pruneClaudeSessionArtifacts(
       } catch {}
     }
 
-    const preserveFromIndex = userMessageIndices.length > preserveRecentCount
-      ? userMessageIndices[userMessageIndices.length - preserveRecentCount]
-      : 0;
+    const normalizedPreserveRecentCount = Math.max(0, preserveRecentCount);
+    const preserveFromIndex = normalizedPreserveRecentCount === 0
+      ? Number.POSITIVE_INFINITY
+      : userMessageIndices.length > normalizedPreserveRecentCount
+        ? userMessageIndices[userMessageIndices.length - normalizedPreserveRecentCount]
+        : 0;
 
     const prunedLines = lines.map((line, index) => {
       if (index >= preserveFromIndex) {
@@ -398,28 +440,16 @@ export async function pruneClaudeSessionArtifacts(
           }
         }
 
-        if (Object.prototype.hasOwnProperty.call(entry, "toolUseResult")) {
-          const result = pruneToolUseResultPayload(entry.toolUseResult, maxPrunedLength, counters);
-          if (result.changed) {
-            entry.toolUseResult = result.value;
-            modified = true;
-          }
+        if (pruneToolUseResultFields(entry, maxPrunedLength, counters)) {
+          modified = true;
         }
 
-        if (Object.prototype.hasOwnProperty.call(entry?.data?.message ?? {}, "toolUseResult")) {
-          const result = pruneToolUseResultPayload(entry.data.message.toolUseResult, maxPrunedLength, counters);
-          if (result.changed) {
-            entry.data.message.toolUseResult = result.value;
-            modified = true;
-          }
+        if (pruneToolUseResultFields(entry?.data?.message, maxPrunedLength, counters)) {
+          modified = true;
         }
 
-        if (Object.prototype.hasOwnProperty.call(entry?.data?.message?.message ?? {}, "toolUseResult")) {
-          const result = pruneToolUseResultPayload(entry.data.message.message.toolUseResult, maxPrunedLength, counters);
-          if (result.changed) {
-            entry.data.message.message.toolUseResult = result.value;
-            modified = true;
-          }
+        if (pruneToolUseResultFields(entry?.data?.message?.message, maxPrunedLength, counters)) {
+          modified = true;
         }
 
         return modified ? JSON.stringify(entry) : line;

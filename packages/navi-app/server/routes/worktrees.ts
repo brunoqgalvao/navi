@@ -23,8 +23,6 @@ import {
   deleteRepoSnapshot,
   type ConflictContext,
 } from "../utils/worktree";
-// ⚠️ EXPERIMENTAL: Worktree preview cleanup - remove this import to revert (see worktree-preview.ts)
-import { cleanupWorktreePreview } from "./worktree-preview";
 import { existsSync } from "fs";
 
 export async function handleWorktreeRoutes(
@@ -169,9 +167,6 @@ export async function handleWorktreeRoutes(
           hasUncommittedChanges: true,
         }, 400);
       }
-
-      // ⚠️ EXPERIMENTAL: Stop any running preview server for this worktree - remove to revert
-      cleanupWorktreePreview(sessionId);
 
       // Remove git worktree
       if (existsSync(session.worktree_path)) {

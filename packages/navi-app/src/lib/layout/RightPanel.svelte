@@ -3,7 +3,7 @@
    * RightPanel - Layout component for the right side panel
    *
    * Pure layout concerns:
-   * - Panel tabs (Files+Preview, Browser, Git, Terminal, Kanban)
+   * - Panel tabs (Files+Preview, Browser, Git, Terminal)
    * - Resize handle
    * - Content switching
    * - Split view for Files + Preview (collapsible file list)
@@ -13,19 +13,12 @@
   import FileBrowser from "../FileBrowser.svelte";
   import Preview, { type InspectedElement } from "../Preview.svelte";
   import { GitPanel } from "../features/git";
-  import { KanbanPanel } from "../features/kanban";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
-  import PreviewPanel from "../components/PreviewPanel.svelte";
-  import EmailPanel from "../features/email/EmailPanel.svelte";
-  import { ChannelsPanel } from "../features/channel-inbox/components";
-  import InboxPanel from "../features/inbox/components/InboxPanel.svelte";
-  import SharedInboxPanel from "../features/inbox/components/SharedInboxPanel.svelte";
   import { ContextPanel } from "../features/context";
-  import AuthGate from "../components/AuthGate.svelte";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "kanban" | "preview-unified" | "context" | "email" | "channels" | "inbox" | "shared-inbox";
+  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "context";
 
   interface Props {
     mode: PanelMode;
@@ -34,9 +27,7 @@
     sessionId: string | null;
     projectPath: string | null;
     worktreePath?: string | null;  // Use this for git operations when in a worktree
-    worktreeBranch?: string | null;  // Current branch for container preview
     previewSource: string | null;
-    containerPreviewUrl?: string | null;  // URL for container preview
     browserUrl: string;
     isResizing: boolean;
     terminalInitialCommand?: string;
@@ -47,10 +38,6 @@
     onBrowserUrlChange: (url: string) => void;
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
-    onNavigateToSession?: (sessionId: string, prompt?: string, autoSend?: boolean) => void;
-    onNavigateToProject?: (projectId: string) => void;
-    /** Callback when preview panel wants to ask Claude for help */
-    onPreviewAskClaude?: (message: string) => void;
     /** Callback when user inspects an element in browser preview */
     onElementInspected?: (element: InspectedElement) => void;
   }
@@ -62,9 +49,7 @@
     sessionId,
     projectPath,
     worktreePath = null,
-    worktreeBranch = null,
     previewSource,
-    containerPreviewUrl = null,
     browserUrl,
     isResizing,
     terminalInitialCommand = "",
@@ -75,9 +60,6 @@
     onBrowserUrlChange,
     onTerminalRef,
     onTerminalSendToClaude,
-    onNavigateToSession,
-    onNavigateToProject,
-    onPreviewAskClaude,
     onElementInspected,
   }: Props = $props();
 
@@ -284,61 +266,10 @@
           }}
         />
       </div>
-    {:else if mode === "kanban" && projectId}
-      <!-- Kanban panel - full width -->
-      <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <KanbanPanel
-          {projectId}
-          {onNavigateToSession}
-        />
-      </div>
-    {:else if mode === "preview-unified"}
-      <!-- Unified Preview panel - full width -->
-      <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <PreviewPanel
-          {projectId}
-          {sessionId}
-          branch={worktreeBranch}
-          previewUrl={containerPreviewUrl}
-          onAskClaude={onPreviewAskClaude}
-          {onElementInspected}
-        />
-      </div>
     {:else if mode === "context"}
       <!-- Context panel - session context visibility -->
       <div class="flex-1 flex flex-col w-full overflow-hidden">
         <ContextPanel {sessionId} />
-      </div>
-    {:else if mode === "email"}
-      <!-- Email panel - requires auth -->
-      <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <AuthGate feature="email" featureDescription="your personal Navi email inbox" featureIcon="email">
-          {#snippet children()}
-            <EmailPanel />
-          {/snippet}
-        </AuthGate>
-      </div>
-    {:else if mode === "channels"}
-      <!-- Channels panel - WhatsApp, Telegram & messaging integrations -->
-      <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <ChannelsPanel />
-      </div>
-    {:else if mode === "inbox"}
-      <!-- Workspace inbox - follow-ups requested by workflows, agents, and prompts -->
-      <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <InboxPanel
-          {projectId}
-          currentSessionId={sessionId}
-          onOpenSession={(nextSessionId) => onNavigateToSession?.(nextSessionId)}
-        />
-      </div>
-    {:else if mode === "shared-inbox"}
-      <!-- Shared inbox - cross-project follow-ups -->
-      <div class="flex-1 flex flex-col w-full overflow-hidden">
-        <SharedInboxPanel
-          onOpenSession={(nextSessionId) => onNavigateToSession?.(nextSessionId)}
-          onOpenProject={(nextProjectId) => onNavigateToProject?.(nextProjectId)}
-        />
       </div>
     {/if}
   </div>

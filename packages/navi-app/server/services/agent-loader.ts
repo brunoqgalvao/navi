@@ -28,7 +28,7 @@ import * as yaml from "yaml";
 // Shared Types
 // ============================================================================
 
-export type AgentModel = "haiku" | "sonnet" | "opus";
+export type AgentModel = "haiku" | "sonnet" | "opus" | "fable";
 
 export interface MCPServerConfig {
   command: string;
@@ -749,7 +749,7 @@ export class AgentLoader {
     };
 
     // Model
-    if (parsed.model && ["haiku", "sonnet", "opus"].includes(parsed.model)) {
+    if (parsed.model && ["haiku", "sonnet", "opus", "fable"].includes(parsed.model)) {
       bundle.model = parsed.model as AgentModel;
     }
 

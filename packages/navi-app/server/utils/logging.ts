@@ -2,13 +2,14 @@ import { accessSync, appendFileSync, constants, existsSync, mkdirSync, renameSyn
 import { homedir } from "os";
 import { join } from "path";
 
+import { getDataDir } from "./data-dir";
 function expandHome(value: string): string {
   if (value === "~") return homedir();
   if (value.startsWith("~/")) return join(homedir(), value.slice(2));
   return value;
 }
 
-const DEFAULT_LOG_DIR = join(homedir(), ".claude-code-ui", "logs");
+const DEFAULT_LOG_DIR = join(getDataDir(), "logs");
 const LOG_DIR = process.env.NAVI_LOG_DIR ? expandHome(process.env.NAVI_LOG_DIR) : DEFAULT_LOG_DIR;
 const LOG_FILE = process.env.NAVI_LOG_FILE ? expandHome(process.env.NAVI_LOG_FILE) : join(LOG_DIR, "navi-server.log");
 const MAX_LOG_BYTES = parseInt(process.env.NAVI_MAX_LOG_BYTES || String(5 * 1024 * 1024), 10);

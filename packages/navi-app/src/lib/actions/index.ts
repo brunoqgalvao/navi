@@ -45,6 +45,7 @@ export {
   setProjectFolder,
   reorderFolders,
   toggleFolderPin,
+  toggleFolderArchive,
   type FolderActionCallbacks,
 } from "./folder-actions";
 
@@ -59,6 +60,7 @@ export {
   setSessionFolder,
   reorderSessionFolders,
   toggleSessionFolderPin,
+  toggleSessionFolderArchive,
   type SessionFolderActionCallbacks,
 } from "./session-folder-actions";
 
@@ -83,6 +85,7 @@ export {
   startNewChatWithSummary,
   getMessagesForApi,
   extractHistoryContextForQuery,
+  makePrunedHistoryContext,
   hasPrunedContext,
   hasRollbackContext,
   clearPrunedCache,

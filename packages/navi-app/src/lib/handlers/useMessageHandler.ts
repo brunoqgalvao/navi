@@ -30,6 +30,11 @@ export interface UseMessageHandlerOptions {
   getProjectId: () => string | null;
   onCostUpdate?: (sessionId: string, costUsd: number) => void;
   onUsageUpdate?: (inputTokens: number, outputTokens: number) => void;
+  onLiveUsageUpdate?: (sessionId: string, inputTokens: number, outputTokens: number) => void;
+  onContextWindowUpdate?: (
+    sessionId: string,
+    info: { contextWindow?: number; maxOutputTokens?: number }
+  ) => void;
   onPermissionRequest?: (data: { requestId: string; tools: string[]; toolInput?: Record<string, unknown>; message: string }) => void;
   onAskUserQuestion?: (data: AskUserQuestionData) => void;
   onSubagentProgress?: (sessionId: string, toolUseId: string, elapsed: number) => void;
@@ -129,6 +134,8 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
     getProjectId,
     onCostUpdate,
     onUsageUpdate,
+    onLiveUsageUpdate,
+    onContextWindowUpdate,
     onPermissionRequest,
     onAskUserQuestion,
     onSubagentProgress,
@@ -235,6 +242,19 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
             (data.usage.cache_read_input_tokens || 0);
           onUsageUpdate?.(totalInputTokens, data.usage.output_tokens || 0);
         }
+      },
+
+      // Live context accounting from each main-chain assistant message, so the
+      // usage display tracks the turn as it grows instead of only on completion.
+      onAssistantUsage: (sessionId, usage) => {
+        const totalInputTokens = (usage.input_tokens || 0) +
+          (usage.cache_creation_input_tokens || 0) +
+          (usage.cache_read_input_tokens || 0);
+        onLiveUsageUpdate?.(sessionId, totalInputTokens, usage.output_tokens || 0);
+      },
+
+      onContextInfo: (sessionId, info) => {
+        onContextWindowUpdate?.(sessionId, info);
       },
       
       onPermissionRequest: (data) => {

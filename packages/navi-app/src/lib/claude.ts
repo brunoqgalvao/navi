@@ -130,6 +130,7 @@ export interface ModelUsage {
   webSearchRequests: number;
   costUSD: number;
   contextWindow: number;
+  maxOutputTokens?: number;
 }
 
 export interface PermissionDenial {
@@ -183,6 +184,9 @@ export interface DoneMessage {
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
   };
+  // Context window the runtime reported for this session's model.
+  contextWindow?: number;
+  maxOutputTokens?: number;
   uuid?: string;
   timestamp?: number;
 }
@@ -426,51 +430,6 @@ export type SessionHierarchyMessage =
   | SessionClarificationRespondedMessage
   | SessionDraftAcceptedMessage;
 
-// Cloud execution message types
-export interface CloudExecutionStartedMessage {
-  type: "cloud_execution_started";
-  uiSessionId?: string;
-  executionId: string;
-  repoUrl?: string;
-  branch?: string;
-}
-
-export interface CloudStageMessage {
-  type: "cloud_stage";
-  uiSessionId?: string;
-  executionId: string;
-  stage: "starting" | "cloning" | "checkout" | "executing" | "syncing" | "completed" | "failed";
-  message?: string;
-}
-
-export interface CloudOutputMessage {
-  type: "cloud_output";
-  uiSessionId?: string;
-  executionId: string;
-  stream: "stdout" | "stderr";
-  data: string;
-}
-
-export interface CloudResultMessage {
-  type: "cloud_result";
-  uiSessionId?: string;
-  executionId: string;
-  success: boolean;
-  exitCode: number;
-  modifiedFiles?: string[];
-  syncedFiles?: string[];
-  duration: number;
-  estimatedCostUsd?: number;
-  error?: string;
-}
-
-export interface CloudErrorMessage {
-  type: "cloud_error";
-  uiSessionId?: string;
-  executionId: string;
-  error: string;
-}
-
 export interface BackgroundProcessEventMessage {
   type: "background_process_event";
   processId: string;
@@ -480,7 +439,7 @@ export interface BackgroundProcessEventMessage {
   port?: number;
   process?: {
     id: string;
-    type: "bash" | "task" | "dev_server" | "container_preview";
+    type: "bash" | "task" | "dev_server";
     command: string;
     cwd: string;
     pid?: number;
@@ -510,11 +469,6 @@ export type ClaudeMessage =
   | AuthStatusMessage
   | UnknownMessage
   | SessionHierarchyMessage
-  | CloudExecutionStartedMessage
-  | CloudStageMessage
-  | CloudOutputMessage
-  | CloudResultMessage
-  | CloudErrorMessage
   | BackgroundProcessEventMessage
   | { type: "connected" }
   | { type: "aborted"; sessionId?: string; uiSessionId?: string }
@@ -588,19 +542,16 @@ export class ClaudeClient {
     workingDirectory?: string;
     allowedTools?: string[];
     model?: string;
+    contextWindow?: number;
     historyContext?: string;
     // Agent selection (e.g., "coder", "img3d")
     agentId?: string;
     // Backend selection (claude, codex, gemini)
     backend?: "claude" | "codex" | "gemini";
-    // Reasoning effort (low, medium, high, xhigh)
+    // Reasoning effort (low, medium, high, xhigh, max)
     reasoningEffort?: string;
     // Optional cap on thinking tokens (Claude backend)
     maxThinkingTokens?: number;
-    // Cloud execution options
-    executionMode?: "local" | "cloud";
-    cloudRepoUrl?: string;
-    cloudBranch?: string;
   }) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected to server");

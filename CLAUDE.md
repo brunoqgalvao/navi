@@ -13,6 +13,19 @@ VERY IMPORTANT CONTEXT:
 
 Navi is an **independent, standardizing harness** for interacting with coding agents. While currently focused on Claude Agent SDK, we secondarily support Codex and Gemini.
 
+> **2026-06 refocus:** Navi was deliberately cut down to its core (chat/sessions,
+> multi-agent orchestration, terminal, git, skills, browser, MCP). A lot of
+> half-baked surface area got demolished. The why-and-what lives in
+> [`docs/superpowers/specs/2026-06-12-navi-refocus-design.md`](docs/superpowers/specs/2026-06-12-navi-refocus-design.md);
+> the current feature inventory is in [`docs/STATUS.md`](docs/STATUS.md). If this
+> file disagrees with reality, reality wins — fix this file.
+>
+> **2026-07 simplification deltas:** the preview/dev-server stack was deleted
+> outright (browser panel is the only preview surface; start dev servers
+> yourself), the skills marketplace/import/editor UI collapsed into one flat
+> SkillsPanel, and the context panel was restyled. Spec:
+> [`docs/superpowers/specs/2026-07-20-simplification-deltas-design.md`](docs/superpowers/specs/2026-07-20-simplification-deltas-design.md).
+
 ### Core Mission
 
 **Be the best UI layer for AI coding agents** — not by reinventing the wheel, but by:
@@ -35,7 +48,7 @@ The goal: patterns proven in Navi should eventually standardize across Claude, C
 #### 2. Rich UI on Standards
 Provide convenient harnesses and UI that abstract complexity:
 - **Workspaces & Sessions** — navigate between many agents/projects
-- **Extensions** — composable sidebar panels (Git, Terminal, Kanban, Deploy)
+- **Extensions** — composable sidebar panels (Files, Browser, Git, Terminal)
 - **Inline Widgets** — rich rendering in chat (diagrams, charts, interactive UI)
 - **Integrations** — OAuth flows abstracted from the user
 - **Multi-account management** — API keys, providers, credentials
@@ -76,9 +89,20 @@ bun run dev:tauri      # Desktop app mode (Tauri)
 # Type checking
 bun run --cwd packages/navi-app check
 
-# API testing
-bun run --cwd packages/navi-app test:api
+# Tests (isolated data dir — safe to run anytime, never touches the live DB)
+bun run --cwd packages/navi-app test:server
+
+# Sandbox instance (isolated second Navi for agent-driven testing)
+bun run sandbox start [--frontend]   # backend :4021, pty :4022, frontend :4020
+bun run sandbox restart|stop|status|logs|url
 ```
+
+**Sandbox & data isolation:** `NAVI_DATA_DIR` overrides `~/.claude-code-ui`
+(helper: `server/utils/data-dir.ts`). The sandbox (`scripts/sandbox.sh`) uses
+`~/.claude-code-ui-sandbox` and ports 4020-4022 — outside the live frontend's
+3021-3030 discovery scan — so agents can start/stop/restart it freely without
+touching the live app. `scripts/smoke.sh` boots against a temp data dir (fast,
+~1s). The LIVE backend on :3021 is still restart-by-Bruno-only — we run inside it.
 
 **Ports:** Frontend dev: 1420 | Backend: 3021 | PTY server: 3022
 
@@ -88,13 +112,12 @@ bun run --cwd packages/navi-app test:api
 
 ### UI/UX Component Taxonomy
 
-Navi has **8 distinct component categories** defined in `src/lib/core/`:
+Navi has **7 distinct component categories** defined in `src/lib/core/`:
 
 | Category | Purpose | Location | Registry |
 |----------|---------|----------|----------|
 | **Extensions** | Sidebar panels (Files, Git, Terminal) | `features/extensions/` | `extensionRegistry` |
 | **Message Widgets** | Inline chat renderers (code, media, tools) | `components/widgets/` | `messageWidgetRegistry` |
-| **Dashboard Widgets** | Project landing page components | `features/dashboard/` | `dashboardWidgetRegistry` |
 | **References** | @ mentions in input (files, terminals, chats) | `core/references.ts` | `references` store |
 | **Plugins** | Unified extensibility (skills + commands + hooks) | `.claude/skills/`, `.claude/commands/` | File-based |
 | **Templates** | Bundles of plugins + config for use cases | `.claude/templates/` | File-based |
@@ -105,7 +128,7 @@ Navi has **8 distinct component categories** defined in `src/lib/core/`:
 
 **Important: Extensions vs Global Settings Feature Toggles**
 
-- **Extensions** are **session/project-scoped** panels. They appear in the right sidebar, can be enabled/disabled per project, and are relevant to the current chat context (Files, Git, Terminal, Kanban, etc.).
+- **Extensions** are **session/project-scoped** panels. They appear in the right sidebar, can be enabled/disabled per project, and are relevant to the current chat context (Files, Browser, Git, Terminal, etc.).
 - **Global Settings Features** are **app-wide toggles** (Settings → Features tab). Use these for features that monitor or affect the entire app, not specific sessions. Examples: Resource Monitor, Debug Mode, Advanced Mode, Telemetry.
 
 When adding a new panel/feature:
@@ -130,8 +153,7 @@ packages/
 │   ├── src/            # Svelte 5 frontend
 │   ├── server/         # Bun backend (routes, services, websocket)
 │   └── src-tauri/      # Tauri desktop wrapper
-├── landing-page/       # Marketing website
-└── navi-cloud/         # Cloud infrastructure (secondary)
+└── landing-page/       # Marketing website
 ```
 
 ### Tech Stack
@@ -145,18 +167,20 @@ packages/
 
 ## Feature Status
 
-See `docs/STATUS.md` for complete feature inventory. Quick summary:
+See `docs/STATUS.md` for complete feature inventory. Quick summary (post-2026-06 refocus):
 
 | Status | Features |
 |--------|----------|
-| **CORE** | Sessions, Projects, Terminal, Git, Skills, Preview, **Multi-Agent System** |
-| **STABLE** | Kanban, Commands, Extensions, OAuth Integrations, Backend Selector |
-| **EXPERIMENTAL** | Proactive Hooks, Sessions Board, Ensemble Consensus, Email (AgentMail) |
-| **DEPRECATED** | E2B Cloud Execution, Self-Healing Builds, Experimental Agents |
-| **CUT** | Channels, Browser (standalone), Plugins |
+| **CORE** | Sessions, Projects, **Multi-Agent Orchestration**, Terminal, Git, Skills, Browser, MCP |
+| **STABLE** | Extensions, Commands, Plugins, Raw Credentials, Backend Selector |
+| **IN REBUILD** | Workflows |
 
-**Experimental features** are marked with `@experimental` in code comments.
-**Deprecated features** are marked with `@deprecated` and will be removed.
+A pile of half-finished features (kanban, channels, email, dashboard, council,
+inbox, cloud execution, proactive hooks, agent-builder, navi-cloud, managed OAuth
+integrations, sessions-board, canvas) was demolished in the refocus. See the
+"Removed in 2026-06 refocus" section of `docs/STATUS.md` and the spec at
+`docs/superpowers/specs/2026-06-12-navi-refocus-design.md`. Don't go hunting for
+them — they're gone.
 
 ---
 
@@ -246,13 +270,11 @@ const gitExt = extensionRegistry.getByPanelMode("git");
 | ID | Panel Mode | Icon | Purpose |
 |----|------------|------|---------|
 | `files` | files | 📁 | File browser, project navigation |
-| `preview` | preview | 👁️ | URL/file preview panel |
 | `git` | git | 🔀 | Git status, branches, commits |
 | `terminal` | terminal | 💻 | Terminal output viewer |
 | `processes` | processes | ⚙️ | Background process manager |
-| `kanban` | kanban | 📋 | Task board |
-| `agents` | agents | 🤖 | Agent hierarchy viewer |
-| `channels` | channels | 💬 | WhatsApp, Telegram & messaging inbox |
+| `context` | context | 🧠 | Session context viewer |
+| `browser` | browser | 🌐 | Browser + URL/file preview surface |
 
 #### Creating a New Extension
 
@@ -305,24 +327,6 @@ registerToolWidget("Read", FilePreviewWidget);
 Example flow for `stocks` widget:
 ```
 User asks → Claude outputs ```stocks {...} ``` → MermaidRenderer detects → StockChart renders
-```
-
-### Dashboard Widgets
-
-Dashboard widgets appear on the project landing page. Located in `src/lib/features/dashboard/`:
-
-| Widget | Purpose |
-|--------|---------|
-| `QuickActions` | Common actions (new chat, settings) |
-| `RecentSessions` | Recently used sessions |
-| `ProjectStats` | Token usage, cost stats |
-| `SkillsList` | Enabled skills for project |
-
-Dashboard can also render markdown widgets using code blocks:
-```markdown
-```widget:stats
-title: Usage This Week
-```
 ```
 
 ### References (@ Mentions)
@@ -379,8 +383,8 @@ model: sonnet
 | `stock-compare` | Fetch and compare stock prices |
 | `playwright` | Browser automation, screenshots |
 | `navi` | Control Navi GUI from Claude |
-| `integrations` | OAuth services (Gmail, Sheets) |
-| `ship-it` | Deploy apps to Navi Cloud |
+| `navi-llm` | Dispatch prompts to other LLMs |
+| `project-template` | Scaffold new projects from templates |
 
 ### Creating a New Skill
 
@@ -684,7 +688,6 @@ Accent colors are dynamically generated from configurable hue/saturation values.
 | Extensions | `packages/navi-app/src/lib/features/extensions/` |
 | Session hierarchy | `packages/navi-app/src/lib/features/session-hierarchy/` |
 | Git feature | `packages/navi-app/src/lib/features/git/` |
-| Dashboard | `packages/navi-app/src/lib/features/dashboard/` |
 | **Message widgets** | `packages/navi-app/src/lib/components/widgets/` |
 | **Stock chart widget** | `packages/navi-app/src/lib/components/widgets/StockChart.svelte` |
 

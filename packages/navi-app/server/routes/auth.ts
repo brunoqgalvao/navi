@@ -6,10 +6,9 @@ import { getSDK } from "../utils/sdk-loader";
 import { createHash, randomBytes } from "crypto";
 
 // ============================================
-// USER AUTH (for gated features like Email)
+// USER AUTH
 // ============================================
 
-const AGENTMAIL_API_BASE = "https://api.agentmail.to/v0";
 const AUTH_STATUS_TIMEOUT_MS = 6000;
 const AUTH_INTERRUPT_TIMEOUT_MS = 500;
 const CLI_AUTH_STATUS_TIMEOUT_MS = 2000;
@@ -112,7 +111,7 @@ async function createNaviInbox(username: string): Promise<string | null> {
   }
 
   try {
-    const response = await fetch(`${AGENTMAIL_API_BASE}/inboxes`, {
+    const response = await fetch(`https://api.agentmail.to/v0/inboxes`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
@@ -130,7 +129,7 @@ async function createNaviInbox(username: string): Promise<string | null> {
 
       // Provide specific error for limit exceeded
       if (errorData.name === "LimitExceededError") {
-        throw new Error("AgentMail inbox limit reached. Please delete unused inboxes at agentmail.to or upgrade your plan.");
+        throw new Error("Inbox limit reached. Please try again later.");
       }
       return null;
     }
@@ -239,11 +238,14 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       ? `${storedApiKey.slice(0, 10)}...${storedApiKey.slice(-4)}`
       : null;
 
-    const zaiKey = globalSettings.get("zaiApiKey") as string | null;
+    const storedZaiKey = globalSettings.get("zaiApiKey") as string | null;
+    const envZaiKey = process.env.ZAI_API_KEY || null;
+    const zaiKey = storedZaiKey || envZaiKey;
     const hasZaiKey = !!zaiKey;
     const zaiKeyPreview = zaiKey
       ? `${zaiKey.slice(0, 8)}...${zaiKey.slice(-4)}`
       : null;
+    const zaiKeySource = storedZaiKey ? "settings" : envZaiKey ? "environment" : null;
 
     return json({
       claudeInstalled,
@@ -258,6 +260,7 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       preferredAuth,
       hasZaiKey,
       zaiKeyPreview,
+      zaiKeySource,
     });
   }
 
@@ -319,13 +322,16 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
   }
 
   if (url.pathname === "/api/auth/zai-key" && method === "GET") {
-    const zaiKey = globalSettings.get("zaiApiKey") as string | null;
+    const storedZaiKey = globalSettings.get("zaiApiKey") as string | null;
+    const envZaiKey = process.env.ZAI_API_KEY || null;
+    const zaiKey = storedZaiKey || envZaiKey;
     const hasZaiKey = !!zaiKey;
     const zaiKeyPreview = zaiKey
       ? `${zaiKey.slice(0, 8)}...${zaiKey.slice(-4)}`
       : null;
+    const zaiKeySource = storedZaiKey ? "settings" : envZaiKey ? "environment" : null;
 
-    return json({ hasZaiKey, zaiKeyPreview });
+    return json({ hasZaiKey, zaiKeyPreview, zaiKeySource });
   }
 
   if (url.pathname === "/api/auth/login" && method === "POST") {
@@ -415,11 +421,11 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
         }
       }
 
-      // Generate username for AgentMail
+      // Generate username for Navi inbox
       const emailUsername = body.email.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
       const naviUsername = `navi-${emailUsername}-${randomBytes(4).toString("hex")}`;
 
-      // Create AgentMail inbox
+      // Create Navi inbox
       let naviEmail: string | null;
       try {
         naviEmail = await createNaviInbox(naviUsername);

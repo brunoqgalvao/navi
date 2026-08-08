@@ -217,6 +217,10 @@ function createCurrentSessionStore() {
     selectedModel: string;
     inputTokens: number;
     outputTokens: number;
+    // Context window the runtime actually reported for this session's model —
+    // authoritative over project settings and model-name heuristics.
+    contextWindow: number | null;
+    maxOutputTokens: number | null;
     isPending: boolean; // True when in "new chat" state before first message sent
   }>({
     projectId: null,
@@ -228,6 +232,8 @@ function createCurrentSessionStore() {
     selectedModel: "",
     inputTokens: 0,
     outputTokens: 0,
+    contextWindow: null,
+    maxOutputTokens: null,
     isPending: false,
   });
 
@@ -240,12 +246,12 @@ function createCurrentSessionStore() {
     setProject: (projectId: string | null) =>
       update((s) => {
         syncUrl(projectId, null);
-        return { ...s, projectId, sessionId: null, claudeSessionId: null, inputTokens: 0, outputTokens: 0, isPending: false };
+        return { ...s, projectId, sessionId: null, claudeSessionId: null, inputTokens: 0, outputTokens: 0, contextWindow: null, maxOutputTokens: null, isPending: false };
       }),
     setSession: (sessionId: string | null, claudeSessionId?: string | null) =>
       update((s) => {
         syncUrl(s.projectId, sessionId);
-        return { ...s, sessionId, claudeSessionId: claudeSessionId ?? null, isPending: false };
+        return { ...s, sessionId, claudeSessionId: claudeSessionId ?? null, contextWindow: null, maxOutputTokens: null, isPending: false };
       }),
     // Set pending state for new chat (no DB session yet)
     setPending: (isPending: boolean) =>
@@ -266,6 +272,8 @@ function createCurrentSessionStore() {
     setSelectedModel: (selectedModel: string) => update((s) => ({ ...s, selectedModel })),
     setUsage: (inputTokens: number, outputTokens: number) =>
       update((s) => ({ ...s, inputTokens, outputTokens })),
+    setContextInfo: (contextWindow: number | null, maxOutputTokens: number | null) =>
+      update((s) => ({ ...s, contextWindow, maxOutputTokens })),
     addUsage: (inputTokens: number, outputTokens: number) =>
       update((s) => ({
         ...s,
@@ -284,11 +292,13 @@ function createCurrentSessionStore() {
         selectedModel: "",
         inputTokens: 0,
         outputTokens: 0,
+        contextWindow: null,
+        maxOutputTokens: null,
         isPending: false,
       });
     },
     restoreFromUrl: (projectId: string | null, sessionId: string | null) =>
-      update((s) => ({ ...s, projectId, sessionId, claudeSessionId: null, inputTokens: 0, outputTokens: 0, isPending: false })),
+      update((s) => ({ ...s, projectId, sessionId, claudeSessionId: null, inputTokens: 0, outputTokens: 0, contextWindow: null, maxOutputTokens: null, isPending: false })),
   };
 }
 
@@ -392,135 +402,6 @@ function createSessionStatusStore() {
   };
 }
 
-// Cloud execution mode store - tracks execution mode per session
-export type ExecutionMode = "local" | "cloud";
-
-export interface CloudExecutionSettings {
-  mode: ExecutionMode;
-  repoUrl?: string;
-  branch?: string;
-}
-
-function createExecutionModeStore() {
-  const { subscribe, update } = writable<Map<string, CloudExecutionSettings>>(new Map());
-
-  return {
-    subscribe,
-    // Get settings for a session (defaults to local)
-    get: (sessionId: string, map: Map<string, CloudExecutionSettings>): CloudExecutionSettings => {
-      return map.get(sessionId) || { mode: "local" };
-    },
-    // Set mode for a session
-    setMode: (sessionId: string, mode: ExecutionMode, repoUrl?: string, branch?: string) =>
-      update((map) => {
-        map.set(sessionId, { mode, repoUrl, branch });
-        return new Map(map);
-      }),
-    // Update just the branch for a session
-    setBranch: (sessionId: string, branch: string) =>
-      update((map) => {
-        const current = map.get(sessionId) || { mode: "local" as ExecutionMode };
-        map.set(sessionId, { ...current, branch });
-        return new Map(map);
-      }),
-    // Clear settings for a session
-    clear: (sessionId: string) =>
-      update((map) => {
-        map.delete(sessionId);
-        return new Map(map);
-      }),
-    // Reset all
-    reset: () => update(() => new Map()),
-  };
-}
-
-// Global execution mode (default for new chats)
-export const defaultExecutionMode = writable<ExecutionMode>("local");
-
-// Cloud execution status store - tracks active cloud executions per session
-export type CloudExecutionStage = "starting" | "cloning" | "checkout" | "executing" | "syncing" | "completed" | "failed";
-
-export interface CloudExecutionState {
-  executionId: string;
-  stage: CloudExecutionStage;
-  stageMessage?: string;
-  repoUrl?: string;
-  branch?: string;
-  outputLines: string[];
-  duration?: number;
-  estimatedCostUsd?: number;
-  success?: boolean;
-  error?: string;
-}
-
-function createCloudExecutionStore() {
-  const { subscribe, update } = writable<Map<string, CloudExecutionState>>(new Map());
-
-  return {
-    subscribe,
-    // Start a new cloud execution
-    start: (sessionId: string, executionId: string, repoUrl?: string, branch?: string) =>
-      update((map) => {
-        map.set(sessionId, {
-          executionId,
-          stage: "starting",
-          repoUrl,
-          branch,
-          outputLines: [],
-        });
-        return new Map(map);
-      }),
-    // Update stage
-    setStage: (sessionId: string, stage: CloudExecutionStage, message?: string) =>
-      update((map) => {
-        const current = map.get(sessionId);
-        if (current) {
-          map.set(sessionId, { ...current, stage, stageMessage: message });
-        }
-        return new Map(map);
-      }),
-    // Add output line
-    addOutput: (sessionId: string, line: string) =>
-      update((map) => {
-        const current = map.get(sessionId);
-        if (current) {
-          // Keep last 50 lines
-          const lines = [...current.outputLines, line].slice(-50);
-          map.set(sessionId, { ...current, outputLines: lines });
-        }
-        return new Map(map);
-      }),
-    // Complete execution
-    complete: (sessionId: string, success: boolean, duration: number, costUsd?: number, error?: string) =>
-      update((map) => {
-        const current = map.get(sessionId);
-        if (current) {
-          map.set(sessionId, {
-            ...current,
-            stage: success ? "completed" : "failed",
-            success,
-            duration,
-            estimatedCostUsd: costUsd,
-            error,
-          });
-        }
-        return new Map(map);
-      }),
-    // Clear execution state
-    clear: (sessionId: string) =>
-      update((map) => {
-        map.delete(sessionId);
-        return new Map(map);
-      }),
-    // Get state for session
-    get: (sessionId: string, map: Map<string, CloudExecutionState>): CloudExecutionState | undefined => {
-      return map.get(sessionId);
-    },
-  };
-}
-
-export const cloudExecutionStore = createCloudExecutionStore();
-
 // Export store instances
 export const sessionMessages = createSessionMessagesStore();
 export const sessionDrafts = createSessionDraftsStore();
@@ -528,7 +409,6 @@ export const currentSession = createCurrentSessionStore();
 export const sessionTodos = createSessionTodosStore();
 export const sessionDebugInfo = createSessionDebugStore();
 export const sessionStatus = createSessionStatusStore();
-export const executionModeStore = createExecutionModeStore();
 export const loadingSessions = writable<Set<string>>(new Set());
 // Track sessions that are loading initial messages from DB (different from streaming)
 export const loadingMessagesSessions = writable<Set<string>>(new Set());
@@ -563,10 +443,10 @@ export const sessionBackendStore = createBackendStore();
 // Default backend for new sessions
 export const defaultBackend = writable<BackendId>("claude");
 
-// Reasoning effort per session (low, medium, high, extra high)
-export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+// Reasoning effort per session (low, medium, high, xhigh, max)
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
-const REASONING_EFFORT_VALUES: ReasoningEffort[] = ["low", "medium", "high", "xhigh"];
+const REASONING_EFFORT_VALUES: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
 const DEFAULT_REASONING_EFFORT_KEY = "navi-default-reasoning-effort";
 
 // Default reasoning effort for new sessions — persisted so the user's last

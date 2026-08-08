@@ -2,7 +2,12 @@
 
 > Feature inventory and status tracking
 
-Last updated: January 11, 2026
+Last updated: July 21, 2026 (post simplification deltas)
+
+> **2026-06 refocus:** Navi was cut down to its core. A pile of half-finished
+> features got demolished (see [Removed in 2026-06 refocus](#removed-in-2026-06-refocus)).
+> The design rationale lives in
+> [`docs/superpowers/specs/2026-06-12-navi-refocus-design.md`](superpowers/specs/2026-06-12-navi-refocus-design.md).
 
 ---
 
@@ -12,8 +17,7 @@ Last updated: January 11, 2026
 |--------|---------|
 | **CORE** | Essential, actively maintained |
 | **STABLE** | Working, low maintenance |
-| **EXPERIMENTAL** | In development, may change or be removed |
-| **DEPRECATED** | Scheduled for removal |
+| **IN REBUILD** | Intentionally torn down, being rebuilt on the refocused core |
 
 ---
 
@@ -29,12 +33,30 @@ These are essential to Navi's operation.
 | Messages | `routes/messages.ts` | Chat history |
 | WebSocket handler | `websocket/handler.ts` | Real-time communication |
 
-### File System & Terminal
+### Multi-Agent Orchestration
+**Production-ready hierarchical agent coordination.** Spawn and coordinate
+multiple AI agents working in parallel.
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Session hierarchy | `routes/session-hierarchy.ts` | Parent-child session management |
+| Multi-session tools | `services/multi-session-tools.ts` | Agent comms (spawn, escalate, deliver) |
+| Child sessions UI | `features/session-hierarchy/` | Real-time hierarchy visualization |
+| Agent types (server) | `server/agent-types.ts` | Built-in agent definitions |
+| Agent types (frontend) | `src/lib/core/agent-types.ts` | UI metadata per agent type |
+
+**Key capabilities:**
+- Spawn child agents for parallel subtasks (depth limit: 3)
+- Inter-agent communication (get_context, log_decision, escalate, deliver)
+- Shared decisions and artifacts across hierarchy
+- Specialized native UIs for agent types (browser, coding, runner)
+
+### Terminal & Processes
 | Feature | Location | Notes |
 |---------|----------|-------|
-| File browser | `routes/filesystem.ts` | Read/write files |
 | Terminal/PTY | `routes/terminal.ts` | Shell integration |
 | Background processes | `routes/background-processes.ts` | Process management |
+| File browser | `routes/filesystem.ts` | Read/write files |
 
 ### Git Integration
 | Feature | Location | Notes |
@@ -46,15 +68,30 @@ These are essential to Navi's operation.
 ### Skills System
 | Feature | Location | Notes |
 |---------|----------|-------|
-| Skill loader | `routes/skills.ts` | Load from `.claude/skills/` |
-| Core skills | See skills table below | |
+| Skill loader | `routes/skills.ts`, `server/skills.ts` | Load from `.claude/skills/` |
+| Skills panel | `src/lib/components/SkillsPanel.svelte` | Flat list; global + per-project toggle, reveal, delete |
+| Core skills | See [Skills Inventory](#skills-inventory) | |
 
-### Preview System
+Installing a skill = drop its folder into `~/.claude/skills/` (global) or
+`.claude/skills/` (project), then rescan. There is no marketplace/import UI.
+
+### Browser Panel (preview surface)
 | Feature | Location | Notes |
 |---------|----------|-------|
-| Native preview | `services/native-preview.ts` | Dev server preview |
-| Preview proxy | `routes/preview-proxy.ts` | Proxy for previews |
-| Container preview | `routes/container-preview.ts` | Docker previews |
+| Browser/file preview | `src/lib/Preview.svelte` + `WorkspacePanel.svelte` | Renders URLs (direct, no proxy) and local files (markdown, images, HTML, JSON, 3D) |
+
+Navi no longer runs, proxies, or port-manages dev servers. Start your dev server
+yourself (terminal panel works); paste the URL into the browser panel.
+
+### MCP
+**Model Context Protocol** — the standards-first integration layer.
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| MCP runtime | `server/mcp.ts` | MCP server wiring |
+| MCP presets | `server/mcp-presets.ts` | Curated server presets |
+| MCP settings | `server/mcp-settings.ts` | Per-project/global config |
+| MCP OAuth provider | `server/mcp-oauth-provider.ts` | OAuth for MCP servers |
 
 ---
 
@@ -62,19 +99,13 @@ These are essential to Navi's operation.
 
 Working features that don't need active development.
 
-### UI Components
+### Extensions Framework
 | Feature | Location | Notes |
 |---------|----------|-------|
-| Chat input/view | `components/ChatInput.svelte`, `ChatView.svelte` | Main chat interface |
-| Sidebar | `components/sidebar/Sidebar.svelte` | Navigation |
-| Settings | `components/Settings.svelte` | App configuration |
+| Extension registry | `src/lib/core/registries.ts` | Sidebar panel registry |
 | Extensions panel | `features/extensions/` | Right panel tabs |
 
-### Kanban
-| Feature | Location | Notes |
-|---------|----------|-------|
-| Task board | `features/kanban/` | Task management |
-| Kanban API | `routes/kanban.ts` | Backend |
+Built-in panels: Files, Browser, Git, Terminal, Processes, Context.
 
 ### Commands
 | Feature | Location | Notes |
@@ -82,160 +113,22 @@ Working features that don't need active development.
 | Slash commands | `routes/commands.ts` | `/command` system |
 | Command UI | `features/commands/` | Frontend |
 
----
+### Plugins
+| Feature | Location | Notes |
+|---------|----------|-------|
+| Plugins | `routes/plugins.ts`, `features/plugins/` | Unified extensibility (skills + commands + hooks) |
+| Hooks | `.claude/hooks/`, `routes/hooks.ts` | Lifecycle hook system |
 
-## EXPERIMENTAL Features
-
-**These features are in development. They may be incomplete, buggy, or removed.**
-
-### Proactive Hooks System
-**Status:** EXPERIMENTAL - Future development
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Analyzer | `features/proactive-hooks/analyzer.ts` | Analyze chat for suggestions |
-| Runner | `features/proactive-hooks/runner.ts` | Execute hook actions |
-| Error detector | `features/proactive-hooks/hooks/error-detector.ts` | Auto-detect errors |
-| Memory builder | `features/proactive-hooks/hooks/memory-builder.ts` | Build context memory |
-| Skill scout | `features/proactive-hooks/hooks/skill-scout.ts` | Suggest skills |
-| Suggestion UI | `features/proactive-hooks/components/` | Toast notifications |
-| Backend | `routes/proactive-hooks.ts` | API endpoints |
-
-**Goal:** AI-driven suggestions based on chat context.
-
----
-
-### Sessions Board
-**Status:** EXPERIMENTAL - Future development
+### Raw Credentials
+**Local, raw credential storage** — no managed OAuth subsystem, just encrypted
+key storage you control.
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Board view | `features/sessions-board/components/SessionsBoard.svelte` | Visual session layout |
-| Column view | `features/sessions-board/components/BoardColumn.svelte` | Kanban columns |
-| Session cards | `features/sessions-board/components/SessionCard.svelte` | Card UI |
-| Backend | `routes/sessions-board.ts` | API endpoints |
-
-**Goal:** Visual management of multiple sessions.
-
----
-
-### Ensemble Consensus
-**Status:** EXPERIMENTAL - Future development
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Skill | `.claude/skills/ensemble-consensus/` | Multi-LLM voting |
-| Runner | `.claude/skills/ensemble-consensus/index.ts` | Execute across models |
-
-**Goal:** Run prompts through multiple LLMs and synthesize best answer.
-
----
-
-### Loop Mode
-**Status:** EXPERIMENTAL - Default OFF
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Feature flag | `stores/ui.ts` (`loopModeEnabled`) | Toggle in Settings |
-| UI toggle | `components/ChatInput.svelte` | Button in chat input |
-| Handler | `handlers/useMessageHandler.ts` | Until-done iteration logic |
-
-**Enable:** Settings → Experimental → Loop Mode
-
-**Goal:** Allow Claude to continue working automatically until a task is complete.
-
----
-
-### Deploy to Cloud
-**Status:** EXPERIMENTAL - Default OFF
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Feature flag | `stores/ui.ts` (`deployToCloudEnabled`) | Toggle in Settings |
-| Routes | `routes/deploy.ts` | API endpoints for deployment |
-| Skill | `.claude/skills/ship-it/` | "Ship it" deployment skill |
-
-**Enable:** Settings → Experimental → Deploy to Cloud
-
-**Goal:** Deploy apps to Navi Cloud (`*.usenavi.app`) with zero configuration.
-
----
-
-## DEPRECATED / TO REMOVE
-
-These features are candidates for removal.
-
-### E2B Cloud Execution
-| Component | Location | Notes |
-|-----------|----------|-------|
-| E2B executor | `services/e2b-executor.ts` | Cloud sandbox execution |
-| Cloud routes | `routes/cloud-execution.ts` | API |
-| Toggle UI | `components/CloudExecutionToggle.svelte` | |
-| Status UI | `components/CloudExecutionStatus.svelte` | |
-
-**Reason:** Navi Cloud pivot makes this obsolete.
-
----
-
-### Experimental Agents Framework
-| Component | Location | Notes |
-|-----------|----------|-------|
-| Experimental agents | `services/experimental-agents.ts` | 649 lines |
-| Experimental routes | `routes/experimental.ts` | 395 lines |
-| Agents panel | `components/agents/ExperimentalAgentsPanel.svelte` | |
-| Quick buttons | `components/agents/QuickAgentButtons.svelte` | |
-| Self-healing widget | `components/agents/SelfHealingWidget.svelte` | |
-
-**Reason:** Overlaps with multi-session agents, unclear purpose.
-
----
-
-### Self-Healing Builds
-| Component | Location | Notes |
-|-----------|----------|-------|
-| Self-healing service | `services/self-healing-builds.ts` | 641 lines |
-
-**Reason:** Premature optimization, complex.
-
----
-
-## CORE Features (continued)
-
-### Multi-Agent System
-**Status:** CORE - Production-ready hierarchical agent coordination
-
-A sophisticated system for spawning and coordinating multiple AI agents working in parallel.
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Session hierarchy | `routes/session-hierarchy.ts` | Parent-child session management |
-| Multi-session tools | `services/multi-session-tools.ts` | Agent communication (spawn, escalate, deliver) |
-| Child sessions UI | `features/session-hierarchy/` | Real-time hierarchy visualization |
-| Agent loader | `services/agent-loader.ts` | Load agents from `.claude/agents/*.md` |
-
-**Key capabilities:**
-- Spawn child agents for parallel subtasks (depth limit: 3)
-- Inter-agent communication (get_context, log_decision, escalate, deliver)
-- Shared decisions and artifacts across hierarchy
-- Specialized native UIs for agent types (browser, coding, runner)
-
----
-
-### OAuth Integrations
-**Status:** STABLE - Keep
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| OAuth framework | `server/integrations/` | OAuth2 flow handling |
-| Integrations routes | `routes/integrations.ts` | API endpoints |
-| Settings UI | `components/IntegrationSettings.svelte` | Connection management |
-| Integrations skill | `.claude/skills/integrations/` | Gmail, Sheets, Drive access |
-
----
+| Credentials store | `server/integrations/{credentials,crypto,db,types,registry}.ts` | Encrypted local credential CRUD |
+| Credentials API | `routes/credentials.ts` | `/api/credentials/*` endpoints |
 
 ### Backend Selector
-**Status:** STABLE - Keep (multi-model support)
-
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | Backends routes | `routes/backends.ts` | API for model selection |
@@ -244,152 +137,80 @@ A sophisticated system for spawning and coordinating multiple AI agents working 
 
 ---
 
-## EXPERIMENTAL Features (continued)
+## IN REBUILD
 
-### Email Feature
-**Status:** EXPERIMENTAL - AgentMail integration for autonomous agent email
+### Workflows
+**Status:** IN REBUILD — torn down in the refocus, being rebuilt on the
+refocused core (sessions + multi-agent orchestration + MCP).
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Email routes | `routes/email.ts` | Email API |
-| Email feature | `features/email/` | Frontend |
-| Email widget | `components/widgets/EmailNotificationWidget.svelte` | Notifications |
-
----
-
-### Browser Integration
-**Status:** EXPERIMENTAL - Backend for browser-use skill
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Browser routes | `routes/browser.ts` | API for browser-use Python skill |
-| Browser widget | `components/widgets/BrowserActionWidget.svelte` | Task status UI |
-| Browser-email init | `features/browser-email-init.ts` | Initialization |
-
----
-
-### Channel Inbox (WhatsApp, Telegram & Messaging)
-**Status:** EXPERIMENTAL - External messaging integrations via MCP
-
-Unified inbox for external messaging channels. Inspired by [Clawbot](https://github.com/clawdbot/clawdbot).
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Channel inbox routes | `routes/channel-inbox.ts` | Inbox API endpoints |
-| Channel providers service | `services/channel-providers.ts` | Provider registry & management |
-| WhatsApp sync service | `services/whatsapp-sync.ts` | WhatsApp-specific sync utilities |
-| Channel inbox feature | `features/channel-inbox/` | Frontend stores, API, types |
-| ChannelsPanel | `features/channel-inbox/components/ChannelsPanel.svelte` | Sidebar panel UI |
-| WhatsApp MCP server | `.claude/mcp-servers/navi-whatsapp/` | WhatsApp Web integration |
-| Email MCP server | `.claude/mcp-servers/navi-email/` | AgentMail integration |
-
-**Supported providers:**
-- WhatsApp (via whatsapp-web.js + MCP)
-- Email (via AgentMail + MCP)
-- Telegram (planned)
-- Slack (planned)
-- Discord (planned)
-
-**Enable:** Extensions sidebar → Channels tab (enabled by default)
-
----
-
-## TO REMOVE
-
-### Old Channels System (Internal)
-**Status:** CUT - Remove (replaced by Channel Inbox)
-
-| Component | Location |
-|-----------|----------|
-| Old channels routes | `routes/channels.ts` |
-| Old channels feature | `features/channels/` |
-
----
-
-### Plugins System
-**Status:** CUT - Remove (redundant with skills/extensions)
-
-| Component | Location |
-|-----------|----------|
-| Plugins routes | `routes/plugins.ts` |
-| Plugins feature | `features/plugins/` |
+See the refocus spec for the intended shape.
 
 ---
 
 ## Skills Inventory
 
-### Core Skills (Keep)
-| Skill | Purpose | Status |
-|-------|---------|--------|
-| `playwright` | Browser automation | STABLE |
-| `navi` | Control Navi from Claude | STABLE |
-| `stock-compare` | Stock charts in chat | STABLE |
-| `project-template` | Project scaffolding | STABLE |
-| `ship-it` | Deploy to Navi Cloud | STABLE |
-
-### Utility Skills (Keep)
-| Skill | Purpose | Status |
-|-------|---------|--------|
-| `navi-llm` | Dispatch to other LLMs | STABLE |
-| `nano-banana-image-gen` | Image generation | STABLE |
-| `codex` | OpenAI Codex CLI | STABLE |
-| `gemini-cli` | Google Gemini CLI | STABLE |
-
-### Experimental Skills
-| Skill | Purpose | Status |
-|-------|---------|--------|
-| `browser-agent` | CDP browser control | EXPERIMENTAL |
-| `browser-use` | Browser-use library | EXPERIMENTAL |
-| `canvas-design` | Visual art generation | EXPERIMENTAL |
-| `ensemble-consensus` | Multi-LLM voting | EXPERIMENTAL |
-| `dashboard` | Custom dashboards | EXPERIMENTAL |
-| `web-deploy-quickstart` | Quick deploy | EXPERIMENTAL |
+| Skill | Purpose |
+|-------|---------|
+| `playwright` | Browser automation, screenshots |
+| `navi` | Control Navi GUI from Claude |
+| `stock-compare` | Stock charts in chat |
+| `project-template` | Project scaffolding |
+| `navi-llm` | Dispatch to other LLMs |
+| `nano-banana-image-gen` | Image generation |
+| `codex` | OpenAI Codex CLI |
+| `gemini-cli` | Google Gemini CLI |
+| `ensemble-consensus` | Multi-LLM voting |
+| `navi-workflows` | Workflow control |
+| `cron` | Scheduled tasks |
 
 ---
 
-## File Cleanup Candidates
+## Removed in 2026-07 simplification deltas
 
-### Safe to Remove (Deprecated)
+Second subtraction pass (spec:
+[`2026-07-20-simplification-deltas-design.md`](superpowers/specs/2026-07-20-simplification-deltas-design.md)).
 
-```
-# Deprecated routes
-packages/navi-app/server/routes/cloud-execution.ts
-packages/navi-app/server/routes/experimental.ts
+| Removed feature | What it was |
+|-----------------|-------------|
+| Preview stack | Dev-server spawn, framework detection, container previews (Docker/Colima), port-manager + LLM port-fixer, preview proxy, worktree previews (~7k LoC) |
+| Skills marketplace | skills.sh browse/install UI + route |
+| Skill import/export/editor UI | Import wizard, URL import, zip export, in-app SKILL.md editor, skill library browser |
+| Settings "Previews" tab | Container preview management in Settings |
 
-# Deprecated services
-packages/navi-app/server/services/e2b-executor.ts
-packages/navi-app/server/services/experimental-agents.ts
-packages/navi-app/server/services/self-healing-builds.ts
+The browser panel (URL + local file rendering) is the only preview surface.
+Skills are managed by one flat panel (list, toggle, reveal, delete).
 
-# Deprecated components
-packages/navi-app/src/lib/components/CloudExecutionStatus.svelte
-packages/navi-app/src/lib/components/CloudExecutionToggle.svelte
-packages/navi-app/src/lib/components/agents/ExperimentalAgentsPanel.svelte
-packages/navi-app/src/lib/components/agents/QuickAgentButtons.svelte
-packages/navi-app/src/lib/components/agents/SelfHealingWidget.svelte
-```
+## Removed in 2026-06 refocus
 
-### Safe to Remove (Cut Features)
+These features were demolished (waves 1–5, ~36k LoC). They are gone, not
+deprecated — don't go looking for them in `src/` or `server/`. Rationale and the
+refocused-core design are in
+[`docs/superpowers/specs/2026-06-12-navi-refocus-design.md`](superpowers/specs/2026-06-12-navi-refocus-design.md).
 
-```
-# Channels (cut)
-packages/navi-app/server/routes/channels.ts
-packages/navi-app/src/lib/features/channels/
+| Removed feature | What it was |
+|-----------------|-------------|
+| Kanban | Task board extension + API |
+| Council | Multi-agent deliberation feature |
+| Sessions Board | Visual multi-session board |
+| Canvas mode / Project canvas | Spatial canvas surfaces |
+| Comments | Inline message comments |
+| Email (AgentMail) | Autonomous agent email + widget |
+| Agent Builder | UI for authoring agents |
+| Experimental Agents | Old experimental agents framework |
+| Self-Healing Builds | Auto-fix build pipeline |
+| E2B / Cloud Execution | Cloud sandbox execution |
+| Proactive Hooks | AI-driven chat suggestions |
+| Channels / Channel Inbox | WhatsApp/Telegram/messaging inbox |
+| WhatsApp sync | WhatsApp-specific sync service |
+| Inbox | Unified inbox surface |
+| Navi Cloud | Cloud package + deploy client |
+| Dashboard | Project landing-page widgets |
+| Managed OAuth Integrations | Gmail/Sheets/Slack connectors + OAuth flow |
 
-# Plugins (cut - redundant with skills)
-packages/navi-app/server/routes/plugins.ts
-packages/navi-app/src/lib/features/plugins/
-```
-
----
-
-## Next Steps
-
-1. ~~**Decide** on IN PROGRESS features~~ ✅ Done
-2. **Remove** DEPRECATED code (E2B, self-healing, experimental agents)
-3. **Remove** CUT features (channels, browser, plugins)
-4. **Mark** EXPERIMENTAL features clearly in UI
-5. **Document** remaining features properly
+> **Note:** raw credential storage (`server/integrations/{credentials,crypto,db,...}`)
+> and MCP OAuth (`mcp-oauth-provider.ts`) were **kept**. What got removed was the
+> *managed connector* layer on top (Gmail/Sheets/Slack integrations, the OAuth
+> connection UI), not credential storage itself.
 
 ---
 

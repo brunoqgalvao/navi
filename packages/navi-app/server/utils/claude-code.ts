@@ -35,7 +35,9 @@ const CLAUDE_SCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".tsx", ".ts", ".jsx"])
 
 export type ClaudeAuthEnvOverrides = {
   apiKey?: string | null;
+  authToken?: string | null;
   baseUrl?: string | null;
+  apiTimeoutMs?: string | null;
 };
 
 type ClaudeCodeRuntimeOptions = {
@@ -141,13 +143,18 @@ export function buildClaudeCodeEnv(baseEnv: NodeJS.ProcessEnv, overrides?: Claud
 
   // Clean auth-related env vars - Navi provides auth explicitly when needed.
   delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
   delete env.ANTHROPIC_BASE_URL;
 
   // Apply Navi-controlled overrides
   const apiKey = overrides?.apiKey ?? null;
+  const authToken = overrides?.authToken ?? null;
   const baseUrl = overrides?.baseUrl ?? null;
+  const apiTimeoutMs = overrides?.apiTimeoutMs ?? null;
   if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
+  if (authToken) env.ANTHROPIC_AUTH_TOKEN = authToken;
   if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
+  if (apiTimeoutMs) env.API_TIMEOUT_MS = apiTimeoutMs;
 
   return env;
 }
@@ -155,7 +162,9 @@ export function buildClaudeCodeEnv(baseEnv: NodeJS.ProcessEnv, overrides?: Claud
 export function getNaviAuthOverridesFromEnv(env: NodeJS.ProcessEnv): ClaudeAuthEnvOverrides {
   return {
     apiKey: env.NAVI_ANTHROPIC_API_KEY ?? null,
+    authToken: env.NAVI_ANTHROPIC_AUTH_TOKEN ?? null,
     baseUrl: env.NAVI_ANTHROPIC_BASE_URL ?? null,
+    apiTimeoutMs: env.NAVI_API_TIMEOUT_MS ?? null,
   };
 }
 

@@ -49,10 +49,6 @@ export {
   currentWorkspace,
   sessionModels,
   projectWorkspaces,
-  // Cloud execution mode
-  executionModeStore,
-  defaultExecutionMode,
-  cloudExecutionStore,
   // Backend selection (claude, codex, gemini)
   sessionBackendStore,
   defaultBackend,
@@ -69,7 +65,7 @@ export {
   currentSessionWait,
 } from "./session";
 
-export type { ProjectWorkspace, SessionPaginationState, ExecutionMode, CloudExecutionSettings, CloudExecutionState, CloudExecutionStage, BackendId, ReasoningEffort } from "./session";
+export type { ProjectWorkspace, SessionPaginationState, BackendId, ReasoningEffort } from "./session";
 
 // Project stores
 export {
@@ -83,13 +79,11 @@ export {
   onboardingComplete,
   advancedMode,
   debugMode,
-  dashboardEnabled,
-  channelsEnabled,
   loopModeEnabled,
   deployToCloudEnabled,
   resourceMonitorEnabled,
-  canvasModeEnabled,
   autoCompactEnabled,
+  autoCompactMethod,
   newChatView,
   showArchivedWorkspaces,
   chatSortOrder,
@@ -110,7 +104,7 @@ export {
 // References store
 export { textReferences, terminalReferences, chatReferences } from "./references";
 
-export type { UIScaleLevel, FileBrowserState, ProjectStatusInfo, ThemeMode, ChatSortOrder } from "./ui";
+export type { UIScaleLevel, FileBrowserState, ProjectStatusInfo, ThemeMode, ChatSortOrder, AutoCompactMethod } from "./ui";
 
 // Cost stores
 export { costStore } from "./costs";

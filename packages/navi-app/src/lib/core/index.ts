@@ -65,10 +65,6 @@ export type {
   MessageWidget,
   MessageWidgetType,
 
-  // Dashboard Widgets
-  DashboardWidget,
-  DashboardWidgetType,
-
   // References
   Reference,
   ReferenceType,
@@ -106,7 +102,6 @@ export {
   // Singleton instances
   extensionRegistry,
   messageWidgetRegistry,
-  dashboardWidgetRegistry,
 
   // Default data
   DEFAULT_EXTENSIONS,

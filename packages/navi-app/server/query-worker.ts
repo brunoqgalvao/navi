@@ -326,8 +326,9 @@ interface WorkerInput {
   // Fork the resumed session into a new SDK session instead of continuing it
   forkSession?: boolean;
   model?: string;
-  // Maximum thinking tokens for the SDK (optional; adaptive when unset)
+  // Maximum thinking tokens for the SDK (optional; overrides the effort mapping)
   maxThinkingTokens?: number;
+  contextWindow?: number;
   allowedTools?: string[];
   sessionId?: string;
   // Selected agent (e.g., "coder", "img3d") - if set, uses agent's system prompt
@@ -363,7 +364,18 @@ interface WorkerInput {
   }>;
   // Enabled skill slugs for this project (undefined = load all skills)
   enabledSkillSlugs?: string[];
+  // Reasoning effort tier ("low" | "medium" | "high" | "xhigh" | "max")
+  // Mapped to the SDK's maxThinkingTokens budget.
+  reasoningEffort?: string;
 }
+
+const REASONING_EFFORT_TO_THINKING_TOKENS: Record<string, number> = {
+  low: 4_000,
+  medium: 16_000,
+  high: 32_000,
+  xhigh: 64_000,
+  max: 128_000,
+};
 
 const pendingPermissions = new Map<string, (result: { approved: boolean; approveAll?: boolean }) => void>();
 const pendingQuestions = new Map<string, (result: { answers: Record<string, string | string[]> }) => void>();
@@ -489,7 +501,7 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
         role: z.string().describe("The role/specialty of the child agent (e.g., 'frontend', 'backend', 'researcher', 'architect')"),
         task: z.string().describe("Clear description of what the child should accomplish. Be specific about deliverables."),
         agent_type: z.enum(["browser", "coding", "runner", "research", "planning", "reviewer", "general"]).optional().describe("Type of agent to spawn - determines UI and capabilities. Choose based on task nature."),
-        model: z.enum(["opus", "sonnet", "haiku"]).optional().describe("Optional: Model to use (defaults to parent's model). Use 'haiku' for simpler tasks."),
+        model: z.enum(["fable", "opus", "sonnet", "haiku"]).optional().describe("Optional: Model to use (defaults to parent's model). Use 'haiku' for simpler tasks, 'fable' for the hardest long-running tasks."),
         context: z.string().optional().describe("Optional: Additional context to pass to the child that they should know."),
         wait_for_completion: z.boolean().optional().describe("If true, this tool will block until the child completes and return their deliverable. Default: false (async)."),
       },
@@ -1616,7 +1628,20 @@ function isImageTooLargeError(error: unknown): boolean {
 }
 
 async function runQuery(input: WorkerInput): Promise<boolean> {
-  const { prompt, cwd, resume, forkSession, model, maxThinkingTokens, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs } = input;
+  const { prompt, cwd, resume, forkSession, model, allowedTools, sessionId, agentId, permissionSettings, multiSession, mcpSettings, mcpBuiltinSettings, externalMcpServers, enabledSkillSlugs, reasoningEffort } = input;
+  // Effort reaches the CLI natively via CLAUDE_CODE_EFFORT_LEVEL (set by the
+  // handler); the thinking-token mapping remains as a secondary lever, and an
+  // explicit maxThinkingTokens input overrides it.
+  const maxThinkingTokens = typeof input.maxThinkingTokens === "number"
+    ? input.maxThinkingTokens
+    : reasoningEffort
+      ? REASONING_EFFORT_TO_THINKING_TOKENS[reasoningEffort.toLowerCase()]
+      : undefined;
+  if (reasoningEffort) {
+    console.error(
+      `[Worker] Reasoning effort: ${reasoningEffort} → maxThinkingTokens: ${maxThinkingTokens ?? "default"}`
+    );
+  }
   currentSessionIdForNaviContext = sessionId;
 
   // Debug: Log multiSession state
@@ -1637,6 +1662,7 @@ async function runQuery(input: WorkerInput): Promise<boolean> {
 
   // Clear any stray API keys from environment - Navi controls auth exclusively
   delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_AUTH_TOKEN;
   delete process.env.ANTHROPIC_BASE_URL;
 
   // Get auth config passed from handler
@@ -1649,15 +1675,23 @@ async function runQuery(input: WorkerInput): Promise<boolean> {
   if (authOverrides.apiKey) {
     console.error(`[Worker] API key prefix: ${authOverrides.apiKey.slice(0, 8)}...`);
   }
+  if (authOverrides.authToken) {
+    console.error(`[Worker] Auth token prefix: ${authOverrides.authToken.slice(0, 8)}...`);
+  }
   if (authOverrides.baseUrl) {
     console.error(`[Worker] Base URL override: ${authOverrides.baseUrl}`);
+  }
+  if (authOverrides.apiTimeoutMs) {
+    console.error(`[Worker] API timeout override: ${authOverrides.apiTimeoutMs}`);
   }
 
   const claudeEnv = buildClaudeCodeEnv(process.env, authOverrides);
 
   // Debug: confirm what's being passed to Claude Code subprocess
   console.error(`[Worker] claudeEnv.ANTHROPIC_API_KEY: ${claudeEnv.ANTHROPIC_API_KEY ? claudeEnv.ANTHROPIC_API_KEY.slice(0, 8) + "..." : "NOT SET"}`);
+  console.error(`[Worker] claudeEnv.ANTHROPIC_AUTH_TOKEN: ${claudeEnv.ANTHROPIC_AUTH_TOKEN ? claudeEnv.ANTHROPIC_AUTH_TOKEN.slice(0, 8) + "..." : "NOT SET"}`);
   console.error(`[Worker] claudeEnv.ANTHROPIC_BASE_URL: ${claudeEnv.ANTHROPIC_BASE_URL || "NOT SET"}`);
+  console.error(`[Worker] claudeEnv.API_TIMEOUT_MS: ${claudeEnv.API_TIMEOUT_MS || "NOT SET"}`);
   console.error(`[Worker] claudeEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS: ${claudeEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS || "NOT SET"}`);
   console.error(`[Worker] Model requested: ${model || "default"}`);
   const runtimeOptions = getClaudeCodeRuntimeOptions();
@@ -1938,50 +1972,6 @@ Example clarifying questions:
       }
     }
 
-    // Add integration MCPs (from configured integrations with credentials)
-    // Uses project-scoped credentials if available, falls back to user-level
-    try {
-      const { getAvailableIntegrationMCPs } = await import("./services/integration-mcp");
-      const { sessions } = await import("./db");
-
-      // Get project ID from session for project-scoped credentials
-      let projectId: string | undefined;
-      if (sessionId) {
-        const session = sessions.get(sessionId);
-        projectId = session?.project_id;
-      }
-
-      const credentialScope = projectId ? { projectId } : undefined;
-      const integrationMCPs = getAvailableIntegrationMCPs(credentialScope);
-
-      for (const [name, config] of Object.entries(integrationMCPs)) {
-        if (isMcpEnabled(name) && !mcpServers[name]) {
-          mcpServers[name] = config;
-          console.error(`[Worker] Added integration MCP server: ${name}${projectId ? ` (project: ${projectId})` : ""}`);
-        }
-      }
-    } catch (e) {
-      console.error(`[Worker] Failed to load integration MCPs:`, e);
-    }
-
-    // Add composable integration MCP servers (new system - defineIntegration)
-    // These are built-in integrations using Navi's OAuth
-    try {
-      // Import to trigger registration, then get connected servers
-      await import("./integrations/providers");
-      const { getIntegrationMcpServers } = await import("./integrations/providers");
-      const integrationServers = getIntegrationMcpServers();
-
-      for (const [name, server] of Object.entries(integrationServers)) {
-        if (isMcpEnabled(name) && !mcpServers[name]) {
-          mcpServers[name] = server;
-          console.error(`[Worker] Added composable integration: ${name}`);
-        }
-      }
-    } catch (e) {
-      console.error(`[Worker] Failed to load composable integrations:`, e);
-    }
-
     // Enable multi-session tools if enabled (for all sessions that can spawn or are children)
     if (multiSession?.enabled && isBuiltinMcpEnabled("multi-session")) {
       mcpServers["multi-session"] = multiSessionServer;
@@ -2019,7 +2009,6 @@ Example clarifying questions:
           resume,
           ...(sdkHooks ? { hooks: sdkHooks as any } : {}),
           ...(resume && forkSession ? { forkSession: true } : {}),
-          ...(typeof maxThinkingTokens === "number" ? { maxThinkingTokens } : {}),
           model: finalModel,
           tools: allTools,
           allowedTools: permissionSettings?.autoAcceptAll ? allTools : autoAllowedTools,
@@ -2030,6 +2019,7 @@ Example clarifying questions:
           settingSources: ['user', 'project', 'local'] as const,
           systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
           includePartialMessages: true,
+          ...(maxThinkingTokens !== undefined && { maxThinkingTokens }),
           mcpServers,
           // Pass SDK subagents (for Task tool spawning)
           // This includes: all Navi Agents + their defined subagents
@@ -2063,7 +2053,15 @@ Example clarifying questions:
             lastAssistantContent = msg.message.content;
             console.error(`[Worker] Assistant content:`, JSON.stringify(lastAssistantContent, null, 2));
             const usage = (msg as any).message?.usage;
-            if (!msg.parent_tool_use_id && usage) {
+            const usageTotal = usage
+              ? (usage.input_tokens || 0) +
+                (usage.cache_creation_input_tokens || 0) +
+                (usage.cache_read_input_tokens || 0) +
+                (usage.output_tokens || 0)
+              : 0;
+            // Synthetic error messages ("Prompt is too long") report all-zero
+            // usage and must not clobber the last real context accounting.
+            if (!msg.parent_tool_use_id && usageTotal > 0) {
               lastAssistantUsage = usage;
             }
           }
@@ -2084,6 +2082,7 @@ Example clarifying questions:
             total_cost_usd: resultData.total_cost_usd,
             num_turns: resultData.num_turns,
             usage: resultData.usage,
+            modelUsage: resultData.modelUsage,
           } : null,
         });
 
@@ -2131,9 +2130,12 @@ Example clarifying questions:
     }
 
     if (!attemptResult.success) {
-      throw attemptResult.error instanceof Error
+      const err = attemptResult.error instanceof Error
         ? attemptResult.error
         : new Error(attemptResult.errorMessage || "Unknown error");
+      // Carry the last real context accounting so the error path can persist it.
+      (err as any).lastAssistantUsage = attemptResult.lastAssistantUsage;
+      throw err;
     }
 
     return true;
@@ -2143,6 +2145,7 @@ Example clarifying questions:
       type: "error",
       sessionId,
       error: error instanceof Error ? error.message : "Unknown error",
+      lastAssistantUsage: (error as any)?.lastAssistantUsage ?? null,
     });
     return false;
   }

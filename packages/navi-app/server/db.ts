@@ -4,8 +4,10 @@ import { homedir } from "os";
 import { join } from "path";
 import { sanitizePersistedMessageContent } from "./services/message-storage";
 import { DEFAULT_CONTEXT_WINDOW } from "./utils/context-window";
+import { isCompactSummaryContent } from "../shared/sdk-user-message";
 
-const DATA_DIR = join(homedir(), ".claude-code-ui");
+import { getDataDir } from "./utils/data-dir";
+const DATA_DIR = getDataDir();
 const DB_PATH = join(DATA_DIR, "data.db");
 
 if (!existsSync(DATA_DIR)) {
@@ -58,6 +60,10 @@ export async function initDb() {
       total_turns INTEGER DEFAULT 0,
       input_tokens INTEGER DEFAULT 0,
       output_tokens INTEGER DEFAULT 0,
+      pending_context_handoff TEXT,
+      pending_context_method TEXT,
+      pending_context_reason TEXT,
+      context_reduced_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -85,6 +91,18 @@ export async function initDb() {
   } catch {}
   try {
     db.run("ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN pending_context_handoff TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN pending_context_method TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN pending_context_reason TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN context_reduced_at INTEGER");
   } catch {}
   try {
     db.run("ALTER TABLE projects ADD COLUMN summary TEXT");
@@ -231,18 +249,23 @@ export async function initDb() {
     db.run("ALTER TABLE sessions ADD COLUMN backlog_note TEXT");
   } catch {}
 
-  // Cloud execution mode - run agents in E2B cloud sandboxes
+  // Cloud execution mode columns - feature deleted, columns kept so existing DBs stay readable
   try {
-    db.run("ALTER TABLE sessions ADD COLUMN execution_mode TEXT DEFAULT 'local'");
+    db.run("ALTER TABLE sessions ADD COLUMN execution_mode TEXT DEFAULT 'local'"); // orphaned by 2026-06 refocus
   } catch {}
   try {
-    db.run("ALTER TABLE sessions ADD COLUMN cloud_repo_url TEXT");
+    db.run("ALTER TABLE sessions ADD COLUMN cloud_repo_url TEXT"); // orphaned by 2026-06 refocus
   } catch {}
   try {
-    db.run("ALTER TABLE sessions ADD COLUMN cloud_branch TEXT");
+    db.run("ALTER TABLE sessions ADD COLUMN cloud_branch TEXT"); // orphaned by 2026-06 refocus
   } catch {}
   try {
-    db.run("ALTER TABLE sessions ADD COLUMN e2b_sandbox_id TEXT");
+    db.run("ALTER TABLE sessions ADD COLUMN e2b_sandbox_id TEXT"); // orphaned by 2026-06 refocus
+  } catch {}
+
+  // Per-session reasoning effort tier ("low" | "medium" | "high" | "xhigh" | "max")
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT");
   } catch {}
 
   // Multi-backend support (claude, codex, gemini)
@@ -262,6 +285,16 @@ export async function initDb() {
   // Conversation phase tracking (inferred by cheap LLM)
   try {
     db.run("ALTER TABLE sessions ADD COLUMN conversation_phase TEXT DEFAULT 'idle'");
+  } catch {}
+
+  // Context window the runtime actually reported for this session's model
+  // (from the result message's modelUsage) — the authoritative budget, unlike
+  // the project-level context_window setting.
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN context_window INTEGER");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN max_output_tokens INTEGER");
   } catch {}
 
   // Context negotiation - draft deliverables and clarification loop
@@ -395,6 +428,10 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_workspace_folders_order ON workspace_folders(sort_order);
   `);
 
+  // Migration: add archived column to workspace_folders (for existing databases)
+  try {
+    db.run("ALTER TABLE workspace_folders ADD COLUMN archived INTEGER DEFAULT 0");
+  } catch {}
   // Migration: add pinned column to workspace_folders (for existing databases)
   try {
     db.run("ALTER TABLE workspace_folders ADD COLUMN pinned INTEGER DEFAULT 0");
@@ -465,33 +502,6 @@ export async function initDb() {
     // Column already exists
   }
 
-  // Kanban cards table - agentic task board
-  db.run(`
-    CREATE TABLE IF NOT EXISTS kanban_cards (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      session_id TEXT,
-      title TEXT NOT NULL,
-      spec TEXT,
-      status TEXT DEFAULT 'spec',
-      status_message TEXT,
-      blocked INTEGER DEFAULT 0,
-      sort_order INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_kanban_cards_project ON kanban_cards(project_id);
-    CREATE INDEX IF NOT EXISTS idx_kanban_cards_session ON kanban_cards(session_id);
-    CREATE INDEX IF NOT EXISTS idx_kanban_cards_status ON kanban_cards(status);
-  `);
-
-  // Migration: add blocked column if not exists
-  try {
-    db.run("ALTER TABLE kanban_cards ADD COLUMN blocked INTEGER DEFAULT 0");
-  } catch {}
-
   // Command settings table - per-workspace/global command configuration
   db.run(`
     CREATE TABLE IF NOT EXISTS command_settings (
@@ -547,38 +557,6 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_session_artifacts_root ON session_artifacts(root_session_id);
   `);
 
-  // Cloud executions table - track E2B cloud sandbox executions
-  db.run(`
-    CREATE TABLE IF NOT EXISTS cloud_executions (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      e2b_sandbox_id TEXT,
-      status TEXT DEFAULT 'pending',
-      stage TEXT,
-      repo_url TEXT,
-      branch TEXT,
-      started_at INTEGER NOT NULL,
-      completed_at INTEGER,
-      duration_ms INTEGER,
-      exit_code INTEGER,
-      error_message TEXT,
-      modified_files TEXT,
-      synced_files TEXT,
-      e2b_cost_usd REAL,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_cloud_executions_session ON cloud_executions(session_id);
-    CREATE INDEX IF NOT EXISTS idx_cloud_executions_status ON cloud_executions(status);
-  `);
-
-  // Add new columns if they don't exist (migration for existing DBs)
-  try {
-    db.run("ALTER TABLE cloud_executions ADD COLUMN synced_files TEXT");
-  } catch {}
-  try {
-    db.run("ALTER TABLE cloud_executions ADD COLUMN e2b_cost_usd REAL");
-  } catch {}
-
   // Session folders - per-project folder organization for sessions
   db.run(`
     CREATE TABLE IF NOT EXISTS session_folders (
@@ -599,6 +577,11 @@ export async function initDb() {
   // Add folder_id to sessions for folder grouping
   try {
     db.run("ALTER TABLE sessions ADD COLUMN folder_id TEXT REFERENCES session_folders(id)");
+  } catch {}
+
+  // Migration: add archived column to session_folders (for existing databases)
+  try {
+    db.run("ALTER TABLE session_folders ADD COLUMN archived INTEGER DEFAULT 0");
   } catch {}
 
   // Workflows - workspace-owned automation definitions with session-backed run history
@@ -709,124 +692,43 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_work_item_events_session ON work_item_events(session_id);
   `);
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS inbox_items (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT,
-      status TEXT NOT NULL DEFAULT 'open',
-      priority TEXT NOT NULL DEFAULT 'medium',
-      source_agent_id TEXT,
-      source_session_id TEXT,
-      work_item_id TEXT,
-      requires_response INTEGER DEFAULT 0,
-      response_options TEXT,
-      metadata TEXT DEFAULT '{}',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      resolved_at INTEGER,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-      FOREIGN KEY (source_session_id) REFERENCES sessions(id) ON DELETE SET NULL,
-      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE SET NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_inbox_items_project ON inbox_items(project_id, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_inbox_items_status ON inbox_items(project_id, status);
-    CREATE INDEX IF NOT EXISTS idx_inbox_items_work_item ON inbox_items(work_item_id);
-  `);
+  const purgedCompactSummaries = purgeCompactSummaryMessages();
+  if (purgedCompactSummaries > 0) {
+    console.log(`[DB] Removed ${purgedCompactSummaries} compact summary message(s) from persisted chat history`);
+  }
 
-  // Channels - cross-workspace spaces for agent collaboration
-  db.run(`
-    CREATE TABLE IF NOT EXISTS channels (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT,
-      workspace_access TEXT DEFAULT 'selected',
-      settings TEXT DEFAULT '{}',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_channels_name ON channels(name);
-  `);
+  const staleAgents = reconcileStaleAgentSessions();
+  if (staleAgents > 0) {
+    console.log(`[DB] Marked ${staleAgents} stale agent session(s) as failed`);
+  }
 
-  // Channel-Workspace access mapping
-  db.run(`
-    CREATE TABLE IF NOT EXISTS channel_workspaces (
-      channel_id TEXT NOT NULL,
-      workspace_id TEXT NOT NULL,
-      PRIMARY KEY (channel_id, workspace_id),
-      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
-      FOREIGN KEY (workspace_id) REFERENCES projects(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_channel_workspaces_channel ON channel_workspaces(channel_id);
-    CREATE INDEX IF NOT EXISTS idx_channel_workspaces_workspace ON channel_workspaces(workspace_id);
-  `);
-
-  // Threads within channels
-  db.run(`
-    CREATE TABLE IF NOT EXISTS channel_threads (
-      id TEXT PRIMARY KEY,
-      channel_id TEXT NOT NULL,
-      title TEXT,
-      status TEXT DEFAULT 'active',
-      workspace_id TEXT,
-      branch_name TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
-      FOREIGN KEY (workspace_id) REFERENCES projects(id) ON DELETE SET NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_channel_threads_channel ON channel_threads(channel_id);
-    CREATE INDEX IF NOT EXISTS idx_channel_threads_status ON channel_threads(status);
-  `);
-
-  // Messages in threads
-  db.run(`
-    CREATE TABLE IF NOT EXISTS channel_messages (
-      id TEXT PRIMARY KEY,
-      thread_id TEXT NOT NULL,
-      sender_type TEXT NOT NULL,
-      sender_id TEXT NOT NULL,
-      sender_name TEXT NOT NULL,
-      content TEXT NOT NULL,
-      mentions TEXT DEFAULT '[]',
-      agent_action TEXT,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (thread_id) REFERENCES channel_threads(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_channel_messages_thread ON channel_messages(thread_id);
-    CREATE INDEX IF NOT EXISTS idx_channel_messages_created ON channel_messages(created_at);
-  `);
-
-  // Message comments - Google Docs-style inline annotations
-  // @experimental
-  db.run(`
-    CREATE TABLE IF NOT EXISTS message_comments (
-      id TEXT PRIMARY KEY,
-      message_id TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      thread_id TEXT NOT NULL,
-      parent_comment_id TEXT,
-      author TEXT NOT NULL,
-      content TEXT NOT NULL,
-      selection_text TEXT,
-      selection_start INTEGER,
-      selection_end INTEGER,
-      resolved INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
-      FOREIGN KEY (parent_comment_id) REFERENCES message_comments(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_message_comments_session ON message_comments(session_id);
-    CREATE INDEX IF NOT EXISTS idx_message_comments_message ON message_comments(message_id);
-    CREATE INDEX IF NOT EXISTS idx_message_comments_thread ON message_comments(thread_id);
-    CREATE INDEX IF NOT EXISTS idx_message_comments_resolved ON message_comments(resolved);
-  `);
-
+  dropLegacyTables();
   saveDb()
   return db;
+}
+
+// One-shot cleanup of tables owned by features removed in the 2026-06 refocus.
+// No migration framework exists (rebuild-spec §6 owns that); DROP IF EXISTS is idempotent.
+const LEGACY_TABLES = ["kanban_cards", "message_comments", "cloud_executions", "channel_messages", "channel_threads", "channel_workspaces", "channels", "inbox_items"];
+function dropLegacyTables() {
+  for (const table of LEGACY_TABLES) {
+    try { db.run(`DROP TABLE IF EXISTS ${table}`); } catch (e) { console.error(`drop ${table}:`, e); }
+  }
+}
+
+// Spawned agent sessions only leave 'working'/'waiting' via an explicit deliver/
+// escalate; a crash, cancel, or server restart leaks them, and each leaked row
+// counts against MAX_CONCURRENT_SESSIONS forever. No agent query survives a
+// restart, so at boot any still-active spawned agent is stale.
+function reconcileStaleAgentSessions(): number {
+  db.run(
+    `UPDATE sessions SET agent_status = 'failed', updated_at = ?
+     WHERE parent_session_id IS NOT NULL
+     AND session_type = 'agent'
+     AND agent_status IN ('working', 'waiting')`,
+    [Date.now()]
+  );
+  return db.getRowsModified();
 }
 
 export function saveDb() {
@@ -944,6 +846,12 @@ export interface Session {
   total_turns: number;
   input_tokens: number;
   output_tokens: number;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  pending_context_handoff: string | null;
+  pending_context_method: string | null;
+  pending_context_reason: string | null;
+  context_reduced_at: number | null;
   pinned: number;
   sort_order: number;
   auto_accept_all: number;
@@ -977,13 +885,15 @@ export interface Session {
   in_backlog: number;
   backlog_added_at: number | null;
   backlog_note: string | null;
-  // Cloud execution mode
-  execution_mode: "local" | "cloud";
-  cloud_repo_url: string | null;
-  cloud_branch: string | null;
-  e2b_sandbox_id: string | null;
+  // Cloud execution mode (feature deleted; columns remain in existing DBs)
+  execution_mode: "local" | "cloud"; // orphaned by 2026-06 refocus
+  cloud_repo_url: string | null; // orphaned by 2026-06 refocus
+  cloud_branch: string | null; // orphaned by 2026-06 refocus
+  e2b_sandbox_id: string | null; // orphaned by 2026-06 refocus
   // Multi-backend support
   backend: "claude" | "codex" | "gemini" | null;
+  // Per-session reasoning effort tier
+  reasoning_effort: "low" | "medium" | "high" | "xhigh" | "max" | null;
   // Agent workspace links
   agent_id: string | null;
   workflow_id: string | null;
@@ -1036,35 +946,6 @@ export interface WorkItemEvent {
   created_at: number;
 }
 
-export type InboxItemStatus = "open" | "acknowledged" | "resolved" | "dismissed";
-export type InboxItemPriority = "low" | "medium" | "high" | "urgent";
-export type InboxItemKind = "report" | "question" | "attention" | "approval" | "delivery";
-
-export interface InboxItem {
-  id: string;
-  project_id: string;
-  kind: InboxItemKind;
-  title: string;
-  body: string | null;
-  status: InboxItemStatus;
-  priority: InboxItemPriority;
-  source_agent_id: string | null;
-  source_session_id: string | null;
-  work_item_id: string | null;
-  requires_response: number;
-  response_options: string | null;
-  metadata: string | null;
-  created_at: number;
-  updated_at: number;
-  resolved_at: number | null;
-}
-
-export interface InboxItemWithProject extends InboxItem {
-  project_name: string | null;
-  project_path: string | null;
-  project_archived: number | null;
-}
-
 export interface Message {
   id: string;
   session_id: string;
@@ -1074,6 +955,22 @@ export interface Message {
   parent_tool_use_id?: string | null;
   is_synthetic?: number;
   is_final?: number;
+}
+
+function parseStoredMessageContent(content: string): unknown {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return content;
+  }
+}
+
+function isStoredCompactSummaryMessage(message: Pick<Message, "role" | "content">): boolean {
+  return message.role === "user" && isCompactSummaryContent(parseStoredMessageContent(message.content));
+}
+
+function filterStoredTranscriptMessages<T extends Pick<Message, "role" | "content">>(rows: T[]): T[] {
+  return rows.filter((row) => !isStoredCompactSummaryMessage(row));
 }
 
 function queryAll<T>(sql: string, params: any[] = []): T[] {
@@ -1190,6 +1087,42 @@ export function compactStoredMessages(options: { sessionIds?: string[] } = {}): 
   };
 }
 
+export function purgeCompactSummaryMessages(): number {
+  const candidates = queryAll<Message>(
+    `SELECT *
+     FROM messages
+     WHERE role = 'user'
+       AND (
+         is_synthetic = 1
+         OR content LIKE ?
+         OR content LIKE ?
+         OR content LIKE ?
+         OR content LIKE ?
+       )`,
+    [
+      '"This session is being continued from a previous conversation that ran out of context.%',
+      '"This conversation is being continued from a previous conversation that ran out of context.%',
+      '%This session is being continued from a previous conversation that ran out of context.%',
+      '%This conversation is being continued from a previous conversation that ran out of context.%',
+    ]
+  ).filter(isStoredCompactSummaryMessage);
+
+  if (candidates.length === 0) {
+    return 0;
+  }
+
+  const messageIds = candidates.map((message) => message.id);
+  const placeholders = messageIds.map(() => "?").join(", ");
+
+  db.run(`DELETE FROM messages WHERE id IN (${placeholders})`, messageIds);
+  db.run(
+    `DELETE FROM search_index WHERE id IN (${placeholders})`,
+    messageIds.map((id) => `msg_${id}`)
+  );
+
+  return messageIds.length;
+}
+
 export interface ProjectWithStats extends Project {
   session_count: number;
   last_activity: number | null;
@@ -1207,6 +1140,7 @@ export interface WorkspaceFolder {
   sort_order: number;
   collapsed: number;
   pinned: number;
+  archived: number;
   created_at: number;
   updated_at: number;
 }
@@ -1239,6 +1173,8 @@ export const workspaceFolders = {
     run("UPDATE workspace_folders SET parent_id = ?, updated_at = ? WHERE parent_id = ?", [parentId, Date.now(), id]);
     run("DELETE FROM workspace_folders WHERE id = ?", [id]);
   },
+  setArchived: (id: string, archived: boolean) =>
+    run("UPDATE workspace_folders SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
   updateOrder: (id: string, sortOrder: number) =>
     run("UPDATE workspace_folders SET sort_order = ? WHERE id = ?", [sortOrder, id]),
   move: (id: string, parentId: string | null, sortOrder: number) =>
@@ -1257,6 +1193,7 @@ export interface SessionFolder {
   sort_order: number;
   collapsed: number;
   pinned: number;
+  archived: number;
   created_at: number;
   updated_at: number;
 }
@@ -1282,6 +1219,8 @@ export const sessionFolders = {
     run("UPDATE session_folders SET collapsed = ? WHERE id = ?", [collapsed ? 1 : 0, id]),
   togglePin: (id: string, pinned: boolean) =>
     run("UPDATE session_folders SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
+  setArchived: (id: string, archived: boolean) =>
+    run("UPDATE session_folders SET archived = ?, updated_at = ? WHERE id = ?", [archived ? 1 : 0, Date.now(), id]),
 };
 
 export interface Workflow {
@@ -1628,108 +1567,6 @@ export const workItemEvents = {
     ),
 };
 
-export const inboxItems = {
-  listByProject: (projectId: string) =>
-    queryAll<InboxItem>(
-      "SELECT * FROM inbox_items WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC",
-      [projectId]
-    ),
-  listAll: () =>
-    queryAll<InboxItemWithProject>(
-      `SELECT
-        inbox_items.*,
-        projects.name AS project_name,
-        projects.path AS project_path,
-        projects.archived AS project_archived
-      FROM inbox_items
-      LEFT JOIN projects ON projects.id = inbox_items.project_id
-      ORDER BY inbox_items.updated_at DESC, inbox_items.created_at DESC`
-    ),
-  get: (id: string) => queryOne<InboxItem>("SELECT * FROM inbox_items WHERE id = ?", [id]),
-  create: (item: InboxItem) =>
-    run(
-      `INSERT INTO inbox_items (
-        id, project_id, kind, title, body, status, priority, source_agent_id, source_session_id,
-        work_item_id, requires_response, response_options, metadata, created_at, updated_at, resolved_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        item.id,
-        item.project_id,
-        item.kind,
-        item.title,
-        item.body,
-        item.status,
-        item.priority,
-        item.source_agent_id,
-        item.source_session_id,
-        item.work_item_id,
-        item.requires_response,
-        item.response_options,
-        item.metadata ?? "{}",
-        item.created_at,
-        item.updated_at,
-        item.resolved_at,
-      ]
-    ),
-  update: (
-    id: string,
-    updates: Partial<
-      Pick<
-        InboxItem,
-        | "kind"
-        | "title"
-        | "body"
-        | "status"
-        | "priority"
-        | "source_agent_id"
-        | "source_session_id"
-        | "work_item_id"
-        | "requires_response"
-        | "response_options"
-        | "metadata"
-        | "resolved_at"
-      >
-    >
-  ) => {
-    const existing = inboxItems.get(id);
-    if (!existing) return;
-    run(
-      `UPDATE inbox_items SET
-        kind = ?,
-        title = ?,
-        body = ?,
-        status = ?,
-        priority = ?,
-        source_agent_id = ?,
-        source_session_id = ?,
-        work_item_id = ?,
-        requires_response = ?,
-        response_options = ?,
-        metadata = ?,
-        resolved_at = ?,
-        updated_at = ?
-      WHERE id = ?`,
-      [
-        updates.kind ?? existing.kind,
-        updates.title ?? existing.title,
-        updates.body === undefined ? existing.body : updates.body,
-        updates.status ?? existing.status,
-        updates.priority ?? existing.priority,
-        updates.source_agent_id === undefined ? existing.source_agent_id : updates.source_agent_id,
-        updates.source_session_id === undefined ? existing.source_session_id : updates.source_session_id,
-        updates.work_item_id === undefined ? existing.work_item_id : updates.work_item_id,
-        updates.requires_response === undefined ? existing.requires_response : updates.requires_response,
-        updates.response_options === undefined ? existing.response_options : updates.response_options,
-        updates.metadata === undefined ? existing.metadata : updates.metadata,
-        updates.resolved_at === undefined ? existing.resolved_at : updates.resolved_at,
-        Date.now(),
-        id,
-      ]
-    );
-  },
-  delete: (id: string) => run("DELETE FROM inbox_items WHERE id = ?", [id]),
-};
-
 export const projects = {
   list: (includeArchived: boolean = false) => queryAll<ProjectWithStats>(`
     SELECT p.*, 
@@ -1904,6 +1741,8 @@ export const sessions = {
     run("UPDATE sessions SET reasoning_effort = ? WHERE id = ?", [effort, id]),
   updateBackend: (backend: string, id: string) =>
     run("UPDATE sessions SET backend = ? WHERE id = ?", [backend, id]),
+  updateReasoningEffort: (effort: string | null, id: string) =>
+    run("UPDATE sessions SET reasoning_effort = ?, updated_at = ? WHERE id = ?", [effort, Date.now(), id]),
   updateBackendSessionState: (
     backendSessionId: string | null,
     backendSessionMetadata: string | null,
@@ -1919,15 +1758,34 @@ export const sessions = {
       "UPDATE sessions SET claude_session_id = NULL, backend_session_id = NULL, backend_session_metadata = NULL, updated_at = ? WHERE id = ?",
       [Date.now(), id]
     ),
+  setPendingContextHandoff: (id: string, handoff: string | null, method: string | null, reason: string | null) =>
+    run(
+      "UPDATE sessions SET pending_context_handoff = ?, pending_context_method = ?, pending_context_reason = ?, context_reduced_at = ?, updated_at = ? WHERE id = ?",
+      [handoff, method, reason, handoff ? Date.now() : null, Date.now(), id]
+    ),
+  clearPendingContextHandoff: (id: string) =>
+    run(
+      "UPDATE sessions SET pending_context_handoff = NULL, pending_context_method = NULL, pending_context_reason = NULL, updated_at = ? WHERE id = ?",
+      [Date.now(), id]
+    ),
   updateConversationPhase: (phase: string, id: string) =>
     run("UPDATE sessions SET conversation_phase = ? WHERE id = ?", [phase, id]),
   updateClaudeSession: (claude_session_id: string | null, model: string | null, cost: number, turns: number, inputTokens: number, outputTokens: number, updated_at: number, id: string) =>
-    run("UPDATE sessions SET claude_session_id = ?, model = ?, total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, pending_fork = 0, updated_at = ? WHERE id = ?",
+    // COALESCE: a query/result that doesn't know the model or resume id must not erase
+    // the persisted values (explicit clearing goes through clearBackendSessionState).
+    // Also clears pending_fork: once a real SDK session id lands, the fork is done.
+    run("UPDATE sessions SET claude_session_id = COALESCE(?, claude_session_id), model = COALESCE(?, model), total_cost_usd = total_cost_usd + ?, total_turns = total_turns + ?, input_tokens = ?, output_tokens = ?, pending_fork = 0, updated_at = ? WHERE id = ?",
         [claude_session_id, model, cost, turns, inputTokens, outputTokens, updated_at, id]),
   // Native fork: inherit the source session's SDK session id; the first query
   // passes forkSession:true so the SDK forks instead of continuing it
   adoptClaudeSessionForFork: (claude_session_id: string, id: string) =>
     run("UPDATE sessions SET claude_session_id = ?, pending_fork = 1 WHERE id = ?", [claude_session_id, id]),
+  updateContextInfo: (id: string, contextWindow: number, maxOutputTokens: number | null) =>
+    run("UPDATE sessions SET context_window = ?, max_output_tokens = ? WHERE id = ?",
+        [contextWindow, maxOutputTokens, id]),
+  updateUsage: (id: string, inputTokens: number, outputTokens: number, updated_at: number) =>
+    run("UPDATE sessions SET input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
+        [inputTokens, outputTokens, updated_at, id]),
   delete: (id: string) => run("DELETE FROM sessions WHERE id = ?", [id]),
   togglePin: (id: string, pinned: boolean) =>
     run("UPDATE sessions SET pinned = ?, updated_at = ? WHERE id = ?", [pinned ? 1 : 0, Date.now(), id]),
@@ -1953,8 +1811,8 @@ export const sessions = {
   setAutoAcceptAll: (id: string, autoAcceptAll: boolean) =>
     run("UPDATE sessions SET auto_accept_all = ?, updated_at = ? WHERE id = ?", [autoAcceptAll ? 1 : 0, Date.now(), id]),
   resetTokenCounts: (sessionId: string, inputTokens: number, outputTokens: number) =>
-    run("UPDATE sessions SET input_tokens = ?, output_tokens = ? WHERE id = ?",
-        [inputTokens, outputTokens, sessionId]),
+    run("UPDATE sessions SET input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
+        [inputTokens, outputTokens, Date.now(), sessionId]),
   setArchivedByProject: (projectId: string, archived: boolean) =>
     run("UPDATE sessions SET archived = ?, updated_at = ? WHERE project_id = ?", [archived ? 1 : 0, Date.now(), projectId]),
   archiveAllNonStarred: (projectId: string) =>
@@ -2036,138 +1894,26 @@ export const sessions = {
       "INSERT INTO sessions (id, project_id, title, worktree_path, worktree_branch, worktree_base_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [id, project_id, title, worktree_path, worktree_branch, worktree_base_branch, created_at, updated_at]
     ),
-
-  // Cloud execution mode methods
-  setExecutionMode: (id: string, mode: "local" | "cloud", repoUrl?: string, branch?: string) =>
-    run(
-      "UPDATE sessions SET execution_mode = ?, cloud_repo_url = ?, cloud_branch = ?, updated_at = ? WHERE id = ?",
-      [mode, repoUrl || null, branch || null, Date.now(), id]
-    ),
-  setE2bSandboxId: (id: string, sandboxId: string | null) =>
-    run("UPDATE sessions SET e2b_sandbox_id = ?, updated_at = ? WHERE id = ?", [sandboxId, Date.now(), id]),
-  createWithCloudMode: (
-    id: string,
-    project_id: string,
-    title: string,
-    execution_mode: "local" | "cloud",
-    cloud_repo_url: string | null,
-    cloud_branch: string | null,
-    created_at: number,
-    updated_at: number
-  ) =>
-    run(
-      "INSERT INTO sessions (id, project_id, title, execution_mode, cloud_repo_url, cloud_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, project_id, title, execution_mode, cloud_repo_url, cloud_branch, created_at, updated_at]
-    ),
-};
-
-// Cloud execution tracking
-export interface CloudExecution {
-  id: string;
-  session_id: string;
-  e2b_sandbox_id: string | null;
-  status: "pending" | "cloning" | "checkout" | "executing" | "syncing" | "completed" | "failed" | "cancelled";
-  stage: string | null;
-  repo_url: string | null;
-  branch: string | null;
-  started_at: number;
-  completed_at: number | null;
-  duration_ms: number | null;
-  exit_code: number | null;
-  error_message: string | null;
-  modified_files: string | null; // JSON array of file paths
-  synced_files: string | null;   // JSON array of synced file paths
-  e2b_cost_usd: number | null;   // Estimated E2B compute cost
-}
-
-export const cloudExecutions = {
-  list: (sessionId: string) =>
-    queryAll<CloudExecution>(
-      "SELECT * FROM cloud_executions WHERE session_id = ? ORDER BY started_at DESC",
-      [sessionId]
-    ),
-  get: (id: string) => queryOne<CloudExecution>("SELECT * FROM cloud_executions WHERE id = ?", [id]),
-  getLatest: (sessionId: string) =>
-    queryOne<CloudExecution>(
-      "SELECT * FROM cloud_executions WHERE session_id = ? ORDER BY started_at DESC LIMIT 1",
-      [sessionId]
-    ),
-  create: (
-    id: string,
-    sessionId: string,
-    repoUrl: string | null,
-    branch: string | null
-  ) => {
-    const now = Date.now();
-    run(
-      "INSERT INTO cloud_executions (id, session_id, status, repo_url, branch, started_at) VALUES (?, ?, 'pending', ?, ?, ?)",
-      [id, sessionId, repoUrl, branch, now]
-    );
-  },
-  updateStatus: (id: string, status: CloudExecution["status"], stage?: string) =>
-    run(
-      "UPDATE cloud_executions SET status = ?, stage = ? WHERE id = ?",
-      [status, stage || null, id]
-    ),
-  setSandboxId: (id: string, sandboxId: string) =>
-    run("UPDATE cloud_executions SET e2b_sandbox_id = ? WHERE id = ?", [sandboxId, id]),
-  complete: (
-    id: string,
-    exitCode: number,
-    modifiedFiles: string[],
-    syncedFiles: string[],
-    durationMs: number,
-    e2bCostUsd: number
-  ) => {
-    const now = Date.now();
-    run(
-      "UPDATE cloud_executions SET status = 'completed', exit_code = ?, modified_files = ?, synced_files = ?, duration_ms = ?, e2b_cost_usd = ?, completed_at = ? WHERE id = ?",
-      [exitCode, JSON.stringify(modifiedFiles), JSON.stringify(syncedFiles), durationMs, e2bCostUsd, now, id]
-    );
-  },
-  fail: (id: string, errorMessage: string, durationMs: number, e2bCostUsd: number) => {
-    const now = Date.now();
-    run(
-      "UPDATE cloud_executions SET status = 'failed', error_message = ?, duration_ms = ?, e2b_cost_usd = ?, completed_at = ? WHERE id = ?",
-      [errorMessage, durationMs, e2bCostUsd, now, id]
-    );
-  },
-  // Get total E2B cost for a session
-  getTotalCost: (sessionId: string): number => {
-    const result = queryOne<{ total: number }>(
-      "SELECT COALESCE(SUM(e2b_cost_usd), 0) as total FROM cloud_executions WHERE session_id = ?",
-      [sessionId]
-    );
-    return result?.total || 0;
-  },
-  // Get total E2B cost for all sessions
-  getTotalCostAll: (): number => {
-    const result = queryOne<{ total: number }>(
-      "SELECT COALESCE(SUM(e2b_cost_usd), 0) as total FROM cloud_executions"
-    );
-    return result?.total || 0;
-  },
-  cancel: (id: string) =>
-    run(
-      "UPDATE cloud_executions SET status = 'cancelled', completed_at = ? WHERE id = ?",
-      [Date.now(), id]
-    ),
 };
 
 export const messages = {
   listBySession: (sessionId: string) =>
-    queryAll<Message>("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC", [sessionId]),
+    filterStoredTranscriptMessages(
+      queryAll<Message>("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC", [sessionId])
+    ),
   listBySessionPaginated: (sessionId: string, limit: number, offset: number) =>
-    queryAll<Message>(
-      "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-      [sessionId, limit, offset]
+    filterStoredTranscriptMessages(
+      queryAll<Message>(
+        "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+        [sessionId, limit, offset]
+      )
     ),
   countBySession: (sessionId: string): number => {
-    const result = queryOne<{ count: number }>(
-      "SELECT COUNT(*) as count FROM messages WHERE session_id = ?",
+    const rows = queryAll<Message>(
+      "SELECT * FROM messages WHERE session_id = ?",
       [sessionId]
     );
-    return result?.count ?? 0;
+    return filterStoredTranscriptMessages(rows).length;
   },
   get: (id: string) => queryOne<Message>("SELECT * FROM messages WHERE id = ?", [id]),
   create: (
@@ -2234,10 +1980,10 @@ export const messages = {
     run("DELETE FROM messages WHERE session_id = ? AND timestamp > ?", [sessionId, timestamp]),
   // Get latest message preview for a session (for child session cards)
   getLatestPreview: (sessionId: string): { role: string; preview: string; timestamp: number } | null => {
-    const msg = queryOne<Message>(
-      "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1",
+    const msg = filterStoredTranscriptMessages(queryAll<Message>(
+      "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 10",
       [sessionId]
-    );
+    ))[0];
     if (!msg) return null;
 
     try {
@@ -3043,144 +2789,6 @@ export const extensionSettings = {
     run("DELETE FROM extension_settings WHERE project_id = ?", [projectId]),
 };
 
-// Kanban Cards
-export type KanbanStatus = "backlog" | "spec" | "execute" | "review" | "done" | "archived";
-
-export interface KanbanCard {
-  id: string;
-  project_id: string;
-  session_id: string | null;
-  title: string;
-  spec: string | null;
-  status: KanbanStatus;
-  status_message: string | null;
-  blocked: number; // 0 or 1 - card-level blocked state
-  sort_order: number;
-  created_at: number;
-  updated_at: number;
-}
-
-export interface KanbanCardWithSession extends KanbanCard {
-  session_title?: string;
-}
-
-export const kanbanCards = {
-  listByProject: (projectId: string, includeArchived = false) =>
-    queryAll<KanbanCardWithSession>(
-      `SELECT k.*, s.title as session_title
-       FROM kanban_cards k
-       LEFT JOIN sessions s ON k.session_id = s.id
-       WHERE k.project_id = ? ${includeArchived ? "" : "AND k.status != 'archived'"}
-       ORDER BY k.sort_order ASC, k.created_at DESC`,
-      [projectId]
-    ),
-
-  listByStatus: (projectId: string, status: KanbanStatus) =>
-    queryAll<KanbanCardWithSession>(
-      `SELECT k.*, s.title as session_title
-       FROM kanban_cards k
-       LEFT JOIN sessions s ON k.session_id = s.id
-       WHERE k.project_id = ? AND k.status = ?
-       ORDER BY k.sort_order ASC`,
-      [projectId, status]
-    ),
-
-  get: (id: string) =>
-    queryOne<KanbanCard>("SELECT * FROM kanban_cards WHERE id = ?", [id]),
-
-  getBySession: (sessionId: string) =>
-    queryOne<KanbanCard>("SELECT * FROM kanban_cards WHERE session_id = ?", [sessionId]),
-
-  create: (card: Omit<KanbanCard, "created_at" | "updated_at">) => {
-    const now = Date.now();
-    run(
-      `INSERT INTO kanban_cards (id, project_id, session_id, title, spec, status, status_message, blocked, sort_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        card.id,
-        card.project_id,
-        card.session_id,
-        card.title,
-        card.spec,
-        card.status,
-        card.status_message,
-        card.blocked ?? 0,
-        card.sort_order,
-        now,
-        now,
-      ]
-    );
-  },
-
-  update: (id: string, updates: Partial<Omit<KanbanCard, "id" | "project_id" | "created_at">>) => {
-    const fields: string[] = [];
-    const values: any[] = [];
-    for (const [key, value] of Object.entries(updates)) {
-      // Skip undefined values and protected fields
-      if (value === undefined) continue;
-      if (key !== "id" && key !== "project_id" && key !== "created_at") {
-        fields.push(`${key} = ?`);
-        values.push(value);
-      }
-    }
-    fields.push("updated_at = ?");
-    values.push(Date.now());
-    values.push(id);
-    if (fields.length > 1) {
-      run(`UPDATE kanban_cards SET ${fields.join(", ")} WHERE id = ?`, values);
-    }
-  },
-
-  updateStatus: (id: string, status: KanbanStatus, statusMessage?: string | null) => {
-    run(
-      "UPDATE kanban_cards SET status = ?, status_message = ?, updated_at = ? WHERE id = ?",
-      [status, statusMessage ?? null, Date.now(), id]
-    );
-  },
-
-  setBlocked: (id: string, blocked: boolean, statusMessage?: string | null) => {
-    run(
-      "UPDATE kanban_cards SET blocked = ?, status_message = ?, updated_at = ? WHERE id = ?",
-      [blocked ? 1 : 0, statusMessage ?? null, Date.now(), id]
-    );
-  },
-
-  linkSession: (id: string, sessionId: string) => {
-    run(
-      "UPDATE kanban_cards SET session_id = ?, updated_at = ? WHERE id = ?",
-      [sessionId, Date.now(), id]
-    );
-  },
-
-  unlinkSession: (sessionId: string) => {
-    run(
-      "UPDATE kanban_cards SET session_id = NULL, updated_at = ? WHERE session_id = ?",
-      [Date.now(), sessionId]
-    );
-  },
-
-  reorder: (cardIds: string[]) => {
-    const now = Date.now();
-    for (let i = 0; i < cardIds.length; i++) {
-      run(
-        "UPDATE kanban_cards SET sort_order = ?, updated_at = ? WHERE id = ?",
-        [i, now, cardIds[i]]
-      );
-    }
-  },
-
-  delete: (id: string) => run("DELETE FROM kanban_cards WHERE id = ?", [id]),
-
-  deleteByProject: (projectId: string) =>
-    run("DELETE FROM kanban_cards WHERE project_id = ?", [projectId]),
-
-  archive: (id: string) =>
-    run(
-      "UPDATE kanban_cards SET status = 'archived', updated_at = ? WHERE id = ?",
-      [Date.now(), id]
-    ),
-};
-
 // ============================================================================
 // Multi-Session Hierarchy (Fractal Agents)
 // ============================================================================
@@ -3318,6 +2926,7 @@ export const sessionHierarchy = {
     const activeCount = queryOne<{ count: number }>(
       `SELECT COUNT(*) as count FROM sessions
        WHERE (root_session_id = ? OR id = ?)
+       AND session_type = 'agent'
        AND agent_status IN ('working', 'waiting', 'blocked', 'pending_review', 'clarification_requested')`,
       [rootId, rootId]
     );
@@ -3485,11 +3094,14 @@ export const sessionHierarchy = {
       [rootSessionId, rootSessionId]
     ),
 
-  // Count active sessions in tree
+  // Count active spawned agents in tree (forks and the root chat itself are
+  // regular sessions stuck at the default 'working' status — they must not
+  // consume MAX_CONCURRENT_SESSIONS slots)
   countActiveSessions: (rootSessionId: string): number => {
     const result = queryOne<{ count: number }>(
       `SELECT COUNT(*) as count FROM sessions
        WHERE (root_session_id = ? OR id = ?)
+       AND session_type = 'agent'
        AND agent_status IN ('working', 'waiting', 'blocked', 'pending_review', 'clarification_requested')`,
       [rootSessionId, rootSessionId]
     );
@@ -3948,494 +3560,3 @@ export const commandSettings = {
   },
 };
 
-// ============================================================================
-// Channels - Cross-workspace agent collaboration
-// ============================================================================
-
-export interface Channel {
-  id: string;
-  name: string;
-  description: string | null;
-  workspace_access: 'selected' | 'all';
-  settings: string; // JSON
-  created_at: number;
-  updated_at: number;
-  // Joined fields
-  workspace_ids?: string[];
-}
-
-export interface ChannelThread {
-  id: string;
-  channel_id: string;
-  title: string | null;
-  status: 'active' | 'resolved' | 'archived';
-  workspace_id: string | null;
-  branch_name: string | null;
-  created_at: number;
-  updated_at: number;
-  // Joined fields
-  message_count?: number;
-  last_message_at?: number;
-}
-
-export interface ChannelMessage {
-  id: string;
-  thread_id: string;
-  sender_type: 'user' | 'agent';
-  sender_id: string;
-  sender_name: string;
-  content: string;
-  mentions: string; // JSON array
-  agent_action: string | null; // JSON
-  created_at: number;
-}
-
-export const channels = {
-  list: (): Channel[] => {
-    const stmt = db.prepare(`
-      SELECT c.*, GROUP_CONCAT(cw.workspace_id) as workspace_ids
-      FROM channels c
-      LEFT JOIN channel_workspaces cw ON c.id = cw.channel_id
-      GROUP BY c.id
-      ORDER BY c.updated_at DESC
-    `);
-    const results: Channel[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as any;
-      results.push({
-        ...row,
-        workspace_ids: row.workspace_ids ? row.workspace_ids.split(',') : [],
-      });
-    }
-    stmt.free();
-    return results;
-  },
-
-  get: (id: string): Channel | null => {
-    const stmt = db.prepare(`
-      SELECT c.*, GROUP_CONCAT(cw.workspace_id) as workspace_ids
-      FROM channels c
-      LEFT JOIN channel_workspaces cw ON c.id = cw.channel_id
-      WHERE c.id = ?
-      GROUP BY c.id
-    `);
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as any;
-      stmt.free();
-      return {
-        ...row,
-        workspace_ids: row.workspace_ids ? row.workspace_ids.split(',') : [],
-      };
-    }
-    stmt.free();
-    return null;
-  },
-
-  create: (id: string, name: string, description: string | null, workspaceAccess: 'selected' | 'all', workspaceIds: string[], now: number): void => {
-    db.run(
-      "INSERT INTO channels (id, name, description, workspace_access, settings, created_at, updated_at) VALUES (?, ?, ?, ?, '{}', ?, ?)",
-      [id, name, description, workspaceAccess, now, now]
-    );
-    // Add workspace mappings
-    for (const wsId of workspaceIds) {
-      db.run("INSERT INTO channel_workspaces (channel_id, workspace_id) VALUES (?, ?)", [id, wsId]);
-    }
-    saveDb();
-  },
-
-  update: (id: string, name: string, description: string | null, workspaceAccess: 'selected' | 'all', workspaceIds: string[], now: number): void => {
-    db.run(
-      "UPDATE channels SET name = ?, description = ?, workspace_access = ?, updated_at = ? WHERE id = ?",
-      [name, description, workspaceAccess, now, id]
-    );
-    // Update workspace mappings
-    db.run("DELETE FROM channel_workspaces WHERE channel_id = ?", [id]);
-    for (const wsId of workspaceIds) {
-      db.run("INSERT INTO channel_workspaces (channel_id, workspace_id) VALUES (?, ?)", [id, wsId]);
-    }
-    saveDb();
-  },
-
-  delete: (id: string): void => {
-    db.run("DELETE FROM channels WHERE id = ?", [id]);
-    saveDb();
-  },
-
-  touch: (id: string, now: number): void => {
-    db.run("UPDATE channels SET updated_at = ? WHERE id = ?", [now, id]);
-    saveDb();
-  },
-};
-
-export const channelThreads = {
-  listByChannel: (channelId: string): ChannelThread[] => {
-    const stmt = db.prepare(`
-      SELECT t.*,
-        (SELECT COUNT(*) FROM channel_messages WHERE thread_id = t.id) as message_count,
-        (SELECT MAX(created_at) FROM channel_messages WHERE thread_id = t.id) as last_message_at
-      FROM channel_threads t
-      WHERE t.channel_id = ?
-      ORDER BY t.updated_at DESC
-    `);
-    stmt.bind([channelId]);
-    const results: ChannelThread[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject() as ChannelThread);
-    }
-    stmt.free();
-    return results;
-  },
-
-  get: (id: string): ChannelThread | null => {
-    const stmt = db.prepare("SELECT * FROM channel_threads WHERE id = ?");
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const result = stmt.getAsObject() as ChannelThread;
-      stmt.free();
-      return result;
-    }
-    stmt.free();
-    return null;
-  },
-
-  create: (id: string, channelId: string, title: string | null, workspaceId: string | null, now: number): void => {
-    db.run(
-      "INSERT INTO channel_threads (id, channel_id, title, status, workspace_id, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?, ?)",
-      [id, channelId, title, workspaceId, now, now]
-    );
-    channels.touch(channelId, now);
-    saveDb();
-  },
-
-  update: (id: string, title: string | null, status: string, now: number): void => {
-    db.run("UPDATE channel_threads SET title = ?, status = ?, updated_at = ? WHERE id = ?", [title, status, now, id]);
-    saveDb();
-  },
-
-  setBranch: (id: string, branchName: string | null, now: number): void => {
-    db.run("UPDATE channel_threads SET branch_name = ?, updated_at = ? WHERE id = ?", [branchName, now, id]);
-    saveDb();
-  },
-
-  delete: (id: string): void => {
-    db.run("DELETE FROM channel_threads WHERE id = ?", [id]);
-    saveDb();
-  },
-
-  touch: (id: string, now: number): void => {
-    db.run("UPDATE channel_threads SET updated_at = ? WHERE id = ?", [now, id]);
-    // Also touch the channel
-    const thread = channelThreads.get(id);
-    if (thread) {
-      channels.touch(thread.channel_id, now);
-    }
-    saveDb();
-  },
-};
-
-export const channelMessages = {
-  listByThread: (threadId: string, limit = 100, offset = 0): ChannelMessage[] => {
-    const stmt = db.prepare(`
-      SELECT * FROM channel_messages
-      WHERE thread_id = ?
-      ORDER BY created_at ASC
-      LIMIT ? OFFSET ?
-    `);
-    stmt.bind([threadId, limit, offset]);
-    const results: ChannelMessage[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject() as ChannelMessage);
-    }
-    stmt.free();
-    return results;
-  },
-
-  get: (id: string): ChannelMessage | null => {
-    const stmt = db.prepare("SELECT * FROM channel_messages WHERE id = ?");
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const result = stmt.getAsObject() as ChannelMessage;
-      stmt.free();
-      return result;
-    }
-    stmt.free();
-    return null;
-  },
-
-  create: (
-    id: string,
-    threadId: string,
-    senderType: 'user' | 'agent',
-    senderId: string,
-    senderName: string,
-    content: string,
-    mentions: string[],
-    agentAction: any | null,
-    now: number
-  ): void => {
-    db.run(
-      "INSERT INTO channel_messages (id, thread_id, sender_type, sender_id, sender_name, content, mentions, agent_action, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, threadId, senderType, senderId, senderName, content, JSON.stringify(mentions), agentAction ? JSON.stringify(agentAction) : null, now]
-    );
-    channelThreads.touch(threadId, now);
-    saveDb();
-  },
-
-  delete: (id: string): void => {
-    db.run("DELETE FROM channel_messages WHERE id = ?", [id]);
-    saveDb();
-  },
-
-  countByThread: (threadId: string): number => {
-    const stmt = db.prepare("SELECT COUNT(*) as count FROM channel_messages WHERE thread_id = ?");
-    stmt.bind([threadId]);
-    if (stmt.step()) {
-      const result = stmt.getAsObject() as { count: number };
-      stmt.free();
-      return result.count;
-    }
-    stmt.free();
-    return 0;
-  },
-};
-
-// ============================================================================
-// Message Comments - Google Docs-style inline annotations
-// @experimental
-// ============================================================================
-
-export interface MessageComment {
-  id: string;
-  message_id: string;
-  session_id: string;
-  thread_id: string;
-  parent_comment_id: string | null;
-  author: 'user' | 'assistant';
-  content: string;
-  selection_text: string | null;
-  selection_start: number | null;
-  selection_end: number | null;
-  resolved: number;
-  created_at: number;
-}
-
-export interface CommentThread {
-  thread_id: string;
-  message_id: string;
-  session_id: string;
-  selection_text: string | null;
-  selection_start: number | null;
-  selection_end: number | null;
-  resolved: number;
-  comments: MessageComment[];
-}
-
-export const messageComments = {
-  // Get all comments for a session
-  listBySession: (sessionId: string): MessageComment[] =>
-    queryAll<MessageComment>(
-      "SELECT * FROM message_comments WHERE session_id = ? ORDER BY created_at ASC",
-      [sessionId]
-    ),
-
-  // Get comments for a specific message
-  listByMessage: (messageId: string): MessageComment[] =>
-    queryAll<MessageComment>(
-      "SELECT * FROM message_comments WHERE message_id = ? ORDER BY created_at ASC",
-      [messageId]
-    ),
-
-  // Get a comment thread (all comments with same thread_id)
-  getThread: (threadId: string): MessageComment[] =>
-    queryAll<MessageComment>(
-      "SELECT * FROM message_comments WHERE thread_id = ? ORDER BY created_at ASC",
-      [threadId]
-    ),
-
-  // Get single comment
-  get: (id: string): MessageComment | undefined =>
-    queryOne<MessageComment>("SELECT * FROM message_comments WHERE id = ?", [id]),
-
-  // Get all threads for a session (grouped)
-  getThreadsForSession: (sessionId: string): CommentThread[] => {
-    const comments = queryAll<MessageComment>(
-      "SELECT * FROM message_comments WHERE session_id = ? ORDER BY created_at ASC",
-      [sessionId]
-    );
-
-    // Group by thread_id
-    const threadMap = new Map<string, MessageComment[]>();
-    for (const comment of comments) {
-      const existing = threadMap.get(comment.thread_id) || [];
-      existing.push(comment);
-      threadMap.set(comment.thread_id, existing);
-    }
-
-    // Convert to CommentThread objects
-    const threads: CommentThread[] = [];
-    for (const [threadId, threadComments] of threadMap) {
-      const first = threadComments[0];
-      threads.push({
-        thread_id: threadId,
-        message_id: first.message_id,
-        session_id: first.session_id,
-        selection_text: first.selection_text,
-        selection_start: first.selection_start,
-        selection_end: first.selection_end,
-        resolved: first.resolved,
-        comments: threadComments,
-      });
-    }
-
-    return threads;
-  },
-
-  // Get threads for a specific message
-  getThreadsForMessage: (messageId: string): CommentThread[] => {
-    const comments = queryAll<MessageComment>(
-      "SELECT * FROM message_comments WHERE message_id = ? ORDER BY created_at ASC",
-      [messageId]
-    );
-
-    const threadMap = new Map<string, MessageComment[]>();
-    for (const comment of comments) {
-      const existing = threadMap.get(comment.thread_id) || [];
-      existing.push(comment);
-      threadMap.set(comment.thread_id, existing);
-    }
-
-    const threads: CommentThread[] = [];
-    for (const [threadId, threadComments] of threadMap) {
-      const first = threadComments[0];
-      threads.push({
-        thread_id: threadId,
-        message_id: first.message_id,
-        session_id: first.session_id,
-        selection_text: first.selection_text,
-        selection_start: first.selection_start,
-        selection_end: first.selection_end,
-        resolved: first.resolved,
-        comments: threadComments,
-      });
-    }
-
-    return threads;
-  },
-
-  // Create a new comment (and optionally start a new thread)
-  create: (comment: Omit<MessageComment, 'created_at'>): MessageComment => {
-    const now = Date.now();
-    run(
-      `INSERT INTO message_comments
-       (id, message_id, session_id, thread_id, parent_comment_id, author, content,
-        selection_text, selection_start, selection_end, resolved, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        comment.id,
-        comment.message_id,
-        comment.session_id,
-        comment.thread_id,
-        comment.parent_comment_id,
-        comment.author,
-        comment.content,
-        comment.selection_text,
-        comment.selection_start,
-        comment.selection_end,
-        comment.resolved,
-        now,
-      ]
-    );
-    return { ...comment, created_at: now };
-  },
-
-  // Reply to a thread
-  reply: (
-    id: string,
-    threadId: string,
-    author: 'user' | 'assistant',
-    content: string
-  ): MessageComment | null => {
-    // Get the first comment in thread to copy metadata
-    const thread = messageComments.getThread(threadId);
-    if (thread.length === 0) return null;
-
-    const first = thread[0];
-    const now = Date.now();
-
-    run(
-      `INSERT INTO message_comments
-       (id, message_id, session_id, thread_id, parent_comment_id, author, content,
-        selection_text, selection_start, selection_end, resolved, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        first.message_id,
-        first.session_id,
-        threadId,
-        first.id, // Parent is the root comment
-        author,
-        content,
-        null, // Replies don't have selection
-        null,
-        null,
-        0,
-        now,
-      ]
-    );
-
-    return {
-      id,
-      message_id: first.message_id,
-      session_id: first.session_id,
-      thread_id: threadId,
-      parent_comment_id: first.id,
-      author,
-      content,
-      selection_text: null,
-      selection_start: null,
-      selection_end: null,
-      resolved: 0,
-      created_at: now,
-    };
-  },
-
-  // Resolve/unresolve a thread
-  setResolved: (threadId: string, resolved: boolean): void => {
-    run(
-      "UPDATE message_comments SET resolved = ? WHERE thread_id = ?",
-      [resolved ? 1 : 0, threadId]
-    );
-  },
-
-  // Delete a single comment
-  delete: (id: string): void => {
-    run("DELETE FROM message_comments WHERE id = ?", [id]);
-  },
-
-  // Delete an entire thread
-  deleteThread: (threadId: string): void => {
-    run("DELETE FROM message_comments WHERE thread_id = ?", [threadId]);
-  },
-
-  // Delete all comments for a message
-  deleteByMessage: (messageId: string): void => {
-    run("DELETE FROM message_comments WHERE message_id = ?", [messageId]);
-  },
-
-  // Delete all comments for a session
-  deleteBySession: (sessionId: string): void => {
-    run("DELETE FROM message_comments WHERE session_id = ?", [sessionId]);
-  },
-
-  // Count unresolved threads for a session
-  countUnresolvedThreads: (sessionId: string): number => {
-    const result = queryOne<{ count: number }>(
-      `SELECT COUNT(DISTINCT thread_id) as count
-       FROM message_comments
-       WHERE session_id = ? AND resolved = 0`,
-      [sessionId]
-    );
-    return result?.count || 0;
-  },
-};

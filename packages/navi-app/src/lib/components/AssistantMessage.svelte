@@ -2,7 +2,6 @@
   import type { ContentBlock, TextBlock, ToolUseBlock, ThinkingBlock, ToolResultBlock, SubagentEventBlock } from "../claude";
   import type { ChatMessage } from "../stores";
   import MermaidRenderer from "./MermaidRenderer.svelte";
-  import ToolRenderer from "./ToolRenderer.svelte";
   import { AgentCard } from "./agents";
   import SubagentModal from "./SubagentModal.svelte";
   import MediaDisplay from "./MediaDisplay.svelte";
@@ -18,22 +17,11 @@
   import TextSelectionContextMenu from "./TextSelectionContextMenu.svelte";
   import AgentBrowserWidget from "./widgets/AgentBrowserWidget.svelte";
   import BrowserActionGroup from "./widgets/BrowserActionGroup.svelte";
-  import ToolActionGroup from "./widgets/ToolActionGroup.svelte";
+  import ToolRow from "./ToolRow.svelte";
+  import ToolCallRun from "./ToolCallRun.svelte";
   import SubagentInteractionCard from "./SubagentInteractionCard.svelte";
   import { isAgentBrowserCommand } from "$lib/utils/agent-browser-parser";
-  import {
-    type ToolGroup,
-    type ToolGroupType,
-    getToolGroupType,
-    shouldGroupTogether,
-    TOOL_GROUP_CONFIG,
-    generateGroupSummary,
-  } from "$lib/core";
-  // Comments feature @experimental
-  import { commentsStore, showComments, createMessageThreadsStore } from "$lib/features/comments";
-  import CommentThread from "$lib/features/comments/components/CommentThread.svelte";
-  import CommentInput from "$lib/features/comments/components/CommentInput.svelte";
-  import CommentIndicator from "$lib/features/comments/components/CommentIndicator.svelte";
+  import { extractToolResultContent, type ToolRunStep } from "./tool-display";
 
   interface Props {
     content: ContentBlock[];
@@ -50,13 +38,11 @@
     onMessageClick?: (e: MouseEvent) => void;
     onQuoteText?: (text: string) => void;
     onForkWithQuote?: (text: string) => void;
-    onAskCouncil?: (text: string) => void;
     onOpenSubagentSession?: (sessionId: string) => void;
     renderMarkdown: (content: string) => string;
     jsonBlocksMap?: Map<string, any>;
     shellBlocksMap?: Map<string, { code: string; language: string }>;
     sessionId?: string;
-    messageId?: string;
   }
 
   let {
@@ -74,13 +60,11 @@
     onMessageClick,
     onQuoteText,
     onForkWithQuote,
-    onAskCouncil,
     onOpenSubagentSession,
     renderMarkdown,
     jsonBlocksMap = new Map(),
     shellBlocksMap = new Map(),
     sessionId = '',
-    messageId = '',
   }: Props = $props();
 
   let showMenu = $state(false);
@@ -90,28 +74,6 @@
 
   // Text selection context menu state
   let selectionMenu = $state<{ x: number; y: number; text: string } | null>(null);
-
-  // Comments state @experimental
-  let commentInput = $state<{ x: number; y: number; text: string } | null>(null);
-  let expandedThreadId = $state<string | null>(null);
-  let localThreads = $state<import("$lib/features/comments").CommentThread[]>([]);
-
-  // Subscribe to comment threads reactively
-  $effect(() => {
-    if (sessionId && messageId) {
-      // Subscribe to the store and filter for this message
-      const unsubscribe = commentsStore.subscribe((map) => {
-        const sessionThreads = map.get(sessionId) || [];
-        localThreads = sessionThreads.filter((t) => t.message_id === messageId);
-      });
-      return unsubscribe;
-    }
-    localThreads = [];
-    return undefined;
-  });
-
-  // Use local state for reactivity
-  const messageThreads = $derived(localThreads);
 
   function handleContextMenu(e: MouseEvent) {
     const selection = window.getSelection();
@@ -135,28 +97,6 @@
   function handleForkWithQuote(text: string) {
     onForkWithQuote?.(text);
     selectionMenu = null;
-  }
-
-  function handleAddComment(text: string) {
-    if (!selectionMenu) return;
-    // Open comment input at the selection position
-    commentInput = {
-      x: selectionMenu.x,
-      y: selectionMenu.y,
-      text,
-    };
-    selectionMenu = null;
-  }
-
-  function handleCommentCreated(threadId: string) {
-    // Expand the newly created thread
-    expandedThreadId = threadId;
-  }
-
-  async function handleAskAI(threadId: string, question: string) {
-    // Get the message content as context and ask AI
-    const context = getCopyText();
-    await commentsStore.askAI(sessionId, threadId, question, context);
   }
 
   function toggleBlock(idx: number) {
@@ -200,50 +140,6 @@
     return match ? match[1] : "unknown";
   }
 
-  function getToolSummary(tool: ToolUseBlock): string {
-    const input = tool.input || {};
-    switch (tool.name) {
-      case "Read":
-        return input.file_path?.split("/").pop() || "";
-      case "Write":
-        return input.file_path?.split("/").pop() || "";
-      case "Edit":
-      case "MultiEdit":
-        return input.file_path?.split("/").pop() || "";
-      case "Bash":
-        const cmd = input.command || "";
-        return cmd.length > 40 ? cmd.slice(0, 40) + "..." : cmd;
-      case "Glob":
-        return input.pattern || "";
-      case "Grep":
-        return input.pattern || "";
-      case "WebFetch":
-        try { return new URL(input.url || "").hostname; } catch { return ""; }
-      case "WebSearch":
-        return input.query || "";
-      default:
-        return "";
-    }
-  }
-
-  const toolIconPaths: Record<string, string> = {
-    Read: "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253",
-    Write: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
-    Edit: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z",
-    MultiEdit: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z",
-    Bash: "M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
-    Glob: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
-    Grep: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
-    WebFetch: "M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9",
-    WebSearch: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
-    Task: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2",
-    TodoWrite: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4",
-  };
-
-  function getToolIconPath(name: string): string {
-    return toolIconPaths[name] || "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z";
-  }
-
   function getSubagentForTool(toolUseId: string): ChatMessage[] {
     return subagentUpdates.filter(u => u.parentToolUseId === toolUseId);
   }
@@ -273,147 +169,108 @@
     }>;
   }
 
-  interface ToolActionGroupBlock {
-    type: 'tool_group';
-    groupType: ToolGroupType;
-    group: ToolGroup;
+  interface ToolRunBlock {
+    type: 'tool_run';
+    steps: ToolRunStep[];
   }
 
-  type GroupedItem = ContentBlock | GroupedBlock | BrowserActionGroupBlock | ToolActionGroupBlock;
+  type GroupedItem = ContentBlock | GroupedBlock | BrowserActionGroupBlock | ToolRunBlock;
 
+  // Aggregate ALL consecutive tool calls (any mix of Bash/Grep/Read/…) into one
+  // collapsed run (contador-style). Intermediate thinking and narration — text
+  // that still has tool work AFTER it — folds into the run's timeline; the
+  // final prose, widgets and special tools (Task, TodoWrite, skill reads,
+  // browser actions) stay prominent and break the run.
   function groupToolBlocks(blocks: ContentBlock[], externalResults: Map<string, ContentBlock>): GroupedItem[] {
     const grouped: GroupedItem[] = [];
-    let currentBrowserGroup: BrowserActionGroupBlock | null = null;
-    let currentToolGroup: ToolActionGroupBlock | null = null;
-    let prevToolUse: ToolUseBlock | null = null;
-    let prevGroupType: ToolGroupType | null = null;
+    let browserGroup: BrowserActionGroupBlock | null = null;
+    let run: ToolRunStep[] | null = null;
+    let pending: ToolRunStep[] = []; // thinking/notes waiting for the run's first tool
 
-    const flushGroups = () => {
-      if (currentBrowserGroup) {
-        grouped.push(currentBrowserGroup);
-        currentBrowserGroup = null;
+    const isStandaloneTool = (t: ToolUseBlock) =>
+      t.name === 'Task' || t.name === 'TodoWrite' ||
+      (t.name === 'Read' && (t.input?.file_path as string)?.includes('/skills/'));
+    const isBrowserTool = (t: ToolUseBlock) =>
+      t.name === 'Bash' && isAgentBrowserCommand((t.input?.command as string) || '');
+
+    // hasGroupableAfter[i]: does any run-joinable tool_use appear after index i?
+    const hasGroupableAfter: boolean[] = new Array(blocks.length).fill(false);
+    for (let i = blocks.length - 2; i >= 0; i--) {
+      const next = blocks[i + 1];
+      const nextGroupable = next.type === 'tool_use' &&
+        !isStandaloneTool(next as ToolUseBlock) && !isBrowserTool(next as ToolUseBlock);
+      hasGroupableAfter[i] = nextGroupable || hasGroupableAfter[i + 1];
+    }
+
+    const emitStepAsBlock = (s: ToolRunStep) => {
+      if (s.kind === 'thinking') grouped.push({ type: 'thinking', thinking: s.text } as ContentBlock);
+      else if (s.kind === 'note') grouped.push({ type: 'text', text: s.text } as ContentBlock);
+      else grouped.push({ toolUse: s.toolUse, toolResult: s.toolResult, originalIndex: s.originalIndex });
+    };
+
+    const flushRun = () => {
+      if (run) {
+        const toolCount = run.filter((s) => s.kind === 'tool').length;
+        if (toolCount >= 2) grouped.push({ type: 'tool_run', steps: run });
+        else run.forEach(emitStepAsBlock); // lone tool: plain row + aux blocks
+        run = null;
       }
-      if (currentToolGroup && currentToolGroup.group.steps.length > 0) {
-        // Only push as a group if we have multiple steps, otherwise push as individual
-        if (currentToolGroup.group.steps.length > 1) {
-          // Finalize the group
-          currentToolGroup.group.summary = generateGroupSummary(currentToolGroup.group);
-          currentToolGroup.group.label = TOOL_GROUP_CONFIG[currentToolGroup.groupType].label;
-          currentToolGroup.group.icon = TOOL_GROUP_CONFIG[currentToolGroup.groupType].icon;
-          grouped.push(currentToolGroup);
-        } else {
-          // Single tool, push as regular grouped block
-          const step = currentToolGroup.group.steps[0];
-          grouped.push({
-            toolUse: step.toolUse,
-            toolResult: step.toolResult,
-            originalIndex: step.originalIndex,
-          });
-        }
-        currentToolGroup = null;
+      pending.forEach(emitStepAsBlock);
+      pending = [];
+    };
+
+    const flushBrowserGroup = () => {
+      if (browserGroup) {
+        grouped.push(browserGroup);
+        browserGroup = null;
       }
-      prevToolUse = null;
-      prevGroupType = null;
     };
 
     blocks.forEach((block, idx) => {
       if (block.type === "tool_use") {
         const toolUse = block as ToolUseBlock;
         const result = externalResults.get(toolUse.id) as ToolResultBlock | undefined;
-        const isBrowser = toolUse.name === "Bash" && isAgentBrowserCommand(toolUse.input?.command || "");
 
-        if (isBrowser) {
-          // Flush any pending tool group before browser actions
-          if (currentToolGroup) {
-            flushGroups();
+        if (isBrowserTool(toolUse)) {
+          flushRun();
+          if (!browserGroup) {
+            browserGroup = { type: 'browser_group', steps: [] };
           }
-          // Add to current browser group or start a new one
-          if (!currentBrowserGroup) {
-            currentBrowserGroup = { type: 'browser_group', steps: [] };
-          }
-          currentBrowserGroup.steps.push({
-            toolUse,
-            toolResult: result,
-            originalIndex: idx,
-          });
-        } else {
-          // Flush browser group if we have one
-          if (currentBrowserGroup) {
-            grouped.push(currentBrowserGroup);
-            currentBrowserGroup = null;
-          }
-
-          // Check if this tool can be grouped
-          const groupType = getToolGroupType(toolUse.name, toolUse.input as Record<string, unknown>);
-
-          // Skip grouping for certain tools that have special rendering
-          const skipGrouping = toolUse.name === 'Task' || toolUse.name === 'TodoWrite' ||
-            (toolUse.name === 'Read' && (toolUse.input?.file_path as string)?.includes('/skills/'));
-
-          if (skipGrouping) {
-            flushGroups();
-            grouped.push({
-              toolUse,
-              toolResult: result,
-              originalIndex: idx,
-            });
-          } else if (groupType && prevToolUse && prevGroupType &&
-                     shouldGroupTogether(prevToolUse, toolUse, prevGroupType, groupType)) {
-            // Continue current group
-            currentToolGroup!.group.steps.push({
-              toolUse,
-              toolResult: result,
-              originalIndex: idx,
-            });
-          } else {
-            // Start a new group (flush previous first)
-            flushGroups();
-
-            if (groupType) {
-              currentToolGroup = {
-                type: 'tool_group',
-                groupType,
-                group: {
-                  type: groupType,
-                  steps: [{
-                    toolUse,
-                    toolResult: result,
-                    originalIndex: idx,
-                  }],
-                  summary: '',
-                  icon: TOOL_GROUP_CONFIG[groupType].icon,
-                  label: TOOL_GROUP_CONFIG[groupType].label,
-                },
-              };
-              prevToolUse = toolUse;
-              prevGroupType = groupType;
-            } else {
-              // Non-groupable tool
-              grouped.push({
-                toolUse,
-                toolResult: result,
-                originalIndex: idx,
-              });
-            }
-          }
-
-          // Update prev tracking for groupable tools
-          if (groupType && !skipGrouping) {
-            prevToolUse = toolUse;
-            prevGroupType = groupType;
-          }
+          browserGroup.steps.push({ toolUse, toolResult: result, originalIndex: idx });
+          return;
         }
+        flushBrowserGroup();
+
+        if (isStandaloneTool(toolUse)) {
+          flushRun();
+          grouped.push({ toolUse, toolResult: result, originalIndex: idx });
+          return;
+        }
+
+        // Run-joinable tool: start (adopting pending narration) or extend the run
+        if (!run) {
+          run = [...pending];
+          pending = [];
+        }
+        run.push({ kind: 'tool', toolUse, toolResult: result, originalIndex: idx });
       } else if (block.type === "tool_result") {
-        // Skip tool_result blocks in the content array - they're handled via externalResults
+        // Skip - handled via externalResults
+      } else if (block.type === "thinking" && hasGroupableAfter[idx]) {
+        const step: ToolRunStep = { kind: 'thinking', text: (block as ThinkingBlock).thinking || '', originalIndex: idx };
+        if (run) run.push(step); else pending.push(step);
+      } else if (block.type === "text" && hasGroupableAfter[idx] && (block as TextBlock).text?.trim()) {
+        const step: ToolRunStep = { kind: 'note', text: (block as TextBlock).text, originalIndex: idx };
+        if (run) run.push(step); else pending.push(step);
       } else {
-        // Non-tool content, flush all groups
-        flushGroups();
+        // Prominent content - flush all groups, render as-is
+        flushBrowserGroup();
+        flushRun();
         grouped.push(block);
       }
     });
 
-    // Flush any remaining groups
-    flushGroups();
+    flushBrowserGroup();
+    flushRun();
 
     return grouped;
   }
@@ -426,29 +283,8 @@
     return 'type' in item && (item as any).type === 'browser_group';
   }
 
-  function isToolActionGroupBlock(item: GroupedItem): item is ToolActionGroupBlock {
-    return 'type' in item && (item as any).type === 'tool_group';
-  }
-
-  /**
-   * Extract text content from tool result content.
-   * MCP tools return content as [{type: "text", text: "..."}] arrays.
-   * Regular tools may return a string directly.
-   */
-  function extractToolResultContent(content: unknown): string {
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      return content
-        .filter((item: any) => item?.type === 'text' && typeof item?.text === 'string')
-        .map((item: any) => item.text)
-        .join('\n');
-    }
-    if (content && typeof content === 'object' && 'text' in content) {
-      return String((content as any).text);
-    }
-    return '';
+  function isToolRunBlock(item: GroupedItem): item is ToolRunBlock {
+    return 'type' in item && (item as any).type === 'tool_run';
   }
 
   const groupedContent = $derived(groupToolBlocks(content, toolResults));
@@ -463,18 +299,6 @@
     <div class="flex-1 min-w-0 relative space-y-2" onclick={onMessageClick} oncontextmenu={handleContextMenu}>
       <!-- Hover actions -->
       <div class="absolute -top-5 right-0 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm px-1 py-0.5 z-20">
-        <!-- Comment indicator @experimental -->
-        {#if $showComments && messageThreads.length > 0}
-          <button
-            onclick={(e) => { e.stopPropagation(); expandedThreadId = expandedThreadId ? null : messageThreads[0].thread_id; }}
-            class="p-1 text-amber-500 hover:text-amber-600 rounded transition-colors"
-            title="{messageThreads.length} comment{messageThreads.length > 1 ? 's' : ''}"
-          >
-            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clip-rule="evenodd" />
-            </svg>
-          </button>
-        {/if}
         <CopyButton text={copyText} />
         <div class="relative">
           <button
@@ -536,10 +360,11 @@
             isRunning: !step.toolResult
           }))}
         />
-      {:else if isToolActionGroupBlock(item)}
-        <!-- Tool action group - search, file ops, web research, etc. -->
-        <ToolActionGroup
-          group={item.group}
+      {:else if isToolRunBlock(item)}
+        <!-- Aggregated run of consecutive tool calls - collapsed by default -->
+        <ToolCallRun
+          steps={item.steps}
+          {renderMarkdown}
           {onPreview}
           {onRunInTerminal}
           {onSendToClaude}
@@ -593,58 +418,7 @@
             {/if}
           </div>
         {:else}
-          {@const expanded = expandedBlocks.has(originalIdx)}
-          {@const summary = getToolSummary(tool)}
-          {@const isLoading = !result}
-          <div class="overflow-hidden">
-            <button
-              onclick={() => toggleBlock(originalIdx)}
-              class="w-full flex items-center gap-2 py-1 text-left rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors -ml-1 pl-1"
-            >
-              {#if isLoading}
-                <svg class="w-4 h-4 text-gray-400 dark:text-gray-500 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              {:else}
-                <svg class="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d={getToolIconPath(tool.name)} />
-                </svg>
-              {/if}
-              <span class="text-sm text-gray-600 dark:text-gray-400">{tool.name}</span>
-              {#if summary}
-                <span class="text-sm text-gray-400 dark:text-gray-500 truncate font-mono flex-1">{summary}</span>
-              {/if}
-              {#if result}
-                {#if result.is_error}
-                  <svg class="w-4 h-4 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                {:else}
-                  <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                  </svg>
-                {/if}
-              {/if}
-              <svg
-                class="w-3.5 h-3.5 text-gray-300 dark:text-gray-600 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-            {#if expanded}
-              {@const resultContent = result ? extractToolResultContent(result.content) : ''}
-              <div class="pl-6 pt-1 space-y-2">
-                <ToolRenderer {tool} toolResult={result ? { content: resultContent, is_error: result.is_error } : undefined} {onPreview} {onRunInTerminal} {onSendToClaude} hideHeader={true} />
-                {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch', 'Bash'].includes(tool.name) && !tool.name.startsWith('mcp__multi-session__') && !tool.name.startsWith('mcp__user-interaction__') && !tool.name.startsWith('mcp__navi-context__')}
-                  <div class="pt-1">
-                    <pre class="text-xs {result.is_error ? 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20' : 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{resultContent}</pre>
-                  </div>
-                {/if}
-              </div>
-            {/if}
-          </div>
+          <ToolRow {tool} {result} {onPreview} {onRunInTerminal} {onSendToClaude} />
         {/if}
       {:else if item.type === "subagent_event"}
         <SubagentInteractionCard
@@ -684,54 +458,42 @@
         </div>
 
       {:else if item.type === "thinking"}
-        {@const thinking = (item as ThinkingBlock).thinking}
-        {@const expanded = expandedBlocks.has(idx)}
-        <div class="rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50/20 dark:bg-purple-900/20 overflow-hidden">
-          <button
-            onclick={() => toggleBlock(idx)}
-            class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
-          >
-            <span class="text-xs">💭</span>
-            <span class="text-xs font-medium text-purple-700 dark:text-purple-300">Thinking</span>
-            <span class="text-xs text-purple-400 dark:text-purple-500 truncate flex-1">
-              {thinking.slice(0, 60)}{thinking.length > 60 ? "..." : ""}
-            </span>
-            <svg
-              class="w-3.5 h-3.5 text-purple-400 dark:text-purple-600 transition-transform shrink-0 {expanded ? 'rotate-90' : ''}"
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        {@const thinking = ((item as ThinkingBlock).thinking || "").trim()}
+        {#if thinking}
+          {@const expanded = expandedBlocks.has(idx)}
+          {@const preview = thinking.split("\n")[0].slice(0, 80)}
+          <div class="group/think py-0.5">
+            <button
+              onclick={() => toggleBlock(idx)}
+              class="flex items-center gap-1.5 max-w-full text-left text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
             >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-          {#if expanded}
-            <div class="px-3 pb-2 pt-1 border-t border-purple-100 dark:border-purple-800 relative">
-              <div class="absolute top-1 right-3">
-                <CopyButton text={thinking} />
+              <span class="shrink-0 font-medium">Thinking</span>
+              {#if !expanded}
+                <span class="truncate text-gray-300 dark:text-gray-600">· {preview}</span>
+              {/if}
+              <svg
+                class="w-3 h-3 shrink-0 opacity-0 group-hover/think:opacity-100 transition-all {expanded ? 'rotate-90 opacity-100' : ''}"
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            {#if expanded}
+              <div class="relative mt-1.5 pl-3 border-l border-gray-200 dark:border-gray-700">
+                <div class="absolute top-0 right-0 opacity-0 group-hover/think:opacity-100 transition-opacity">
+                  <CopyButton text={thinking} />
+                </div>
+                <div class="text-xs leading-relaxed text-gray-500 dark:text-gray-400 whitespace-pre-wrap max-h-64 overflow-y-auto pr-8">{thinking}</div>
               </div>
-              <pre class="text-xs text-purple-700 dark:text-purple-300 whitespace-pre-wrap font-mono bg-purple-50 dark:bg-purple-900/30 rounded p-2 pr-8 max-h-48 overflow-y-auto">{thinking}</pre>
-            </div>
-          {/if}
-        </div>
+            {/if}
+          </div>
+        {/if}
 
       {/if}
     {/each}
     </div>
 
   </div>
-
-  <!-- Comment Threads (shown inline below message) @experimental -->
-  {#if $showComments && messageThreads.length > 0}
-    <div class="mt-3 ml-4 flex flex-col gap-2 max-w-sm">
-      {#each messageThreads as thread (thread.thread_id)}
-        <CommentThread
-          {thread}
-          {sessionId}
-          onClose={() => {}}
-          onAskAI={handleAskAI}
-        />
-      {/each}
-    </div>
-  {/if}
 
 <!-- Text Selection Context Menu -->
 {#if selectionMenu}
@@ -741,23 +503,7 @@
     selectedText={selectionMenu.text}
     onQuote={handleQuote}
     onForkWithQuote={handleForkWithQuote}
-    onAddComment={messageId ? handleAddComment : undefined}
-    onAskCouncil={onAskCouncil}
     onClose={() => selectionMenu = null}
-  />
-{/if}
-
-<!-- Comment Input (when adding new comment) @experimental -->
-{#if commentInput && messageId && sessionId}
-  <CommentInput
-    {messageId}
-    {sessionId}
-    selectionText={commentInput.text}
-    x={commentInput.x}
-    y={commentInput.y}
-    onClose={() => commentInput = null}
-    onCreated={handleCommentCreated}
-    onAskAI={handleAskAI}
   />
 {/if}
 

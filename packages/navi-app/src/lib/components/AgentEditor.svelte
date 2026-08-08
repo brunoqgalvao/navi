@@ -17,7 +17,7 @@
   let format = $state<"simple" | "bundle">("simple");
   let soul = $state("");
   let memory = $state("");
-  let model = $state<"haiku" | "sonnet" | "opus" | "">("");
+  let model = $state<"haiku" | "sonnet" | "opus" | "fable" | "">("");
   let selectedTools = $state<string[]>([]);
 
   let saving = $state(false);
@@ -32,6 +32,7 @@
 
   const modelOptions = [
     { value: "", label: "Inherit from parent" },
+    { value: "fable", label: "Fable (hardest, longest)" },
     { value: "haiku", label: "Haiku (fast, cheap)" },
     { value: "sonnet", label: "Sonnet (balanced)" },
     { value: "opus", label: "Opus (powerful)" },

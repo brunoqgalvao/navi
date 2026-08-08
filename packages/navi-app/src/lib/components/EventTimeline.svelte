@@ -218,7 +218,7 @@
                           <summary class="text-xs font-medium text-purple-700 cursor-pointer">
                             Thinking ({(block as any).thinking?.length || 0} chars)
                           </summary>
-                          <pre class="mt-2 text-xs text-purple-600 whitespace-pre-wrap overflow-x-auto">{(block as any).thinking}</pre>
+                          <pre class="mt-2 text-xs text-gray-500 whitespace-pre-wrap overflow-x-auto">{(block as any).thinking}</pre>
                         </details>
                       {:else if block.type === "tool_use"}
                         <ToolRenderer tool={block as any} {onPreview} compact={true} />

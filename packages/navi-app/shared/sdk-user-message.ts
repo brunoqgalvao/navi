@@ -8,10 +8,24 @@ function getMessageContent(input: unknown): unknown {
   return (input as { message?: { content?: unknown } }).message?.content;
 }
 
-export function isCompactSummaryContent(content: unknown): boolean {
-  if (typeof content !== "string") return false;
+function getTextContent(content: unknown): string | undefined {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return undefined;
 
-  const normalized = content.trim();
+  const text = content
+    .filter((block) => block && (block as { type?: unknown }).type === "text")
+    .map((block) => (block as { text?: unknown }).text)
+    .filter((text): text is string => typeof text === "string")
+    .join("\n");
+
+  return text.trim() ? text : undefined;
+}
+
+export function isCompactSummaryContent(content: unknown): boolean {
+  const text = getTextContent(content);
+  if (!text) return false;
+
+  const normalized = text.trim();
   if (!normalized.includes("Summary:")) return false;
 
   return COMPACT_SUMMARY_PREFIXES.some((prefix) => normalized.startsWith(prefix));
@@ -38,6 +52,7 @@ export function getSdkUserMessageFlags(input: unknown): {
     isSynthetic?: unknown;
     isVisibleInTranscriptOnly?: unknown;
     tool_use_result?: unknown;
+    toolUseResult?: unknown;
   };
 
   const content = getMessageContent(data);
@@ -50,7 +65,7 @@ export function getSdkUserMessageFlags(input: unknown): {
     isCompactSummary,
     isReplay: data.isReplay === true,
     isSynthetic: data.isSynthetic === true || isCompactSummary,
-    toolUseResult: data.tool_use_result,
+    toolUseResult: data.tool_use_result ?? data.toolUseResult,
   };
 }
 
@@ -60,15 +75,13 @@ export function shouldDisplayOrPersistUserMessage(input: {
   isSynthetic?: boolean;
   toolUseResult?: unknown;
 }): boolean {
+  if (input.isCompactSummary === true || isCompactSummaryContent(input.content)) {
+    return false;
+  }
+
   const hasToolResult =
     Array.isArray(input.content) &&
     input.content.some((block) => block && (block as { type?: unknown }).type === "tool_result");
 
-  return (
-    input.isSynthetic === true ||
-    input.isCompactSummary === true ||
-    Boolean(input.toolUseResult) ||
-    hasToolResult ||
-    isCompactSummaryContent(input.content)
-  );
+  return Boolean(input.toolUseResult) || hasToolResult;
 }

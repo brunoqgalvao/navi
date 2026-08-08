@@ -22,16 +22,17 @@ type ModelOptionLike = {
 export const CLAUDE_FABLE_5 = "claude-fable-5";
 export const CLAUDE_OPUS_5 = "claude-opus-5";
 export const CLAUDE_OPUS_4_8 = "claude-opus-4-8";
-export const CLAUDE_OPUS_4_7 = "claude-opus-4-7";
 export const CLAUDE_SONNET_5 = "claude-sonnet-5";
 export const CLAUDE_SONNET_4_6 = "claude-sonnet-4-6";
 export const CLAUDE_HAIKU_4_5 = "claude-haiku-4-5";
 
-export const DEFAULT_CLAUDE_MODEL = CLAUDE_OPUS_5;
+export const DEFAULT_CLAUDE_MODEL = CLAUDE_FABLE_5;
 export const DEFAULT_CLAUDE_FAST_MODEL = CLAUDE_SONNET_5;
 export const DEFAULT_CLAUDE_LIGHT_MODEL = CLAUDE_HAIKU_4_5;
 
-// Context windows per docs: Fable 5 / Opus 5 / 4.x / Sonnet 5 / 4.6 are 1M; only Haiku 4.5 is 200K.
+// API-level context windows: Fable 5 / Opus 5 / 4.x / Sonnet 5 / 4.6 are 1M;
+// only Haiku 4.5 is 200K. (What the Claude Code runtime actually allocates per
+// session may differ — see src/lib/context-window.ts.)
 const CONTEXT_1M = 1_000_000;
 const CONTEXT_200K = 200_000;
 
@@ -40,9 +41,9 @@ const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
     value: CLAUDE_FABLE_5,
     displayName: "Claude Fable 5",
     shortLabel: "Fable 5",
-    description: "Most capable for demanding reasoning",
+    description: "Most capable Claude model",
     provider: "anthropic",
-    aliases: ["fable"],
+    aliases: ["default", "fable"],
     order: 0,
     contextWindow: CONTEXT_1M,
   },
@@ -52,28 +53,8 @@ const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
     shortLabel: "Opus 5",
     description: "Most capable for complex work",
     provider: "anthropic",
-    aliases: ["default", "opus"],
+    aliases: ["opus"],
     order: 1,
-    contextWindow: CONTEXT_1M,
-  },
-  {
-    value: CLAUDE_OPUS_4_8,
-    displayName: "Claude Opus 4.8",
-    shortLabel: "Opus 4.8",
-    description: "Previous-generation Opus",
-    provider: "anthropic",
-    aliases: [],
-    order: 2,
-    contextWindow: CONTEXT_1M,
-  },
-  {
-    value: CLAUDE_OPUS_4_7,
-    displayName: "Claude Opus 4.7",
-    shortLabel: "Opus 4.7",
-    description: "Previous Opus snapshot",
-    provider: "anthropic",
-    aliases: [],
-    order: 3,
     contextWindow: CONTEXT_1M,
   },
   {
@@ -83,17 +64,27 @@ const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
     description: "Best balance of speed and capability",
     provider: "anthropic",
     aliases: ["sonnet"],
-    order: 4,
+    order: 2,
+    contextWindow: CONTEXT_1M,
+  },
+  {
+    value: CLAUDE_OPUS_4_8,
+    displayName: "Claude Opus 4.8",
+    shortLabel: "Opus 4.8",
+    description: "Previous Opus generation",
+    provider: "anthropic",
+    aliases: [],
+    order: 3,
     contextWindow: CONTEXT_1M,
   },
   {
     value: CLAUDE_SONNET_4_6,
     displayName: "Claude Sonnet 4.6",
     shortLabel: "Sonnet 4.6",
-    description: "Previous-generation Sonnet",
+    description: "Previous Sonnet generation",
     provider: "anthropic",
     aliases: [],
-    order: 5,
+    order: 4,
     contextWindow: CONTEXT_1M,
   },
   {
@@ -103,7 +94,7 @@ const CURATED_ANTHROPIC_MODELS: CuratedAnthropicModel[] = [
     description: "Fastest for quick answers",
     provider: "anthropic",
     aliases: ["haiku"],
-    order: 6,
+    order: 5,
     contextWindow: CONTEXT_200K,
   },
 ];
@@ -149,9 +140,9 @@ export function getCuratedAnthropicModels(): AnthropicModelOption[] {
 }
 
 /**
- * Context window (in tokens) for an Anthropic model, or null when the model
- * is unknown/not Anthropic. Falls back to family heuristics for model ids
- * not in the curated list (e.g. dated snapshots).
+ * API-level context window (in tokens) for an Anthropic model, or null when
+ * the model is unknown/not Anthropic. Falls back to family heuristics for
+ * model ids not in the curated list (e.g. dated snapshots).
  */
 export function getAnthropicModelContextWindow(value: string | null | undefined): number | null {
   const normalized = normalizeAnthropicModelValue(value);
