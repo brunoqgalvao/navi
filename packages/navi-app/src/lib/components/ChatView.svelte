@@ -278,9 +278,34 @@
     | { type: "message"; data: ChatMessage }
     | { type: "child"; data: HierarchySession };
 
+  // Merge consecutive assistant messages into one turn so consecutive tool
+  // calls aggregate into a single collapsed run (AssistantMessage groups
+  // within one content array). Keeps the FIRST message's id — stable while a
+  // live turn streams in more messages, and the natural anchor for
+  // rollback/fork. System-info messages (compact notices etc.) stay separate.
+  function mergeAssistantTurns(msgs: ChatMessage[]): ChatMessage[] {
+    const out: ChatMessage[] = [];
+    for (const m of msgs) {
+      const prev = out[out.length - 1];
+      if (
+        prev && prev.role === "assistant" && m.role === "assistant" &&
+        !prev.isSystemInfo && !m.isSystemInfo &&
+        Array.isArray(prev.content) && Array.isArray(m.content)
+      ) {
+        out[out.length - 1] = {
+          ...prev,
+          content: [...(prev.content as ContentBlock[]), ...(m.content as ContentBlock[])],
+        };
+      } else {
+        out.push(m);
+      }
+    }
+    return out;
+  }
+
   // Create a mixed timeline of messages and active child sessions
   function getMixedTimeline(): TimelineItem[] {
-    const visibleMsgs = getVisibleMessages();
+    const visibleMsgs = mergeAssistantTurns(getVisibleMessages());
     const items: TimelineItem[] = [];
 
     // Convert messages to timeline items

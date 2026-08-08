@@ -648,7 +648,7 @@ Write instructions for Claude here. This file tells Claude:
           </div>
         </div>
       {:else if activeTab === "skills"}
-        <SkillsPanel projectId={project.id} />
+        <SkillsPanel projectId={project.id} projectPath={project.path} />
       {:else if activeTab === "analytics"}
         <ProjectAnalytics projectId={project.id} projectPath={project.path} />
       {/if}

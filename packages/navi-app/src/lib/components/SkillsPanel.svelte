@@ -1,17 +1,20 @@
 <script lang="ts">
   import { skillsApi, type Skill } from "../api";
-  import { showError } from "$lib/errorHandler";
+  import { showError, showSuccess } from "$lib/errorHandler";
 
   interface Props {
     /** When set, toggles control per-project enablement; otherwise global. */
     projectId?: string | null;
+    /** Project root path — lets rescan also import .claude/skills from the project. */
+    projectPath?: string | null;
   }
 
-  let { projectId = null }: Props = $props();
+  let { projectId = null, projectPath = null }: Props = $props();
 
   let skills = $state<Skill[]>([]);
   let loading = $state(true);
   let deleting = $state<string | null>(null);
+  let rescanning = $state(false);
 
   $effect(() => {
     loadSkills();
@@ -25,6 +28,24 @@
       showError({ title: "Failed to load skills", message: e.message });
     } finally {
       loading = false;
+    }
+  }
+
+  async function rescan() {
+    if (rescanning) return;
+    rescanning = true;
+    try {
+      const { results } = await skillsApi.scan(projectPath ?? undefined);
+      await loadSkills();
+      const added = results.library.added.length;
+      showSuccess(
+        "Rescan complete",
+        added > 0 ? `Imported ${added} new skill${added === 1 ? "" : "s"}.` : "No new skills found."
+      );
+    } catch (e: any) {
+      showError({ title: "Rescan failed", message: e.message });
+    } finally {
+      rescanning = false;
     }
   }
 
@@ -83,12 +104,23 @@
 </script>
 
 <div class="flex flex-col gap-1">
+  <div class="flex items-center justify-end pb-1">
+    <button
+      onclick={rescan}
+      disabled={rescanning || loading}
+      class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors disabled:opacity-50"
+      title="Import skills from ~/.claude/skills{projectPath ? ' and .claude/skills' : ''}"
+    >
+      <svg class="w-3.5 h-3.5 {rescanning ? 'animate-spin' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+      {rescanning ? "Rescanning…" : "Rescan"}
+    </button>
+  </div>
   {#if loading}
     <p class="text-sm text-gray-500 dark:text-gray-400 py-4">Loading skills…</p>
   {:else if skills.length === 0}
     <div class="text-sm text-gray-500 dark:text-gray-400 py-4 space-y-1">
       <p>No skills in the library.</p>
-      <p>Drop a skill folder into <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">~/.claude/skills/</code> or <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">.claude/skills/</code> and rescan.</p>
+      <p>Drop a skill folder into <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">~/.claude/skills/</code> or <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">.claude/skills/</code>, then hit Rescan above.</p>
     </div>
   {:else}
     {#each skills as skill (skill.id)}
