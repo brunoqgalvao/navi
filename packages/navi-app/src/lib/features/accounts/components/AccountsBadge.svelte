@@ -88,7 +88,7 @@
     swapping = name;
     try {
       await swapAccount(name);
-      showSuccess("Account swapped", `Live slot now on '${name}'. Applies to new sessions only.`);
+      showSuccess("Account swapped", `Live slot now on '${name}'. Running sessions switch over on their next token refresh.`);
       await refresh(true);
     } catch (e) {
       showError({ title: "Swap failed", message: e instanceof Error ? e.message : String(e) });

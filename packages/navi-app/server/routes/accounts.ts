@@ -223,7 +223,10 @@ export async function handleAccountsRoutes(
       return error("Invalid JSON body", 400);
     }
     if (!/^[a-zA-Z0-9_-]+$/.test(account)) return error("Invalid account name", 400);
-    const res = await runCommand(["ccx", "swap", account], 60_000);
+    // --force: swap even while claude sessions are running (they pick up the
+    // new account on their next token refresh) — without it, ccx refuses
+    // whenever any session is alive, which in Navi is nearly always.
+    const res = await runCommand(["ccx", "swap", account, "--force"], 60_000);
     statusCache = null;
     if (!res.ok) return error(res.stderr.trim() || res.stdout.trim() || "swap failed", 500);
     return json({ ok: true, account, output: res.stdout.trim() });
