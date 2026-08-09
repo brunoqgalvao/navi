@@ -26,33 +26,34 @@ import type {
   NormalizedContentBlock,
 } from "./types";
 
-const DEFAULT_CODEX_MODEL = "gpt-5.2-codex";
+const DEFAULT_CODEX_MODEL = "gpt-5.6-sol";
 // The Codex CLI only accepts these values for model_reasoning_effort (any model)
 const COMPATIBLE_CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
 const BASE_CODEX_MODELS = [
-  // Current Codex-focused models
-  "gpt-5.2-codex",
-  "gpt-5-codex",
-  "codex-mini-latest",
+  // Current generation. A ChatGPT-account login can only reach these — the
+  // older `*-codex` slugs below are API-key-only and fail with a 400.
+  "gpt-5.6-sol",
+  "gpt-5.6-luna",
+  "gpt-5.6-terra",
+  "gpt-5.6-pro",
+  "gpt-5.6",
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
   // Prior Codex snapshots still seen in existing sessions
+  "gpt-5.3-codex",
+  "gpt-5.2-codex",
+  "gpt-5.2",
   "gpt-5.1-codex-max",
   "gpt-5.1-codex",
   "gpt-5.1-codex-mini",
-  // General OpenAI models that Codex CLI can also target
+  "gpt-5.1",
+  "gpt-5-codex",
   "gpt-5",
   "gpt-5-mini",
   "gpt-5-nano",
-  "gpt-5.1",
-  "o4-mini",
-  "o3",
-  "o3-mini",
-  "o1",
-  "o1-mini",
-  "o1-preview",
-  "gpt-4.5-preview",
-  "gpt-4o",
-  "gpt-4o-mini",
-  "gpt-4-turbo",
+  "codex-mini-latest",
   // Experimental
   "exp",
 ] as const;
@@ -215,6 +216,49 @@ function buildCodexRunCommand(args: string[]): CodexRunCommand | null {
     displayPath: codexPath,
     env: buildEnvWithPrependedPath(process.env, extraPathDirs),
   };
+}
+
+/**
+ * Codex nests its API failures inside a JSON string, so the useful sentence is
+ * buried under two layers of escaping by the time it reaches a chat bubble.
+ */
+export function unwrapCodexErrorMessage(raw: unknown): string {
+  let message = typeof raw === "string" ? raw : "";
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    message =
+      (typeof obj.message === "string" && obj.message) ||
+      (typeof obj.error === "string" && obj.error) ||
+      JSON.stringify(raw);
+  }
+
+  for (let depth = 0; depth < 3; depth++) {
+    const trimmed = message.trim();
+    if (!trimmed.startsWith("{")) break;
+    try {
+      const parsed = JSON.parse(trimmed);
+      const next =
+        (typeof parsed?.error?.message === "string" && parsed.error.message) ||
+        (typeof parsed?.message === "string" && parsed.message) ||
+        (typeof parsed?.error === "string" && parsed.error);
+      if (!next) break;
+      message = next;
+    } catch {
+      break;
+    }
+  }
+
+  return message.trim();
+}
+
+export function describeCodexExit(
+  code: number,
+  model: string,
+  stderrTail: string
+): string {
+  const tail = stderrTail.trim().split("\n").filter(Boolean).slice(-3).join(" ");
+  const base = `Codex exited with code ${code} (model "${model}")`;
+  return tail ? `${base}: ${tail}` : `${base}.`;
 }
 
 export function buildCodexExecPlan(
@@ -395,6 +439,17 @@ export class CodexAdapter implements BackendAdapter {
     let done = false;
 
     let buffer = "";
+    // Codex reports the real failure (bad model, auth, quota) as a JSON event and
+    // *then* exits non-zero. Without this flag the generic "exited with code N"
+    // frame lands last and is the only thing the user sees.
+    let sawError = false;
+    let stderrTail = "";
+
+    const pushEvent = (normalized: NormalizedEvent) => {
+      if (normalized.type === "error") sawError = true;
+      eventQueue.push(normalized);
+      resolveNext?.();
+    };
 
     child.stdout?.on("data", (chunk) => {
       buffer += chunk.toString();
@@ -407,8 +462,7 @@ export class CodexAdapter implements BackendAdapter {
           const event = JSON.parse(line);
           const normalized = this.normalizeCodexEvent(event, options.sessionId);
           if (normalized) {
-            eventQueue.push(normalized);
-            resolveNext?.();
+            pushEvent(normalized);
           }
         } catch (e) {
           // Non-JSON output, might be progress text
@@ -417,9 +471,11 @@ export class CodexAdapter implements BackendAdapter {
       }
     });
 
-    // Stderr contains thinking tokens - we suppress them by default
+    // Stderr carries reasoning tokens plus, occasionally, the only description of
+    // a launch failure. Keep a bounded tail so a non-zero exit can explain itself.
     child.stderr?.on("data", (chunk) => {
       const text = chunk.toString();
+      stderrTail = (stderrTail + text).slice(-2000);
       // Only log if it looks like an error, not thinking
       if (
         text.includes("error") ||
@@ -447,6 +503,7 @@ export class CodexAdapter implements BackendAdapter {
           const event = JSON.parse(buffer);
           const normalized = this.normalizeCodexEvent(event, options.sessionId);
           if (normalized) {
+            if (normalized.type === "error") sawError = true;
             eventQueue.push(normalized);
           }
         } catch {}
@@ -458,11 +515,13 @@ export class CodexAdapter implements BackendAdapter {
         sessionId: options.sessionId,
       });
 
-      if (code !== 0 && code !== null) {
+      // A bare exit code tells the user nothing, and it would be the last error
+      // frame they see — only fall back to it when Codex explained nothing itself.
+      if (code !== 0 && code !== null && !sawError) {
         eventQueue.push({
           type: "error",
           sessionId: options.sessionId,
-          error: `Codex exited with code ${code}`,
+          error: describeCodexExit(code, plan.model, stderrTail),
         });
       }
 
@@ -710,16 +769,26 @@ export class CodexAdapter implements BackendAdapter {
           sessionId,
           subtype: "error",
           isError: true,
-          errors: [event.error || "Turn failed"],
+          errors: [unwrapCodexErrorMessage(event.error) || "Turn failed"],
         };
 
       case "error":
         return {
           type: "error",
           sessionId,
-          error: event.message || event.error || "Unknown error",
+          error: unwrapCodexErrorMessage(event.message ?? event.error) || "Unknown error",
           code: event.code,
         };
+
+      // Codex reports non-fatal problems (unknown model metadata, unsupported
+      // service tier) as completed items of type "error" rather than top-level
+      // error events. Surfacing them as status keeps them out of the error path
+      // while still telling the user why a run behaved oddly.
+      case "item.completed": {
+        if (event.item?.type !== "error") return null;
+        const text = unwrapCodexErrorMessage(event.item.message);
+        return text ? { type: "system", subtype: "status", status: `Codex: ${text}` } : null;
+      }
 
       default:
         return null;

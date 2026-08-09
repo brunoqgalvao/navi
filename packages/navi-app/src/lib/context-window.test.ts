@@ -7,47 +7,89 @@ import {
 } from "./context-window";
 
 describe("model context window (runtime rule)", () => {
-  test("claude models are 200k unless the id opts into [1m]", () => {
-    // The bundled Claude Code CLI hardcodes: model id contains "[1m]" → 1M, else 200k.
-    expect(getModelContextWindow("claude", "claude-opus-4-8")).toBe(200_000);
-    expect(getModelContextWindow("claude", "claude-fable-5")).toBe(200_000);
-    expect(getModelContextWindow("claude", "claude-sonnet-5[1m]")).toBe(1_000_000);
-    expect(getModelContextWindow("claude", "glm-5.2[1m]")).toBe(1_000_000);
+  test("current Anthropic models are 1M native", () => {
+    // Mirrors the CLI's own model registry: window 1e6, native_1m.
+    expect(getModelContextWindow("claude", "claude-fable-5")).toBe(1_000_000);
+    expect(getModelContextWindow("claude", "claude-opus-5")).toBe(1_000_000);
+    expect(getModelContextWindow("claude", "claude-opus-4-8")).toBe(1_000_000);
+    expect(getModelContextWindow("claude", "claude-sonnet-5")).toBe(1_000_000);
+    expect(getModelContextWindow("claude", "claude-sonnet-4-6")).toBe(1_000_000);
+  });
+
+  test("haiku is 200k unless the id opts into [1m]", () => {
+    expect(getModelContextWindow("claude", "claude-haiku-4-5")).toBe(200_000);
+    expect(getModelContextWindow("claude", "claude-haiku-4-5[1m]")).toBe(1_000_000);
+  });
+
+  test("unrecognized claude-runtime models fall back to 200k", () => {
     expect(getModelContextWindow("claude", "glm-5.2")).toBe(200_000);
+    expect(getModelContextWindow("claude", "glm-5.2[1m]")).toBe(1_000_000);
   });
 
   test("codex and gemini keep the 1M default", () => {
-    expect(getModelContextWindow("codex", "gpt-5.2-codex")).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(getModelContextWindow("codex", "gpt-5.6-sol")).toBe(DEFAULT_CONTEXT_WINDOW);
     expect(getModelContextWindow("gemini", "gemini-3-pro")).toBe(DEFAULT_CONTEXT_WINDOW);
   });
 });
 
 describe("effective session context window", () => {
-  test("the window reported by the runtime wins over everything", () => {
+  test("the window reported by the runtime wins over the project budget", () => {
+    expect(
+      getEffectiveSessionContextWindow({
+        sessionContextWindow: 1_000_000,
+        projectContextWindow: 200_000,
+        backend: "claude",
+        model: "claude-fable-5",
+      })
+    ).toBe(1_000_000);
+  });
+
+  test("a runtime window larger than the registry is trusted", () => {
+    // e.g. a [1m]-suffixed Haiku session, or a deployment with a raised cap.
+    expect(
+      getEffectiveSessionContextWindow({
+        sessionContextWindow: 1_000_000,
+        backend: "claude",
+        model: "claude-haiku-4-5",
+      })
+    ).toBe(1_000_000);
+  });
+
+  test("ignores a reported window below the model's native size", () => {
+    // A CLI pinned before Fable 5 shipped doesn't know the model and reports a
+    // generic 200k, which made a 1M session look 5x fuller than it was.
     expect(
       getEffectiveSessionContextWindow({
         sessionContextWindow: 200_000,
-        projectContextWindow: 1_000_000,
         backend: "claude",
-        model: "claude-sonnet-5[1m]",
+        model: "claude-fable-5",
+      })
+    ).toBe(1_000_000);
+  });
+
+  test("still trusts a genuinely small window for a small model", () => {
+    expect(
+      getEffectiveSessionContextWindow({
+        sessionContextWindow: 200_000,
+        backend: "claude",
+        model: "claude-haiku-4-5",
       })
     ).toBe(200_000);
   });
 
   test("a project budget can cap the model window but never raise it", () => {
-    // The 92.8k/1000k incident: project said 1M, the model's real window was 200k.
     expect(
       getEffectiveSessionContextWindow({
         projectContextWindow: 1_000_000,
         backend: "claude",
-        model: "claude-opus-4-8",
+        model: "claude-haiku-4-5",
       })
     ).toBe(200_000);
     expect(
       getEffectiveSessionContextWindow({
         projectContextWindow: 100_000,
         backend: "claude",
-        model: "claude-sonnet-5[1m]",
+        model: "claude-sonnet-5",
       })
     ).toBe(100_000);
   });
