@@ -41,7 +41,8 @@ export type ClaudeAuthEnvOverrides = {
 };
 
 type ClaudeCodeRuntimeOptions = {
-  executable?: string;
+  // Must stay assignable to the SDK's Options["executable"].
+  executable?: "bun" | "node" | "deno";
   executableArgs?: string[];
   pathToClaudeCodeExecutable?: string;
   spawnClaudeCodeProcess?: (options: {
@@ -105,8 +106,21 @@ export function buildClaudeCodeRuntimeOptions(inputs: {
 
   if (isBun) {
     return {
-      executable: bunPath ?? "bun",
+      // The SDK only accepts a runtime *name* here, not a path. When we know
+      // which bun to use, swap it in at spawn time so a bun that isn't on PATH
+      // still works.
+      executable: "bun",
       executableArgs: ["--env-file=/dev/null"],
+      ...(bunPath && {
+        spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) =>
+          spawnChildProcess(command === "bun" ? bunPath : command, args, {
+            cwd,
+            env,
+            stdio: ["pipe", "pipe", "pipe"],
+            signal,
+            windowsHide: true,
+          }),
+      }),
       ...(claudePath && { pathToClaudeCodeExecutable: claudePath }),
     };
   }
