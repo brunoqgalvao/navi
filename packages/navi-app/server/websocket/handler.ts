@@ -2119,6 +2119,8 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
 
   let lastAssistantContent: any[] = [];
   let lastAssistantTextContent: any[] = [];
+  let backendUsage: { input_tokens: number; output_tokens: number } | null = null;
+  let backendContextWindow: number | null = null;
 
   // Save user message
   if (sessionId && prompt) {
@@ -2189,6 +2191,19 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
         }
       }
 
+      // Codex and Gemini report their own token totals and context budget.
+      // Without this the context meter stayed at zero for non-Claude sessions.
+      if (event.type === "result" && typeof event.inputTokens === "number") {
+        backendUsage = {
+          input_tokens: event.inputTokens,
+          output_tokens: event.outputTokens ?? 0,
+        };
+        backendContextWindow = event.contextWindow ?? backendContextWindow;
+        if (sessionId && backendContextWindow) {
+          sessions.updateContextInfo(sessionId, backendContextWindow, null);
+        }
+      }
+
       // Convert normalized events to UI format
       const uiEvent = convertNormalizedEventToUI(event, sessionId);
       if (uiEvent) {
@@ -2202,6 +2217,19 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
           sessions.updateClaudeSession(null, effectiveModel || null, 0, 1, 0, 0, now, sessionId);
         }
       }
+    }
+
+    if (sessionId && backendUsage) {
+      sessions.updateClaudeSession(
+        null,
+        effectiveModel || null,
+        0,
+        0,
+        backendUsage.input_tokens,
+        backendUsage.output_tokens,
+        Date.now(),
+        sessionId
+      );
     }
 
     if (sessionId) {
@@ -2226,6 +2254,8 @@ async function handleQueryWithAdapter(ws: any, data: ClientMessage, backendId: B
       type: "query_complete",
       uiSessionId: sessionId,
       backend: backendId,
+      ...(backendUsage && { usage: backendUsage }),
+      ...(backendContextWindow && { contextWindow: backendContextWindow }),
     });
 
   } catch (error: any) {

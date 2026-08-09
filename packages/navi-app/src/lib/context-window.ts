@@ -1,10 +1,16 @@
+import { getAnthropicModelContextWindow } from "../../shared/anthropic-models";
+
 export const DEFAULT_CONTEXT_WINDOW = 1_000_000;
 
-// The Claude Code runtime hardcodes this: a model id containing "[1m]" gets the
-// 1M window, and most other models run at 200k. Exceptions: Fable/Mythos-tier
-// models run 1M natively (their default = their maximum). The session-reported
-// window (extracted from the runtime init) always overrides this heuristic.
+// Fallback for a Claude-runtime model we don't recognize at all. Every current
+// Anthropic model is 1M native except Haiku 4.5; 200k is the conservative floor
+// for anything older or unrecognized.
 export const CLAUDE_RUNTIME_CONTEXT_WINDOW = 200_000;
+
+// Every model in the Codex CLI's registry — the whole gpt-5.6 family, 5.5,
+// 5.4, 5.2 — carries context_window 272000. Assuming 1M here let a Codex
+// session look a quarter full when it was about to overflow.
+export const CODEX_CONTEXT_WINDOW = 272_000;
 
 export type ContextBackendId = "claude" | "codex" | "gemini" | string;
 
@@ -21,26 +27,30 @@ export function getModelContextWindow(
   const normalizedBackend = backend?.toLowerCase();
   const normalizedModel = model?.toLowerCase() ?? "";
 
-  // Anything executed by the Claude Code runtime (Anthropic models and z.ai GLM
-  // models routed through it) follows the runtime's "[1m]" rule.
+  // Anything executed by the Claude Code runtime: Anthropic models, plus z.ai
+  // GLM models routed through it.
   const runsOnClaudeRuntime =
     normalizedBackend === "claude" ||
     normalizedModel.includes("claude") ||
     normalizedModel.startsWith("glm-");
   if (runsOnClaudeRuntime) {
+    // The "[1m]" suffix opts a model into 1M where that isn't already native
+    // (Haiku 4.5 is the only current model that needs it).
     if (normalizedModel.includes("[1m]")) return DEFAULT_CONTEXT_WINDOW;
-    // Fable/Mythos run a 1M window natively (no [1m] marker needed)
-    if (/fable|mythos/.test(normalizedModel)) return DEFAULT_CONTEXT_WINDOW;
-    return CLAUDE_RUNTIME_CONTEXT_WINDOW;
+    // Every current Anthropic model is 1M native except Haiku 4.5. The curated
+    // table is the source of truth; it mirrors the CLI's own model registry.
+    return (
+      getAnthropicModelContextWindow(normalizedModel) ?? CLAUDE_RUNTIME_CONTEXT_WINDOW
+    );
   }
 
-  if (normalizedBackend === "codex" || normalizedBackend === "gemini") {
-    return DEFAULT_CONTEXT_WINDOW;
-  }
+  if (normalizedBackend === "codex") return CODEX_CONTEXT_WINDOW;
+  if (normalizedBackend === "gemini") return DEFAULT_CONTEXT_WINDOW;
 
-  if (normalizedModel.includes("codex") || normalizedModel.includes("gemini")) {
-    return DEFAULT_CONTEXT_WINDOW;
+  if (normalizedModel.includes("codex") || normalizedModel.startsWith("gpt-")) {
+    return CODEX_CONTEXT_WINDOW;
   }
+  if (normalizedModel.includes("gemini")) return DEFAULT_CONTEXT_WINDOW;
 
   return null;
 }
@@ -51,12 +61,20 @@ export function getEffectiveSessionContextWindow(options: {
   backend?: ContextBackendId | null;
   model?: string | null;
 }): number {
-  // The window the runtime reported for this session is the truth.
+  const modelWindow = getModelContextWindow(options.backend, options.model);
+
+  // The window the runtime reported for this session is normally the truth —
+  // but a CLI pinned before a model shipped doesn't recognize it and falls back
+  // to a generic 200k, which showed a 1M Fable session as 5x fuller than it was.
+  // A reported window below the model's known native size means the runtime is
+  // guessing, so the model registry wins.
   if (typeof options.sessionContextWindow === "number" && options.sessionContextWindow > 0) {
+    if (modelWindow !== null && modelWindow > options.sessionContextWindow) {
+      return modelWindow;
+    }
     return options.sessionContextWindow;
   }
 
-  const modelWindow = getModelContextWindow(options.backend, options.model);
   const projectWindow =
     typeof options.projectContextWindow === "number" && options.projectContextWindow > 0
       ? options.projectContextWindow

@@ -41,11 +41,12 @@ describe("buildClaudeCodeRuntimeOptions", () => {
       claudePath: "/tmp/claude-agent-sdk/cli.js",
     });
 
-    expect(result).toEqual({
-      executable: "/opt/homebrew/bin/bun",
-      executableArgs: ["--env-file=/dev/null"],
-      pathToClaudeCodeExecutable: "/tmp/claude-agent-sdk/cli.js",
-    });
+    // The SDK only accepts a runtime name here; the resolved bun path is
+    // applied by the spawn override instead.
+    expect(result.executable).toBe("bun");
+    expect(result.executableArgs).toEqual(["--env-file=/dev/null"]);
+    expect(result.pathToClaudeCodeExecutable).toBe("/tmp/claude-agent-sdk/cli.js");
+    expect(typeof result.spawnClaudeCodeProcess).toBe("function");
   });
 
   test("uses bun with env-file when the Claude path is unresolved", () => {
@@ -55,8 +56,20 @@ describe("buildClaudeCodeRuntimeOptions", () => {
       claudePath: null,
     });
 
+    expect(result.executable).toBe("bun");
+    expect(result.executableArgs).toEqual(["--env-file=/dev/null"]);
+    expect(result.pathToClaudeCodeExecutable).toBeUndefined();
+  });
+
+  test("falls back to bun on PATH when no bun path was resolved", () => {
+    const result = buildClaudeCodeRuntimeOptions({
+      isBun: true,
+      bunPath: null,
+      claudePath: null,
+    });
+
     expect(result).toEqual({
-      executable: "/opt/homebrew/bin/bun",
+      executable: "bun",
       executableArgs: ["--env-file=/dev/null"],
     });
   });

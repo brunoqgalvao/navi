@@ -334,6 +334,25 @@ export function createMessageHandler(config: MessageHandlerConfig) {
       // Multi-backend completion event (Codex, Gemini)
       case "query_complete": {
         if (uiSessionId) {
+          const completeMsg = msg as {
+            usage?: { input_tokens?: number; output_tokens?: number };
+            contextWindow?: number;
+          };
+          if (completeMsg.usage) {
+            callbacks.onComplete?.(uiSessionId, {
+              costUsd: 0,
+              usage: {
+                input_tokens: completeMsg.usage.input_tokens ?? 0,
+                output_tokens: completeMsg.usage.output_tokens ?? 0,
+              },
+            });
+          }
+          if (completeMsg.contextWindow) {
+            callbacks.onContextInfo?.(uiSessionId, {
+              contextWindow: completeMsg.contextWindow,
+              maxOutputTokens: undefined,
+            });
+          }
           callbacks.onStreamingEnd?.(uiSessionId, "done");
         }
         break;
