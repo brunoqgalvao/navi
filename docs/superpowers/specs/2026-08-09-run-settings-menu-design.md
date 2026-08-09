@@ -17,7 +17,7 @@ to `canChangeBackend`, which is `isNewChat` (`ChatInput.svelte:1512`, from `App.
 Nothing about authentication is involved, yet a padlock reads as "not signed in".
 
 Which rows lock depends on where you are, because Claude and Z.ai share
-`backendId: "claude"` (`:42`, `:50`): from a Codex chat, Claude, Z.ai *and* Gemini all lock;
+`backendId: "claude"` (`:41`, `:49`): from a Codex chat, Claude, Z.ai *and* Gemini all lock;
 from a Claude chat, only Codex and Gemini do, and Z.ai stays freely selectable.
 
 **Real unavailability is invisible.** A harness that genuinely cannot run — Gemini CLI not
@@ -102,8 +102,12 @@ group inside the Claude harness's model list. This requires new harness-keyed me
 is provider-keyed. The chip is unchanged and keeps tinting by *provider* (`:261`), so a Z.ai
 session shows a fuchsia chip reading `GLM-5.2` while the harness row reads `Claude`.
 
-The model submenu groups by provider with sticky headers, so a user who thinks in brands still
-finds "Z.ai → GLM-5.2".
+**The model submenu is scoped to what the chat can actually run.** On a new chat it lists every
+harness's models grouped by provider with sticky headers, so a user who thinks in brands still
+finds "Z.ai → GLM-5.2" and picking a model from another harness switches the harness — the
+behaviour `selectModel` (`:216-227`) has today. On a chat with messages it lists only the
+current harness's models. That is not a behaviour change: model buttons for other harnesses are
+already disabled in that state (`:368-369`), so scoping the list only removes dead rows.
 
 **Effort** keeps its five levels and its per-harness clamping (`isReasoningOptionDisabled`
 `:164-172`, `reasoningDisabledTitle` `:174-179`, `effectiveReasoningEffort` `:97-103`). Only the
@@ -113,6 +117,15 @@ presentation changes.
 `ArrowRight` on the focused row. They are positioned beside the row, flipping to the opposite
 side when within 24px of the viewport edge and clamping vertically so they never extend past
 the viewport; the grouped model list keeps a `max-h-72 overflow-y-auto` as today (`:361`).
+
+**Props.** `RunSettingsMenu` takes what `ModelReasoningSelector` took —
+`backend, selectedModel, backendModels, reasoningEffort, canChangeBackend, onBackendChange,
+onModelSelect, onReasoningEffortChange, class` (`:7-17`) — plus `sessionId: string | null`
+(needed to persist the harness, see below) and `onOpenProviderSettings: () => void` for the
+Set up affordance. `ChatInput` forwards both, exactly as it already forwards the three
+callbacks (`ChatInput.svelte:86`, `:98`, `:1507-1516`); `App.svelte` supplies
+`onOpenProviderSettings` as `() => { settingsInitialTab = "api"; showSettings = true; }`, the
+same shape as the existing `onManageMcp` (`App.svelte:4189`).
 
 **Accessibility**, absent from the current component (`:315-321`) and introduced here: the menu
 is `role="menu"`, rows are `role="menuitem"` with `aria-haspopup="menu"` and `aria-expanded`;
@@ -127,12 +140,20 @@ A pure function is the unit of logic, so it can be tested without a store or a c
 
 ```ts
 // src/lib/stores/run-availability.ts
+export type ProviderAuthStatus = Awaited<ReturnType<typeof api.auth.status>>;
+
 export function deriveRunAvailability(
-  backends: BackendInfo[],
-  codexHealth: CodexHealth | null,
-  authStatus: AuthStatus,
+  backends: BackendInfo[],          // backendsApi.list()
+  codexHealth: CodexHealthInfo | null,  // src/lib/api.ts:123-134
+  auth: ProviderAuthStatus,         // api.auth.status() returns an inline type
 ): Record<MenuEntryId, EntryAvailability>
 ```
+
+The client type is `CodexHealthInfo` (`src/lib/api.ts:123-134`), not the server-local
+`CodexHealth` (`server/routes/backends.ts:35-47`, unexported). `api.auth.status()` returns an
+anonymous inline type (`src/lib/api.ts:788+`) with no exported name, hence the `Awaited<
+ReturnType<...>>` alias — and it is called `ProviderAuthStatus` rather than `AuthStatus`
+because `src/lib/stores/auth.ts:20-25` already owns `AuthState` for Navi's own user auth.
 
 `MenuEntryId` is the set of things the menu can offer: the three harnesses (`claude`, `codex`,
 `gemini`) plus the `zai` model group. Z.ai is deliberately *not* a harness but still needs an
@@ -157,19 +178,36 @@ Inputs, all of which already exist:
 
 Mapping:
 
+Installed-ness comes from `BackendInfo.installed` for all three harnesses, so one detector
+answers one question. `auth` contributes only sign-in state and the Z.ai key.
+
 | Entry | `needs-setup` when | Reason | Fix |
 |---|---|---|---|
-| `claude` | `!claudeInstalled` | `Claude CLI not found` | command `npm i -g @anthropic-ai/claude-code` |
-| `claude` | installed, `!hasOAuth && !hasApiKey` | `Not signed in` | settings |
-| `codex` | `!installed` | `Codex CLI not found` | command `brew install codex` |
+| `claude` | `!installed` | `Claude CLI not found` | command `npm i -g @anthropic-ai/claude-code` |
+| `claude` | installed, `!auth.hasOAuth && !auth.hasApiKey` | `Not signed in` | settings |
+| `codex` | `!installed` | `Codex CLI not found` | command `npm i -g @openai/codex` |
 | `codex` | `authMode === "not_logged_in"` | `Not signed in` | settings |
 | `codex` | `authMode === "unknown"` | `Couldn't read sign-in state` | settings |
 | `gemini` | `!installed` | `Gemini CLI not found` | command `npm i -g @google/gemini-cli` |
-| `zai` | `!hasZaiKey` | `No Z.ai API key` | settings |
+| `zai` | `!auth.hasZaiKey` | `No Z.ai API key` | settings |
+| `zai` | claude harness not `ready` | inherits the Claude reason | inherits |
 
-`CodexHealth.authMode` is a four-state union (`backends.ts:41`) and `detectCodexAuthMode`
-returns `"unknown"` on spawn failure or unparsed output (`:70`, `:85`); treating it as
-`needs-setup` is deliberate — an unreadable state should not present as ready.
+The install commands match how the repo actually resolves each CLI:
+`@openai/codex` with per-platform npm packages (`server/backends/codex-adapter.ts:132`,
+`:161-172`) — Homebrew would be wrong on Windows — and `@google/gemini-cli`
+(`server/backends/gemini-adapter.ts:35`).
+
+`authMode` is a four-state union (`backends.ts:41`) and `detectCodexAuthMode` returns
+`"unknown"` on spawn failure or unparsed output (`:70`, `:85`); treating it as `needs-setup` is
+deliberate — an unreadable state should not present as ready.
+
+The `zai` row inherits Claude's state because Z.ai models run on the Claude runtime; a Z.ai key
+with no Claude CLI is not runnable, and reporting it ready would be a lie.
+
+**Known gap: a signed-out Gemini reads as ready.** There is no Gemini equivalent of
+`codex login status` wired up and no Gemini Settings card, so only installation is detectable.
+Accepted for now — the failure surfaces as a runtime error rather than a menu state, which is
+the status quo. Adding Gemini auth detection is follow-up work, not a silent omission.
 
 **Two fix affordances, because "API Keys" is the wrong destination for a missing CLI.** A
 `settings` fix renders a **Set up** link that opens Settings on the API Keys tab —
@@ -186,17 +224,24 @@ honest error. This is reachable because `sessionBackendStore.get` defaults to `"
 
 **Fetching.** `getCodexHealth()` is expensive — `spawnSync(codex, ["login","status"])` with a
 4s timeout (`backends.ts:72-78`), `codex --version` (`codex-adapter.ts:355-368`), a
-`readdirSync` of `~/.codex/skills` with a YAML parse per skill (`backends.ts:83-126`), and a
-256KB log tail (`:49-61`). The store therefore fetches lazily **on first menu open, not on
-component mount**, and caches for 60s. It invalidates immediately on the
-`navi:claude-auth-updated` window event (`Settings.svelte:92-96`), which is extended to fire
-for every provider change rather than only Claude's.
+`readdirSync` of `~/.codex/skills` with a YAML parse per skill (`scanCodexSkills`,
+`backends.ts:88-126`), and a 256KB log tail (`readTail`, `:50-62`). The store therefore fetches
+lazily **on first menu open, not on component mount**, and caches for 60s.
 
-**Saving a Z.ai key must also reload models.** Z.ai models come from `/api/models` via
-`loadBackendModels()` (`data-loaders.ts:53-70`), not from this store, and `saveZaiKey()`
-(`Settings.svelte:342-362`) does not currently notify anything. Re-deriving availability alone
-would leave the Z.ai group empty after a successful "Set up → save key". The event handler
-therefore re-runs `loadBackendModels()` as well as re-deriving availability.
+**The refresh signal is renamed.** `navi:claude-auth-updated` (`Settings.svelte:92-96`) becomes
+`navi:provider-auth-updated`, since it now carries Codex and Z.ai changes too; its single
+listener (`ClaudeAuthBadge.svelte:11`) is updated with it. It must be dispatched from every
+mutation site, which today means adding it to `saveZaiKey()` (`Settings.svelte:342-363`) and
+`deleteZaiKey()` (`:365-375`), which notify nothing at present, as well as the new Codex card's
+"I've logged in" button.
+
+**Saving a Z.ai key must also reload models — via `loadModels()`, not `loadBackendModels()`.**
+Z.ai models reach the menu through `/api/models` → `loadModels()` (`data-loaders.ts:53-70`),
+which is the only writer of `availableModels` (`:56`). `loadBackendModels()`
+(`data-loaders.ts:70-109`) hits a different endpoint, `/api/backends/models`, and fills its
+claude slot by reading `get(availableModels)` (`:83`) — so calling it alone re-copies the same
+stale array and the Z.ai group stays empty. The handler calls `loadModels()` first, then
+`loadBackendModels()`.
 
 ### Settings: the Codex card
 
@@ -221,18 +266,33 @@ The Codex card shows:
 
 No new server routes.
 
-### Harness selection must persist per session
+### Harness selection: two cases, one of them currently broken
 
-Today `onBackendChange` (`App.svelte:4214-4225`) writes only the global `defaultBackend`
-writable (`session.ts:444`) — in-memory, not persisted — and never writes
-`sessionBackendStore`; a session's backend is written once at creation
-(`session-actions.ts:82`, `:127`). So choosing a harness on a new chat silently changes the
-app-wide default for every future chat and is lost on restart.
+`canChangeBackend` is true in two different states, and `onBackendChange`
+(`App.svelte:4214-4225`) — which writes only the global `defaultBackend` (`session.ts:444`) —
+is right for one and useless for the other.
 
-Promoting harness to a first-class row makes that surprising. The handler is changed to write
-all three: `sessionBackendStore.set(sessionId, backend)`, `PATCH /api/sessions/:id` with
-`{ backend }` (already supported, `server/routes/sessions.ts:250-252`, column at
-`server/db.ts:273`), and `defaultBackend` as today so the next new chat inherits the choice.
+**Pending new chat (`sessionId === null`).** Today's behaviour is correct and stays. There is
+no session row to write: `setPending(true)` sets `sessionId: null` (`session.ts:257-261`).
+`defaultBackend` is exactly the right carrier, because `sendMessage` (`App.svelte:2841-2846`)
+calls `createNewChat`, which reads `get(defaultBackend)` (`session-actions.ts:71`), passes it
+to `api.sessions.create` (`:76`) and seeds `sessionBackendStore` (`:82`). The choice is not
+lost — it is consumed at send.
+
+**Existing session with zero messages (`sessionId !== null`).** This is the broken case, and
+worse than a persistence problem: picking a harness does not even update the chip.
+`sessionBackendStore.get` can never return falsy — it is `map.get(sessionId) || "claude"`
+(`session.ts:425-427`) — so the `|| $defaultBackend` fallback at `App.svelte:4211` is dead
+code, and the query path (`App.svelte:2666`, `:2806`, `:2912`) keeps sending the old backend.
+
+So `onBackendChange` branches on `sessionId`:
+
+| State | Writes |
+|---|---|
+| `sessionId === null` | `defaultBackend` only (unchanged) |
+| `sessionId !== null` | `sessionBackendStore.set(sessionId, backend)`, `PATCH /api/sessions/:id` with `{ backend }` (supported at `server/routes/sessions.ts:250-252`, column `server/db.ts:273`), **and** `defaultBackend` so the next new chat inherits it |
+
+This is why `RunSettingsMenu` needs `sessionId` as a prop.
 
 ## Testing
 
@@ -242,10 +302,12 @@ modules. This design does not add that infrastructure. Component behaviour is th
 covered by the QA pass, and the logic worth asserting is extracted into pure functions so it
 can be tested with `bun test`:
 
-- `deriveRunAvailability(backends, codexHealth, authStatus)` — every row of the mapping table,
-  including Z.ai with and without a key, and all four `authMode` values.
+- `deriveRunAvailability(backends, codexHealth, auth)` — every row of the mapping table,
+  including all four `authMode` values, Z.ai with and without a key, and Z.ai inheriting
+  Claude's `needs-setup` when the Claude CLI is missing.
 - `shouldShowHarnessRow(canChangeBackend)` and the footer text it implies.
-- `groupModelsForHarness(models, harness)` — Z.ai models group under `claude`, and no group is
+- `modelGroupsFor(models, harness, canChangeBackend)` — all harnesses grouped when switchable,
+  only the current harness's models when not; Z.ai models group under `claude`; no group is
   emitted for a harness with no models.
 - Effort clamping per harness is preserved (Gemini has no Extra High/Max; Codex has no Max).
 
@@ -253,8 +315,9 @@ QA pass against the sandbox instance, covering both the redesign and what it put
 
 1. New chat: three rows; switch harness; switch model; switch effort; reopen and confirm each
    row shows the committed value.
-2. New chat, harness switched, then send — confirm the query runs on the chosen harness and
-   that reloading the session keeps it (this is the persistence change).
+2. Pending new chat: switch harness, send, and confirm the created session runs on the chosen
+   harness. Then open an *existing* chat that has no messages, switch harness, and confirm the
+   chip updates, the next send uses it, and it survives a reload — the currently-broken case.
 3. Chat with messages: harness row absent, footer names the harness, model and effort still work.
 4. A `needs-setup` entry shows its reason; a `settings` fix opens Settings → API Keys; a
    `command` fix shows a copy box.
