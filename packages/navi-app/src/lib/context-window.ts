@@ -7,6 +7,11 @@ export const DEFAULT_CONTEXT_WINDOW = 1_000_000;
 // for anything older or unrecognized.
 export const CLAUDE_RUNTIME_CONTEXT_WINDOW = 200_000;
 
+// Every model in the Codex CLI's registry — the whole gpt-5.6 family, 5.5,
+// 5.4, 5.2 — carries context_window 272000. Assuming 1M here let a Codex
+// session look a quarter full when it was about to overflow.
+export const CODEX_CONTEXT_WINDOW = 272_000;
+
 export type ContextBackendId = "claude" | "codex" | "gemini" | string;
 
 export function getEffectiveContextWindow(contextWindow?: number | null): number {
@@ -39,13 +44,13 @@ export function getModelContextWindow(
     );
   }
 
-  if (normalizedBackend === "codex" || normalizedBackend === "gemini") {
-    return DEFAULT_CONTEXT_WINDOW;
-  }
+  if (normalizedBackend === "codex") return CODEX_CONTEXT_WINDOW;
+  if (normalizedBackend === "gemini") return DEFAULT_CONTEXT_WINDOW;
 
-  if (normalizedModel.includes("codex") || normalizedModel.includes("gemini")) {
-    return DEFAULT_CONTEXT_WINDOW;
+  if (normalizedModel.includes("codex") || normalizedModel.startsWith("gpt-")) {
+    return CODEX_CONTEXT_WINDOW;
   }
+  if (normalizedModel.includes("gemini")) return DEFAULT_CONTEXT_WINDOW;
 
   return null;
 }

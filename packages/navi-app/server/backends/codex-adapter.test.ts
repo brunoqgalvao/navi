@@ -5,8 +5,11 @@ import {
   buildCodexModelCatalog,
   describeCodexExit,
   unwrapCodexErrorMessage,
+  CODEX_AUTO_COMPACT_TOKEN_LIMIT,
+  CODEX_CONTEXT_WINDOW,
 } from "./codex-adapter";
-import type { QueryOptions } from "./types";
+import { CodexAdapter } from "./codex-adapter";
+import type { NormalizedEvent, QueryOptions } from "./types";
 
 function createOptions(overrides: Partial<QueryOptions> = {}): QueryOptions {
   return {
@@ -125,5 +128,89 @@ describe("codex error reporting", () => {
     expect(describeCodexExit(1, "gpt-5.6-sol", "")).toBe(
       'Codex exited with code 1 (model "gpt-5.6-sol").'
     );
+  });
+});
+
+describe("codex thread items", () => {
+  // normalizeCodexItem is private; go through the public event normalizer.
+  const normalize = (event: unknown) =>
+    (new CodexAdapter() as any).normalizeCodexEvent(event, "s1") as NormalizedEvent | null;
+
+  test("renders the agent's reply as an assistant message", () => {
+    const event = normalize({
+      type: "item.completed",
+      item: { id: "item_0", type: "agent_message", text: "OK" },
+    });
+
+    expect(event).toEqual({
+      type: "assistant",
+      sessionId: "s1",
+      content: [{ type: "text", text: "OK" }],
+    });
+  });
+
+  test("renders reasoning as thinking", () => {
+    const event = normalize({
+      type: "item.completed",
+      item: { type: "reasoning", text: "considering options" },
+    });
+
+    expect(event?.type).toBe("assistant");
+    expect((event as any).content[0]).toEqual({
+      type: "thinking",
+      thinking: "considering options",
+    });
+  });
+
+  test("renders a shell call as a Bash tool use plus result", () => {
+    const event = normalize({
+      type: "item.completed",
+      item: {
+        id: "item_3",
+        type: "command_execution",
+        command: "ls -la",
+        aggregated_output: "total 0",
+        exit_code: 0,
+      },
+    }) as any;
+
+    expect(event.content[0].name).toBe("Bash");
+    expect(event.content[0].input.command).toBe("ls -la");
+    expect(event.content[1].content).toBe("total 0");
+    expect(event.content[1].is_error).toBe(false);
+  });
+
+  test("marks a failed command as an error result", () => {
+    const event = normalize({
+      type: "item.completed",
+      item: { type: "command_execution", command: "false", exit_code: 1 },
+    }) as any;
+
+    expect(event.content[1].is_error).toBe(true);
+  });
+
+  test("surfaces Codex's own compaction as status", () => {
+    const event = normalize({
+      type: "item.completed",
+      item: { type: "context_compaction" },
+    });
+
+    expect(event?.type).toBe("system");
+    expect((event as any).status).toContain("compacted");
+  });
+
+  test("ignores item types Navi has no rendering for", () => {
+    expect(normalize({ type: "item.completed", item: { type: "todo_list" } })).toBeNull();
+  });
+});
+
+describe("codex native compaction", () => {
+  test("turns on auto-compaction with headroom below the context window", () => {
+    const plan = buildCodexExecPlan(createOptions({ model: "gpt-5.6-sol" }), "gpt-5.6-sol");
+
+    expect(plan.args).toContain(
+      `model_auto_compact_token_limit=${CODEX_AUTO_COMPACT_TOKEN_LIMIT}`
+    );
+    expect(CODEX_AUTO_COMPACT_TOKEN_LIMIT).toBeLessThan(CODEX_CONTEXT_WINDOW);
   });
 });

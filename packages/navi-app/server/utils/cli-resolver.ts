@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { homedir } from "os";
-import { basename, delimiter, dirname, join } from "path";
+import { basename, delimiter, dirname, join, sep } from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,6 +14,8 @@ type ResolveCliExecutableOptions = {
   packageBinPath?: string;
   additionalCandidates?: string[];
   appRoots?: string[];
+  /** Search PATH and common install dirs before the bundled node_modules copy. */
+  preferInstalled?: boolean;
 };
 
 function expandHome(value: string): string {
@@ -94,11 +96,19 @@ function resolveFromAppNodeModules(options: ResolveCliExecutableOptions): string
   return firstExisting(candidates);
 }
 
-function resolveFromPathEnv(executableNames: string[]): string | null {
+function resolveFromPathEnv(
+  executableNames: string[],
+  { skipNodeModules = false }: { skipNodeModules?: boolean } = {}
+): string | null {
   const pathEnv = process.env.PATH || process.env.Path || process.env.path;
   if (!pathEnv) return null;
 
-  const directories = pathEnv.split(delimiter).filter(Boolean);
+  let directories = pathEnv.split(delimiter).filter(Boolean);
+  // Bun and npm put node_modules/.bin on PATH, so "search PATH" would otherwise
+  // find the very bundled shim the caller asked to look past.
+  if (skipNodeModules) {
+    directories = directories.filter((dir) => !dir.split(sep).includes("node_modules"));
+  }
   const candidates = directories.flatMap((dir) =>
     executableNames.map((name) => join(dir, name))
   );
@@ -130,12 +140,18 @@ function resolveFromCommonPaths(executableNames: string[]): string | null {
 export function resolveCliExecutable(options: ResolveCliExecutableOptions): string | null {
   const executableNames = options.executableNames ?? executableNamesFor(options.command);
 
+  // preferInstalled: search the user's own install before the copy bundled into
+  // node_modules. Worth it for CLIs whose bundled copy is version-pinned or
+  // unsigned; the bundle stays as the fallback for machines without one.
+  const bundled = () => resolveFromAppNodeModules(options);
+  const installed = () =>
+    resolveFromPathEnv(executableNames, { skipNodeModules: options.preferInstalled }) ||
+    resolveFromCommonPaths(executableNames);
+
   return (
     resolveFromExplicitEnv(options.envVarNames) ||
     firstExisting(options.additionalCandidates?.map(expandHome) ?? []) ||
-    resolveFromAppNodeModules(options) ||
-    resolveFromPathEnv(executableNames) ||
-    resolveFromCommonPaths(executableNames)
+    (options.preferInstalled ? installed() || bundled() : bundled() || installed())
   );
 }
 

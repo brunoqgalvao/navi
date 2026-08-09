@@ -27,6 +27,11 @@ import type {
 } from "./types";
 
 const DEFAULT_CODEX_MODEL = "gpt-5.6-sol";
+// Every model in the Codex registry reports context_window 272000.
+export const CODEX_CONTEXT_WINDOW = 272_000;
+// Leave room for the summarization turn itself; compacting at the very edge of
+// the window fails the same way the overflow it is meant to prevent does.
+export const CODEX_AUTO_COMPACT_TOKEN_LIMIT = Math.round(CODEX_CONTEXT_WINDOW * 0.8);
 // The Codex CLI only accepts these values for model_reasoning_effort (any model)
 const COMPATIBLE_CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
 const BASE_CODEX_MODELS = [
@@ -103,9 +108,9 @@ export function getConfiguredCodexReasoningEffort(): string | undefined {
 }
 
 export function buildCodexModelCatalog(configuredModel?: string): string[] {
-  const models = [...BASE_CODEX_MODELS];
+  const models: string[] = [...BASE_CODEX_MODELS];
 
-  if (configuredModel && !models.includes(configuredModel as (typeof BASE_CODEX_MODELS)[number])) {
+  if (configuredModel && !models.includes(configuredModel)) {
     models.unshift(configuredModel);
   }
 
@@ -117,12 +122,18 @@ export function resolveCodexExecutable(): string | null {
 
   return (
     resolveExplicitExecutable(envVarNames) ||
-    resolveCodexNativeExecutable() ||
+    // The user's own install wins over the copy vendored into node_modules.
+    // The vendored binary is unsigned, so macOS XProtect quarantines and
+    // deletes it — which surfaced only as "Codex exited with code 1" — and
+    // being version-pinned it also shadows a newer CLI the user installed.
+    // It stays as the fallback for machines with no codex at all.
     resolveCliExecutable({
       command: "codex",
       packageName: "@openai/codex",
       packageBinPath: "bin/codex.js",
-    })
+      preferInstalled: true,
+    }) ||
+    resolveCodexNativeExecutable()
   );
 }
 
@@ -293,6 +304,9 @@ export function buildCodexExecPlan(
 
   const args = ["exec", "--json", "-m", model];
   args.push("--config", `model_reasoning_effort="${reasoningEffort}"`);
+  // Codex ships with auto-compaction off (auto_compact_token_limit: null), so a
+  // long run just overflows. Give it a limit with enough headroom to summarize.
+  args.push("--config", `model_auto_compact_token_limit=${CODEX_AUTO_COMPACT_TOKEN_LIMIT}`);
   args.push("--sandbox", sandboxMode);
 
   if (options.permissionMode === "auto") {
@@ -427,9 +441,13 @@ export class CodexAdapter implements BackendAdapter {
 
     const child = this.childProcess;
 
-    // For resume, pipe the prompt to stdin
-    if (options.resume && options.prompt && child.stdin) {
-      child.stdin.write(options.prompt);
+    // For resume, pipe the prompt to stdin. Either way stdin must be closed:
+    // `codex exec` reads it for extra input and blocks forever on an open pipe,
+    // so leaving it open hangs the turn with no output and no error.
+    if (child.stdin) {
+      if (options.resume && options.prompt) {
+        child.stdin.write(options.prompt);
+      }
       child.stdin.end();
     }
 
@@ -733,6 +751,100 @@ export class CodexAdapter implements BackendAdapter {
   /**
    * Legacy event normalizer for older Codex versions (top-level "type" field)
    */
+  /**
+   * Normalize one `item.completed` payload from Codex 0.14x's thread protocol.
+   */
+  private normalizeCodexItem(item: any, sessionId: string): NormalizedEvent | null {
+    if (!item || typeof item !== "object") return null;
+
+    switch (item.type) {
+      case "agent_message":
+        return {
+          type: "assistant",
+          sessionId,
+          content: this.extractTextContent(item.text ?? item.message ?? ""),
+        };
+
+      case "reasoning":
+        return {
+          type: "assistant",
+          sessionId,
+          content: [{ type: "thinking", thinking: item.text ?? item.summary_text ?? "" }],
+        };
+
+      case "command_execution": {
+        const toolUseId = item.id || crypto.randomUUID();
+        const command = Array.isArray(item.command) ? item.command.join(" ") : item.command || "";
+        return {
+          type: "assistant",
+          sessionId,
+          content: [
+            {
+              type: "tool_use",
+              id: toolUseId,
+              name: "Bash",
+              input: { command, description: this.extractBashDescription(command) },
+            },
+            {
+              type: "tool_result",
+              tool_use_id: toolUseId,
+              content: item.aggregated_output ?? item.stdout ?? "",
+              is_error: typeof item.exit_code === "number" && item.exit_code !== 0,
+            },
+          ],
+        };
+      }
+
+      case "file_change": {
+        const toolUseId = item.id || crypto.randomUUID();
+        const paths = Array.isArray(item.changes)
+          ? item.changes.map((change: any) => change?.path).filter(Boolean).join(", ")
+          : item.path || "";
+        return {
+          type: "assistant",
+          sessionId,
+          content: [
+            {
+              type: "tool_use",
+              id: toolUseId,
+              name: "Edit",
+              input: { file_path: paths },
+            },
+            {
+              type: "tool_result",
+              tool_use_id: toolUseId,
+              content: paths ? `Updated ${paths}` : "Updated files",
+            },
+          ],
+        };
+      }
+
+      case "web_search":
+        return {
+          type: "system",
+          subtype: "status",
+          status: item.query ? `Searched the web for "${item.query}"` : "Searched the web",
+        };
+
+      case "context_compaction":
+        return {
+          type: "system",
+          subtype: "status",
+          status: "Codex compacted its context to make room to continue.",
+        };
+
+      case "error": {
+        const text = unwrapCodexErrorMessage(item.message);
+        return text ? { type: "system", subtype: "status", status: `Codex: ${text}` } : null;
+      }
+
+      // user_message is our own prompt echoed back; todo_list / image_view /
+      // mcp_tool_call have no Navi rendering yet.
+      default:
+        return null;
+    }
+  }
+
   private normalizeLegacyCodexEvent(
     event: any,
     eventType: string,
@@ -754,14 +866,33 @@ export class CodexAdapter implements BackendAdapter {
           status: "Processing...",
         };
 
-      case "turn.completed":
+      case "turn.completed": {
+        const usage = event.usage ?? {};
+        // Codex reports the fresh and cached halves of the prompt separately;
+        // both occupy the context window, so the meter needs their sum.
+        const inputTokens =
+          (usage.input_tokens ?? 0) +
+          (usage.cached_input_tokens ?? 0) +
+          (usage.cache_write_input_tokens ?? 0);
+        const outputTokens = (usage.output_tokens ?? 0) + (usage.reasoning_output_tokens ?? 0);
         return {
           type: "result",
           sessionId,
           subtype: "success",
-          costUsd: event.usage?.total_cost,
+          costUsd: usage.total_cost,
           numTurns: 1,
+          ...(inputTokens > 0 && { inputTokens }),
+          ...(outputTokens > 0 && { outputTokens }),
+          contextWindow: CODEX_CONTEXT_WINDOW,
         };
+      }
+
+      // Codex compacts its own context mid-run once it crosses the auto-compact
+      // limit. Report it the same way the Claude backend reports a boundary so
+      // the UI can show one story for both.
+      case "item.started":
+      case "item.updated":
+        return null;
 
       case "turn.failed":
         return {
@@ -784,11 +915,11 @@ export class CodexAdapter implements BackendAdapter {
       // service tier) as completed items of type "error" rather than top-level
       // error events. Surfacing them as status keeps them out of the error path
       // while still telling the user why a run behaved oddly.
-      case "item.completed": {
-        if (event.item?.type !== "error") return null;
-        const text = unwrapCodexErrorMessage(event.item.message);
-        return text ? { type: "system", subtype: "status", status: `Codex: ${text}` } : null;
-      }
+      // Codex 0.14x reports everything the agent does as a completed thread
+      // item. Anything unhandled here is silently dropped — which is why the
+      // agent's own replies never reached the chat.
+      case "item.completed":
+        return this.normalizeCodexItem(event.item, sessionId);
 
       default:
         return null;

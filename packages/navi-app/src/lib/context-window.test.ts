@@ -26,8 +26,14 @@ describe("model context window (runtime rule)", () => {
     expect(getModelContextWindow("claude", "glm-5.2[1m]")).toBe(1_000_000);
   });
 
-  test("codex and gemini keep the 1M default", () => {
-    expect(getModelContextWindow("codex", "gpt-5.6-sol")).toBe(DEFAULT_CONTEXT_WINDOW);
+  test("codex models are 272k, not the 1M default", () => {
+    // Every model in the Codex CLI registry reports context_window 272000.
+    expect(getModelContextWindow("codex", "gpt-5.6-sol")).toBe(272_000);
+    expect(getModelContextWindow("codex", "gpt-5.2-codex")).toBe(272_000);
+    expect(getModelContextWindow(null, "gpt-5.4")).toBe(272_000);
+  });
+
+  test("gemini keeps the 1M default", () => {
     expect(getModelContextWindow("gemini", "gemini-3-pro")).toBe(DEFAULT_CONTEXT_WINDOW);
   });
 });

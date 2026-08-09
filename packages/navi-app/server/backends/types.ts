@@ -128,6 +128,11 @@ export interface ResultEvent {
   isError?: boolean;
   result?: string;
   errors?: string[];
+  /** Tokens occupying the backend's context after this turn. */
+  inputTokens?: number;
+  outputTokens?: number;
+  /** The backend's context budget for this session's model, when it reports one. */
+  contextWindow?: number;
 }
 
 export interface ErrorEvent {
