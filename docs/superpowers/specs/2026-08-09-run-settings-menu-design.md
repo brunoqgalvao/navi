@@ -118,14 +118,16 @@ presentation changes.
 side when within 24px of the viewport edge and clamping vertically so they never extend past
 the viewport; the grouped model list keeps a `max-h-72 overflow-y-auto` as today (`:361`).
 
-**Props.** `RunSettingsMenu` takes what `ModelReasoningSelector` took —
+**Props.** `RunSettingsMenu` takes exactly what `ModelReasoningSelector` took —
 `backend, selectedModel, backendModels, reasoningEffort, canChangeBackend, onBackendChange,
-onModelSelect, onReasoningEffortChange, class` (`:7-17`) — plus `sessionId: string | null`
-(needed to persist the harness, see below) and `onOpenProviderSettings: () => void` for the
-Set up affordance. `ChatInput` forwards both, exactly as it already forwards the three
-callbacks (`ChatInput.svelte:86`, `:98`, `:1507-1516`); `App.svelte` supplies
-`onOpenProviderSettings` as `() => { settingsInitialTab = "api"; showSettings = true; }`, the
-same shape as the existing `onManageMcp` (`App.svelte:4189`).
+onModelSelect, onReasoningEffortChange, class` (`:7-17`) — plus one new callback,
+`onOpenProviderSettings: () => void`, for the Set up affordance. It needs no `sessionId`: the
+harness branching below lives in `onBackendChange` at `App.svelte:4214-4225`, where
+`$session.sessionId` is already in scope. `ChatInput` gains `onOpenProviderSettings` as a
+forwarded prop alongside the three callbacks it already forwards (`ChatInput.svelte:86`,
+`:98`, `:1507-1516`), and `App.svelte` supplies it as
+`() => { settingsInitialTab = "api"; showSettings = true; }` — the same shape as the existing
+`onManageMcp` (`App.svelte:4189`).
 
 **Accessibility**, absent from the current component (`:315-321`) and introduced here: the menu
 is `role="menu"`, rows are `role="menuitem"` with `aria-haspopup="menu"` and `aria-expanded`;
@@ -144,13 +146,13 @@ export type ProviderAuthStatus = Awaited<ReturnType<typeof api.auth.status>>;
 
 export function deriveRunAvailability(
   backends: BackendInfo[],          // backendsApi.list()
-  codexHealth: CodexHealthInfo | null,  // src/lib/api.ts:123-134
+  codexHealth: CodexHealthInfo | null,  // src/lib/api.ts:123-135
   auth: ProviderAuthStatus,         // api.auth.status() returns an inline type
 ): Record<MenuEntryId, EntryAvailability>
 ```
 
-The client type is `CodexHealthInfo` (`src/lib/api.ts:123-134`), not the server-local
-`CodexHealth` (`server/routes/backends.ts:35-47`, unexported). `api.auth.status()` returns an
+The client type is `CodexHealthInfo` (`src/lib/api.ts:123-135`), not the server-local
+`CodexHealth` (`server/routes/backends.ts:36-48`, unexported). `api.auth.status()` returns an
 anonymous inline type (`src/lib/api.ts:788+`) with no exported name, hence the `Awaited<
 ReturnType<...>>` alias — and it is called `ProviderAuthStatus` rather than `AuthStatus`
 because `src/lib/stores/auth.ts:20-25` already owns `AuthState` for Navi's own user auth.
@@ -186,8 +188,8 @@ answers one question. `auth` contributes only sign-in state and the Z.ai key.
 | `claude` | `!installed` | `Claude CLI not found` | command `npm i -g @anthropic-ai/claude-code` |
 | `claude` | installed, `!auth.hasOAuth && !auth.hasApiKey` | `Not signed in` | settings |
 | `codex` | `!installed` | `Codex CLI not found` | command `npm i -g @openai/codex` |
-| `codex` | `authMode === "not_logged_in"` | `Not signed in` | settings |
-| `codex` | `authMode === "unknown"` | `Couldn't read sign-in state` | settings |
+| `codex` | installed, `authMode === "not_logged_in"` | `Not signed in` | settings |
+| `codex` | installed, `authMode === "unknown"` | `Couldn't read sign-in state` | settings |
 | `gemini` | `!installed` | `Gemini CLI not found` | command `npm i -g @google/gemini-cli` |
 | `zai` | `!auth.hasZaiKey` | `No Z.ai API key` | settings |
 | `zai` | claude harness not `ready` | inherits the Claude reason | inherits |
@@ -199,7 +201,11 @@ The install commands match how the repo actually resolves each CLI:
 
 `authMode` is a four-state union (`backends.ts:41`) and `detectCodexAuthMode` returns
 `"unknown"` on spawn failure or unparsed output (`:70`, `:85`); treating it as `needs-setup` is
-deliberate — an unreadable state should not present as ready.
+deliberate — an unreadable state should not present as ready. The `installed,` qualifier on the
+two `authMode` rows matters: with no CLI there is no path, so `detectCodexAuthMode` returns
+`"unknown"` (`:70`) and `getCodexHealth` passes `info?.path` straight through (`:185`). Without
+the guard a machine with no Codex would match both rows and could render "Couldn't read
+sign-in state" with a settings link instead of "not found" with an install command.
 
 The `zai` row inherits Claude's state because Z.ai models run on the Claude runtime; a Z.ai key
 with no Claude CLI is not runnable, and reporting it ready would be a lie.
@@ -228,20 +234,23 @@ honest error. This is reachable because `sessionBackendStore.get` defaults to `"
 `backends.ts:88-126`), and a 256KB log tail (`readTail`, `:50-62`). The store therefore fetches
 lazily **on first menu open, not on component mount**, and caches for 60s.
 
-**The refresh signal is renamed.** `navi:claude-auth-updated` (`Settings.svelte:92-96`) becomes
-`navi:provider-auth-updated`, since it now carries Codex and Z.ai changes too; its single
-listener (`ClaudeAuthBadge.svelte:11`) is updated with it. It must be dispatched from every
-mutation site, which today means adding it to `saveZaiKey()` (`Settings.svelte:342-363`) and
-`deleteZaiKey()` (`:365-375`), which notify nothing at present, as well as the new Codex card's
-"I've logged in" button.
+**The refresh signal is renamed.** `navi:claude-auth-updated` becomes
+`navi:provider-auth-updated`, since it now carries Codex and Z.ai changes too. There are two
+existing dispatchers, not one — `Settings.svelte:92-96` and an identical helper in
+`Onboarding.svelte:29-33` — and one listener, `ClaudeAuthBadge.svelte:11`. All three change
+together; renaming only the Settings pair would orphan the onboarding dispatch and stop the
+badge refreshing after first-run auth. The event must also be dispatched from the mutation
+sites that are silent today: `saveZaiKey()` (`Settings.svelte:342-363`), `deleteZaiKey()`
+(`:365-375`), and the new Codex card's "I've logged in" button.
 
 **Saving a Z.ai key must also reload models — via `loadModels()`, not `loadBackendModels()`.**
-Z.ai models reach the menu through `/api/models` → `loadModels()` (`data-loaders.ts:53-70`),
-which is the only writer of `availableModels` (`:56`). `loadBackendModels()`
-(`data-loaders.ts:70-109`) hits a different endpoint, `/api/backends/models`, and fills its
-claude slot by reading `get(availableModels)` (`:83`) — so calling it alone re-copies the same
-stale array and the Z.ai group stays empty. The handler calls `loadModels()` first, then
-`loadBackendModels()`.
+Z.ai models reach the menu through `/api/models` → `loadModels()` (`data-loaders.ts:53-67`),
+the only writer of `availableModels` (`:56`). `loadBackendModels()` (`:70-110`) hits a
+different endpoint, `/api/backends/models`, and fills its claude slot by reading
+`get(availableModels)` (`:83`) — so calling it alone re-copies the same stale array and the
+Z.ai group stays empty. The handler therefore calls `loadModels()`, which already chains
+`loadBackendModels()` itself (`:57`); calling both would just re-fetch `/api/backends/models`
+twice.
 
 ### Settings: the Codex card
 
