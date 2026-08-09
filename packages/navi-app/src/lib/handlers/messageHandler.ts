@@ -15,6 +15,7 @@ import type {
 } from "../claude";
 import type { HandlerCallbacks, UICommand } from "./types";
 import type { TodoItem } from "../stores/types";
+import { normalizeTodos } from "../utils/todos";
 import { sessionMessages } from "../stores/session";
 import { handleStreamEvent } from "./streamHandler";
 import { get } from "svelte/store";
@@ -55,11 +56,11 @@ function extractTodos(content: ContentBlock[]): TodoItem[] | null {
   );
   if (!todoTool?.input?.todos) return null;
 
-  // Validate the todo structure
-  const todos = todoTool.input.todos;
-  if (!Array.isArray(todos)) return null;
+  // Normalize — models occasionally emit todos as a stringified array
+  const todos = normalizeTodos(todoTool.input.todos);
+  if (todos.length === 0) return null;
 
-  return todos as TodoItem[];
+  return todos;
 }
 
 export function createMessageHandler(config: MessageHandlerConfig) {

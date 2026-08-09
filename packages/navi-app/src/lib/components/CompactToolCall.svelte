@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ToolUseBlock, ToolResultBlock } from "../claude";
+  import { normalizeTodos } from "../utils/todos";
 
   interface Props {
     tool: ToolUseBlock;
@@ -61,7 +62,7 @@
       case "WebSearch":
         return input.query || "";
       case "TodoWrite":
-        return `${input.todos?.length || 0} items`;
+        return `${normalizeTodos(input.todos).length} items`;
       case "Task":
         return input.description?.slice(0, 40) || "";
       default:

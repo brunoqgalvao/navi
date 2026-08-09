@@ -11,6 +11,7 @@
   import NaviContextWidget from "./tools/mcp/NaviContextWidget.svelte";
   import AgentBrowserWidget from "./widgets/AgentBrowserWidget.svelte";
   import { isAgentBrowserCommand } from "$lib/utils/agent-browser-parser";
+  import { normalizeTodos } from "$lib/utils/todos";
 
   interface Props {
     tool: ToolUseBlock;
@@ -134,7 +135,7 @@
       case "WebSearch":
         return input.query || "";
       case "TodoWrite":
-        return `${input.todos?.length || 0} items`;
+        return `${normalizeTodos(input.todos).length} items`;
       case "Skill":
         return input.skill || input.command || input.name || "";
       default:
@@ -310,7 +311,7 @@
       />
 
     {:else if tool.name === "TodoWrite"}
-      <div class="text-xs text-gray-500">Updated execution plan ({input.todos?.length || 0} items)</div>
+      <div class="text-xs text-gray-500">Updated execution plan ({normalizeTodos(input.todos).length} items)</div>
 
     {:else if tool.name === "Skill"}
       <div class="flex items-center gap-2">
