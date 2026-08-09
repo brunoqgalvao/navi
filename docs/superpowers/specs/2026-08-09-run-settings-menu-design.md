@@ -124,8 +124,8 @@ onModelSelect, onReasoningEffortChange, class` (`:7-17`) — plus one new callba
 `onOpenProviderSettings: () => void`, for the Set up affordance. It needs no `sessionId`: the
 harness branching below lives in `onBackendChange` at `App.svelte:4214-4225`, where
 `$session.sessionId` is already in scope. `ChatInput` gains `onOpenProviderSettings` as a
-forwarded prop alongside the three callbacks it already forwards (`ChatInput.svelte:86`,
-`:98`, `:1507-1516`), and `App.svelte` supplies it as
+forwarded prop alongside the three callbacks it already forwards (`ChatInput.svelte:87-88`,
+`:91`, destructured `:98`, forwarded `:1507-1516`), and `App.svelte` supplies it as
 `() => { settingsInitialTab = "api"; showSettings = true; }` — the same shape as the existing
 `onManageMcp` (`App.svelte:4189`).
 
@@ -301,7 +301,8 @@ So `onBackendChange` branches on `sessionId`:
 | `sessionId === null` | `defaultBackend` only (unchanged) |
 | `sessionId !== null` | `sessionBackendStore.set(sessionId, backend)`, `PATCH /api/sessions/:id` with `{ backend }` (supported at `server/routes/sessions.ts:250-252`, column `server/db.ts:273`), **and** `defaultBackend` so the next new chat inherits it |
 
-This is why `RunSettingsMenu` needs `sessionId` as a prop.
+All of this lives in `App.svelte`, inside the same template scope that already reads
+`$session.sessionId` (`:4211`) — which is why `RunSettingsMenu` needs no `sessionId` prop.
 
 ## Testing
 
