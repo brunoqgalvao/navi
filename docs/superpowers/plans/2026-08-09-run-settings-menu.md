@@ -33,11 +33,12 @@ known-but-unavailable entries. Task 3's tests pin this.
 
 | File | Responsibility |
 |---|---|
-| `src/lib/stores/run-availability.ts` **(create)** | `deriveRunAvailability()` + types + the lazy store |
-| `src/lib/components/run-settings/entries.ts` **(create)** | `providerMeta` (rehomed), `resolveEntryForSelection`, `compactModelLabel`, `reasoningLabel` |
+| `src/lib/stores/run-availability.ts` **(create)** | `deriveRunAvailability()` + types (Task 1), lazy caching store (Task 1b) |
+| `src/lib/components/run-settings/entries.ts` **(create)** | `entryMeta` (rehomed `providerMeta`), `resolveEntryForSelection`, `compactModelLabel`, `reasoningLabel`, `reasoningOptions` |
 | `src/lib/components/run-settings/model-groups.ts` **(create)** | `modelGroupsFor`, `shouldShowHarnessRow`, `harnessFooterText`, `harnessMeta` |
-| `src/lib/components/run-settings/effort.ts` **(create)** | `isEffortDisabled`, `effortDisabledReason`, `clampEffort` (rehomed) |
+| `src/lib/components/run-settings/effort.ts` **(create)** | `isEffortDisabled`, `effortDisabledReason` (returns `string | undefined`), `clampEffort` |
 | `src/lib/components/run-settings/MenuRow.svelte` **(create)** | One row + its submenu, keyboard and edge behaviour |
+| `src/lib/components/run-settings/MenuItem.svelte` **(create)** | One selectable submenu item (`role="menuitemradio"`) |
 | `src/lib/components/run-settings/RunSettingsMenu.svelte` **(create)** | Chip + rows |
 | `src/lib/components/settings/ProviderCard.svelte` **(create)** | Card frame with `body`/`footer` snippets |
 | `src/lib/components/ModelReasoningSelector.svelte` **(delete)** | Replaced (helpers rehomed in Task 2 first) |
@@ -258,6 +259,80 @@ git add packages/navi-app/src/lib/stores/run-availability.ts packages/navi-app/s
 git commit -m "Derive why each harness is unusable, with the fix that matches it"
 ```
 
+### Task 1b: The lazy availability store
+
+**Files:**
+- Modify: `packages/navi-app/src/lib/stores/run-availability.ts` (append)
+
+Task 1 is the pure function; this is the thing the menu actually imports. Tasks 6 and 10 call
+`runAvailability.refresh()` and `.invalidate()`, so it has to exist.
+
+Lazy on purpose: `getCodexHealth()` spawns `codex login status` with a 4s timeout
+(`server/routes/backends.ts:72-78`) and `codex --version` (`codex-adapter.ts:355-368`), scans
+`~/.codex/skills` parsing YAML per skill (`backends.ts:88-126`) and tails 256KB of log
+(`:50-62`). Mounting `ChatInput` must not pay that; opening the menu may.
+
+- [ ] **Step 1: Append the store**
+
+```ts
+import { writable } from "svelte/store";
+import { api, backendsApi } from "../api";
+
+const TTL_MS = 60_000;
+
+function createRunAvailability() {
+  const { subscribe, set } = writable<Record<MenuEntryId, EntryAvailability> | null>(null);
+  let fetchedAt = 0;
+  let inFlight: Promise<void> | null = null;
+
+  async function refresh(force = false): Promise<void> {
+    if (!force && Date.now() - fetchedAt < TTL_MS) return;
+    if (inFlight) return inFlight;
+    inFlight = (async () => {
+      try {
+        const [backends, codexHealth, auth] = await Promise.all([
+          backendsApi.list(),
+          backendsApi.getCodexHealth().catch(() => null),
+          api.auth.status(),
+        ]);
+        set(deriveRunAvailability(backends, codexHealth, auth));
+        fetchedAt = Date.now();
+      } catch (e) {
+        console.error("Failed to load harness availability:", e);
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
+  }
+
+  return { subscribe, refresh, invalidate: () => { fetchedAt = 0; } };
+}
+
+export const runAvailability = createRunAvailability();
+```
+
+Note the type-only import of `ProviderAuthStatus` in Task 1 used `typeof import("../api")`;
+now that `api` is a real value import, simplify it to
+`Awaited<ReturnType<typeof api.auth.status>>`.
+
+- [ ] **Step 2: Typecheck**
+
+Run: `cd packages/navi-app && bun run check 2>&1 | tail -3`
+Expected: `0 errors`.
+
+- [ ] **Step 3: Confirm the pure tests still pass** (the store must not have broken them)
+
+Run: `cd packages/navi-app && bun test src/lib/stores/run-availability.test.ts`
+Expected: PASS, 11 tests.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add packages/navi-app/src/lib/stores/run-availability.ts
+git commit -m "Fetch harness availability lazily, since the codex probe is expensive"
+```
+
 ### Task 2: Rehome the chip helpers before deleting their file
 
 **Files:**
@@ -297,7 +372,8 @@ describe("compactModelLabel", () => {
     expect(compactModelLabel("claude-fable-5")).toBe("Fable 5");
   });
   test("prettifies a raw gpt slug", () => {
-    expect(compactModelLabel("gpt-5.6-sol")).toBe("GPT-5.6 sol");
+    // The trailing .replace(/-/g," ") also eats the hyphen the ^gpt- rule just inserted.
+    expect(compactModelLabel("gpt-5.6-sol")).toBe("GPT 5.6 sol");
   });
   test("falls back to Model when there is nothing", () => {
     expect(compactModelLabel(null)).toBe("Model");
@@ -334,6 +410,10 @@ Expected: FAIL — module not found.
 - [ ] **Step 3: Implement by copying, not rewriting**
 
 Copy the four helpers out of `ModelReasoningSelector.svelte` verbatim, changing only:
+- **the shared import depth.** The originals sit at `src/lib/components/` and read
+  `../../../shared/anthropic-models` (`:4`) and `../../../shared/zai-models` (`:5`). From
+  `src/lib/components/run-settings/` that is one level short — `src/shared` does not exist.
+  Both become `../../../../shared/…`.
 - the `anthropic` key becomes `claude`, and the type becomes `Record<MenuEntryId, …>`
 - `resolveProviderForSelection` becomes `resolveEntryForSelection` returning `MenuEntryId`
 - keep `isZaiModel(...)` in the zai branch (`:137`) — dropping it would silently narrow
@@ -469,7 +549,7 @@ Expected: FAIL — module not found.
 import type { BackendId, ModelInfo } from "../../stores";
 import type { EntryAvailability, MenuEntryId } from "../../stores/run-availability";
 import { entryMeta } from "./entries";
-import { isZaiModel } from "../../../shared/zai-models";
+import { isZaiModel } from "../../../../shared/zai-models";
 
 export const harnessMeta: Record<BackendId, { label: string; icon: string; accent: string; muted: string; description: string }> = {
   claude: entryMeta.claude,
@@ -587,7 +667,7 @@ describe("clampEffort", () => {
 describe("effortDisabledReason", () => {
   test("explains the clamp rather than just greying out", () => {
     expect(effortDisabledReason("codex", "max")).toBeTruthy();
-    expect(effortDisabledReason("claude", "max")).toBeNull();
+    expect(effortDisabledReason("claude", "max")).toBeUndefined();
   });
 });
 ```
@@ -630,7 +710,12 @@ Props: `{ label: string; value: string; disabled?: boolean; children: Snippet }`
 
 Must satisfy the spec's accessibility section in full — it is easy to build half of this:
 - row: `role="menuitem"`, `aria-haspopup="menu"`, `aria-expanded={open}`
-- submenu: `role="menu"`; items `role="menuitemradio"` with `aria-checked`
+- submenu container: `role="menu"`. **Items are rendered by the caller's snippet, so
+  `MenuRow` cannot set their roles.** Do not reach into them by DOM query. Instead export a
+  sibling `MenuItem.svelte` (same folder) that renders one `role="menuitemradio"` +
+  `aria-checked` item, and have callers use it inside the snippet; `MenuRow` handles roving
+  focus by listening for `keydown` on its own submenu container and moving focus between
+  `[role="menuitemradio"]` children it contains
 - opens on `mouseenter`, `click`, `Enter`, `Space`, `ArrowRight`
 - `ArrowUp`/`ArrowDown` move within the focused list
 - `ArrowLeft` leaves the submenu back to its row
@@ -696,6 +781,15 @@ New:
 - sticky group headers in the model submenu
 - when `!canChangeBackend`: no harness row, footer from `harnessFooterText(backend)`
 - warning dot on the chip when `availability[resolveEntryForSelection(...)]` is `needs-setup`
+- **the menu container itself is `role="menu"`** (spec requires it; `MenuRow` only owns rows
+  and submenus)
+- **committing any value closes the whole menu.** This is an explicit change from today, where
+  the menu stays open — it will not happen by inheritance.
+- **picking a model from another harness switches the harness.** `ModelGroup.harness` exists
+  for this: on select, if `group.harness !== backend`, call `onBackendChange(group.harness)`
+  before `onModelSelect(model.value)` — the order `selectModel` uses today
+  (`ModelReasoningSelector.svelte:216-227`). Losing this is a silent regression of the same
+  kind as dropping the auto-select effect.
 
 - [ ] **Step 2: Typecheck**
 
@@ -724,7 +818,8 @@ cd packages/navi-app && grep -rn "BackendSelector\|ModelSelector" src/ --include
 ```
 (Quote the globs — unquoted they are expanded by zsh and the command errors before grep runs,
 which would read as a pass.)
-Expected: only the two files' own definitions. Anything else — stop and re-plan.
+Expected: **no output at all** (a Svelte file does not contain its own name).
+Any hit means something still imports them — stop and re-plan.
 
 - [ ] **Step 2: Add the prop to `ChatInput`**
 
@@ -894,10 +989,13 @@ Add the dispatch to `saveZaiKey()` (`Settings.svelte:342-363`) and `deleteZaiKey
 
 Not in `ClaudeAuthBadge` — that component only refreshes its own status
 (`ClaudeAuthBadge.svelte:17-29`) and a global model reload does not belong there. In
-`App.svelte`, where `loadModels` is already imported from `src/lib/actions/data-loaders.ts`,
-add a listener that calls `loadModels()` and `runAvailability.invalidate()`.
+`App.svelte`, where it is already imported **aliased** as `loadModels as loadModelsAction`
+(`App.svelte:175`, called at `:252` and `:1278`), add a listener that calls
+`loadModelsAction()` and `runAvailability.invalidate()`. Use the alias — the bare name is not
+in scope.
 
-Call `loadModels()` (`data-loaders.ts:53-67`) — **not** `loadBackendModels()`. It is the only
+Call `loadModelsAction()` — i.e. `loadModels` (`data-loaders.ts:53-67`) — **not**
+`loadBackendModels()`. It is the only
 writer of `availableModels` (`:56`) and already chains `loadBackendModels()` itself (`:57`);
 `loadBackendModels()` alone re-copies a stale array (`:83`) and the Z.ai group stays empty.
 
@@ -914,7 +1012,17 @@ git commit -m "Rename the auth-refresh event and make saving a Z.ai key reload m
 
 - [ ] **Step 1: Load Codex health in `loadApiTab()`**
 
-`const codexHealth = await backendsApi.getCodexHealth().catch(() => null);`
+Add `backendsApi` to the `../api` import at `Settings.svelte:2` — today it imports only
+`{ api, costsApi, … }` and `backendsApi` is a separate export (`src/lib/api.ts:1712`).
+
+Assign to a module-level `$state`, not a function-local const, so the card markup can read it —
+every other value `loadApiTab()` loads does this (`Settings.svelte:197-208`):
+
+```ts
+let codexHealth = $state<CodexHealthInfo | null>(null);
+// inside loadApiTab():
+codexHealth = await backendsApi.getCodexHealth().catch(() => null);
+```
 
 - [ ] **Step 2: Add the card via `ProviderCard`**, mirroring Claude's interaction (`:579-609`)
 
@@ -954,7 +1062,10 @@ Never restart the live instance.
 6. Keyboard only: open the chip, arrow through rows, enter and leave a submenu, commit a value, two-stage Escape back to the chip.
 7. All four Settings cards after the port: Claude (both OAuth and API-key states), OpenAI, Z.ai including remove, Codex.
 8. A brand-new chat still auto-selects a model rather than showing an empty chip.
-9. The chip looks unchanged — same tint per provider, Z.ai still fuchsia.
+9. From a **new** chat, pick a model belonging to another harness directly and confirm the
+   harness switches with it (not just the model).
+10. Committing any value closes the menu.
+11. The chip looks unchanged — same tint per provider, Z.ai still fuchsia.
 
 - [ ] **Step 3: Record it** with the `qa-video` skill, asserting the load-bearing states.
 
