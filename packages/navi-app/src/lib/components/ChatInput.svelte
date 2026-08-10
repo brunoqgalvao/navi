@@ -6,7 +6,7 @@
   import TerminalReferenceChip from "./TerminalReferenceChip.svelte";
   import ChatReferenceChip from "./ChatReferenceChip.svelte";
   import AudioRecorder from "./AudioRecorder.svelte";
-  import ModelReasoningSelector from "./ModelReasoningSelector.svelte";
+  import RunSettingsMenu from "./run-settings/RunSettingsMenu.svelte";
   import Tooltip from "./Tooltip.svelte";
   import { getApiBase } from "../config";
   import { isZaiModel } from "../../../shared/zai-models";
@@ -89,13 +89,14 @@
     // Reasoning effort (low, medium, high, xhigh, max)
     reasoningEffort?: ReasoningEffort;
     onReasoningEffortChange?: (effort: ReasoningEffort) => void;
+    onOpenProviderSettings?: () => void;
     // Slash commands from SDK
     slashCommands?: SlashCommand[];
     // UI-only command handlers
     onUICommand?: (command: string, args?: string) => boolean; // Return true if handled
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, backend = "claude", selectedModel = "", backendModels = { claude: [], codex: [], gemini: [] }, reasoningEffort = "medium", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onBackendChange, onModelSelect, onReasoningEffortChange, slashCommands = [], onUICommand }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, backend = "claude", selectedModel = "", backendModels = { claude: [], codex: [], gemini: [] }, reasoningEffort = "medium", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onBackendChange, onModelSelect, onReasoningEffortChange, onOpenProviderSettings, slashCommands = [], onUICommand }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
@@ -1504,7 +1505,7 @@
         </Tooltip>
       {/if}
 
-      <ModelReasoningSelector
+      <RunSettingsMenu
         {backend}
         {selectedModel}
         {backendModels}
@@ -1513,6 +1514,7 @@
         {onBackendChange}
         {onModelSelect}
         {onReasoningEffortChange}
+        {onOpenProviderSettings}
       />
 
 

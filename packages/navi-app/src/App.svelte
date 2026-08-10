@@ -4187,6 +4187,7 @@ Please walk me through the setup step by step. When I have the credentials, save
                     onExecCommand={handleExecCommand}
                     onManageSkills={() => { projectSettingsInitialTab = "skills"; showProjectSettings = true; }}
                     onManageMcp={() => { settingsInitialTab = "mcp"; showSettings = true; }}
+                    onOpenProviderSettings={() => { settingsInitialTab = "api"; showSettings = true; }}
                     onToggleUntilDone={toggleUntilDone}
                     onOpenInfiniteLoop={() => openInfiniteLoopConfig(inputText)}
                     {isInfiniteLoopMode}
