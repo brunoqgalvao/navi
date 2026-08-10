@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, costsApi, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project } from "../api";
+  import { api, costsApi, backendsApi, type CodexHealthInfo, type PermissionSettings, type CostAnalytics, type HourlyCost, type DailyCost, type Project } from "../api";
   import { onMount } from "svelte";
   import { getUpdateStatus, applyUpdate, type UpdateStatus } from "../features/update";
   import { advancedMode, debugMode, loopModeEnabled, deployToCloudEnabled, resourceMonitorEnabled, autoCompactEnabled, autoCompactMethod, onboardingComplete, tour, showArchivedWorkspaces, uiScale, theme, type ThemeMode, type AutoCompactMethod } from "../stores";
@@ -85,13 +85,18 @@
   let zaiError: string | null = $state(null);
   let savingZai = $state(false);
 
+  let codexHealth = $state<CodexHealthInfo | null>(null);
+  let checkingCodex = $state(false);
+  let showCodexSetup = $state(false);
+  const codexLoginCommand = "codex login";
+
   let showOAuthSetup = $state(false);
   let checkingOAuth = $state(false);
   const claudeLoginCommand = "claude auth login";
 
-  function notifyClaudeAuthUpdated() {
+  function notifyProviderAuthUpdated() {
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("navi:claude-auth-updated"));
+      window.dispatchEvent(new CustomEvent("navi:provider-auth-updated"));
     }
   }
 
@@ -190,10 +195,12 @@
   async function loadApiTab() {
     loadingApiTab = true;
     try {
-      const [config, auth] = await Promise.all([
+      const [config, auth, codex] = await Promise.all([
         api.config.get(),
         api.auth.status(),
+        backendsApi.getCodexHealth().catch(() => null),
       ]);
+      codexHealth = codex;
       hasOpenAIKey = config.hasOpenAIKey;
       openAIKeyPreview = config.openAIKeyPreview;
       autoTitleEnabled = config.autoTitleEnabled;
@@ -331,7 +338,7 @@
       authMethod = "api_key";
       showAnthropicInput = false;
       anthropicKeyInput = "";
-      notifyClaudeAuthUpdated();
+      notifyProviderAuthUpdated();
     } catch (e: any) {
       anthropicError = e.message || "Failed to save API key";
     } finally {
@@ -355,11 +362,30 @@
       zaiKeySource = "settings";
       showZaiInput = false;
       zaiKeyInput = "";
+      notifyProviderAuthUpdated();
     } catch (e: any) {
       zaiError = e.message || "Failed to save API key";
     } finally {
       savingZai = false;
     }
+  }
+
+  async function checkCodexStatus() {
+    checkingCodex = true;
+    try {
+      codexHealth = await backendsApi.getCodexHealth().catch(() => null);
+      showCodexSetup = false;
+      notifyProviderAuthUpdated();
+    } finally {
+      checkingCodex = false;
+    }
+  }
+
+  function codexAuthLabel(mode: CodexHealthInfo["authMode"] | undefined): string {
+    if (mode === "chatgpt") return "ChatGPT account";
+    if (mode === "api_key") return "API key";
+    if (mode === "not_logged_in") return "Not signed in";
+    return "Unknown";
   }
 
   async function deleteZaiKey() {
@@ -369,6 +395,7 @@
       hasZaiKey = auth.hasZaiKey;
       zaiKeyPreview = auth.zaiKeyPreview;
       zaiKeySource = auth.zaiKeySource;
+      notifyProviderAuthUpdated();
     } catch (e) {
       console.error("Failed to delete Z.ai key:", e);
     }
@@ -390,7 +417,7 @@
       if (auth.hasOAuth) {
         showOAuthSetup = false;
       }
-      notifyClaudeAuthUpdated();
+      notifyProviderAuthUpdated();
     } finally {
       checkingOAuth = false;
     }
@@ -684,7 +711,7 @@
                                     await api.auth.setPreferred("oauth");
                                     preferredAuth = "oauth";
                                     authMethod = "oauth";
-                                    notifyClaudeAuthUpdated();
+                                    notifyProviderAuthUpdated();
                                   } finally {
                                     switchingAuth = false;
                                   }
@@ -701,7 +728,7 @@
                                     await api.auth.setPreferred("api_key");
                                     preferredAuth = "api_key";
                                     authMethod = "api_key";
-                                    notifyClaudeAuthUpdated();
+                                    notifyProviderAuthUpdated();
                                   } finally {
                                     switchingAuth = false;
                                   }
@@ -862,6 +889,92 @@
 
                       <p class="text-xs text-gray-500 dark:text-gray-400">
                         Get your key from <a href="https://z.ai/model-api" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Z.ai</a>. GLM-5.2 1M appears as <code class="font-mono">glm-5.2[1m]</code> after a key is configured.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Codex (OpenAI CLI). Mirrors the Claude card: status is read live, signing
+                     in is a command you run yourself, since codex login needs a browser. -->
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-start gap-4">
+                    <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center shrink-0">
+                      <span class="text-emerald-600 dark:text-emerald-400 font-bold text-sm">X</span>
+                    </div>
+                    <div class="flex-1 space-y-4">
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Codex (OpenAI)</h3>
+                          <p class="text-xs text-gray-500 dark:text-gray-400">Used by the Codex harness</p>
+                        </div>
+                        {#if codexHealth?.installed && codexHealth.authMode !== "not_logged_in" && codexHealth.authMode !== "unknown"}
+                          <span class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">Signed in</span>
+                        {:else if codexHealth?.installed}
+                          <span class="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Not signed in</span>
+                        {:else}
+                          <span class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">Not installed</span>
+                        {/if}
+                      </div>
+
+                      <div class="flex items-center gap-2 text-xs">
+                        <span class="text-gray-500 dark:text-gray-400">Codex CLI:</span>
+                        {#if codexHealth?.installed}
+                          <span class="text-green-600 dark:text-green-400">
+                            Installed{codexHealth.version ? ` · ${codexHealth.version}` : ""}
+                          </span>
+                        {:else}
+                          <span class="text-gray-400 dark:text-gray-500">Not found</span>
+                        {/if}
+                      </div>
+
+                      <div class="flex items-center gap-2 text-xs">
+                        <span class="text-gray-500 dark:text-gray-400">Signed in:</span>
+                        <span class="text-gray-700 dark:text-gray-300">{codexAuthLabel(codexHealth?.authMode)}</span>
+                      </div>
+
+                      {#if !showCodexSetup}
+                        <button
+                          onclick={() => (showCodexSetup = true)}
+                          class="text-xs px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                        >
+                          {codexHealth?.installed && codexHealth.authMode === "chatgpt" ? "Re-authenticate" : "Sign in"}
+                        </button>
+                      {:else}
+                        <div class="space-y-2">
+                          <div class="flex items-center gap-2 bg-gray-900 dark:bg-black rounded-lg px-3 py-2">
+                            <code class="flex-1 text-xs text-gray-100 font-mono">{codexLoginCommand}</code>
+                            <button
+                              onclick={() => navigator.clipboard.writeText(codexLoginCommand)}
+                              class="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                              title="Copy command"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                          <p class="text-xs text-gray-500 dark:text-gray-400">
+                            Run this in your terminal — it opens your browser to sign in — then click below.
+                          </p>
+                          <div class="flex items-center gap-2">
+                            <button
+                              onclick={checkCodexStatus}
+                              disabled={checkingCodex}
+                              class="text-xs px-3 py-1.5 rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:opacity-90 transition-opacity disabled:opacity-50"
+                            >
+                              {checkingCodex ? "Checking..." : "I've logged in"}
+                            </button>
+                            <button
+                              onclick={() => (showCodexSetup = false)}
+                              class="text-xs px-3 py-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      {/if}
+
+                      <p class="text-xs text-gray-500 dark:text-gray-400">
+                        Install with <code class="font-mono">npm i -g @openai/codex</code>. Navi uses your own
+                        install in preference to the copy bundled in node_modules.
                       </p>
                     </div>
                   </div>

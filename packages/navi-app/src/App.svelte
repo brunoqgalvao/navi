@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
+  import { runAvailability } from "./lib/stores/run-availability";
   import { get } from "svelte/store";
   import { ClaudeClient, type ClaudeMessage, type ContentBlock } from "./lib/claude";
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
@@ -1262,6 +1263,17 @@
     // Initialize extension registry with default extensions
     initializeRegistry();
 
+    // A provider's credentials changed somewhere in Settings or onboarding. Re-derive
+    // availability, and reload models — Z.ai's models only exist once its key does, so
+    // without this the menu's Z.ai group stays empty after you save one. loadModelsAction
+    // is the only writer of availableModels and chains loadBackendModels itself.
+    const onProviderAuthUpdated = () => {
+      runAvailability.invalidate();
+      void runAvailability.refresh(true);
+      void loadModelsAction();
+    };
+    window.addEventListener("navi:provider-auth-updated", onProviderAuthUpdated);
+
     startSidecar().then(async () => {
       serverReady = true;
       startConnectivityMonitoring(30000);
@@ -1427,6 +1439,7 @@ Please walk me through the setup step by step. When I have the credentials, save
       document.removeEventListener("click", handleGlobalClick);
       document.removeEventListener("open-setup-chat", handleSetupChat);
       unsubscribeHash();
+      window.removeEventListener("navi:provider-auth-updated", onProviderAuthUpdated);
       cleanupErrorHandlers();
     };
   });

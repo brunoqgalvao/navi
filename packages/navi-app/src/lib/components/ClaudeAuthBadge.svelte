@@ -8,7 +8,7 @@
     hasOAuth: boolean;
   };
 
-  const CLAUDE_AUTH_EVENT = "navi:claude-auth-updated";
+  const PROVIDER_AUTH_EVENT = "navi:provider-auth-updated";
   const REFRESH_INTERVAL_MS = 30000;
 
   let authStatus = $state<ClaudeAuthStatus | null>(null);
@@ -43,14 +43,14 @@
   onMount(() => {
     refreshStatus();
 
-    window.addEventListener(CLAUDE_AUTH_EVENT, handleFocus);
+    window.addEventListener(PROVIDER_AUTH_EVENT, handleFocus);
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     refreshTimer = setInterval(refreshStatus, REFRESH_INTERVAL_MS);
   });
 
   onDestroy(() => {
-    window.removeEventListener(CLAUDE_AUTH_EVENT, handleFocus);
+    window.removeEventListener(PROVIDER_AUTH_EVENT, handleFocus);
     window.removeEventListener("focus", handleFocus);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
     if (refreshTimer) clearInterval(refreshTimer);

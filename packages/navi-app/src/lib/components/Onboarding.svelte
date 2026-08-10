@@ -26,9 +26,9 @@
   let settingPreferred = $state(false);
   const claudeLoginCommand = "claude auth login";
 
-  function notifyClaudeAuthUpdated() {
+  function notifyProviderAuthUpdated() {
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("navi:claude-auth-updated"));
+      window.dispatchEvent(new CustomEvent("navi:provider-auth-updated"));
     }
   }
 
@@ -64,7 +64,7 @@
       if (authStatus) {
         authStatus = { ...authStatus, authMethod: method, preferredAuth: method };
       }
-      notifyClaudeAuthUpdated();
+      notifyProviderAuthUpdated();
       step = "complete";
     } catch (e) {
       console.error("Failed to set preferred auth:", e);
@@ -86,7 +86,7 @@
       await api.auth.setApiKey(apiKey.trim());
       authStatus = await api.auth.status();
       if (authStatus.authenticated) {
-        notifyClaudeAuthUpdated();
+        notifyProviderAuthUpdated();
         if (authStatus.hasOAuth) {
           step = "choose-auth";
         } else {
@@ -107,7 +107,7 @@
     try {
       authStatus = await api.auth.status();
       if (authStatus.hasOAuth) {
-        notifyClaudeAuthUpdated();
+        notifyProviderAuthUpdated();
         if (authStatus.hasApiKey) {
           step = "choose-auth";
         } else {
