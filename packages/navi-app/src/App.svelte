@@ -4215,6 +4215,18 @@ Please walk me through the setup step by step. When I have the credentials, save
                     onBackendChange={(newBackend) => {
                       // Only allow backend change for new chats
                       if ($session.isPending || !$session.sessionId || currentMessages.length === 0) {
+                        const backendSessionId = $session.sessionId;
+                        if (backendSessionId) {
+                          // An existing chat with no messages: the session row is the source
+                          // of truth. Without this the chip never updates, because
+                          // sessionBackendStore.get always returns a value and the
+                          // `|| $defaultBackend` fallback below is dead code.
+                          sessionBackendStore.set(backendSessionId, newBackend);
+                          api.sessions
+                            .update(backendSessionId, { backend: newBackend })
+                            .catch((e) => console.error("Failed to persist backend:", e));
+                        }
+                        // A pending chat has no row yet; createNewChat reads this at send.
                         defaultBackend.set(newBackend);
                         // Auto-select the default model for the new backend
                         const models = getBackendModelsFormatted(newBackend, get(backendModels));
