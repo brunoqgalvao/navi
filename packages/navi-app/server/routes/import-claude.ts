@@ -30,7 +30,7 @@ function extractUserText(content: unknown): string | null {
     const trimmed = content.trim();
     if (!trimmed) return null;
     if (
-      trimmed.startsWith("<command-name>") ||
+      trimmed.startsWith("<command-") ||
       trimmed.startsWith("<local-command") ||
       trimmed.startsWith("<system-reminder>") ||
       trimmed.startsWith("Caveat:")
@@ -283,6 +283,9 @@ export async function handleImportClaudeRoutes(
     const requestedIds: string[] | null = Array.isArray(body.sessionIds)
       ? body.sessionIds
       : null;
+    if (!requestedIds && body.all !== true) {
+      return json({ error: "Provide sessionIds or set all: true" }, 400);
+    }
 
     const known = getKnownClaudeSessionIds();
     let candidates = scanExternalSessions(days).filter(

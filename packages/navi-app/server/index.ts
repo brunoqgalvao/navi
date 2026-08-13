@@ -16,6 +16,7 @@ import { handleConfigRoutes } from "./routes/config";
 import { handleProjectRoutes } from "./routes/projects";
 import { handleSessionRoutes } from "./routes/sessions";
 import { handleMessageRoutes } from "./routes/messages";
+import { handleImportClaudeRoutes } from "./routes/import-claude";
 import { handleSkillRoutes } from "./routes/skills";
 import { handleAgentRoutes } from "./routes/agents";
 import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal";
@@ -340,6 +341,10 @@ const server = Bun.serve({
 
     // Message routes
     response = await handleMessageRoutes(url, method, req);
+    if (response) return response;
+
+    // Import external Claude Code (terminal) sessions
+    response = await handleImportClaudeRoutes(url, method, req);
     if (response) return response;
 
     // Skill routes
