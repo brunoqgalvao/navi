@@ -80,6 +80,7 @@ export function createMessageHandler(config: MessageHandlerConfig) {
             cwd: systemMsg.cwd,
             tools: systemMsg.tools,
             skills: systemMsg.skills,
+            agents: systemMsg.agents,
           });
         }
         // Handle compacting status

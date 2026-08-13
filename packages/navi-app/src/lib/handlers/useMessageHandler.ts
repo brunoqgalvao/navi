@@ -169,6 +169,7 @@ export function useMessageHandler(options: UseMessageHandlerOptions) {
           model: data.model || "",
           tools: data.tools || [],
           skills: data.skills || [],
+          agents: data.agents || [],
           timestamp: new Date(),
         });
         // If claudeSessionId is present, notify the UI to update session state

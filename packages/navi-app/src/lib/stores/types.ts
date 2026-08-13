@@ -58,6 +58,7 @@ export interface SessionDebugInfo {
   model: string;
   tools: string[];
   skills: string[];
+  agents: string[];
   timestamp: Date;
 }
 

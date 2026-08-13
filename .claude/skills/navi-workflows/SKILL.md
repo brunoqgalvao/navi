@@ -12,9 +12,10 @@ Use this skill for Navi workflow CRUD, manual runs, schedule changes, and run-hi
 ## Mental Model
 
 - A **workflow** belongs to a project and stores a reusable prompt, schedule, optional gate, and notes.
-- Each workflow has a **root session** in the sidebar. That root session holds the workflow summary.
+- Each workflow has a **root session**. That root session holds the workflow summary.
 - Every execution creates a **child run session** under that root session.
-- **Run history** is available both in the sidebar (child run sessions) and via `GET /api/workflows/{workflowId}/runs`.
+- **Run history** is available as child run sessions in the session tree and via `GET /api/workflows/{workflowId}/runs`.
+- **There is no workflows GUI** (removed 2026-08): no sidebar section, editor, or monitor view. This skill and the REST API are the only way to manage workflows — that's why this skill matters.
 
 ## API Base
 

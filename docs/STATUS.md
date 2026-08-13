@@ -144,6 +144,11 @@ key storage you control.
 **Status:** IN REBUILD — torn down in the refocus, being rebuilt on the
 refocused core (sessions + multi-agent orchestration + MCP).
 
+The workflows GUI (sidebar section, editor modal, monitor view) was removed
+in 2026-08. Workflows are backend + API + `navi-workflows` skill only: the
+scheduler, routes, and run history all still work, driven programmatically.
+Workflow runs still show up as child sessions in the session tree.
+
 See the refocus spec for the intended shape.
 
 ---

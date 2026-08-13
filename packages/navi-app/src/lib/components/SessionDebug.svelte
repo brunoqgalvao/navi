@@ -243,6 +243,10 @@ ${UI_INSTRUCTIONS}
             <span class="font-bold text-gray-700">Skills ({debug.skills?.length || 0})</span>
             <pre class="mt-1">{(debug.skills || []).join(', ') || 'none'}</pre>
           </div>
+          <div class="col-span-2">
+            <span class="font-bold text-gray-700">Subagents ({debug.agents?.length || 0})</span>
+            <pre class="mt-1 whitespace-pre-wrap">{(debug.agents || []).join(', ') || 'none'}</pre>
+          </div>
         </div>
         {/if}
 

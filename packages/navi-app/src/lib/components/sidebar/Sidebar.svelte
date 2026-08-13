@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
   import { currentSession as session, isConnected, projectStatus, sessionStatus, costStore, showArchivedWorkspaces, chatSortOrder, attentionItems } from "../../stores";
-  import { api, agentsApi, type Agent as ProjectAgent, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult, type Workflow, type WorkflowGate, type WorkflowSchedule } from "../../api";
+  import { api, type Project, type Session, type WorkspaceFolder, type SessionFolder, type SearchResult } from "../../api";
   import { getApiBase } from "../../config";
   import StarButton from "../StarButton.svelte";
   import TitleSuggestion from "../TitleSuggestion.svelte";
@@ -15,12 +15,10 @@
   import { blockedSessionsStore, blockedCount } from "../../features/session-hierarchy";
   import Tooltip from "../Tooltip.svelte";
   import SessionChildren from "./SessionChildren.svelte";
-  import WorkflowEditorModal from "./WorkflowEditorModal.svelte";
 
   interface Props {
     projects: Project[];
     sessions: Session[];
-    workflows?: Workflow[];
     recentChats: Session[];
     currentProject: Project | null;
     currentMessages: ChatMessage[];
@@ -79,34 +77,6 @@
     onSessionFolderToggleCollapse?: (id: string, collapsed: boolean) => void;
     onSessionSetFolder?: (sessionId: string, folderId: string | null) => void;
     onSessionFolderReorder?: (order: string[]) => void;
-    onWorkflowCreate?: (input: {
-      name: string;
-      prompt: string;
-      schedule: WorkflowSchedule;
-      gate?: WorkflowGate;
-      enabled?: boolean;
-      ownerAgentId?: string | null;
-      collapsed?: boolean;
-      learningNotes?: string | null;
-      feedbackNotes?: string | null;
-    }) => Promise<Workflow>;
-    onWorkflowUpdate?: (
-      workflowId: string,
-      input: {
-        name?: string;
-        prompt?: string;
-        schedule?: WorkflowSchedule;
-        gate?: WorkflowGate;
-        enabled?: boolean;
-        ownerAgentId?: string | null;
-        collapsed?: boolean;
-        learningNotes?: string | null;
-        feedbackNotes?: string | null;
-      }
-    ) => Promise<Workflow>;
-    onWorkflowDelete?: (workflowId: string) => Promise<void>;
-    onWorkflowRun?: (workflowId: string) => Promise<void>;
-    onWorkflowSelect?: (workflow: Workflow) => void;
     onOpenProjectInNewWindow: (project: Project) => void;
     onOpenSessionInNewWindow: (session: Session) => void;
     onOpenHomeInNewWindow: () => void;
@@ -117,7 +87,6 @@
   let {
     projects,
     sessions,
-    workflows = [],
     recentChats,
     currentProject,
     currentMessages,
@@ -176,11 +145,6 @@
     onSessionFolderToggleCollapse,
     onSessionSetFolder,
     onSessionFolderReorder,
-    onWorkflowCreate,
-    onWorkflowUpdate,
-    onWorkflowDelete,
-    onWorkflowRun,
-    onWorkflowSelect,
     onOpenProjectInNewWindow,
     onOpenSessionInNewWindow,
     onOpenHomeInNewWindow,
@@ -197,40 +161,8 @@
     console.log("[Sidebar] sessionFolders updated:", sessionFolders.length, sessionFolders);
   });
 
-  // Agent section collapsed state
-  let projectAgents = $state<ProjectAgent[]>([]);
-  let loadingProjectAgents = $state(false);
-
   // Sessions dropdown for collapsed sidebar
   let sessionsDropdownOpen = $state(false);
-
-  onMount(() => {
-    const handleProjectAgentsUpdated = (event: Event) => {
-      const customEvent = event as CustomEvent<{ projectId?: string }>;
-      const updatedProjectId = customEvent.detail?.projectId;
-      if (updatedProjectId && updatedProjectId === currentProject?.id) {
-        void loadProjectAgents(updatedProjectId);
-      }
-    };
-
-    window.addEventListener("navi:project-agents-updated", handleProjectAgentsUpdated as EventListener);
-
-    return () => {
-      window.removeEventListener("navi:project-agents-updated", handleProjectAgentsUpdated as EventListener);
-    };
-  });
-
-  async function loadProjectAgents(projectId: string) {
-    loadingProjectAgents = true;
-    try {
-      projectAgents = await agentsApi.listForProject(projectId);
-    } catch (e) {
-      console.error("Failed to load project agents:", e);
-      projectAgents = [];
-    } finally {
-      loadingProjectAgents = false;
-    }
-  }
 
   let sidebarSearchQuery = $state("");
   let searchResults = $state<SearchResult[]>([]);
@@ -286,17 +218,6 @@
     doSearch(sidebarSearchQuery);
   });
 
-  $effect(() => {
-    const projectId = currentProject?.id;
-    if (projectId) {
-      void loadProjectAgents(projectId);
-      return;
-    }
-
-    projectAgents = [];
-    loadingProjectAgents = false;
-  });
-
   let filteredSessions = $derived.by(() => {
     const query = sidebarSearchQuery.trim();
     const sortOrder = $chatSortOrder;
@@ -328,23 +249,7 @@
     });
   });
 
-  let workflowRootsBySessionId = $derived.by(() => {
-    const map = new Map<string, Workflow>();
-    for (const workflow of workflows) {
-      map.set(workflow.rootSessionId, workflow);
-    }
-    return map;
-  });
-
-  let workflowRootSessions = $derived.by(() =>
-    filteredSessions.filter((session) => workflowRootsBySessionId.has(session.id))
-  );
-
-  let regularFilteredSessions = $derived.by(() =>
-    filteredSessions.filter((session) => !workflowRootsBySessionId.has(session.id))
-  );
-
-  let visibleConversationCount = $derived(workflowRootSessions.length + regularFilteredSessions.length);
+  let visibleConversationCount = $derived(filteredSessions.length);
 
   // Use centralized attention store for running/needs-input items
   let runningChats = $derived($attentionItems.runningSessions.map(item => item.session));
@@ -364,60 +269,6 @@
       map.set(parentId, children.sort((a, b) => a.created_at - b.created_at));
     }
     return map;
-  });
-
-  let workflowSidebarItems = $derived.by(() =>
-    workflowRootSessions
-      .map((workflowSession) => {
-        const workflow = workflowRootsBySessionId.get(workflowSession.id);
-        if (!workflow) return null;
-        return {
-          workflow,
-          workflowSession,
-          workflowChildren: childrenByParent.get(workflowSession.id) || [],
-        };
-      })
-      .filter((item): item is {
-        workflow: Workflow;
-        workflowSession: Session;
-        workflowChildren: Session[];
-      } => item !== null)
-  );
-
-  let workflowGroups = $derived.by(() => {
-    const groups = new Map<
-      string,
-      {
-        id: string;
-        label: string;
-        description: string | null;
-        items: typeof workflowSidebarItems;
-      }
-    >();
-
-    for (const item of workflowSidebarItems) {
-      const owner = item.workflow.ownerAgentId
-        ? projectAgents.find((candidate) => candidate.id === item.workflow.ownerAgentId) || null
-        : null;
-      const key = owner?.id || "__workspace__";
-
-      if (!groups.has(key)) {
-        groups.set(key, {
-          id: key,
-          label: owner?.name || "Workspace",
-          description: owner?.description || null,
-          items: [],
-        });
-      }
-
-      groups.get(key)?.items.push(item);
-    }
-
-    return [...groups.values()].sort((a, b) => {
-      if (a.id === "__workspace__") return 1;
-      if (b.id === "__workspace__") return -1;
-      return a.label.localeCompare(b.label);
-    });
   });
 
   function sortFoldersForTree(a: WorkspaceFolder, b: WorkspaceFolder): number {
@@ -513,9 +364,6 @@
   let sessionFolderMenuId = $state<string | null>(null);
   let draggedSessionFolderId = $state<string | null>(null);
   let dragOverSessionFolderId = $state<string | null>(null);
-  let showWorkflowEditor = $state(false);
-  let editingWorkflow = $state<Workflow | null>(null);
-  let workflowMenuId = $state<string | null>(null);
 
   async function openInFinder() {
     if (!currentProject) return;
@@ -1014,48 +862,7 @@
 
   // Session folder helpers
   function getSessionsInFolder(folderId: string | null): Session[] {
-    return regularFilteredSessions.filter(s => (s.folder_id || null) === folderId);
-  }
-
-  function formatWorkflowSchedule(workflow: Workflow): string {
-    switch (workflow.schedule.kind) {
-      case "every":
-        return `Every ${Math.max(1, Math.round(workflow.schedule.interval / 60000))}m`;
-      case "cron":
-        return workflow.schedule.expression;
-      case "at":
-        return new Date(workflow.schedule.time).toLocaleString();
-    }
-  }
-
-  function openCreateWorkflow() {
-    editingWorkflow = null;
-    showWorkflowEditor = true;
-  }
-
-  function openEditWorkflow(workflow: Workflow, e: Event) {
-    e.stopPropagation();
-    editingWorkflow = workflow;
-    workflowMenuId = null;
-    showWorkflowEditor = true;
-  }
-
-  async function saveWorkflow(input: {
-    name: string;
-    prompt: string;
-    schedule: WorkflowSchedule;
-    gate?: WorkflowGate;
-    enabled?: boolean;
-    ownerAgentId?: string | null;
-    collapsed?: boolean;
-    learningNotes?: string | null;
-    feedbackNotes?: string | null;
-  }) {
-    if (editingWorkflow) {
-      await onWorkflowUpdate?.(editingWorkflow.id, input);
-    } else {
-      await onWorkflowCreate?.(input);
-    }
+    return filteredSessions.filter(s => (s.folder_id || null) === folderId);
   }
 
   async function createSessionFolder() {
@@ -1783,148 +1590,11 @@
         {/if}
 
         <div class="flex-1 overflow-y-auto space-y-0.5 sidebar-scroll pr-1">
-          {#if sessions.length === 0 && workflowRootSessions.length === 0}
+          {#if sessions.length === 0}
             <div class="text-xs text-gray-400 dark:text-gray-500 italic text-center py-8">No chats yet</div>
           {:else if visibleConversationCount === 0}
             <div class="text-xs text-gray-400 dark:text-gray-500 italic text-center py-4">No matching chats</div>
           {:else}
-            {#if workflowRootSessions.length > 0 || onWorkflowCreate}
-              <div class="mb-3">
-                <div class="flex items-center justify-between px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-gray-400 dark:text-gray-500">
-                  <span>Workflows</span>
-                  {#if onWorkflowCreate}
-                    <button onclick={openCreateWorkflow} class="inline-flex items-center gap-1 text-[10px] font-medium bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 dark:from-violet-500/20 dark:to-fuchsia-500/20 hover:from-violet-500/20 hover:to-fuchsia-500/20 dark:hover:from-violet-500/30 dark:hover:to-fuchsia-500/30 text-violet-600 dark:text-violet-300 px-2 py-0.5 rounded-md transition-all border border-violet-200/60 dark:border-violet-500/30 hover:border-violet-300 dark:hover:border-violet-500/50 normal-case tracking-normal">
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
-                      New
-                    </button>
-                  {/if}
-                </div>
-
-                {#if workflowGroups.length === 0}
-                  <div class="px-2 py-2 text-xs text-gray-400 italic">No workflows yet</div>
-                {:else}
-                  <div class="space-y-2">
-                    {#each workflowGroups as group (group.id)}
-                      <div class="rounded-xl border border-gray-100 bg-gray-50/50 dark:border-gray-800 dark:bg-gray-900/30">
-                        <div class="flex items-start justify-between gap-3 px-3 py-2">
-                          <div class="min-w-0">
-                            <div class="flex items-center gap-2">
-                              <span class={`inline-flex h-6 items-center rounded-full px-2.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${group.id === "__workspace__" ? "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200" : "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300"}`}>
-                                {group.id === "__workspace__" ? "Workspace" : "Agent"}
-                              </span>
-                              <span class="truncate text-[12px] font-semibold text-gray-700 dark:text-gray-200">{group.label}</span>
-                            </div>
-                            {#if group.description}
-                              <p class="mt-1 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">{group.description}</p>
-                            {/if}
-                          </div>
-                          <span class="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-gray-500 shadow-sm dark:bg-gray-800 dark:text-gray-300">
-                            {group.items.length}
-                          </span>
-                        </div>
-
-                        <div class="space-y-1 px-2 pb-2">
-                          {#each group.items as item (item.workflow.id)}
-                            {@const workflow = item.workflow}
-                            {@const workflowChildren = item.workflowChildren}
-                            <div class="group">
-                              <div class={`relative rounded-lg border ${$session.sessionId === workflow.rootSessionId ? 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 shadow-sm' : 'bg-white/80 dark:bg-gray-800/70 border-gray-100 dark:border-gray-800 hover:border-gray-200 dark:hover:border-gray-700'}`}>
-                                <div class="flex items-start gap-2 px-2.5 py-2">
-                                  <button
-                                    onclick={(e) => {
-                                      e.stopPropagation();
-                                      onWorkflowUpdate?.(workflow.id, { collapsed: !workflow.collapsed });
-                                    }}
-                                    class="mt-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                                  >
-                                    <svg class={`w-3.5 h-3.5 transition-transform ${workflow.collapsed ? '' : 'rotate-90'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                                    </svg>
-                                  </button>
-
-                                  <button
-                                    onclick={() => onWorkflowSelect?.(workflow)}
-                                    class="flex-1 min-w-0 text-left"
-                                  >
-                                    <div class="flex items-center gap-2 min-w-0">
-                                      <span class={`inline-flex items-center justify-center w-6 h-6 rounded-md text-[10px] font-semibold ${workflow.enabled ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300'}`}>
-                                        WF
-                                      </span>
-                                      <div class="min-w-0">
-                                        <div class="truncate text-[13px] font-medium text-gray-800 dark:text-gray-100">{workflow.name}</div>
-                                        <div class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-2 flex-wrap">
-                                          <span>{formatWorkflowSchedule(workflow)}</span>
-                                          {#if workflow.nextRunAt}
-                                            <span>Next <RelativeTime timestamp={workflow.nextRunAt} /></span>
-                                          {/if}
-                                          {#if workflow.lastSkipReason}
-                                            <span class="text-amber-600 dark:text-amber-400 truncate">Skipped: {workflow.lastSkipReason}</span>
-                                          {:else if workflow.lastError}
-                                            <span class="text-red-500 truncate">Error: {workflow.lastError}</span>
-                                          {/if}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </button>
-
-                                  <div class="flex items-center gap-1">
-                                    <button
-                                      onclick={async (e) => {
-                                        e.stopPropagation();
-                                        await onWorkflowRun?.(workflow.id);
-                                      }}
-                                      class="px-2 py-1 text-[10px] rounded-md border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                    >
-                                      Run
-                                    </button>
-                                    <div class="relative">
-                                      <button
-                                        onclick={(e) => {
-                                          e.stopPropagation();
-                                          workflowMenuId = workflowMenuId === workflow.id ? null : workflow.id;
-                                        }}
-                                        class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                                      >
-                                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>
-                                      </button>
-                                      {#if workflowMenuId === workflow.id}
-                                        <div class="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[160px] z-[70]">
-                                          <button onclick={(e) => openEditWorkflow(workflow, e)} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Edit workflow</button>
-                                          <button onclick={async (e) => { e.stopPropagation(); await onWorkflowUpdate?.(workflow.id, { enabled: !workflow.enabled }); workflowMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
-                                            {workflow.enabled ? "Pause" : "Enable"}
-                                          </button>
-                                          <button onclick={async (e) => { e.stopPropagation(); await onWorkflowDelete?.(workflow.id); workflowMenuId = null; }} class="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30">
-                                            Delete
-                                          </button>
-                                        </div>
-                                      {/if}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div class="px-2.5 pb-2 text-[10px] text-gray-500 dark:text-gray-400">
-                                  {workflow.runCount} run{workflow.runCount === 1 ? '' : 's'}
-                                </div>
-                              </div>
-
-                              {#if !workflow.collapsed}
-                                {#if workflowChildren.length > 0}
-                                  <div class="mt-1">
-                                    <SessionChildren children={workflowChildren} parentId={workflow.rootSessionId} {onSelectSession} />
-                                  </div>
-                                {:else}
-                                  <div class="ml-7 mt-1 text-[11px] text-gray-400 dark:text-gray-500 italic">No runs yet</div>
-                                {/if}
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            {/if}
 
             <!-- Session folders -->
             {#each visibleSessionFolders as folder (folder.id)}
@@ -2299,17 +1969,3 @@
   </div>
 </aside>
 
-<WorkflowEditorModal
-  open={showWorkflowEditor}
-  workflow={editingWorkflow}
-  agents={projectAgents}
-  onClose={() => {
-    showWorkflowEditor = false;
-    editingWorkflow = null;
-  }}
-  onSave={saveWorkflow}
-  onSelectSession={(sessionId) => {
-    const sess = sessions.find(s => s.id === sessionId);
-    if (sess) onSelectSession(sess);
-  }}
-/>
