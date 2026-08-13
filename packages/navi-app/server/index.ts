@@ -19,7 +19,6 @@ import { handleMessageRoutes } from "./routes/messages";
 import { handleSkillRoutes } from "./routes/skills";
 import { handleAgentRoutes } from "./routes/agents";
 import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal";
-import { handleProxyRoutes } from "./routes/proxy";
 import { handleProcessRoutes } from "./routes/processes";
 import { handleAnalyticsRoutes } from "./routes/analytics";
 import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
@@ -33,8 +32,6 @@ import { handleCredentialsRoutes } from "./routes/credentials";
 // Backend adapters (Claude, Codex, Gemini)
 import { handleBackendRoutes } from "./routes/backends";
 import { handleHooksRoutes } from "./routes/hooks";
-// Browser-use automation
-import { handleBrowserRoutes } from "./routes/browser";
 // Plugin Management
 import { handlePluginRoutes } from "./routes/plugins";
 // MCP Server Settings
@@ -446,20 +443,12 @@ const server = Bun.serve({
     response = await handleTerminalRoutes(url, method, req);
     if (response) return response;
 
-    // Proxy routes (for external URL preview)
-    response = await handleProxyRoutes(url, method, req);
-    if (response) return response;
-
     // Process management routes
     response = await handleProcessRoutes(url, method, req);
     if (response) return response;
 
     // Analytics routes
     response = await handleAnalyticsRoutes(url, method);
-    if (response) return response;
-
-    // Browser routes (browser-use)
-    response = await handleBrowserRoutes(url, method, req);
     if (response) return response;
 
     // Background process routes

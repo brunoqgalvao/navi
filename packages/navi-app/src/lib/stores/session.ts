@@ -1,6 +1,6 @@
 import { writable, derived, get } from "svelte/store";
 import { setHash } from "../router";
-import type { ChatMessage, TodoItem, SessionDebugInfo, SessionStatus, SessionStatusType, ModelInfo, SDKEvent, QueuedMessage, SessionWorkspace, TerminalTab, BrowserState, ActiveWait } from "./types";
+import type { ChatMessage, TodoItem, SessionDebugInfo, SessionStatus, SessionStatusType, ModelInfo, SDKEvent, QueuedMessage, SessionWorkspace, TerminalTab, ActiveWait } from "./types";
 import type { ContentBlock } from "../claude";
 
 // Pagination metadata per session
@@ -585,7 +585,7 @@ function createSessionEventsStore() {
 
 export const sessionEvents = createSessionEventsStore();
 
-// Session workspaces store (terminals + browser per session)
+// Session workspaces store (terminals per session)
 function createSessionWorkspacesStore() {
   const { subscribe, set, update } = writable<Map<string, SessionWorkspace>>(new Map());
 
@@ -594,11 +594,6 @@ function createSessionWorkspacesStore() {
     terminalTabs: [{ id: "term-1", name: "Terminal 1" }],
     activeTerminalId: "term-1",
     terminalCounter: 1,
-    browser: {
-      url: "",
-      history: [],
-      historyIndex: -1,
-    },
   });
 
   return {
@@ -693,81 +688,6 @@ function createSessionWorkspacesStore() {
         return new Map(map);
       }),
 
-    // Browser operations
-    updateBrowser: (sessionId: string, updates: Partial<BrowserState>) =>
-      update((map) => {
-        const workspace = map.get(sessionId) || getDefaultWorkspace(sessionId);
-        map.set(sessionId, {
-          ...workspace,
-          browser: { ...workspace.browser, ...updates },
-        });
-        return new Map(map);
-      }),
-
-    navigateBrowser: (sessionId: string, url: string) =>
-      update((map) => {
-        const workspace = map.get(sessionId) || getDefaultWorkspace(sessionId);
-        const { browser } = workspace;
-        const newHistory = [...browser.history.slice(0, browser.historyIndex + 1), url];
-        map.set(sessionId, {
-          ...workspace,
-          browser: {
-            url,
-            history: newHistory,
-            historyIndex: newHistory.length - 1,
-          },
-        });
-        return new Map(map);
-      }),
-
-    browserBack: (sessionId: string) =>
-      update((map) => {
-        const workspace = map.get(sessionId);
-        if (!workspace || workspace.browser.historyIndex <= 0) return map;
-        const newIndex = workspace.browser.historyIndex - 1;
-        map.set(sessionId, {
-          ...workspace,
-          browser: {
-            ...workspace.browser,
-            url: workspace.browser.history[newIndex],
-            historyIndex: newIndex,
-          },
-        });
-        return new Map(map);
-      }),
-
-    browserForward: (sessionId: string) =>
-      update((map) => {
-        const workspace = map.get(sessionId);
-        if (!workspace || workspace.browser.historyIndex >= workspace.browser.history.length - 1)
-          return map;
-        const newIndex = workspace.browser.historyIndex + 1;
-        map.set(sessionId, {
-          ...workspace,
-          browser: {
-            ...workspace.browser,
-            url: workspace.browser.history[newIndex],
-            historyIndex: newIndex,
-          },
-        });
-        return new Map(map);
-      }),
-
-    browserGoToIndex: (sessionId: string, index: number) =>
-      update((map) => {
-        const workspace = map.get(sessionId);
-        if (!workspace || index < 0 || index >= workspace.browser.history.length) return map;
-        map.set(sessionId, {
-          ...workspace,
-          browser: {
-            ...workspace.browser,
-            url: workspace.browser.history[index],
-            historyIndex: index,
-          },
-        });
-        return new Map(map);
-      }),
-
     // Clear session workspace
     clearSession: (sessionId: string) =>
       update((map) => {
@@ -788,7 +708,6 @@ export interface ProjectWorkspace {
   terminalTabs: TerminalTab[];
   activeTerminalId: string;
   terminalCounter: number;
-  browser: BrowserState;
   lastLoadedFromServer: number;
 }
 
@@ -800,11 +719,6 @@ function createProjectWorkspacesStore() {
     terminalTabs: [],
     activeTerminalId: "",
     terminalCounter: 0,
-    browser: {
-      url: "",
-      history: [],
-      historyIndex: -1,
-    },
     lastLoadedFromServer: 0,
   });
 
@@ -905,80 +819,6 @@ function createProjectWorkspacesStore() {
           t.id === tabId ? { ...t, ...updates } : t
         );
         map.set(projectId, { ...workspace, terminalTabs: newTabs });
-        return new Map(map);
-      }),
-
-    updateBrowser: (projectId: string, updates: Partial<BrowserState>) =>
-      update((map) => {
-        const workspace = map.get(projectId) || getDefaultWorkspace(projectId);
-        map.set(projectId, {
-          ...workspace,
-          browser: { ...workspace.browser, ...updates },
-        });
-        return new Map(map);
-      }),
-
-    navigateBrowser: (projectId: string, url: string) =>
-      update((map) => {
-        const workspace = map.get(projectId) || getDefaultWorkspace(projectId);
-        const { browser } = workspace;
-        const newHistory = [...browser.history.slice(0, browser.historyIndex + 1), url];
-        map.set(projectId, {
-          ...workspace,
-          browser: {
-            url,
-            history: newHistory,
-            historyIndex: newHistory.length - 1,
-          },
-        });
-        return new Map(map);
-      }),
-
-    browserBack: (projectId: string) =>
-      update((map) => {
-        const workspace = map.get(projectId);
-        if (!workspace || workspace.browser.historyIndex <= 0) return map;
-        const newIndex = workspace.browser.historyIndex - 1;
-        map.set(projectId, {
-          ...workspace,
-          browser: {
-            ...workspace.browser,
-            url: workspace.browser.history[newIndex],
-            historyIndex: newIndex,
-          },
-        });
-        return new Map(map);
-      }),
-
-    browserForward: (projectId: string) =>
-      update((map) => {
-        const workspace = map.get(projectId);
-        if (!workspace || workspace.browser.historyIndex >= workspace.browser.history.length - 1)
-          return map;
-        const newIndex = workspace.browser.historyIndex + 1;
-        map.set(projectId, {
-          ...workspace,
-          browser: {
-            ...workspace.browser,
-            url: workspace.browser.history[newIndex],
-            historyIndex: newIndex,
-          },
-        });
-        return new Map(map);
-      }),
-
-    browserGoToIndex: (projectId: string, index: number) =>
-      update((map) => {
-        const workspace = map.get(projectId);
-        if (!workspace || index < 0 || index >= workspace.browser.history.length) return map;
-        map.set(projectId, {
-          ...workspace,
-          browser: {
-            ...workspace.browser,
-            url: workspace.browser.history[index],
-            historyIndex: index,
-          },
-        });
         return new Map(map);
       }),
 

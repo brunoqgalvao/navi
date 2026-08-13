@@ -829,13 +829,11 @@
   let showPreview = $state(false);
   let previewSource = $state("");
   let showFileBrowser = $state(false);
-  let showBrowser = $state(false);
   let showGitPanel = $state(false);
   let showTerminal = $state(false);
   let showContext = $state(false);
   let showExtensionSettings = $state(false);
-  let browserUrl = $state("http://localhost:3000");
-  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "context";
+  type RightPanelMode = "preview" | "files" | "git" | "terminal" | "processes" | "context";
   let rightPanelMode = $state<RightPanelMode>("preview");
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
@@ -3156,29 +3154,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     sendMessage();
   }
 
-  // Handle element inspection from browser preview
-  function handleElementInspected(element: import("./lib/Preview.svelte").InspectedElement) {
-    // Format element data for chat context
-    const elementInfo = [
-      `**Inspected Element from ${element.page.url}**`,
-      "",
-      "```html",
-      element.outerHTML,
-      "```",
-      "",
-      `**Selector:** \`${element.selector}\``,
-      "",
-      `**Tag:** ${element.tagName}`,
-      element.attributes.class ? `**Classes:** ${element.attributes.class}` : "",
-      element.attributes.id ? `**ID:** ${element.attributes.id}` : "",
-      element.textContent ? `**Text:** "${element.textContent.slice(0, 100)}${element.textContent.length > 100 ? '...' : ''}"` : "",
-    ].filter(Boolean).join("\n");
-
-    // Pre-fill input with element context
-    inputText = elementInfo + "\n\nHelp me with this element: ";
-    inputRef?.focus();
-  }
-
   // Handle "Send to Claude" from Bash tool results (pre-fills input for review)
   function handleBashSendToClaude(context: string) {
     inputText = context;
@@ -3206,7 +3181,9 @@ Please walk me through the setup step by step. When I have the credentials, save
   function openPreview(source: string, line?: number) {
     const isUrl = source.startsWith("http://") || source.startsWith("https://") || source.startsWith("localhost") || source.match(/^:\d+/);
     if (isUrl) {
-      openBrowser(source);
+      // No embedded browser — open URLs in the system browser
+      const formatted = source.startsWith(":") ? `http://localhost${source}` : source.startsWith("localhost") ? `http://${source}` : source;
+      window.open(formatted, "_blank");
     } else {
       // If line number is provided, append it as a fragment identifier
       const sourceWithLine = line ? `${source}#line${line}` : source;
@@ -3214,12 +3191,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       showPreview = true;
       rightPanelMode = "preview";
     }
-  }
-
-  function openBrowser(url: string) {
-    browserUrl = url.startsWith(":") ? `http://localhost${url}` : url.startsWith("localhost") ? `http://${url}` : url;
-    showBrowser = true;
-    rightPanelMode = "browser";
   }
 
   function closePreview() {
@@ -3250,7 +3221,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   function closeRightPanel() {
     showFileBrowser = false;
     showPreview = false;
-    showBrowser = false;
     showGitPanel = false;
     showTerminal = false;
     showContext = false;
@@ -3283,7 +3253,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const panelMode = mode as RightPanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext;
+    const isPanelOpen = showFileBrowser || showPreview || showGitPanel || showTerminal || showContext;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -3294,9 +3264,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       case "files":
       case "preview":
         showFileBrowser = true;
-        break;
-      case "browser":
-        showBrowser = true;
         break;
       case "git":
         showGitPanel = true;
@@ -3406,13 +3373,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   function getLinkContextMenuItems() {
     if (!linkContextMenu) return [];
     return [
-      {
-        label: "Open in Preview",
-        icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>',
-        onclick: () => {
-          if (linkContextMenu) openPreview(linkContextMenu.url);
-        }
-      },
       {
         label: "Open in Browser",
         icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>',
@@ -4249,8 +4209,8 @@ Please walk me through the setup step by step. When I have the credentials, save
   </div>
   <!-- End Chat Container -->
 
-  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext}
+  <!-- Right Panel (File Browser / Preview / Git / Terminal / Context) -->
+  {#if showFileBrowser || showPreview || showGitPanel || showTerminal || showContext}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -4259,14 +4219,12 @@ Please walk me through the setup step by step. When I have the credentials, save
       projectPath={currentProject?.path || null}
       worktreePath={currentSessionData?.worktree_path}
       {previewSource}
-      {browserUrl}
       isResizing={isResizingRight}
       {terminalInitialCommand}
       onModeChange={(mode) => {
         rightPanelMode = mode;
         if (mode === "files") showFileBrowser = true;
         else if (mode === "preview") showPreview = true;
-        else if (mode === "browser") showBrowser = true;
         else if (mode === "git") showGitPanel = true;
         else if (mode === "terminal") showTerminal = true;
         else if (mode === "context") showContext = true;
@@ -4274,10 +4232,8 @@ Please walk me through the setup step by step. When I have the credentials, save
       onClose={closeRightPanel}
       onStartResize={startResizingRight}
       onFileSelect={handleFileSelect}
-      onBrowserUrlChange={(url) => browserUrl = url}
       onTerminalRef={(ref) => terminalRef = ref}
       onTerminalSendToClaude={handleTerminalSendToClaude}
-      onElementInspected={handleElementInspected}
     />
   {/if}
 

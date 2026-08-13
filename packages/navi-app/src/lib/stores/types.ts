@@ -137,20 +137,12 @@ export interface TerminalTab {
   cwd?: string;
 }
 
-// Browser state per session
-export interface BrowserState {
-  url: string;
-  history: string[];
-  historyIndex: number;
-}
-
-// Workspace state per session (terminals + browser)
+// Workspace state per session (terminals)
 export interface SessionWorkspace {
   sessionId: string;
   terminalTabs: TerminalTab[];
   activeTerminalId: string;
   terminalCounter: number;
-  browser: BrowserState;
 }
 
 // Text reference from preview selection

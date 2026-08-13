@@ -356,12 +356,13 @@ These endpoints let Claude Code directly control the Navi UI. This is what makes
 
 ### Open Preview Panel
 
-Open a URL or file in Navi's preview panel:
+Open a file in Navi's file preview panel. URLs are opened in the user's
+system browser (there is no embedded browser in Navi):
 
 ```bash
 curl -X POST http://localhost:3001/api/ui/preview \
   -H "Content-Type: application/json" \
-  -d '{"source": "http://localhost:3000"}'
+  -d '{"source": "http://localhost:3000"}'   # opens in system browser
 ```
 
 Open a local file:
@@ -440,10 +441,11 @@ In addition to the API, you can also use these methods:
 
 ### In Your Response
 
-Simply include a URL in your text response and the user can click to preview:
+Simply include a URL in your text response and the user can click it to open
+it in their browser:
 
 ```
-You can preview this at http://localhost:3000
+You can open this at http://localhost:3000
 ```
 
 ### Media Display

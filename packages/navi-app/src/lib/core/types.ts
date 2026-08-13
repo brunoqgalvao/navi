@@ -34,7 +34,6 @@ export interface Extension {
  */
 export type ExtensionId =
   | "files"
-  | "browser"
   | "git"
   | "terminal"
   | "processes"
@@ -46,7 +45,6 @@ export type ExtensionId =
  */
 export type PanelMode =
   | "files"
-  | "browser"
   | "git"
   | "terminal"
   | "processes"

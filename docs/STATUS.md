@@ -75,13 +75,14 @@ multiple AI agents working in parallel.
 Installing a skill = drop its folder into `~/.claude/skills/` (global) or
 `.claude/skills/` (project), then rescan. There is no marketplace/import UI.
 
-### Browser Panel (preview surface)
+### File Preview (in Files panel)
 | Feature | Location | Notes |
 |---------|----------|-------|
-| Browser/file preview | `src/lib/Preview.svelte` + `WorkspacePanel.svelte` | Renders URLs (direct, no proxy) and local files (markdown, images, HTML, JSON, 3D) |
+| File preview | `src/lib/Preview.svelte` | Renders local files (markdown, code, images, CSV/XLSX, JSON, PDF, 3D, logs) with inline editing |
 
-Navi no longer runs, proxies, or port-manages dev servers. Start your dev server
-yourself (terminal panel works); paste the URL into the browser panel.
+There is no embedded browser (removed 2026-08). URLs open in the system
+browser. Navi no longer runs, proxies, or port-manages dev servers — start
+your dev server yourself (terminal panel works).
 
 ### MCP
 **Model Context Protocol** — the standards-first integration layer.
@@ -105,7 +106,7 @@ Working features that don't need active development.
 | Extension registry | `src/lib/core/registries.ts` | Sidebar panel registry |
 | Extensions panel | `features/extensions/` | Right panel tabs |
 
-Built-in panels: Files, Browser, Git, Terminal, Processes, Context.
+Built-in panels: Files, Git, Terminal, Processes, Context.
 
 ### Commands
 | Feature | Location | Notes |
@@ -177,7 +178,8 @@ Second subtraction pass (spec:
 | Skill import/export/editor UI | Import wizard, URL import, zip export, in-app SKILL.md editor, skill library browser |
 | Settings "Previews" tab | Container preview management in Settings |
 
-The browser panel (URL + local file rendering) is the only preview surface.
+File preview (in the Files panel) is the only preview surface; the embedded
+browser panel was removed in 2026-08 — URLs open in the system browser.
 Skills are managed by one flat panel (list, toggle, reveal, delete).
 
 ## Removed in 2026-06 refocus

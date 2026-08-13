@@ -1,42 +1,30 @@
 <script lang="ts">
   /**
-   * WorkspacePanel - Project-aware container for terminal tabs and browser
+   * WorkspacePanel - Project-aware container for terminal tabs
    *
    * Handles:
-   * - Project workspace state (terminals, browser)
+   * - Project workspace state (terminals)
    * - Terminal tab management (per project, not per session)
-   * - Browser navigation state
    * - Terminal reconnection from PTY server
    */
-  import { onMount } from "svelte";
-  import { currentSession, projectWorkspaces } from "../stores/session";
-  import type { TerminalTab } from "../stores/types";
+  import { projectWorkspaces } from "../stores/session";
   import SafeTerminal from "./SafeTerminal.svelte";
-  import Preview, { type InspectedElement } from "../Preview.svelte";
   import { ptyApi } from "../api";
 
   interface Props {
-    mode: "terminal" | "browser";
+    mode: "terminal";
     projectId: string | null;
     projectPath: string | null;
-    browserUrl?: string;
-    onBrowserUrlChange?: (url: string) => void;
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
-    isResizing?: boolean;
-    onElementInspected?: (element: InspectedElement) => void;
   }
 
   let {
     mode,
     projectId,
     projectPath,
-    browserUrl = "",
-    onBrowserUrlChange,
     onTerminalRef,
     onTerminalSendToClaude,
-    isResizing = false,
-    onElementInspected,
   }: Props = $props();
 
   // Get workspace for current project reactively
@@ -109,26 +97,6 @@
   function handleTerminalIdChange(tabId: string, newTerminalId: string | null) {
     if (!projectId) return;
     projectWorkspaces.updateTerminalTab(projectId, tabId, { terminalId: newTerminalId || undefined });
-  }
-
-  // Browser actions
-  function handleBrowserBack() {
-    if (projectId) projectWorkspaces.browserBack(projectId);
-  }
-
-  function handleBrowserForward() {
-    if (projectId) projectWorkspaces.browserForward(projectId);
-  }
-
-  function handleBrowserGoToIndex(index: number) {
-    if (projectId) projectWorkspaces.browserGoToIndex(projectId, index);
-  }
-
-  function handleBrowserUrlChange(url: string) {
-    if (projectId && url && url !== workspace?.browser.url) {
-      projectWorkspaces.navigateBrowser(projectId, url);
-    }
-    onBrowserUrlChange?.(url);
   }
 </script>
 
@@ -205,17 +173,4 @@
       {/each}
     {/if}
   </div>
-{:else if mode === "browser"}
-  <Preview
-    source={workspace?.browser.url || browserUrl}
-    type="url"
-    onUrlChange={handleBrowserUrlChange}
-    browserHistory={workspace?.browser.history}
-    browserHistoryIndex={workspace?.browser.historyIndex}
-    onBrowserBack={handleBrowserBack}
-    onBrowserForward={handleBrowserForward}
-    onBrowserGoToIndex={handleBrowserGoToIndex}
-    isParentResizing={isResizing}
-    {onElementInspected}
-  />
 {/if}
