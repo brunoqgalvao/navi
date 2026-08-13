@@ -16,6 +16,17 @@
 
   let { blocks, partialText, partialThinking, renderMarkdown, jsonBlocksMap = new Map(), shellBlocksMap = new Map(), onRunInTerminal }: Props = $props();
 
+  function lastThinkingSentence(text: string): string {
+    const trimmed = text.trim();
+    if (!trimmed) return "";
+    const parts = trimmed.split(/(?<=[.!?…])\s+/);
+    let sentence = parts[parts.length - 1] || "";
+    if (sentence.length < 15 && parts.length > 1) {
+      sentence = `${parts[parts.length - 2]} ${sentence}`;
+    }
+    return sentence.length > 160 ? `…${sentence.slice(-160)}` : sentence;
+  }
+
   function getDisplayBlocks(): { block: ContentBlock; isStreaming: boolean; streamingContent?: string }[] {
     return blocks.map((block, idx) => {
       const isLast = idx === blocks.length - 1;
@@ -101,8 +112,8 @@
         {:else if block.type === "thinking"}
           <div class="flex items-center gap-1.5 py-0.5 max-w-full text-xs text-gray-400 dark:text-gray-500">
             <span class="shrink-0 font-medium animate-pulse">Thinking</span>
-            {#if (streamingContent || "").trim()}
-              <span class="truncate text-gray-300 dark:text-gray-600">· {(streamingContent || "").trim().slice(-80)}</span>
+            {#if lastThinkingSentence(streamingContent || "")}
+              <span class="truncate">· {lastThinkingSentence(streamingContent || "")}</span>
             {/if}
           </div>
         {:else if block.type === "tool_use"}
@@ -128,8 +139,13 @@
     {/each}
 
     {#if blocks.length === 0}
-      <div class="h-6 flex items-center">
-        <WorkingIndicator variant="dots" size="xs" color="gray" label="Thinking..." />
+      <div class="h-6 flex items-center gap-1.5 max-w-full text-xs text-gray-400 dark:text-gray-500">
+        {#if lastThinkingSentence(partialThinking)}
+          <span class="shrink-0 font-medium animate-pulse">Thinking</span>
+          <span class="truncate">· {lastThinkingSentence(partialThinking)}</span>
+        {:else}
+          <WorkingIndicator variant="dots" size="xs" color="gray" label="Thinking..." />
+        {/if}
       </div>
     {/if}
   </div>
