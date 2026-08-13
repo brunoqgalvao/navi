@@ -22,7 +22,7 @@ import { handleAgentRoutes } from "./routes/agents";
 import { handleTerminalRoutes, installPtyErrorHandler } from "./routes/terminal";
 import { handleProcessRoutes } from "./routes/processes";
 import { handleAnalyticsRoutes } from "./routes/analytics";
-import { handleBackgroundProcessRoutes, addProcessEventListener, type ProcessEvent } from "./routes/background-processes";
+import { handleBackgroundProcessRoutes, addProcessEventListener, resumeInterruptedProcesses, type ProcessEvent } from "./routes/background-processes";
 import { handleExtensionRoutes } from "./routes/extensions";
 import { handleWorktreeRoutes } from "./routes/worktrees";
 import { handleBranchNameRoutes } from "./routes/branch-name";
@@ -415,6 +415,9 @@ addProcessEventListener((event: ProcessEvent) => {
     ...event,
   });
 });
+
+// Bring back background processes killed by the last restart/update
+resumeInterruptedProcesses();
 
 // Initialize cron scheduler with WebSocket broadcast
 cronScheduler.init(broadcastToClients);
