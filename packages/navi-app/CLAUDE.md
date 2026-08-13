@@ -30,9 +30,7 @@ The Files panel shows the project directory structure. Users can:
 
 - Frontend: Svelte 5 + Vite + Tailwind
 - Backend: Bun + WebSocket server
-- Desktop: Tauri v2
 
 ### Commands
 - `bun run dev:all` - Run both frontend and backend
-- `bun run tauri:dev` - Run as desktop app
 - `bun run build` - Build for production

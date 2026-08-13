@@ -189,7 +189,6 @@ export function resolveClaudeCodeExecutable(): string | null {
     resolveClaudeCodeFromCommonPaths() ||
     resolveClaudeCodeFromPathEnv() ||
     resolveClaudeCodeFromBundledOverride() ||
-    resolveClaudeCodeFromResources() ||
     resolveClaudeCodeFromNodeModules()
   );
 }
@@ -366,25 +365,6 @@ function resolveClaudeCodeFromBundledOverride(): string | null {
     .map((value) => expandHome(value as string));
 
   return firstExisting(bundled);
-}
-
-function resolveClaudeCodeFromResources(): string | null {
-  const baseDirs = new Set<string>();
-  if (process.execPath) baseDirs.add(dirname(process.execPath));
-  if (process.argv?.[0]) baseDirs.add(dirname(process.argv[0]));
-
-  const candidates: string[] = [];
-  if (process.env.TAURI_RESOURCE_DIR) {
-    const resourceDir = expandHome(process.env.TAURI_RESOURCE_DIR);
-    candidates.push(join(resourceDir, "claude-agent-sdk", "cli.js"));
-    candidates.push(join(resourceDir, "resources", "claude-agent-sdk", "cli.js"));
-  }
-  for (const base of baseDirs) {
-    candidates.push(join(base, "..", "Resources", "claude-agent-sdk", "cli.js"));
-    candidates.push(join(base, "..", "Resources", "resources", "claude-agent-sdk", "cli.js"));
-  }
-
-  return firstExisting(candidates);
 }
 
 function resolveClaudeCodeFromNodeModules(): string | null {

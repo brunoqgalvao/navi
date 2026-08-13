@@ -1,6 +1,6 @@
 # Navi - Claude Code Local UI
 
-A desktop application providing a rich GUI for Claude Code, built with Svelte 5, Tauri, and Bun.
+A local web application providing a rich GUI for Claude Code, built with Svelte 5 and Bun.
 
 ## Be snarky fun
 
@@ -84,7 +84,6 @@ We have native stuff (native plugins, native MCPs, native UI). But we build on s
 ```bash
 # Development
 bun run dev:app        # Frontend + backend + PTY server
-bun run dev:tauri      # Desktop app mode (Tauri)
 
 # Type checking
 bun run --cwd packages/navi-app check
@@ -151,15 +150,13 @@ import {
 packages/
 ├── navi-app/           # Main desktop application
 │   ├── src/            # Svelte 5 frontend
-│   ├── server/         # Bun backend (routes, services, websocket)
-│   └── src-tauri/      # Tauri desktop wrapper
+│   └── server/         # Bun backend (routes, services, websocket)
 └── landing-page/       # Marketing website
 ```
 
 ### Tech Stack
 - **Frontend:** Svelte 5 + Vite + Tailwind CSS
 - **Backend:** Bun + custom HTTP server + WebSocket
-- **Desktop:** Tauri v2
 - **Database:** sql.js (SQLite in-memory, persisted to ~/.claude-code-ui/data.db)
 - **AI:** @anthropic-ai/claude-agent-sdk
 

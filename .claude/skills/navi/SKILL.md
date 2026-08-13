@@ -11,17 +11,11 @@ If the task is specifically about Navi workflows, workflow schedules, workflow r
 
 ## API Base
 
-**Dynamic URL Discovery**: The API base URL varies depending on how Navi is running:
-- Dev mode: `http://localhost:3001/api`
-- Tauri app: `http://localhost:3011/api`
+The backend listens on `http://localhost:3021/api` by default (the sandbox
+instance uses `:4021`). If in doubt, probe `http://localhost:3021/health`.
 
-To discover the correct URL programmatically:
-```bash
-# Try dev port first, fall back to app port
-NAVI_API=$(curl -s http://localhost:3001/api/navi-url 2>/dev/null | jq -r '.apiUrl' || echo "http://localhost:3011")
-```
-
-For simplicity in examples below, we use `http://localhost:3001` but substitute the correct URL for your environment.
+For simplicity in examples below, we use `http://localhost:3001` in some
+snippets — substitute your actual backend port (normally `3021`).
 
 ## Quick Reference
 

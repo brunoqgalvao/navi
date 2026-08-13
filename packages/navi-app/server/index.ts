@@ -135,91 +135,6 @@ if (stats.total === 0) {
 const PREFERRED_PORT = parseInt(process.argv[2] || Bun.env.PORT || "3021", 10);
 const PORT = await findAvailablePort(PREFERRED_PORT);
 
-// Spawn PTY server when running in Tauri (bundled) mode
-// The PTY server runs separately because node-pty has issues with Bun's file descriptor handling
-let ptyServerProcess: ReturnType<typeof import("child_process").spawn> | null = null;
-
-async function spawnPtyServer() {
-  const { spawn } = await import("child_process");
-  const { join, dirname } = await import("path");
-  const { existsSync } = await import("fs");
-
-  // Calculate PTY port (main server port + 1)
-  const ptyPort = PORT + 1;
-
-  // Find the PTY server script
-  let ptyServerPath: string | null = null;
-
-  // In Tauri bundled mode, look in resources directory
-  if (process.env.TAURI_RESOURCE_DIR) {
-    const resourcePath = join(process.env.TAURI_RESOURCE_DIR, "resources", "pty-server.cjs");
-    if (existsSync(resourcePath)) {
-      ptyServerPath = resourcePath;
-    }
-  }
-
-  // Also check relative to the server directory (for development with Tauri)
-  if (!ptyServerPath) {
-    const serverDir = dirname(import.meta.url.replace("file://", ""));
-    const devPath = join(serverDir, "pty-server.cjs");
-    if (existsSync(devPath)) {
-      ptyServerPath = devPath;
-    }
-  }
-
-  if (!ptyServerPath) {
-    console.warn("[Server] PTY server script not found, terminal functionality may be limited");
-    return;
-  }
-
-  // Find node executable - check multiple locations
-  let nodePath = "node";
-  const nodeLocations = [
-    process.env.NAVI_NODE_PATH,
-    "/usr/local/bin/node",          // Homebrew Intel
-    "/opt/homebrew/bin/node",       // Homebrew ARM (Apple Silicon)
-    "/usr/bin/node",                // System node
-    `${process.env.HOME}/.nvm/current/bin/node`, // nvm
-  ].filter(Boolean) as string[];
-
-  for (const loc of nodeLocations) {
-    if (existsSync(loc)) {
-      nodePath = loc;
-      break;
-    }
-  }
-  ptyServerProcess = spawn(nodePath, [ptyServerPath], {
-    env: {
-      ...process.env,
-      PTY_PORT: String(ptyPort),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: false,
-  });
-
-  ptyServerProcess.stdout?.on("data", (data: Buffer) => {
-    // PTY server output (silent in production)
-  });
-
-  ptyServerProcess.stderr?.on("data", (data: Buffer) => {
-    console.error(`[PTY] ${data.toString().trim()}`);
-  });
-
-  ptyServerProcess.on("error", (err) => {
-    console.error("[Server] Failed to spawn PTY server:", err.message);
-  });
-
-  ptyServerProcess.on("exit", (code, signal) => {
-    ptyServerProcess = null;
-  });
-}
-
-// Spawn PTY server if we're in Tauri mode (TAURI_RESOURCE_DIR is set)
-// This handles the bundled app case where PTY server isn't started separately
-if (process.env.TAURI_RESOURCE_DIR) {
-  await spawnPtyServer();
-}
-
 // Get shared state for routes that need it
 const pendingPermissions = getPendingPermissions();
 const sessionApprovedAll = getSessionApprovedAll();
@@ -503,26 +418,15 @@ workflowScheduler.init(broadcastToClients);
 // Compact oversized persisted messages and prune archived transcript artifacts in the background.
 scheduleStorageMaintenance();
 
-// Cleanup PTY server on exit
-function cleanupPtyServer() {
-  if (ptyServerProcess) {
-    ptyServerProcess.kill("SIGTERM");
-    ptyServerProcess = null;
-  }
-}
-
 process.on("SIGINT", () => {
-  cleanupPtyServer();
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
-  cleanupPtyServer();
   process.exit(0);
 });
 
 process.on("exit", () => {
-  cleanupPtyServer();
   cronScheduler.shutdown();
   workflowScheduler.shutdown();
 });

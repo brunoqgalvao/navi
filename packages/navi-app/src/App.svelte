@@ -10,7 +10,7 @@
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree, startNewChat } from "./lib/actions";
   import { parseHash, onHashChange } from "./lib/router";
-  import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
+  import { discoverPorts, getServerUrl } from "./lib/config";
   import { getDefaultContextResetThresholdPercent, getEffectiveSessionContextWindow } from "./lib/context-window";
   import { setupGlobalErrorHandlers, pendingErrorReport, showError, showSuccess, type ErrorReport } from "./lib/errorHandler";
   import Preview from "./lib/Preview.svelte";
@@ -186,56 +186,17 @@
     getDefaultModelForBackend,
   } from "./lib/actions";
 
-  let sidecarProcess: any = null;
   let serverReady = $state(false);
   let serverError = $state<string | null>(null);
 
   async function startSidecar(): Promise<number> {
-    if (!isTauri()) {
-      try {
-        const ports = await discoverPorts();
-        const res = await fetch(`http://localhost:${ports.server}/health`);
-        if (res.ok) return ports.server;
-      } catch {
-      }
-      serverError = "Server not running. Start with: bun run dev:all";
-      throw new Error(serverError);
-    }
-
-    let serverPort = BUNDLED_SERVER_PORT;
-    let ptyPort = BUNDLED_PTY_PORT;
-
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const ports = await invoke<[number, number]>("get_server_ports");
-      if (Array.isArray(ports)) {
-        const [tauriServerPort, tauriPtyPort] = ports;
-        if (typeof tauriServerPort === "number") {
-          serverPort = tauriServerPort;
-        }
-        if (typeof tauriPtyPort === "number") {
-          ptyPort = tauriPtyPort;
-        }
-      }
-    } catch (e) {
-      // Failed to read ports from Tauri backend, using defaults
+      const ports = await discoverPorts();
+      const res = await fetch(`http://localhost:${ports.server}/health`);
+      if (res.ok) return ports.server;
+    } catch {
     }
-
-    setServerPort(serverPort);
-    setPtyServerPort(ptyPort);
-
-    for (let i = 0; i < 30; i++) {
-      try {
-        const res = await fetch(`http://localhost:${serverPort}/health`);
-        if (res.ok) {
-          return serverPort;
-        }
-      } catch {
-      }
-      await new Promise(r => setTimeout(r, 100));
-    }
-
-    serverError = "Bundled server failed to respond";
+    serverError = "Server not running. Start with: bun run dev:all";
     throw new Error(serverError);
   }
   
@@ -1436,9 +1397,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     if (activeSessionsPoll) {
       clearInterval(activeSessionsPoll);
     }
-    if (sidecarProcess) {
-      sidecarProcess.kill();
-    }
   });
 
   function attachSession(sessionId: string | null, connected: boolean) {
@@ -1937,29 +1895,11 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function pickDirectory() {
-    if (isTauri()) {
-      try {
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        const selected = await open({
-          directory: true,
-          multiple: false,
-        });
-        if (selected && typeof selected === "string") {
-          newProjectPath = selected;
-          if (!newProjectName) {
-            newProjectName = selected.split("/").filter(Boolean).pop() || "";
-          }
-        }
-      } catch (e) {
-        console.error("Failed to pick directory:", e);
-      }
-    } else {
-      const path = prompt("Enter directory path:", "/Users/");
-      if (path) {
-        newProjectPath = path;
-        if (!newProjectName) {
-          newProjectName = path.split("/").filter(Boolean).pop() || "";
-        }
+    const path = prompt("Enter directory path:", "/Users/");
+    if (path) {
+      newProjectPath = path;
+      if (!newProjectName) {
+        newProjectName = path.split("/").filter(Boolean).pop() || "";
       }
     }
   }
@@ -2019,24 +1959,9 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function pickDirectoryForEdit() {
-    if (isTauri()) {
-      try {
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        const selected = await open({
-          directory: true,
-          multiple: false,
-        });
-        if (selected && typeof selected === "string") {
-          editProjectPath = selected;
-        }
-      } catch (e) {
-        console.error("Failed to pick directory:", e);
-      }
-    } else {
-      const path = prompt("Enter directory path:", editProjectPath);
-      if (path) {
-        editProjectPath = path;
-      }
+    const path = prompt("Enter directory path:", editProjectPath);
+    if (path) {
+      editProjectPath = path;
     }
   }
 
@@ -2278,85 +2203,16 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function openProjectInNewWindow(project: Project) {
-    console.log("[CMD+CLICK] openProjectInNewWindow called for:", project.name, "isTauri:", isTauri());
-    if (!isTauri()) {
-      // In browser mode, open in a new browser tab
-      console.log("[CMD+CLICK] Opening in browser tab");
-      window.open(`#/project/${project.id}`, '_blank');
-      return;
-    }
-
-    try {
-      console.log("[CMD+CLICK] Calling Tauri invoke");
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("open_project_in_new_window", {
-        projectId: project.id,
-        projectName: project.name
-      });
-    } catch (e) {
-      console.error("Failed to open project in new window:", e);
-      notifications.add({
-        title: "Error",
-        message: "Failed to open project in new window",
-        type: "error"
-      });
-    }
+    window.open(`#/project/${project.id}`, '_blank');
   }
 
   async function openSessionInNewWindow(sess: Session) {
     if (!currentProject) return;
-
-    if (!isTauri()) {
-      // In browser mode, open in a new browser tab
-      window.open(`#/project/${currentProject.id}/chat/${sess.id}`, '_blank');
-      return;
-    }
-
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("open_session_in_new_window", {
-        projectId: currentProject.id,
-        sessionId: sess.id,
-        sessionTitle: sess.title || "Chat"
-      });
-    } catch (e) {
-      console.error("Failed to open session in new window:", e);
-      notifications.add({
-        title: "Error",
-        message: "Failed to open session in new window",
-        type: "error"
-      });
-    }
+    window.open(`#/project/${currentProject.id}/chat/${sess.id}`, '_blank');
   }
 
   async function openHomeInNewWindow() {
-    if (!isTauri()) {
-      // In browser mode, open in a new browser tab
-      window.open('#/', '_blank');
-      return;
-    }
-
-    try {
-      // Use create_new_window by opening without a project
-      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      const windowNum = Date.now();
-      new WebviewWindow(`home-${windowNum}`, {
-        url: 'index.html',
-        title: 'Navi',
-        width: 1200,
-        height: 800,
-        minWidth: 800,
-        minHeight: 600,
-        center: true
-      });
-    } catch (e) {
-      console.error("Failed to open home in new window:", e);
-      notifications.add({
-        title: "Error",
-        message: "Failed to open new window",
-        type: "error"
-      });
-    }
+    window.open('#/', '_blank');
   }
 
   async function toggleSessionPin(sess: Session, e: Event) {
