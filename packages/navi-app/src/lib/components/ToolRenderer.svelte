@@ -30,6 +30,11 @@
 
   // Check if this is a native MCP tool that we have custom UI for
   function parseNativeMcpInfo(): { server: string; toolName: string } | null {
+    // The native SDK AskUserQuestion tool renders with the same widget as the
+    // old mcp__user-interaction__ask_user_question (kept for old transcripts).
+    if (tool.name === "AskUserQuestion") {
+      return { server: "user-interaction", toolName: "ask_user_question" };
+    }
     const match = tool.name.match(/^mcp__([^_]+)__(.+)$/);
     if (!match) return null;
     const [, server, mcpToolName] = match;

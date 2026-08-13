@@ -60,7 +60,7 @@
     {@const resultContent = result ? extractToolResultContent(result.content) : ''}
     <div class="pl-6 pt-1 space-y-2">
       <ToolRenderer {tool} toolResult={result ? { content: resultContent, is_error: result.is_error } : undefined} {onPreview} {onRunInTerminal} {onSendToClaude} hideHeader={true} />
-      {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch', 'Bash'].includes(tool.name) && !tool.name.startsWith('mcp__multi-session__') && !tool.name.startsWith('mcp__user-interaction__') && !tool.name.startsWith('mcp__navi-context__')}
+      {#if result && !['Read', 'Write', 'Edit', 'MultiEdit', 'WebFetch', 'WebSearch', 'Bash', 'AskUserQuestion'].includes(tool.name) && !tool.name.startsWith('mcp__multi-session__') && !tool.name.startsWith('mcp__user-interaction__') && !tool.name.startsWith('mcp__navi-context__')}
         <div class="pt-1">
           <pre class="text-xs {result.is_error ? 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20' : 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800'} rounded p-2 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">{resultContent}</pre>
         </div>

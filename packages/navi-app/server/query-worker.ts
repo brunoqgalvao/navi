@@ -380,64 +380,52 @@ const REASONING_EFFORT_TO_THINKING_TOKENS: Record<string, number> = {
 const pendingPermissions = new Map<string, (result: { approved: boolean; approveAll?: boolean }) => void>();
 const pendingQuestions = new Map<string, (result: { answers: Record<string, string | string[]> }) => void>();
 
-// Define the question option schema
-const questionOptionSchema = z.object({
-  label: z.string().describe("Short label for the option (e.g., 'TypeScript')"),
-  description: z.string().describe("Description of this option"),
-});
+// Handle the native AskUserQuestion tool: forward the questions to the UI over
+// the existing ask_user_question channel, wait for the user's answers, and
+// return them via updatedInput per the SDK contract (answers keyed by the full
+// question text; the UI keys them by header, so we remap here).
+async function handleAskUserQuestion(
+  toolInput: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<{ behavior: "allow"; updatedInput: Record<string, unknown> } | { behavior: "deny"; message: string }> {
+  const questions = Array.isArray((toolInput as any).questions) ? (toolInput as any).questions : [];
+  const requestId = crypto.randomUUID();
 
-// Define the question schema
-const questionSchema = z.object({
-  question: z.string().describe("The question to ask the user"),
-  header: z.string().max(12).describe("Short header/category for the question (max 12 chars)"),
-  options: z.array(questionOptionSchema).min(2).max(4).describe("2-4 options for the user to choose from"),
-  multiSelect: z.boolean().describe("Whether the user can select multiple options"),
-});
+  send({
+    type: "ask_user_question",
+    requestId,
+    questions,
+  });
 
-// Create MCP server with ask_user_question tool
-const userInteractionServer = createSdkMcpServer({
-  name: "user-interaction",
-  version: "1.0.0",
-  tools: [
-    tool(
-      "ask_user_question",
-      "Ask the user one or more questions and wait for their response. Use this when you need clarification or user input before proceeding.",
-      {
-        questions: z.array(questionSchema).min(1).max(4).describe("1-4 questions to ask the user"),
+  let aborted = false;
+  const result = await new Promise<{ answers: Record<string, string | string[]> }>((resolve) => {
+    pendingQuestions.set(requestId, resolve);
+    signal.addEventListener(
+      "abort",
+      () => {
+        if (pendingQuestions.delete(requestId)) {
+          aborted = true;
+          resolve({ answers: {} });
+        }
       },
-      async (args) => {
-        const requestId = crypto.randomUUID();
+      { once: true },
+    );
+  });
 
-        // Send question to UI
-        send({
-          type: "ask_user_question",
-          requestId,
-          questions: args.questions,
-        });
+  if (aborted) {
+    return { behavior: "deny", message: "The question was cancelled before the user answered." };
+  }
 
-        // Wait for user response
-        const result = await new Promise<{ answers: Record<string, string | string[]> }>((resolve) => {
-          pendingQuestions.set(requestId, resolve);
-        });
+  const answers: Record<string, string | string[]> = {};
+  for (const q of questions) {
+    const answer = result.answers[q.header] ?? result.answers[q.question];
+    if (answer !== undefined && answer !== "") {
+      answers[q.question] = answer;
+    }
+  }
 
-        // Format the response
-        const answerText = Object.entries(result.answers)
-          .map(([header, answer]) => {
-            const answerStr = Array.isArray(answer) ? answer.join(", ") : answer;
-            return `${header}: ${answerStr}`;
-          })
-          .join("\n");
-
-        return {
-          content: [{
-            type: "text" as const,
-            text: `User answered:\n${answerText}`,
-          }],
-        };
-      }
-    ),
-  ],
-});
+  return { behavior: "allow", updatedInput: { questions, answers } };
+}
 
 // ============================================================================
 // Multi-Session Agent Tools (Fractal Agents)
@@ -1701,7 +1689,13 @@ async function runQuery(input: WorkerInput): Promise<boolean> {
     toolInput: Record<string, unknown>,
     options: { signal: AbortSignal; toolUseID: string }
   ): Promise<{ behavior: 'allow'; updatedInput: Record<string, unknown> } | { behavior: 'deny'; message: string; interrupt?: boolean }> => {
-    // MCP tools (like ask_user_question) are auto-allowed - they handle their own interaction
+    // Native clarifying questions always go to the user, regardless of
+    // auto-accept settings — answering them IS the user interaction.
+    if (toolName === "AskUserQuestion") {
+      return handleAskUserQuestion(toolInput, options.signal);
+    }
+
+    // MCP tools are auto-allowed - they handle their own interaction
     if (toolName.startsWith("mcp__")) {
       return { behavior: 'allow', updatedInput: toolInput };
     }
@@ -1911,11 +1905,14 @@ Example clarifying questions:
       "TodoWrite",
       "Task",
       "TaskOutput",
-      // Note: ask_user_question is exposed via MCP server (mcp__user-interaction__ask_user_question)
+      "AskUserQuestion",
       // Multi-session tools exposed via MCP server (mcp__multi-session__*)
     ];
 
-    const allTools = allowedTools || agentTools || defaultTools;
+    // AskUserQuestion is always available (the SDK drops it when a custom
+    // tools array omits it, and clarifying questions should never be lost to
+    // an agent's restricted tool list). It's handled in canUseTool.
+    const allTools = [...new Set([...(allowedTools || agentTools || defaultTools), "AskUserQuestion"])];
 
     const requireConfirmation = permissionSettings?.requireConfirmation || [];
     const autoAllowedTools = allTools.filter(t => !requireConfirmation.includes(t));
@@ -1932,13 +1929,6 @@ Example clarifying questions:
 
     // Build MCP servers - include built-in servers if enabled
     const mcpServers: Record<string, any> = {};
-
-    if (isBuiltinMcpEnabled("user-interaction")) {
-      mcpServers["user-interaction"] = userInteractionServer;
-      console.error(`[Worker] MCP server enabled: user-interaction`);
-    } else {
-      console.error(`[Worker] MCP server disabled: user-interaction`);
-    }
 
     if (isBuiltinMcpEnabled("navi-context")) {
       mcpServers["navi-context"] = naviContextServer;
@@ -2016,6 +2006,9 @@ Example clarifying questions:
           ...runtimeOptions,
           permissionMode: "default",
           canUseTool,
+          toolConfig: {
+            askUserQuestion: { previewFormat: "html" },
+          },
           settingSources: ['user', 'project', 'local'] as const,
           systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
           includePartialMessages: true,

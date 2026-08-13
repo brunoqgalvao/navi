@@ -2566,7 +2566,6 @@ export function handleQueryWithProcess(ws: any, data: ClientMessage) {
     multiSession: multiSessionContext,
     mcpSettings: mcpSettings.getAll(mcpProjectPath), // Pass MCP server enabled/disabled states (for external servers)
     mcpBuiltinSettings: {  // Pass built-in MCP server enabled/disabled states separately
-      "user-interaction": !mcpSettings.isDisabledBuiltin("user-interaction", mcpProjectPath),
       "navi-context": !mcpSettings.isDisabledBuiltin("navi-context", mcpProjectPath),
       "multi-session": !mcpSettings.isDisabledBuiltin("multi-session", mcpProjectPath),
     },

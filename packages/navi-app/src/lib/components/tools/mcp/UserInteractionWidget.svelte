@@ -40,6 +40,10 @@
     // First try JSON parsing (in case format changes)
     try {
       const parsed = JSON.parse(content);
+      // Native AskUserQuestion output: { questions, answers: { [question]: label } }
+      if (parsed.answers && typeof parsed.answers === 'object') {
+        return parsed.answers as Record<string, string | string[]>;
+      }
       if (parsed.result && typeof parsed.result === 'object') {
         return parsed.result as Record<string, string | string[]>;
       }
@@ -149,7 +153,7 @@
 
           <!-- Options or Answer -->
           {#if isAnswered && answeredValues}
-            {@const answer = answeredValues[q.header]}
+            {@const answer = answeredValues[q.header] ?? answeredValues[q.question]}
             <div class="mt-2">
               {#if Array.isArray(answer)}
                 <div class="flex flex-wrap gap-1">

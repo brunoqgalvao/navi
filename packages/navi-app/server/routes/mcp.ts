@@ -25,10 +25,6 @@ import {
 
 // Built-in MCP servers with their tool counts
 const BUILTIN_SERVERS: Record<string, { toolCount: number; description: string }> = {
-  "user-interaction": {
-    toolCount: 1,
-    description: "Ask user questions with UI prompts",
-  },
   "navi-context": {
     toolCount: 3,
     description: "View processes, terminal, and wait",

@@ -216,6 +216,8 @@ export interface PermissionRequestMessage {
 export interface QuestionOption {
   label: string;
   description: string;
+  /** Optional HTML preview fragment (native AskUserQuestion previewFormat) */
+  preview?: string;
 }
 
 export interface QuestionItem {

@@ -71,7 +71,7 @@ MCP Server + Native UI wrapper = best of both worlds
 ```
 
 Examples:
-- `askUserTool` = MCP server (portable) + native Navi UI (pretty prompts)
+- Ask-user questions = native SDK `AskUserQuestion` tool (handled in `canUseTool`) + native Navi UI (pretty prompts)
 - Agent orchestration = native (needs deep UI integration)
 - Deploy pipeline = plugin (reusable across tools)
 
