@@ -1,6 +1,6 @@
 {
   "name": "navi-app",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "description": "Navi — the local AI coding assistant UI. Already on it.",
   "type": "module",
   "scripts": {
