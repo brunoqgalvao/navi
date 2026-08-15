@@ -67,11 +67,14 @@ type CodexExecutionPlan = {
   args: string[];
   model: string;
   downgradedToReadOnly: boolean;
+  networkAccess: boolean;
   adjustedReasoningEffort?: {
     from: string;
     to: string;
   };
 };
+
+type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 type CodexRunCommand = {
   command: string;
@@ -105,6 +108,39 @@ export function getConfiguredCodexModel(): string | undefined {
 
 export function getConfiguredCodexReasoningEffort(): string | undefined {
   return readCodexConfigValue("model_reasoning_effort");
+}
+
+export function getConfiguredCodexSandboxMode(): CodexSandboxMode | undefined {
+  const mode = readCodexConfigValue("sandbox_mode");
+  return mode === "read-only" || mode === "workspace-write" || mode === "danger-full-access"
+    ? mode
+    : undefined;
+}
+
+/**
+ * Passing --sandbox always overrides ~/.codex/config.toml, so Navi used to
+ * silently narrow a sandbox the user had deliberately widened. Auto-approved
+ * runs now keep a configured danger-full-access, and every workspace-write run
+ * gets network access — without it Codex blocks DNS, so any API the agent needs
+ * (a task board, gh, a deploy CLI) fails in a way that looks like a dead server.
+ */
+export function resolveCodexSandbox(
+  permissionMode: QueryOptions["permissionMode"],
+  configuredMode?: CodexSandboxMode
+): { mode: CodexSandboxMode; needsNetworkOverride: boolean; downgradedToReadOnly: boolean } {
+  // Exec mode has no approval callback bridge, so anything short of explicit
+  // auto-approval stays read-only regardless of what the config asks for.
+  if (permissionMode !== "auto") {
+    return { mode: "read-only", needsNetworkOverride: false, downgradedToReadOnly: true };
+  }
+
+  const mode = configuredMode === "danger-full-access" ? configuredMode : "workspace-write";
+
+  return {
+    mode,
+    needsNetworkOverride: mode === "workspace-write",
+    downgradedToReadOnly: false,
+  };
 }
 
 export function buildCodexModelCatalog(configuredModel?: string): string[] {
@@ -274,7 +310,8 @@ export function describeCodexExit(
 
 export function buildCodexExecPlan(
   options: QueryOptions,
-  defaultModel: string
+  defaultModel: string,
+  configuredSandboxMode?: CodexSandboxMode
 ): CodexExecutionPlan {
   const model = options.model || defaultModel;
   const backendOpts = options.backendOptions || {};
@@ -297,22 +334,19 @@ export function buildCodexExecPlan(
     };
   }
 
-  // Codex exec does not expose approval callbacks. Preserve write access only
-  // for explicit auto-approve mode; otherwise run safely in read-only mode.
-  const downgradedToReadOnly = options.permissionMode !== "auto";
-  const sandboxMode = downgradedToReadOnly ? "read-only" : "workspace-write";
+  const sandbox = resolveCodexSandbox(options.permissionMode, configuredSandboxMode);
 
   const args = ["exec", "--json", "-m", model];
   args.push("--config", `model_reasoning_effort="${reasoningEffort}"`);
   // Codex ships with auto-compaction off (auto_compact_token_limit: null), so a
   // long run just overflows. Give it a limit with enough headroom to summarize.
   args.push("--config", `model_auto_compact_token_limit=${CODEX_AUTO_COMPACT_TOKEN_LIMIT}`);
-  args.push("--sandbox", sandboxMode);
 
-  if (options.permissionMode === "auto") {
-    args.push("--full-auto");
+  if (sandbox.needsNetworkOverride) {
+    args.push("--config", "sandbox_workspace_write.network_access=true");
   }
 
+  args.push("--sandbox", sandbox.mode);
   args.push("--skip-git-repo-check");
 
   if (options.resume) {
@@ -329,7 +363,8 @@ export function buildCodexExecPlan(
   return {
     args,
     model,
-    downgradedToReadOnly,
+    downgradedToReadOnly: sandbox.downgradedToReadOnly,
+    networkAccess: sandbox.mode !== "read-only",
     adjustedReasoningEffort,
   };
 }
@@ -387,7 +422,7 @@ export class CodexAdapter implements BackendAdapter {
   }
 
   async *query(options: QueryOptions): AsyncGenerator<NormalizedEvent> {
-    const plan = buildCodexExecPlan(options, this.defaultModel);
+    const plan = buildCodexExecPlan(options, this.defaultModel, getConfiguredCodexSandboxMode());
     const runCommand = buildCodexRunCommand(plan.args);
 
     // Emit init event
@@ -406,7 +441,7 @@ export class CodexAdapter implements BackendAdapter {
         type: "system",
         subtype: "status",
         status:
-          "Codex manual approvals are not wired in Navi yet. Running this turn in read-only mode.",
+          "Codex manual approvals are not wired in Navi yet. Running this turn in read-only mode, with no network access.",
       };
     }
 

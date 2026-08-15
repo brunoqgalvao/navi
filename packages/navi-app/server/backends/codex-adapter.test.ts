@@ -36,7 +36,7 @@ describe("codex adapter helpers", () => {
     expect(models.filter((m) => m === "gpt-5.6-sol")).toHaveLength(1);
   });
 
-  test("uses workspace-write plus full-auto for auto-approved runs", () => {
+  test("uses workspace-write for auto-approved runs", () => {
     const plan = buildCodexExecPlan(
       createOptions({
         model: "gpt-5.2-codex",
@@ -47,8 +47,51 @@ describe("codex adapter helpers", () => {
 
     expect(plan.args).toContain("--sandbox");
     expect(plan.args).toContain("workspace-write");
-    expect(plan.args).toContain("--full-auto");
+    // --full-auto is a deprecated alias for exactly this sandbox mode; passing
+    // both only earns a deprecation warning on stderr.
+    expect(plan.args).not.toContain("--full-auto");
     expect(plan.downgradedToReadOnly).toBe(false);
+  });
+
+  test("opens network access in the workspace-write sandbox", () => {
+    const plan = buildCodexExecPlan(
+      createOptions({ model: "gpt-5.4", permissionMode: "auto" }),
+      "gpt-5.4",
+      "workspace-write"
+    );
+
+    // Codex's workspace-write sandbox blocks DNS unless this is set, which
+    // silently breaks every API/CLI the agent tries to reach.
+    expect(plan.args).toContain("sandbox_workspace_write.network_access=true");
+    expect(plan.networkAccess).toBe(true);
+  });
+
+  test("honors a danger-full-access sandbox configured by the user", () => {
+    const plan = buildCodexExecPlan(
+      createOptions({ model: "gpt-5.4", permissionMode: "auto" }),
+      "gpt-5.4",
+      "danger-full-access"
+    );
+
+    expect(plan.args).toContain("danger-full-access");
+    expect(plan.args).not.toContain("workspace-write");
+    // That mode is already unrestricted, so the network override is redundant.
+    expect(plan.args).not.toContain("sandbox_workspace_write.network_access=true");
+    expect(plan.networkAccess).toBe(true);
+  });
+
+  test("never widens the sandbox past read-only when approvals are required", () => {
+    const plan = buildCodexExecPlan(
+      createOptions({ model: "gpt-5.4", permissionMode: "confirm" }),
+      "gpt-5.4",
+      "danger-full-access"
+    );
+
+    expect(plan.args).toContain("read-only");
+    expect(plan.args).not.toContain("danger-full-access");
+    expect(plan.args).not.toContain("sandbox_workspace_write.network_access=true");
+    expect(plan.networkAccess).toBe(false);
+    expect(plan.downgradedToReadOnly).toBe(true);
   });
 
   test("downgrades confirm mode to read-only because exec has no approval callback bridge", () => {
