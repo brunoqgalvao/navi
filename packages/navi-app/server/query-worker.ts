@@ -498,7 +498,8 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
         role: z.string().describe("The role/specialty of the child agent (e.g., 'frontend', 'backend', 'researcher', 'architect')"),
         task: z.string().describe("Clear description of what the child should accomplish. Be specific about deliverables."),
         agent_type: z.enum(["browser", "coding", "runner", "research", "planning", "reviewer", "general"]).optional().describe("Type of agent to spawn - determines UI and capabilities. Choose based on task nature."),
-        model: z.enum(["fable", "opus", "sonnet", "haiku"]).optional().describe("Optional: Model to use (defaults to parent's model). Use 'haiku' for simpler tasks, 'fable' for the hardest long-running tasks."),
+        model: z.string().optional().describe("Optional: Model to use (defaults to parent's model). For the claude backend use 'haiku' for simpler tasks or 'fable' for the hardest long-running work; for other backends pass that backend's model id."),
+        backend: z.enum(["claude", "codex", "gemini"]).optional().describe("Optional: Which agent runtime the child runs on (defaults to yours). A codex or gemini child is a single auto-delivered turn: it gets no Navi tools, skills or MCP servers, and cannot report progress or spawn its own children."),
         context: z.string().optional().describe("Optional: Additional context to pass to the child that they should know."),
         wait_for_completion: z.boolean().optional().describe("If true, this tool will block until the child completes and return their deliverable. Default: false (async)."),
       },
@@ -513,6 +514,9 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
           task: args.task,
           agent_type: args.agent_type,
           model: args.model,
+          // Without this the handler always fell back to the parent's backend,
+          // so every child ran on Claude no matter what was asked for.
+          backend: args.backend,
           context: args.context,
         });
 

@@ -1212,8 +1212,14 @@ function handleMultiSessionSpawn(proc: ChildProcess, sessionId: string | undefin
       // Auto-start the child session
       // Get parent session to determine project and working directory
       const parentSession = sessions.get(sessionId);
-      const resolvedModel = msg.model || (parentSession ? parentSession.model : null) || "opus";
-      const resolvedBackend = msg.backend || (parentSession ? parentSession.backend : null) || "claude";
+      const parentBackend = (parentSession ? parentSession.backend : null) || "claude";
+      const resolvedBackend = msg.backend || parentBackend;
+      // Inheriting the parent's model only makes sense on the same runtime —
+      // handing "opus" to Codex is just an invalid model id. On a cross-backend
+      // spawn, let that backend pick its own default.
+      const inheritedModel = resolvedBackend === parentBackend ? parentSession?.model : null;
+      const resolvedModel =
+        msg.model || inheritedModel || (resolvedBackend === "claude" ? "opus" : "");
 
       sendWorkerResponse(proc, "multi_session_spawn_response", msg.requestId, {
         success: true,
