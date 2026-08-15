@@ -95,6 +95,14 @@ export function createMessageHandler(config: MessageHandlerConfig) {
       case "stream_event": {
         if (uiSessionId) {
           const streamMsg = msg as StreamEventMessage;
+          // Sidechain deltas belong to a subagent, and the streaming store is
+          // keyed by session alone — feeding them here made subagent prose
+          // appear in the parent's bubble and then jump when its real message
+          // arrived. The subagent's own transcript renders from the assistant
+          // messages that carry the same parentToolUseId.
+          if (streamMsg.parentToolUseId) {
+            break;
+          }
           const eventType = streamMsg.event?.type;
           if (eventType === "message_start") {
             callbacks.onStreamingStart?.(uiSessionId);

@@ -3,6 +3,7 @@ import { get } from "svelte/store";
 
 import { createMessageHandler } from "./messageHandler";
 import { sessionMessages } from "../stores/session";
+import { streamingStore } from "./streamingStore";
 
 const SESSION_ID = "session-compact-test";
 const COMPACT_SUMMARY = `This session is being continued from a previous conversation that ran out of context.
@@ -151,6 +152,69 @@ describe("createMessageHandler", () => {
     });
 
     expect(updates).toHaveLength(0);
+  });
+
+  test("keeps subagent streaming out of the parent's bubble", () => {
+    const handler = createMessageHandler({
+      callbacks: {},
+      getCurrentSessionId: () => SESSION_ID,
+      getProjectId: () => "project-1",
+    });
+
+    handler.handle({
+      type: "stream_event",
+      uiSessionId: SESSION_ID,
+      parentToolUseId: "toolu_subagent_1",
+      event: { type: "message_start" },
+    });
+    handler.handle({
+      type: "stream_event",
+      uiSessionId: SESSION_ID,
+      parentToolUseId: "toolu_subagent_1",
+      event: {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "subagent thinking out loud" },
+      },
+    });
+
+    // The sidechain has its own transcript; leaking it here made the parent's
+    // text appear and then jump when the real message landed.
+    expect(get(streamingStore).get(SESSION_ID)?.partialText || "").toBe("");
+  });
+
+  test("still streams the parent's own tokens", () => {
+    const handler = createMessageHandler({
+      callbacks: {},
+      getCurrentSessionId: () => SESSION_ID,
+      getProjectId: () => "project-1",
+    });
+
+    handler.handle({
+      type: "stream_event",
+      uiSessionId: SESSION_ID,
+      parentToolUseId: null,
+      event: { type: "message_start" },
+    });
+    handler.handle({
+      type: "stream_event",
+      uiSessionId: SESSION_ID,
+      parentToolUseId: null,
+      event: {
+        type: "content_block_start",
+        content_block: { type: "text", text: "" },
+      },
+    });
+    handler.handle({
+      type: "stream_event",
+      uiSessionId: SESSION_ID,
+      parentToolUseId: null,
+      event: {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "parent speaking" },
+      },
+    });
+
+    expect(get(streamingStore).get(SESSION_ID)?.isStreaming).toBe(true);
   });
 
   test("forwards the runtime-reported context window on done", () => {
