@@ -113,12 +113,7 @@ function getSystemInfo(): Record<string, unknown> {
     info.devicePixelRatio = window.devicePixelRatio;
   }
 
-  // Detect if running in Tauri
-  if (typeof window !== "undefined" && (window.__TAURI__ || window.__TAURI_INTERNALS__)) {
-    info.runtime = "tauri";
-  } else {
-    info.runtime = "browser";
-  }
+  info.runtime = "browser";
 
   return info;
 }
@@ -305,9 +300,7 @@ export function initTelemetry(): void {
   // Track app start
   trackEvent(TelemetryEvents.APP_STARTED, {
     ...parseOsInfo(),
-    runtime: typeof window !== "undefined" && (window.__TAURI__ || window.__TAURI_INTERNALS__)
-      ? "tauri"
-      : "browser",
+    runtime: "browser",
   });
 
   // Flush events on page unload

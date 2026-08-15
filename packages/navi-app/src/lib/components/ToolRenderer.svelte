@@ -11,6 +11,7 @@
   import NaviContextWidget from "./tools/mcp/NaviContextWidget.svelte";
   import AgentBrowserWidget from "./widgets/AgentBrowserWidget.svelte";
   import { isAgentBrowserCommand } from "$lib/utils/agent-browser-parser";
+  import { normalizeTodos } from "$lib/utils/todos";
 
   interface Props {
     tool: ToolUseBlock;
@@ -29,6 +30,11 @@
 
   // Check if this is a native MCP tool that we have custom UI for
   function parseNativeMcpInfo(): { server: string; toolName: string } | null {
+    // The native SDK AskUserQuestion tool renders with the same widget as the
+    // old mcp__user-interaction__ask_user_question (kept for old transcripts).
+    if (tool.name === "AskUserQuestion") {
+      return { server: "user-interaction", toolName: "ask_user_question" };
+    }
     const match = tool.name.match(/^mcp__([^_]+)__(.+)$/);
     if (!match) return null;
     const [, server, mcpToolName] = match;
@@ -134,7 +140,7 @@
       case "WebSearch":
         return input.query || "";
       case "TodoWrite":
-        return `${input.todos?.length || 0} items`;
+        return `${normalizeTodos(input.todos).length} items`;
       case "Skill":
         return input.skill || input.command || input.name || "";
       default:
@@ -310,7 +316,7 @@
       />
 
     {:else if tool.name === "TodoWrite"}
-      <div class="text-xs text-gray-500">Updated execution plan ({input.todos?.length || 0} items)</div>
+      <div class="text-xs text-gray-500">Updated execution plan ({normalizeTodos(input.todos).length} items)</div>
 
     {:else if tool.name === "Skill"}
       <div class="flex items-center gap-2">

@@ -1,4 +1,4 @@
-// Hash-based router for Tauri/SPA compatibility
+// Hash-based SPA router
 // URLs look like: #/project/abc123/chat/xyz789
 
 export interface RouteState {

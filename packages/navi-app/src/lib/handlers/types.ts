@@ -21,6 +21,8 @@ export interface CompactMetadata {
 export interface QuestionOption {
   label: string;
   description: string;
+  /** Optional HTML preview fragment (native AskUserQuestion previewFormat) */
+  preview?: string;
 }
 
 export interface QuestionItem {
@@ -68,7 +70,7 @@ export interface UntilDoneContextResetData {
   message: string;
 }
 export interface HandlerCallbacks {
-  onSessionInit?: (sessionId: string, data: { claudeSessionId?: string; model?: string; cwd?: string; tools?: string[]; skills?: string[] }) => void;
+  onSessionInit?: (sessionId: string, data: { claudeSessionId?: string; model?: string; cwd?: string; tools?: string[]; skills?: string[]; agents?: string[] }) => void;
   onClaudeSessionId?: (sessionId: string, claudeSessionId: string) => void;
   onMessageUpdate?: (sessionId: string) => void;
   onStreamingStart?: (sessionId: string) => void;

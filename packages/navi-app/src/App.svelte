@@ -6,12 +6,12 @@
   import { relativeTime, formatContent, linkifyUrls, linkifyCodePaths, linkifyFilenames, linkifyFileLineReferences, linkifyChatReferences } from "./lib/utils";
   import { sessionMessages, sessionDrafts, currentSession as session, isConnected, projects, availableModels, onboardingComplete, messageQueue, loadingSessions, advancedMode, debugMode, todos, sessionTodos, sessionHistoryContext, notifications, pendingPermissionRequests, sessionStatus, tour, attachedFiles, textReferences, sessionDebugInfo, costStore, showArchivedWorkspaces, navHistory, sessionModels, attention, projectWorkspaces, compactingSessionsStore, startConnectivityMonitoring, stopConnectivityMonitoring, theme, sessionBackendStore, defaultBackend, backendModels, getBackendModelsFormatted, sessionReasoningEffort, defaultReasoningEffort, auth, autoCompactEnabled, autoCompactMethod, type ChatMessage, type AttachedFile, type NavHistoryEntry, type TextReference, type BackendId, type ReasoningEffort, type AutoCompactMethod } from "./lib/stores";
   import { backgroundProcessEvents } from "./lib/stores/backgroundProcessEvents";
-  import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill, type Workflow, type WorkflowGate, type WorkflowSchedule } from "./lib/api";
+  import { api, skillsApi, costsApi, worktreeApi, type Project, type Session, type Skill } from "./lib/api";
   import { mcpApi, type McpServer } from "./lib/features/mcp";
   import { getStatus as getGitStatus } from "./lib/features/git/api";
   import { createNewChatWithWorktree, startNewChat } from "./lib/actions";
   import { parseHash, onHashChange } from "./lib/router";
-  import { setServerPort, setPtyServerPort, isTauri, DEV_SERVER_PORT, BUNDLED_SERVER_PORT, BUNDLED_PTY_PORT, discoverPorts, getServerUrl } from "./lib/config";
+  import { discoverPorts, getServerUrl } from "./lib/config";
   import { getDefaultContextResetThresholdPercent, getEffectiveSessionContextWindow } from "./lib/context-window";
   import { setupGlobalErrorHandlers, pendingErrorReport, showError, showSuccess, type ErrorReport } from "./lib/errorHandler";
   import Preview from "./lib/Preview.svelte";
@@ -108,7 +108,6 @@
   import ChatView from "./lib/components/ChatView.svelte";
   import ChatInput from "./lib/components/ChatInput.svelte";
   import QuestionPrompt from "./lib/components/QuestionPrompt.svelte";
-  import WorkflowMonitorView from "./lib/features/workflows/components/WorkflowMonitorView.svelte";
   import ContextWarning from "./lib/components/ContextWarning.svelte";
   import MergeModal from "./lib/components/MergeModal.svelte";
   import CommandHelpModal from "./lib/components/CommandHelpModal.svelte";
@@ -187,56 +186,17 @@
     getDefaultModelForBackend,
   } from "./lib/actions";
 
-  let sidecarProcess: any = null;
   let serverReady = $state(false);
   let serverError = $state<string | null>(null);
 
   async function startSidecar(): Promise<number> {
-    if (!isTauri()) {
-      try {
-        const ports = await discoverPorts();
-        const res = await fetch(`http://localhost:${ports.server}/health`);
-        if (res.ok) return ports.server;
-      } catch {
-      }
-      serverError = "Server not running. Start with: bun run dev:all";
-      throw new Error(serverError);
-    }
-
-    let serverPort = BUNDLED_SERVER_PORT;
-    let ptyPort = BUNDLED_PTY_PORT;
-
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const ports = await invoke<[number, number]>("get_server_ports");
-      if (Array.isArray(ports)) {
-        const [tauriServerPort, tauriPtyPort] = ports;
-        if (typeof tauriServerPort === "number") {
-          serverPort = tauriServerPort;
-        }
-        if (typeof tauriPtyPort === "number") {
-          ptyPort = tauriPtyPort;
-        }
-      }
-    } catch (e) {
-      // Failed to read ports from Tauri backend, using defaults
+      const ports = await discoverPorts();
+      const res = await fetch(`http://localhost:${ports.server}/health`);
+      if (res.ok) return ports.server;
+    } catch {
     }
-
-    setServerPort(serverPort);
-    setPtyServerPort(ptyPort);
-
-    for (let i = 0; i < 30; i++) {
-      try {
-        const res = await fetch(`http://localhost:${serverPort}/health`);
-        if (res.ok) {
-          return serverPort;
-        }
-      } catch {
-      }
-      await new Promise(r => setTimeout(r, 100));
-    }
-
-    serverError = "Bundled server failed to respond";
+    serverError = "Server not running. Start with: bun run dev:all";
     throw new Error(serverError);
   }
   
@@ -269,16 +229,10 @@
 
   let sidebarProjects = $state<Project[]>([]);
   let sidebarSessions = $state<Session[]>([]);
-  let workflowsForProject = $state<Workflow[]>([]);
   let recentChats = $state<Session[]>([]);
 
   // Get current session data from sidebar sessions for worktree info
   let currentSessionData = $derived($session.sessionId ? sidebarSessions.find(s => s.id === $session.sessionId) : null);
-  let currentWorkflow = $derived(
-    $session.sessionId
-      ? workflowsForProject.find((item) => item.rootSessionId === $session.sessionId) ?? null
-      : null
-  );
 
   // Session hierarchy info for multi-agent
   let currentSessionHierarchy = $derived(() => {
@@ -573,7 +527,6 @@
         api.sessions.list($session.projectId, $showArchivedWorkspaces).then(list => {
           sidebarSessions = list;
         });
-        loadWorkflows($session.projectId);
       }
       // Trigger tour after first message
       if (reason === "done" && sessionId === $session.sessionId && !$tour.completedTours.includes("chat")) {
@@ -830,13 +783,11 @@
   let showPreview = $state(false);
   let previewSource = $state("");
   let showFileBrowser = $state(false);
-  let showBrowser = $state(false);
   let showGitPanel = $state(false);
   let showTerminal = $state(false);
   let showContext = $state(false);
   let showExtensionSettings = $state(false);
-  let browserUrl = $state("http://localhost:3000");
-  type RightPanelMode = "preview" | "files" | "browser" | "git" | "terminal" | "processes" | "context";
+  type RightPanelMode = "preview" | "files" | "git" | "terminal" | "processes" | "context";
   let rightPanelMode = $state<RightPanelMode>("preview");
   let terminalRef: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null = $state(null);
   let terminalInitialCommand = $state("");
@@ -1451,9 +1402,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     if (activeSessionsPoll) {
       clearInterval(activeSessionsPoll);
     }
-    if (sidecarProcess) {
-      sidecarProcess.kill();
-    }
   });
 
   function attachSession(sessionId: string | null, connected: boolean) {
@@ -1552,84 +1500,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   const setProjectFolder = setProjectFolderAction;
   const reorderFolders = reorderFoldersAction;
 
-  async function loadWorkflows(projectId: string) {
-    try {
-      workflowsForProject = await api.workflows.list(projectId);
-    } catch (e) {
-      console.error("Failed to load workflows:", e);
-      workflowsForProject = [];
-    }
-  }
-
-  async function createWorkflow(data: {
-    name: string;
-    prompt: string;
-    schedule: WorkflowSchedule;
-    gate?: WorkflowGate;
-    enabled?: boolean;
-    ownerAgentId?: string | null;
-    collapsed?: boolean;
-    learningNotes?: string | null;
-    feedbackNotes?: string | null;
-  }) {
-    if (!$session.projectId) {
-      throw new Error("No project selected");
-    }
-    const workflow = await api.workflows.create($session.projectId, data);
-    workflowsForProject = [workflow, ...workflowsForProject];
-    sidebarSessions = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
-    return workflow;
-  }
-
-  async function updateWorkflow(
-    workflowId: string,
-    data: {
-      name?: string;
-      prompt?: string;
-      schedule?: WorkflowSchedule;
-      gate?: WorkflowGate;
-      enabled?: boolean;
-      ownerAgentId?: string | null;
-      collapsed?: boolean;
-      learningNotes?: string | null;
-      feedbackNotes?: string | null;
-    }
-  ) {
-    const workflow = await api.workflows.update(workflowId, data);
-    workflowsForProject = workflowsForProject.map((item) => (item.id === workflowId ? workflow : item));
-    if ($session.projectId) {
-      sidebarSessions = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
-    }
-    return workflow;
-  }
-
-  async function deleteWorkflow(workflowId: string) {
-    const workflow = workflowsForProject.find((item) => item.id === workflowId);
-    await api.workflows.delete(workflowId);
-    workflowsForProject = workflowsForProject.filter((item) => item.id !== workflowId);
-    if ($session.projectId) {
-      sidebarSessions = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
-    }
-    if (workflow && $session.sessionId === workflow.rootSessionId) {
-      session.setSession(null);
-    }
-  }
-
-  async function runWorkflow(workflowId: string) {
-    await api.workflows.run(workflowId);
-    if ($session.projectId) {
-      sidebarSessions = await api.sessions.list($session.projectId, $showArchivedWorkspaces);
-      loadWorkflows($session.projectId);
-    }
-  }
-
-  function selectWorkflowRoot(workflow: Workflow) {
-    const rootSession = sidebarSessions.find((sess) => sess.id === workflow.rootSessionId);
-    if (rootSession) {
-      selectSession(rootSession);
-    }
-  }
-
   async function selectSessionById(sessionId: string) {
     const existing = sidebarSessions.find((sess) => sess.id === sessionId);
     if (existing) {
@@ -1643,7 +1513,7 @@ Please walk me through the setup step by step. When I have the credentials, save
         await selectSession(fetched);
       }
     } catch (err) {
-      console.error("Failed to open workflow session:", err);
+      console.error("Failed to open session:", err);
     }
   }
 
@@ -1665,15 +1535,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       api.sessions.list($session.projectId, $showArchivedWorkspaces).then(list => {
         sidebarSessions = list;
       });
-    }
-  });
-
-  $effect(() => {
-    const projectId = $session.projectId;
-    if (projectId) {
-      loadWorkflows(projectId);
-    } else {
-      workflowsForProject = [];
     }
   });
 
@@ -1952,29 +1813,11 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function pickDirectory() {
-    if (isTauri()) {
-      try {
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        const selected = await open({
-          directory: true,
-          multiple: false,
-        });
-        if (selected && typeof selected === "string") {
-          newProjectPath = selected;
-          if (!newProjectName) {
-            newProjectName = selected.split("/").filter(Boolean).pop() || "";
-          }
-        }
-      } catch (e) {
-        console.error("Failed to pick directory:", e);
-      }
-    } else {
-      const path = prompt("Enter directory path:", "/Users/");
-      if (path) {
-        newProjectPath = path;
-        if (!newProjectName) {
-          newProjectName = path.split("/").filter(Boolean).pop() || "";
-        }
+    const path = prompt("Enter directory path:", "/Users/");
+    if (path) {
+      newProjectPath = path;
+      if (!newProjectName) {
+        newProjectName = path.split("/").filter(Boolean).pop() || "";
       }
     }
   }
@@ -2034,24 +1877,9 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function pickDirectoryForEdit() {
-    if (isTauri()) {
-      try {
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        const selected = await open({
-          directory: true,
-          multiple: false,
-        });
-        if (selected && typeof selected === "string") {
-          editProjectPath = selected;
-        }
-      } catch (e) {
-        console.error("Failed to pick directory:", e);
-      }
-    } else {
-      const path = prompt("Enter directory path:", editProjectPath);
-      if (path) {
-        editProjectPath = path;
-      }
+    const path = prompt("Enter directory path:", editProjectPath);
+    if (path) {
+      editProjectPath = path;
     }
   }
 
@@ -2186,17 +2014,6 @@ Please walk me through the setup step by step. When I have the credentials, save
 
   async function deleteSession(e: Event, id: string) {
     e.stopPropagation();
-    const workflow = workflowsForProject.find((item) => item.rootSessionId === id);
-    if (workflow) {
-      if (!confirm(`Delete workflow "${workflow.name}" and all of its run history?`)) return;
-      try {
-        await deleteWorkflow(workflow.id);
-      } catch (err) {
-        console.error("Failed to delete workflow:", err);
-      }
-      return;
-    }
-
     if (!confirm("Delete this chat?")) return;
 
     try {
@@ -2293,85 +2110,16 @@ Please walk me through the setup step by step. When I have the credentials, save
   }
 
   async function openProjectInNewWindow(project: Project) {
-    console.log("[CMD+CLICK] openProjectInNewWindow called for:", project.name, "isTauri:", isTauri());
-    if (!isTauri()) {
-      // In browser mode, open in a new browser tab
-      console.log("[CMD+CLICK] Opening in browser tab");
-      window.open(`#/project/${project.id}`, '_blank');
-      return;
-    }
-
-    try {
-      console.log("[CMD+CLICK] Calling Tauri invoke");
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("open_project_in_new_window", {
-        projectId: project.id,
-        projectName: project.name
-      });
-    } catch (e) {
-      console.error("Failed to open project in new window:", e);
-      notifications.add({
-        title: "Error",
-        message: "Failed to open project in new window",
-        type: "error"
-      });
-    }
+    window.open(`#/project/${project.id}`, '_blank');
   }
 
   async function openSessionInNewWindow(sess: Session) {
     if (!currentProject) return;
-
-    if (!isTauri()) {
-      // In browser mode, open in a new browser tab
-      window.open(`#/project/${currentProject.id}/chat/${sess.id}`, '_blank');
-      return;
-    }
-
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("open_session_in_new_window", {
-        projectId: currentProject.id,
-        sessionId: sess.id,
-        sessionTitle: sess.title || "Chat"
-      });
-    } catch (e) {
-      console.error("Failed to open session in new window:", e);
-      notifications.add({
-        title: "Error",
-        message: "Failed to open session in new window",
-        type: "error"
-      });
-    }
+    window.open(`#/project/${currentProject.id}/chat/${sess.id}`, '_blank');
   }
 
   async function openHomeInNewWindow() {
-    if (!isTauri()) {
-      // In browser mode, open in a new browser tab
-      window.open('#/', '_blank');
-      return;
-    }
-
-    try {
-      // Use create_new_window by opening without a project
-      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      const windowNum = Date.now();
-      new WebviewWindow(`home-${windowNum}`, {
-        url: 'index.html',
-        title: 'Navi',
-        width: 1200,
-        height: 800,
-        minWidth: 800,
-        minHeight: 600,
-        center: true
-      });
-    } catch (e) {
-      console.error("Failed to open home in new window:", e);
-      notifications.add({
-        title: "Error",
-        message: "Failed to open new window",
-        type: "error"
-      });
-    }
+    window.open('#/', '_blank');
   }
 
   async function toggleSessionPin(sess: Session, e: Event) {
@@ -3169,29 +2917,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     sendMessage();
   }
 
-  // Handle element inspection from browser preview
-  function handleElementInspected(element: import("./lib/Preview.svelte").InspectedElement) {
-    // Format element data for chat context
-    const elementInfo = [
-      `**Inspected Element from ${element.page.url}**`,
-      "",
-      "```html",
-      element.outerHTML,
-      "```",
-      "",
-      `**Selector:** \`${element.selector}\``,
-      "",
-      `**Tag:** ${element.tagName}`,
-      element.attributes.class ? `**Classes:** ${element.attributes.class}` : "",
-      element.attributes.id ? `**ID:** ${element.attributes.id}` : "",
-      element.textContent ? `**Text:** "${element.textContent.slice(0, 100)}${element.textContent.length > 100 ? '...' : ''}"` : "",
-    ].filter(Boolean).join("\n");
-
-    // Pre-fill input with element context
-    inputText = elementInfo + "\n\nHelp me with this element: ";
-    inputRef?.focus();
-  }
-
   // Handle "Send to Claude" from Bash tool results (pre-fills input for review)
   function handleBashSendToClaude(context: string) {
     inputText = context;
@@ -3219,7 +2944,9 @@ Please walk me through the setup step by step. When I have the credentials, save
   function openPreview(source: string, line?: number) {
     const isUrl = source.startsWith("http://") || source.startsWith("https://") || source.startsWith("localhost") || source.match(/^:\d+/);
     if (isUrl) {
-      openBrowser(source);
+      // No embedded browser — open URLs in the system browser
+      const formatted = source.startsWith(":") ? `http://localhost${source}` : source.startsWith("localhost") ? `http://${source}` : source;
+      window.open(formatted, "_blank");
     } else {
       // If line number is provided, append it as a fragment identifier
       const sourceWithLine = line ? `${source}#line${line}` : source;
@@ -3227,12 +2954,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       showPreview = true;
       rightPanelMode = "preview";
     }
-  }
-
-  function openBrowser(url: string) {
-    browserUrl = url.startsWith(":") ? `http://localhost${url}` : url.startsWith("localhost") ? `http://${url}` : url;
-    showBrowser = true;
-    rightPanelMode = "browser";
   }
 
   function closePreview() {
@@ -3263,7 +2984,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   function closeRightPanel() {
     showFileBrowser = false;
     showPreview = false;
-    showBrowser = false;
     showGitPanel = false;
     showTerminal = false;
     showContext = false;
@@ -3296,7 +3016,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     const panelMode = mode as RightPanelMode;
 
     // Check if we're already showing this panel - if so, close it
-    const isPanelOpen = showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext;
+    const isPanelOpen = showFileBrowser || showPreview || showGitPanel || showTerminal || showContext;
     if (isPanelOpen && rightPanelMode === panelMode) {
       closeRightPanel();
       return;
@@ -3307,9 +3027,6 @@ Please walk me through the setup step by step. When I have the credentials, save
       case "files":
       case "preview":
         showFileBrowser = true;
-        break;
-      case "browser":
-        showBrowser = true;
         break;
       case "git":
         showGitPanel = true;
@@ -3419,13 +3136,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   function getLinkContextMenuItems() {
     if (!linkContextMenu) return [];
     return [
-      {
-        label: "Open in Preview",
-        icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>',
-        onclick: () => {
-          if (linkContextMenu) openPreview(linkContextMenu.url);
-        }
-      },
       {
         label: "Open in Browser",
         icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>',
@@ -3764,7 +3474,6 @@ Please walk me through the setup step by step. When I have the credentials, save
   <Sidebar
     projects={sidebarProjects}
     sessions={sidebarSessions}
-    workflows={workflowsForProject}
     {recentChats}
     {currentProject}
     {currentMessages}
@@ -3819,7 +3528,7 @@ Please walk me through the setup step by step. When I have the credentials, save
     onStartResizing={startResizingLeft}
     isResizing={isResizingLeft}
     onCollapseToggle={() => sidebarCollapsed = !sidebarCollapsed}
-    onBackToWorkspaces={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; sessionFolders = []; workflowsForProject = []; }}
+    onBackToWorkspaces={() => { session.setProject(null); session.setSession(null); sidebarSessions = []; sessionFolders = []; }}
     onFolderCreate={createFolder}
     onFolderUpdate={updateFolder}
     onFolderDelete={deleteFolder}
@@ -3838,11 +3547,6 @@ Please walk me through the setup step by step. When I have the credentials, save
     onSessionFolderToggleCollapse={toggleSessionFolderCollapseAction}
     onSessionSetFolder={setSessionFolderAction}
     onSessionFolderReorder={(order) => reorderSessionFoldersAction($session.projectId!, order)}
-    onWorkflowCreate={createWorkflow}
-    onWorkflowUpdate={updateWorkflow}
-    onWorkflowDelete={deleteWorkflow}
-    onWorkflowRun={runWorkflow}
-    onWorkflowSelect={selectWorkflowRoot}
     onOpenProjectInNewWindow={openProjectInNewWindow}
     onOpenSessionInNewWindow={openSessionInNewWindow}
     onOpenHomeInNewWindow={openHomeInNewWindow}
@@ -3989,8 +3693,7 @@ Please walk me through the setup step by step. When I have the credentials, save
                 projectPath={currentProject?.path || ''}
                 projectName={currentProject.name}
                 sessions={sidebarSessions}
-                workflows={workflowsForProject}
-                projectDescription={currentProject?.description}
+                            projectDescription={currentProject?.description}
                 {claudeMdContent}
                 {projectContext}
                 onSuggestionClick={(suggestion) => { inputText = suggestion; }}
@@ -4042,20 +3745,6 @@ Please walk me through the setup step by step. When I have the credentials, save
               </div>
             {/if}
 
-            {#if currentWorkflow}
-              <WorkflowMonitorView
-                workflow={currentWorkflow}
-                onRunNow={async () => {
-                  await runWorkflow(currentWorkflow.id);
-                }}
-                onSelectSession={async (sessionId) => {
-                  if (sessionId && sessionId !== $session.sessionId) {
-                    await selectSessionById(sessionId);
-                  }
-                }}
-                onOpenArtifact={openPreview}
-              />
-            {:else}
               <ChatView
                 sessionId={$session.sessionId}
                 projectPath={currentProject?.path || ''}
@@ -4112,7 +3801,6 @@ Please walk me through the setup step by step. When I have the credentials, save
                 }
                 }}
               />
-            {/if}
           {/if}
 
         </div>
@@ -4275,8 +3963,8 @@ Please walk me through the setup step by step. When I have the credentials, save
   </div>
   <!-- End Chat Container -->
 
-  <!-- Right Panel (File Browser / Preview / Browser / Git / Terminal / Context) -->
-  {#if showFileBrowser || showPreview || showBrowser || showGitPanel || showTerminal || showContext}
+  <!-- Right Panel (File Browser / Preview / Git / Terminal / Context) -->
+  {#if showFileBrowser || showPreview || showGitPanel || showTerminal || showContext}
     <RightPanel
       mode={rightPanelMode}
       width={rightPanelWidth}
@@ -4285,14 +3973,12 @@ Please walk me through the setup step by step. When I have the credentials, save
       projectPath={currentProject?.path || null}
       worktreePath={currentSessionData?.worktree_path}
       {previewSource}
-      {browserUrl}
       isResizing={isResizingRight}
       {terminalInitialCommand}
       onModeChange={(mode) => {
         rightPanelMode = mode;
         if (mode === "files") showFileBrowser = true;
         else if (mode === "preview") showPreview = true;
-        else if (mode === "browser") showBrowser = true;
         else if (mode === "git") showGitPanel = true;
         else if (mode === "terminal") showTerminal = true;
         else if (mode === "context") showContext = true;
@@ -4300,10 +3986,8 @@ Please walk me through the setup step by step. When I have the credentials, save
       onClose={closeRightPanel}
       onStartResize={startResizingRight}
       onFileSelect={handleFileSelect}
-      onBrowserUrlChange={(url) => browserUrl = url}
       onTerminalRef={(ref) => terminalRef = ref}
       onTerminalSendToClaude={handleTerminalSendToClaude}
-      onElementInspected={handleElementInspected}
     />
   {/if}
 

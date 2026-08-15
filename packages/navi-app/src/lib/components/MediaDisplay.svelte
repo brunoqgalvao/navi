@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getApiBase, isTauri } from "../config";
+  import { getApiBase } from "../config";
   import STLViewer from "./STLViewer.svelte";
   import GLBViewer from "./GLBViewer.svelte";
   import { get3DModelType } from "../media-parser";
@@ -99,18 +99,21 @@
       return;
     }
 
-    if (isTauri()) {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("share_file", { filePath });
+    try {
+      const res = await fetch(resolveMediaSrc(currentItem.src));
+      const blob = await res.blob();
+      const fileName = filePath.split("/").pop() || "image";
+      const file = new File([blob], fileName, { type: blob.type });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file] });
         shareStatus = null;
-      } catch (err) {
-        console.error("Share failed:", err);
-        shareStatus = "Share failed";
+      } else {
+        shareStatus = "Sharing not supported here";
         setTimeout(() => shareStatus = null, 2000);
       }
-    } else {
-      shareStatus = "Sharing only available in app";
+    } catch (err) {
+      console.error("Share failed:", err);
+      shareStatus = "Share failed";
       setTimeout(() => shareStatus = null, 2000);
     }
   }
@@ -126,17 +129,29 @@
       return;
     }
 
-    if (isTauri()) {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("copy_image_to_clipboard", { filePath });
-        shareStatus = "Copied to clipboard!";
-        setTimeout(() => shareStatus = null, 2000);
-      } catch (err) {
-        console.error("Copy failed:", err);
-        shareStatus = "Copy failed";
-        setTimeout(() => shareStatus = null, 2000);
+    try {
+      const res = await fetch(resolveMediaSrc(currentItem.src));
+      const blob = await res.blob();
+      // Clipboard API only accepts PNG for images — convert via canvas if needed
+      if (blob.type === "image/png") {
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+      } else {
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+        const pngBlob: Blob = await new Promise((resolve, reject) =>
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png")
+        );
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
       }
+      shareStatus = "Copied to clipboard!";
+      setTimeout(() => shareStatus = null, 2000);
+    } catch (err) {
+      console.error("Copy failed:", err);
+      shareStatus = "Copy failed";
+      setTimeout(() => shareStatus = null, 2000);
     }
   }
 

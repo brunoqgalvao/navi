@@ -49,21 +49,8 @@ function getUserPath() {
   }
 }
 
-// When running in Tauri bundled mode, modules are in pty-node_modules directory
-// alongside this script in the resources folder
 function loadModule(moduleName) {
-  // Try standard require first
-  try {
-    return require(moduleName);
-  } catch (e) {
-    // If that fails, try from pty-node_modules relative to this script
-    const ptyNodeModulesPath = path.join(__dirname, 'pty-node_modules', moduleName);
-    if (fs.existsSync(ptyNodeModulesPath)) {
-      return require(ptyNodeModulesPath);
-    }
-    // Re-throw original error if not found
-    throw e;
-  }
+  return require(moduleName);
 }
 
 function getNodePtyDirs() {

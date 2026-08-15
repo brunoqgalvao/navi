@@ -1,6 +1,6 @@
 # Navi - Claude Code Local UI
 
-A desktop application providing a rich GUI for Claude Code, built with Svelte 5, Tauri, and Bun.
+A local web application providing a rich GUI for Claude Code, built with Svelte 5 and Bun.
 
 ## Be snarky fun
 
@@ -14,14 +14,14 @@ VERY IMPORTANT CONTEXT:
 Navi is an **independent, standardizing harness** for interacting with coding agents. While currently focused on Claude Agent SDK, we secondarily support Codex and Gemini.
 
 > **2026-06 refocus:** Navi was deliberately cut down to its core (chat/sessions,
-> multi-agent orchestration, terminal, git, skills, browser, MCP). A lot of
+> multi-agent orchestration, terminal, git, skills, MCP). A lot of
 > half-baked surface area got demolished. The why-and-what lives in
 > [`docs/superpowers/specs/2026-06-12-navi-refocus-design.md`](docs/superpowers/specs/2026-06-12-navi-refocus-design.md);
 > the current feature inventory is in [`docs/STATUS.md`](docs/STATUS.md). If this
 > file disagrees with reality, reality wins — fix this file.
 >
 > **2026-07 simplification deltas:** the preview/dev-server stack was deleted
-> outright (browser panel is the only preview surface; start dev servers
+> outright (start dev servers
 > yourself), the skills marketplace/import/editor UI collapsed into one flat
 > SkillsPanel, and the context panel was restyled. Spec:
 > [`docs/superpowers/specs/2026-07-20-simplification-deltas-design.md`](docs/superpowers/specs/2026-07-20-simplification-deltas-design.md).
@@ -48,7 +48,7 @@ The goal: patterns proven in Navi should eventually standardize across Claude, C
 #### 2. Rich UI on Standards
 Provide convenient harnesses and UI that abstract complexity:
 - **Workspaces & Sessions** — navigate between many agents/projects
-- **Extensions** — composable sidebar panels (Files, Browser, Git, Terminal)
+- **Extensions** — composable sidebar panels (Files, Git, Terminal)
 - **Inline Widgets** — rich rendering in chat (diagrams, charts, interactive UI)
 - **Integrations** — OAuth flows abstracted from the user
 - **Multi-account management** — API keys, providers, credentials
@@ -71,7 +71,7 @@ MCP Server + Native UI wrapper = best of both worlds
 ```
 
 Examples:
-- `askUserTool` = MCP server (portable) + native Navi UI (pretty prompts)
+- Ask-user questions = native SDK `AskUserQuestion` tool (handled in `canUseTool`) + native Navi UI (pretty prompts)
 - Agent orchestration = native (needs deep UI integration)
 - Deploy pipeline = plugin (reusable across tools)
 
@@ -84,7 +84,6 @@ We have native stuff (native plugins, native MCPs, native UI). But we build on s
 ```bash
 # Development
 bun run dev:app        # Frontend + backend + PTY server
-bun run dev:tauri      # Desktop app mode (Tauri)
 
 # Type checking
 bun run --cwd packages/navi-app check
@@ -128,7 +127,7 @@ Navi has **7 distinct component categories** defined in `src/lib/core/`:
 
 **Important: Extensions vs Global Settings Feature Toggles**
 
-- **Extensions** are **session/project-scoped** panels. They appear in the right sidebar, can be enabled/disabled per project, and are relevant to the current chat context (Files, Browser, Git, Terminal, etc.).
+- **Extensions** are **session/project-scoped** panels. They appear in the right sidebar, can be enabled/disabled per project, and are relevant to the current chat context (Files, Git, Terminal, etc.).
 - **Global Settings Features** are **app-wide toggles** (Settings → Features tab). Use these for features that monitor or affect the entire app, not specific sessions. Examples: Resource Monitor, Debug Mode, Advanced Mode, Telemetry.
 
 When adding a new panel/feature:
@@ -151,15 +150,13 @@ import {
 packages/
 ├── navi-app/           # Main desktop application
 │   ├── src/            # Svelte 5 frontend
-│   ├── server/         # Bun backend (routes, services, websocket)
-│   └── src-tauri/      # Tauri desktop wrapper
+│   └── server/         # Bun backend (routes, services, websocket)
 └── landing-page/       # Marketing website
 ```
 
 ### Tech Stack
 - **Frontend:** Svelte 5 + Vite + Tailwind CSS
 - **Backend:** Bun + custom HTTP server + WebSocket
-- **Desktop:** Tauri v2
 - **Database:** sql.js (SQLite in-memory, persisted to ~/.claude-code-ui/data.db)
 - **AI:** @anthropic-ai/claude-agent-sdk
 
@@ -171,7 +168,7 @@ See `docs/STATUS.md` for complete feature inventory. Quick summary (post-2026-06
 
 | Status | Features |
 |--------|----------|
-| **CORE** | Sessions, Projects, **Multi-Agent Orchestration**, Terminal, Git, Skills, Browser, MCP |
+| **CORE** | Sessions, Projects, **Multi-Agent Orchestration**, Terminal, Git, Skills, MCP |
 | **STABLE** | Extensions, Commands, Plugins, Raw Credentials, Backend Selector |
 | **IN REBUILD** | Workflows |
 
@@ -259,7 +256,7 @@ Extensions appear as tabs in the right sidebar. Use the registry pattern:
 import { extensionRegistry, type Extension } from "$lib/core";
 
 // Get all panel modes (derived from extensions)
-const modes = extensionRegistry.getPanelModes(); // ["files", "browser", "git", ...]
+const modes = extensionRegistry.getPanelModes(); // ["files", "git", ...]
 
 // Get extension by panel mode
 const gitExt = extensionRegistry.getByPanelMode("git");
@@ -274,7 +271,6 @@ const gitExt = extensionRegistry.getByPanelMode("git");
 | `terminal` | terminal | 💻 | Terminal output viewer |
 | `processes` | processes | ⚙️ | Background process manager |
 | `context` | context | 🧠 | Session context viewer |
-| `browser` | browser | 🌐 | Browser + URL/file preview surface |
 
 #### Creating a New Extension
 

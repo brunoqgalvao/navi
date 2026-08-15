@@ -8,6 +8,7 @@
   import GenerativeUI from "./experimental/GenerativeUI.svelte";
   import CopyButton from "./CopyButton.svelte";
   import TodoListPreview from "./tools/TodoListPreview.svelte";
+  import { normalizeTodos } from "../utils/todos";
   import EmbeddedMarkdownViewer from "./EmbeddedMarkdownViewer.svelte";
   import { processGenerativeUIContent } from "../generative-ui";
   import { parseMediaContent } from "../media-parser";
@@ -392,7 +393,7 @@
         {:else if isTodoWrite(tool)}
           {@const expanded = expandedBlocks.has(originalIdx)}
           <TodoListPreview
-            todos={tool.input?.todos || []}
+            todos={normalizeTodos(tool.input?.todos)}
             {expanded}
             onToggle={() => toggleBlock(originalIdx)}
           />

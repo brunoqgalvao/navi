@@ -130,19 +130,20 @@ When outputting complex JSON data, the UI will render it as an interactive colla
 
 ## Preview Panel
 
-The UI has a built-in preview panel that can display:
-- **URLs**: Any localhost URL (e.g., \`http://localhost:3000\`)
+The UI has a built-in file preview panel that can display:
 - **Files**: Code files with syntax highlighting
 - **Markdown**: Rendered markdown documents
 - **Images**: PNG, JPG, GIF, SVG, etc.
+
+There is no embedded browser — URLs open in the user's system browser.
 
 ### How to Suggest Previews
 
 When you create or modify files that the user might want to see, suggest they preview it:
 
-1. For web apps: "You can preview this at http://localhost:3000 using the preview panel"
-2. For files: "You can preview this file using the Files panel on the right"
-3. For markdown: "Open the preview panel to see the rendered markdown"
+1. For files: "You can preview this file using the Files panel on the right"
+2. For markdown: "Open it from the Files panel to see the rendered markdown"
+3. For web apps: give the localhost URL and let the user open it in their browser
 
 ### File Browser
 

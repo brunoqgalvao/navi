@@ -22,7 +22,6 @@ export type {
   Session,
   Skill,
   TerminalTab,
-  BrowserState,
   SessionWorkspace,
   TextReference,
   TerminalReference,

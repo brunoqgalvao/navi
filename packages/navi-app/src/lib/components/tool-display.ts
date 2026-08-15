@@ -1,6 +1,7 @@
 // Shared display helpers for rendering tool_use blocks in chat
 // (ToolRow, ToolCallRun, AssistantMessage).
 import type { ToolUseBlock, ToolResultBlock } from "../claude";
+import { normalizeTodos } from "../utils/todos";
 
 export interface ToolRunToolStep {
   kind: "tool";
@@ -45,7 +46,7 @@ export function getToolSummary(tool: ToolUseBlock): string {
     case "WebSearch":
       return (input.query as string) || "";
     case "TodoWrite":
-      return `${(input.todos as unknown[])?.length || 0} items`;
+      return `${normalizeTodos(input.todos).length} items`;
     case "Task":
       return (input.description as string)?.slice(0, 40) || "";
     default:

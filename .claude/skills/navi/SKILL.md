@@ -11,17 +11,11 @@ If the task is specifically about Navi workflows, workflow schedules, workflow r
 
 ## API Base
 
-**Dynamic URL Discovery**: The API base URL varies depending on how Navi is running:
-- Dev mode: `http://localhost:3001/api`
-- Tauri app: `http://localhost:3011/api`
+The backend listens on `http://localhost:3021/api` by default (the sandbox
+instance uses `:4021`). If in doubt, probe `http://localhost:3021/health`.
 
-To discover the correct URL programmatically:
-```bash
-# Try dev port first, fall back to app port
-NAVI_API=$(curl -s http://localhost:3001/api/navi-url 2>/dev/null | jq -r '.apiUrl' || echo "http://localhost:3011")
-```
-
-For simplicity in examples below, we use `http://localhost:3001` but substitute the correct URL for your environment.
+For simplicity in examples below, we use `http://localhost:3001` in some
+snippets — substitute your actual backend port (normally `3021`).
 
 ## Quick Reference
 
@@ -356,12 +350,13 @@ These endpoints let Claude Code directly control the Navi UI. This is what makes
 
 ### Open Preview Panel
 
-Open a URL or file in Navi's preview panel:
+Open a file in Navi's file preview panel. URLs are opened in the user's
+system browser (there is no embedded browser in Navi):
 
 ```bash
 curl -X POST http://localhost:3001/api/ui/preview \
   -H "Content-Type: application/json" \
-  -d '{"source": "http://localhost:3000"}'
+  -d '{"source": "http://localhost:3000"}'   # opens in system browser
 ```
 
 Open a local file:
@@ -440,10 +435,11 @@ In addition to the API, you can also use these methods:
 
 ### In Your Response
 
-Simply include a URL in your text response and the user can click to preview:
+Simply include a URL in your text response and the user can click it to open
+it in their browser:
 
 ```
-You can preview this at http://localhost:3000
+You can open this at http://localhost:3000
 ```
 
 ### Media Display

@@ -7,7 +7,10 @@
 import { json, corsHeaders } from "../utils/response";
 import { spawn, exec, type ChildProcess } from "child_process";
 import { homedir } from "os";
+import { join } from "path";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { getActiveProcesses } from "../websocket/handler";
+import { getDataDir } from "../utils/data-dir";
 
 // Constants
 const MAX_OUTPUT_LINES = 200;
@@ -51,6 +54,137 @@ export interface BackgroundProcess {
 
 // In-memory store for background processes
 const backgroundProcesses = new Map<string, BackgroundProcess>();
+
+// ============================================================================
+// Restart-survival snapshot
+//
+// The self-update flow (`launchctl kickstart -k`) kills the whole service
+// tree, background processes included. We keep a snapshot of running
+// processes on disk so the next boot can bring them back via
+// resumeInterruptedProcesses().
+// ============================================================================
+
+interface ProcessSnapshotEntry {
+  command: string;
+  cwd: string;
+  sessionId?: string;
+  projectId?: string;
+  type: BackgroundProcess["type"];
+  label?: string;
+  startedAt: number;
+  ports: number[];
+}
+
+const snapshotPath = () => join(getDataDir(), "background-processes.json");
+
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function persistRunningProcesses() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    try {
+      const running: ProcessSnapshotEntry[] = Array.from(backgroundProcesses.values())
+        .filter((p) => p.status === "running" || p.status === "starting")
+        .map((p) => ({
+          command: p.command,
+          cwd: p.cwd,
+          sessionId: p.sessionId,
+          projectId: p.projectId,
+          type: p.type,
+          label: p.label,
+          startedAt: p.startedAt,
+          ports: p.ports,
+        }));
+      writeFileSync(snapshotPath(), JSON.stringify(running, null, 2));
+    } catch (e) {
+      console.error("[BackgroundProcesses] Failed to persist snapshot:", e);
+    }
+  }, 250);
+}
+
+// Labels from inferLabel() that indicate a process meant to stay alive
+const LONG_RUNNING_LABELS = new Set(["Dev Server", "Watch", "Server", "Docker", "Supabase"]);
+
+function looksLongRunning(entry: ProcessSnapshotEntry): boolean {
+  if (entry.type === "dev_server") return true;
+  if (entry.ports.length > 0) return true;
+  if (entry.label && LONG_RUNNING_LABELS.has(entry.label)) return true;
+  return false;
+}
+
+/**
+ * Bring back processes that were running when the server last died
+ * (update/restart). Long-running ones (dev servers, anything that had a
+ * port, watchers) are restarted automatically; arbitrary one-shot commands
+ * are surfaced as "killed" entries so the user can restart them explicitly
+ * instead of us re-executing possibly non-idempotent commands.
+ */
+export function resumeInterruptedProcesses(): { restarted: number; surfaced: number } {
+  let entries: ProcessSnapshotEntry[] = [];
+  try {
+    if (!existsSync(snapshotPath())) return { restarted: 0, surfaced: 0 };
+    entries = JSON.parse(readFileSync(snapshotPath(), "utf-8"));
+  } catch (e) {
+    console.error("[BackgroundProcesses] Failed to read snapshot:", e);
+    return { restarted: 0, surfaced: 0 };
+  }
+
+  let restarted = 0;
+  let surfaced = 0;
+
+  for (const entry of entries) {
+    if (!entry?.command) continue;
+
+    if (looksLongRunning(entry)) {
+      const proc = startBackgroundProcess({
+        command: entry.command,
+        cwd: entry.cwd,
+        sessionId: entry.sessionId,
+        projectId: entry.projectId,
+        type: entry.type,
+        label: entry.label,
+      });
+      proc.output.push(
+        `[navi] Restarted automatically after server restart (previously running since ${new Date(entry.startedAt).toLocaleString()})`
+      );
+      restarted++;
+    } else {
+      // Keep it visible in the panel with the one-click restart button
+      const id = crypto.randomUUID();
+      const record: BackgroundProcess = {
+        id,
+        type: entry.type,
+        command: entry.command,
+        cwd: entry.cwd,
+        sessionId: entry.sessionId,
+        projectId: entry.projectId,
+        startedAt: entry.startedAt,
+        completedAt: Date.now(),
+        status: "killed",
+        output: ["[navi] Interrupted by server restart — use restart to run it again"],
+        outputSize: 0,
+        ports: [],
+        label: entry.label,
+      };
+      backgroundProcesses.set(id, record);
+      emitEvent({
+        type: "process_started",
+        processId: id,
+        process: sanitizeProcessForApi(record),
+      });
+      surfaced++;
+    }
+  }
+
+  if (restarted > 0 || surfaced > 0) {
+    console.log(
+      `[BackgroundProcesses] Resumed after restart: ${restarted} restarted, ${surfaced} left for manual restart`
+    );
+  }
+  persistRunningProcesses();
+  return { restarted, surfaced };
+}
 
 // Event listeners for real-time updates
 type ProcessEventListener = (event: ProcessEvent) => void;
@@ -225,6 +359,7 @@ export function startBackgroundProcess(options: {
   };
 
   backgroundProcesses.set(id, bgProcess);
+  persistRunningProcesses();
 
   emitEvent({
     type: "process_started",
@@ -303,6 +438,7 @@ export function startBackgroundProcess(options: {
     bgProcess.exitCode = code ?? undefined;
     bgProcess.completedAt = Date.now();
     delete bgProcess.process;
+    persistRunningProcesses();
 
     emitEvent({
       type: "process_status",
@@ -321,6 +457,7 @@ export function startBackgroundProcess(options: {
     bgProcess.status = "failed";
     bgProcess.output.push(`Error: ${err.message}`);
     delete bgProcess.process;
+    persistRunningProcesses();
 
     emitEvent({
       type: "process_status",
@@ -345,6 +482,7 @@ export function killBackgroundProcess(id: string, signal: NodeJS.Signals = "SIGT
     try {
       proc.process.kill(signal);
       proc.status = "killed";
+      persistRunningProcesses();
 
       // Force kill after timeout if SIGTERM
       if (signal === "SIGTERM") {
@@ -386,6 +524,7 @@ export function removeBackgroundProcess(id: string): boolean {
   }
 
   backgroundProcesses.delete(id);
+  persistRunningProcesses();
 
   emitEvent({
     type: "process_removed",

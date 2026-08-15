@@ -30,52 +30,6 @@ export interface SessionFolder {
   updated_at: number;
 }
 
-export type WorkflowSchedule =
-  | { kind: "at"; time: string | number }
-  | { kind: "every"; interval: number }
-  | { kind: "cron"; expression: string; timezone?: string };
-
-export type WorkflowGate =
-  | { kind: "none" }
-  | { kind: "command"; command: string; cwd?: string };
-
-export interface Workflow {
-  id: string;
-  projectId: string;
-  rootSessionId: string;
-  ownerAgentId: string | null;
-  name: string;
-  prompt: string;
-  schedule: WorkflowSchedule;
-  gate: WorkflowGate;
-  enabled: boolean;
-  collapsed: boolean;
-  learningNotes: string | null;
-  feedbackNotes: string | null;
-  model: string | null;
-  backend: BackendId | null;
-  runCount: number;
-  lastRunAt: number | null;
-  nextRunAt: number | null;
-  lastError: string | null;
-  lastSkipReason: string | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface WorkflowRun {
-  id: string;
-  workflow_id: string;
-  session_id: string | null;
-  status: "running" | "success" | "failed" | "skipped";
-  trigger_source: "manual" | "scheduled";
-  started_at: number;
-  completed_at: number | null;
-  skipped_reason: string | null;
-  error: string | null;
-  session?: Session | null;
-}
-
 export interface Project {
   id: string;
   name: string;
@@ -423,57 +377,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ order }),
       }),
-  },
-
-  workflows: {
-    list: (projectId: string) => request<Workflow[]>(`/projects/${projectId}/workflows`),
-    get: (id: string) => request<Workflow>(`/workflows/${id}`),
-    create: (
-      projectId: string,
-      data: {
-        name: string;
-        prompt: string;
-        schedule: WorkflowSchedule;
-        gate?: WorkflowGate;
-        enabled?: boolean;
-        collapsed?: boolean;
-        learningNotes?: string | null;
-        feedbackNotes?: string | null;
-        model?: string | null;
-        backend?: BackendId | null;
-        ownerAgentId?: string | null;
-      }
-    ) =>
-      request<Workflow>(`/projects/${projectId}/workflows`, {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
-    update: (
-      id: string,
-      data: {
-        name?: string;
-        prompt?: string;
-        schedule?: WorkflowSchedule;
-        gate?: WorkflowGate;
-        enabled?: boolean;
-        collapsed?: boolean;
-        learningNotes?: string | null;
-        feedbackNotes?: string | null;
-        model?: string | null;
-        backend?: BackendId | null;
-        ownerAgentId?: string | null;
-      }
-    ) =>
-      request<Workflow>(`/workflows/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      }),
-    delete: (id: string) =>
-      request<{ success: boolean; workflowId: string }>(`/workflows/${id}`, { method: "DELETE" }),
-    run: (id: string) =>
-      request<{ success: boolean; workflowId: string }>(`/workflows/${id}/run`, { method: "POST" }),
-    runs: (id: string, limit: number = 25) =>
-      request<{ workflowId: string; runs: WorkflowRun[] }>(`/workflows/${id}/runs?limit=${limit}`),
   },
 
   workItems: {

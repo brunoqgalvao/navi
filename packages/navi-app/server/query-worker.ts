@@ -8,7 +8,7 @@ import { createHash } from "crypto";
 import sharp, { type Metadata } from "sharp";
 import { buildClaudeCodeEnv, getClaudeCodeRuntimeOptions, getNaviAuthOverridesFromEnv } from "./utils/claude-code";
 import { getAgentDefinition, inferAgentTypeFromRole } from "./agent-types";
-import { agentLoader, type ResolvedAgent, type AgentBundle } from "./services/agent-loader";
+import { agentLoader, type ResolvedAgent } from "./services/agent-loader";
 import { buildSystemPromptAppend } from "./services/system-prompt-append";
 import { buildSdkHooks } from "./services/sdk-hook-bridge";
 import {
@@ -113,147 +113,6 @@ function loadAllSkills(cwd: string, enabledSkillSlugs?: string[]): SkillInfo[] {
   }
 
   return allSkills;
-}
-
-// Agent loading for Claude Agent SDK
-interface AgentInfo {
-  name: string;
-  description: string;
-  model?: 'haiku' | 'sonnet' | 'opus';
-  tools?: string[];
-  prompt: string;
-}
-
-function parseAgentFrontmatter(content: string): {
-  name?: string;
-  description?: string;
-  model?: 'haiku' | 'sonnet' | 'opus';
-  tools?: string[];
-  body: string
-} {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!frontmatterMatch) {
-    return { body: content };
-  }
-
-  const [, frontmatter, body] = frontmatterMatch;
-  const result: {
-    name?: string;
-    description?: string;
-    model?: 'haiku' | 'sonnet' | 'opus';
-    tools?: string[];
-    body: string
-  } = { body };
-
-  let currentKey = '';
-  let inArray = false;
-  const arrayValues: string[] = [];
-
-  for (const line of frontmatter.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    // Check if it's an array item
-    if (trimmed.startsWith('- ') && inArray) {
-      arrayValues.push(trimmed.slice(2).trim());
-      continue;
-    }
-
-    // Finish previous array if any
-    if (inArray && currentKey === 'tools') {
-      result.tools = [...arrayValues];
-      arrayValues.length = 0;
-      inArray = false;
-    }
-
-    const colonIndex = trimmed.indexOf(':');
-    if (colonIndex > 0) {
-      const key = trimmed.slice(0, colonIndex).trim();
-      const value = trimmed.slice(colonIndex + 1).trim();
-
-      currentKey = key;
-
-      if (value === '' || value === '|') {
-        inArray = true;
-      } else {
-        const cleanValue = value.replace(/^["']|["']$/g, '');
-        if (key === 'name') result.name = cleanValue;
-        else if (key === 'description') result.description = cleanValue;
-        else if (key === 'model' && ['haiku', 'sonnet', 'opus'].includes(cleanValue)) {
-          result.model = cleanValue as 'haiku' | 'sonnet' | 'opus';
-        }
-      }
-    }
-  }
-
-  // Handle trailing array
-  if (inArray && currentKey === 'tools' && arrayValues.length > 0) {
-    result.tools = [...arrayValues];
-  }
-
-  return result;
-}
-
-function loadAgentsFromDir(agentsDir: string): AgentInfo[] {
-  const agents: AgentInfo[] = [];
-
-  if (!fs.existsSync(agentsDir)) return agents;
-
-  try {
-    const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name.endsWith('.md')) {
-        const agentPath = path.join(agentsDir, entry.name);
-        const content = fs.readFileSync(agentPath, 'utf-8');
-        const parsed = parseAgentFrontmatter(content);
-        const slug = entry.name.replace(/\.md$/, '');
-
-        if (parsed.description) { // description is required for agents
-          agents.push({
-            name: slug,
-            description: parsed.description,
-            model: parsed.model,
-            tools: parsed.tools,
-            prompt: parsed.body,
-          });
-        }
-      }
-    }
-  } catch (e) {
-    console.error(`[Worker] Error loading agents from ${agentsDir}:`, e);
-  }
-
-  return agents;
-}
-
-function loadAllAgents(cwd: string): Record<string, any> {
-  const projectAgentsDir = path.join(cwd, '.claude', 'agents');
-  const globalAgentsDir = path.join(os.homedir(), '.claude', 'agents');
-
-  const projectAgents = loadAgentsFromDir(projectAgentsDir);
-  const globalAgents = loadAgentsFromDir(globalAgentsDir);
-
-  // Merge, project takes precedence
-  const allAgents: AgentInfo[] = [...projectAgents];
-  for (const ga of globalAgents) {
-    if (!allAgents.find(a => a.name === ga.name)) {
-      allAgents.push(ga);
-    }
-  }
-
-  // Convert to SDK format: Record<string, AgentDefinition>
-  const agentsMap: Record<string, any> = {};
-  for (const agent of allAgents) {
-    agentsMap[agent.name] = {
-      description: agent.description,
-      prompt: agent.prompt,
-      ...(agent.model && { model: agent.model }),
-      ...(agent.tools && agent.tools.length > 0 && { tools: agent.tools }),
-    };
-  }
-
-  console.error(`[Worker] Loaded ${allAgents.length} agents:`, Object.keys(agentsMap));
-  return agentsMap;
 }
 
 interface MultiSessionContext {
@@ -386,64 +245,52 @@ const REASONING_EFFORT_TO_THINKING_TOKENS: Record<string, number> = {
 const pendingPermissions = new Map<string, (result: { approved: boolean; approveAll?: boolean }) => void>();
 const pendingQuestions = new Map<string, (result: { answers: Record<string, string | string[]> }) => void>();
 
-// Define the question option schema
-const questionOptionSchema = z.object({
-  label: z.string().describe("Short label for the option (e.g., 'TypeScript')"),
-  description: z.string().describe("Description of this option"),
-});
+// Handle the native AskUserQuestion tool: forward the questions to the UI over
+// the existing ask_user_question channel, wait for the user's answers, and
+// return them via updatedInput per the SDK contract (answers keyed by the full
+// question text; the UI keys them by header, so we remap here).
+async function handleAskUserQuestion(
+  toolInput: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<{ behavior: "allow"; updatedInput: Record<string, unknown> } | { behavior: "deny"; message: string }> {
+  const questions = Array.isArray((toolInput as any).questions) ? (toolInput as any).questions : [];
+  const requestId = crypto.randomUUID();
 
-// Define the question schema
-const questionSchema = z.object({
-  question: z.string().describe("The question to ask the user"),
-  header: z.string().max(12).describe("Short header/category for the question (max 12 chars)"),
-  options: z.array(questionOptionSchema).min(2).max(4).describe("2-4 options for the user to choose from"),
-  multiSelect: z.boolean().describe("Whether the user can select multiple options"),
-});
+  send({
+    type: "ask_user_question",
+    requestId,
+    questions,
+  });
 
-// Create MCP server with ask_user_question tool
-const userInteractionServer = createSdkMcpServer({
-  name: "user-interaction",
-  version: "1.0.0",
-  tools: [
-    tool(
-      "ask_user_question",
-      "Ask the user one or more questions and wait for their response. Use this when you need clarification or user input before proceeding.",
-      {
-        questions: z.array(questionSchema).min(1).max(4).describe("1-4 questions to ask the user"),
+  let aborted = false;
+  const result = await new Promise<{ answers: Record<string, string | string[]> }>((resolve) => {
+    pendingQuestions.set(requestId, resolve);
+    signal.addEventListener(
+      "abort",
+      () => {
+        if (pendingQuestions.delete(requestId)) {
+          aborted = true;
+          resolve({ answers: {} });
+        }
       },
-      async (args) => {
-        const requestId = crypto.randomUUID();
+      { once: true },
+    );
+  });
 
-        // Send question to UI
-        send({
-          type: "ask_user_question",
-          requestId,
-          questions: args.questions,
-        });
+  if (aborted) {
+    return { behavior: "deny", message: "The question was cancelled before the user answered." };
+  }
 
-        // Wait for user response
-        const result = await new Promise<{ answers: Record<string, string | string[]> }>((resolve) => {
-          pendingQuestions.set(requestId, resolve);
-        });
+  const answers: Record<string, string | string[]> = {};
+  for (const q of questions) {
+    const answer = result.answers[q.header] ?? result.answers[q.question];
+    if (answer !== undefined && answer !== "") {
+      answers[q.question] = answer;
+    }
+  }
 
-        // Format the response
-        const answerText = Object.entries(result.answers)
-          .map(([header, answer]) => {
-            const answerStr = Array.isArray(answer) ? answer.join(", ") : answer;
-            return `${header}: ${answerStr}`;
-          })
-          .join("\n");
-
-        return {
-          content: [{
-            type: "text" as const,
-            text: `User answered:\n${answerText}`,
-          }],
-        };
-      }
-    ),
-  ],
-});
+  return { behavior: "allow", updatedInput: { questions, answers } };
+}
 
 // ============================================================================
 // Multi-Session Agent Tools (Fractal Agents)
@@ -1705,7 +1552,13 @@ async function runQuery(input: WorkerInput): Promise<boolean> {
     toolInput: Record<string, unknown>,
     options: { signal: AbortSignal; toolUseID: string }
   ): Promise<{ behavior: 'allow'; updatedInput: Record<string, unknown> } | { behavior: 'deny'; message: string; interrupt?: boolean }> => {
-    // MCP tools (like ask_user_question) are auto-allowed - they handle their own interaction
+    // Native clarifying questions always go to the user, regardless of
+    // auto-accept settings — answering them IS the user interaction.
+    if (toolName === "AskUserQuestion") {
+      return handleAskUserQuestion(toolInput, options.signal);
+    }
+
+    // MCP tools are auto-allowed - they handle their own interaction
     if (toolName.startsWith("mcp__")) {
       return { behavior: 'allow', updatedInput: toolInput };
     }
@@ -1762,34 +1615,12 @@ async function runQuery(input: WorkerInput): Promise<boolean> {
     const skills = loadAllSkills(cwd, enabledSkillSlugs);
     console.error(`[Worker] Loaded ${skills.length} skills:`, skills.map(s => s.name));
 
-    // Load all Navi Agents using the new unified loader
-    const naviAgentsMap = await agentLoader.loadAllAgents(cwd);
-    console.error(`[Worker] Loaded ${naviAgentsMap.size} Navi Agents:`, Array.from(naviAgentsMap.keys()));
-
-    // Convert Navi Agents to SDK subagent format for Task tool spawning
-    // Each Navi Agent can be spawned as a subagent, plus we collect their defined subagents
-    const sdkSubagents: Record<string, any> = {};
-
-    naviAgentsMap.forEach((naviAgent, id) => {
-      // Add the Navi Agent itself as a spawnable subagent
-      sdkSubagents[id] = {
-        description: naviAgent.description,
-        prompt: naviAgent.prompt,
-        ...(naviAgent.model && { model: naviAgent.model }),
-        ...(naviAgent.tools?.allowed && { tools: naviAgent.tools.allowed }),
-      };
-
-      // Also add any SDK subagents defined within this Navi Agent
-      if (naviAgent.subagents) {
-        for (const [subId, subagent] of Object.entries(naviAgent.subagents)) {
-          // Prefix with parent agent id to avoid collisions
-          const fullSubagentId = `${id}:${subId}`;
-          sdkSubagents[fullSubagentId] = subagent;
-        }
-      }
-    });
-
-    console.error(`[Worker] Total SDK subagents available: ${Object.keys(sdkSubagents).length}`);
+    // Subagents for the native Task tool. The CLI already auto-loads simple
+    // .claude/agents/*.md files (settingSources includes user+project), so this
+    // only passes what it can't discover: builtins, directory bundles, and
+    // nested subagents. Passing disk agents here again would duplicate them.
+    const sdkSubagents = await agentLoader.getSDKAgentDefinitions(cwd);
+    console.error(`[Worker] SDK subagents via agents option: ${Object.keys(sdkSubagents).length}`, Object.keys(sdkSubagents));
 
     // Build system prompt append with skills
     let systemPromptAppend = buildSystemPromptAppend(skills);
@@ -1915,11 +1746,14 @@ Example clarifying questions:
       "TodoWrite",
       "Task",
       "TaskOutput",
-      // Note: ask_user_question is exposed via MCP server (mcp__user-interaction__ask_user_question)
+      "AskUserQuestion",
       // Multi-session tools exposed via MCP server (mcp__multi-session__*)
     ];
 
-    const allTools = allowedTools || agentTools || defaultTools;
+    // AskUserQuestion is always available (the SDK drops it when a custom
+    // tools array omits it, and clarifying questions should never be lost to
+    // an agent's restricted tool list). It's handled in canUseTool.
+    const allTools = [...new Set([...(allowedTools || agentTools || defaultTools), "AskUserQuestion"])];
 
     const requireConfirmation = permissionSettings?.requireConfirmation || [];
     const autoAllowedTools = allTools.filter(t => !requireConfirmation.includes(t));
@@ -1936,13 +1770,6 @@ Example clarifying questions:
 
     // Build MCP servers - include built-in servers if enabled
     const mcpServers: Record<string, any> = {};
-
-    if (isBuiltinMcpEnabled("user-interaction")) {
-      mcpServers["user-interaction"] = userInteractionServer;
-      console.error(`[Worker] MCP server enabled: user-interaction`);
-    } else {
-      console.error(`[Worker] MCP server disabled: user-interaction`);
-    }
 
     if (isBuiltinMcpEnabled("navi-context")) {
       mcpServers["navi-context"] = naviContextServer;
@@ -2020,13 +1847,16 @@ Example clarifying questions:
           ...runtimeOptions,
           permissionMode: "default",
           canUseTool,
+          toolConfig: {
+            askUserQuestion: { previewFormat: "html" },
+          },
           settingSources: ['user', 'project', 'local'] as const,
           systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPromptAppend },
           includePartialMessages: true,
           ...(maxThinkingTokens !== undefined && { maxThinkingTokens }),
           mcpServers,
-          // Pass SDK subagents (for Task tool spawning)
-          // This includes: all Navi Agents + their defined subagents
+          // Native Task-tool subagents the CLI can't load from disk on its own
+          // (builtins, agent.yaml bundles, nested subagents)
           ...(Object.keys(sdkSubagents).length > 0 && { agents: sdkSubagents }),
         },
       });

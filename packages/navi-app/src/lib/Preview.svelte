@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { marked } from "marked";
   import hljs from "highlight.js";
   import * as XLSX from "xlsx";
@@ -13,42 +12,17 @@
   import LogViewer from "./components/LogViewer.svelte";
   import CodeEditor from "./components/CodeEditor.svelte";
   import { api } from "./api";
-  import { getApiBase, getServerUrl } from "./config";
+  import { getApiBase } from "./config";
   import { textReferences } from "./stores";
   import type { TextReference } from "./stores/types";
   import { showSuccess, showError } from "./errorHandler";
 
-  type PreviewType = "url" | "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "xlsx" | "json" | "stl" | "glb" | "logs" | "directory" | "none";
-
-  // Element inspector data type
-  export interface InspectedElement {
-    tagName: string;
-    selector: string;
-    outerHTML: string;
-    innerHTML: string;
-    textContent: string;
-    attributes: Record<string, string>;
-    ancestors: Array<{ tag: string; id?: string; class?: string }>;
-    rect: { x: number; y: number; width: number; height: number };
-    computed: Record<string, string>;
-    page: { url: string; title: string };
-  }
+  type PreviewType = "file" | "markdown" | "code" | "image" | "pdf" | "audio" | "video" | "csv" | "xlsx" | "json" | "stl" | "glb" | "logs" | "directory" | "none";
 
   interface Props {
     source: string;
     type?: PreviewType;
     onClose?: () => void;
-    onUrlChange?: (url: string) => void;
-    // Session-aware browser props
-    browserHistory?: string[];
-    browserHistoryIndex?: number;
-    onBrowserBack?: () => void;
-    onBrowserForward?: () => void;
-    onBrowserGoToIndex?: (index: number) => void;
-    // Resize state - when true, overlay blocks iframe mouse capture
-    isParentResizing?: boolean;
-    // Element inspector callback
-    onElementInspected?: (element: InspectedElement) => void;
     // Start in edit mode when opening file
     startInEditMode?: boolean;
   }
@@ -57,30 +31,14 @@
     source,
     type = "none",
     onClose,
-    onUrlChange,
-    browserHistory,
-    browserHistoryIndex,
-    onBrowserBack,
-    onBrowserForward,
-    onBrowserGoToIndex,
-    isParentResizing = false,
-    onElementInspected,
     startInEditMode = false,
   }: Props = $props();
-
-  // Use external history if provided, otherwise use internal state
-  let isControlled = $derived(browserHistory !== undefined);
 
   let content = $state("");
   let loading = $state(false);
   let error = $state("");
   let detectedType = $state<PreviewType>("none");
-  let iframeKey = $state(0);
   let mediaKey = $state(Date.now()); // Cache-busting for images/media
-  let urlInput = $state("");
-  let currentUrl = $state("");
-  let internalHistory = $state<string[]>([]);
-  let internalHistoryIndex = $state(-1);
 
   // Edit mode state
   let isEditMode = $state(false);
@@ -95,25 +53,10 @@
     }
   });
 
-  // Use external or internal history
-  let history = $derived(isControlled ? (browserHistory ?? []) : internalHistory);
-  let historyIndex = $derived(isControlled ? (browserHistoryIndex ?? -1) : internalHistoryIndex);
-  let iframeRef: HTMLIFrameElement | null = $state(null);
-  let iframeLoading = $state(false);
-  let iframeError = $state("");
-  let showDebug = $state(false);
-  let showBackHistory = $state(false);
-  let showForwardHistory = $state(false);
-
-  // Element inspector state
-  let inspectMode = $state(false);
-  let inspectorReady = $state(false);
-  let inspectorTimeout: ReturnType<typeof setTimeout> | null = null;
-
   // Context menu state for text references
   interface SelectionInfo {
     text: string;
-    type: "code" | "csv" | "xlsx" | "json" | "markdown" | "text" | "url";
+    type: "code" | "csv" | "xlsx" | "json" | "markdown" | "text";
     startLine?: number;
     endLine?: number;
     rows?: [number, number];
@@ -141,10 +84,6 @@
     // Check for logs: prefix (e.g., "logs:process-id" or "logs:terminal:terminal-id")
     if (src.startsWith("logs:")) {
       return "logs";
-    }
-
-    if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("localhost") || src.match(/^:\d+/)) {
-      return "url";
     }
 
     const ext = src.split(".").pop()?.toLowerCase() || "";
@@ -269,37 +208,6 @@
     }
   }
 
-  function formatUrl(url: string): string {
-    if (url.startsWith(":")) return `http://localhost${url}`;
-    if (url.startsWith("localhost")) return `http://${url}`;
-    return url;
-  }
-
-  function isLocalUrl(url: string): boolean {
-    const formatted = formatUrl(url);
-    try {
-      const parsed = new URL(formatted);
-      return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-    } catch {
-      return false;
-    }
-  }
-
-  function getProxiedUrl(url: string): string {
-    const formatted = formatUrl(url);
-    // IMPORTANT: Use absolute URL with getServerUrl() to ensure requests go to backend (port 3021/3011)
-    // not the frontend dev server (port 1420) which would serve the Navi UI instead
-    const serverUrl = getServerUrl();
-
-    // Localhost URLs load directly — there is no preview proxy anymore
-    if (isLocalUrl(formatted)) {
-      return formatted;
-    }
-
-    // For external URLs, use the general proxy
-    return `${serverUrl}/api/proxy?url=${encodeURIComponent(formatted)}`;
-  }
-
   function renderMarkdown(md: string): string {
     return marked(md) as string;
   }
@@ -414,94 +322,6 @@
     const headers = parseRow(lines[0]);
     const rows = lines.slice(1).map(parseRow);
     return { headers, rows };
-  }
-
-  function navigateTo(url: string, addToHistory = true) {
-    if (!url) return;
-    const formatted = formatUrl(url);
-    if (addToHistory && formatted !== currentUrl) {
-      if (!isControlled) {
-        internalHistory = [...internalHistory.slice(0, internalHistoryIndex + 1), formatted];
-        internalHistoryIndex = internalHistory.length - 1;
-      }
-    }
-    urlInput = formatted;
-    currentUrl = formatted;
-    iframeLoading = true;
-    iframeError = "";
-    onUrlChange?.(formatted);
-    iframeKey++;
-  }
-
-  function goBack() {
-    if (isControlled) {
-      // Delegate to parent
-      onBrowserBack?.();
-    } else if (internalHistoryIndex > 0) {
-      internalHistoryIndex--;
-      urlInput = internalHistory[internalHistoryIndex];
-      currentUrl = internalHistory[internalHistoryIndex];
-      iframeLoading = true;
-      iframeError = "";
-      iframeKey++;
-    }
-  }
-
-  function goForward() {
-    if (isControlled) {
-      // Delegate to parent
-      onBrowserForward?.();
-    } else if (internalHistoryIndex < internalHistory.length - 1) {
-      internalHistoryIndex++;
-      urlInput = internalHistory[internalHistoryIndex];
-      currentUrl = internalHistory[internalHistoryIndex];
-      iframeLoading = true;
-      iframeError = "";
-      iframeKey++;
-    }
-  }
-
-  function handleUrlSubmit(e: KeyboardEvent) {
-    if (e.key === "Enter") {
-      navigateTo(urlInput);
-    }
-  }
-
-  function handleBackContextMenu(e: MouseEvent) {
-    e.preventDefault();
-    if (historyIndex > 0) {
-      showBackHistory = true;
-      showForwardHistory = false;
-    }
-  }
-
-  function handleForwardContextMenu(e: MouseEvent) {
-    e.preventDefault();
-    if (historyIndex < history.length - 1) {
-      showForwardHistory = true;
-      showBackHistory = false;
-    }
-  }
-
-  function goToHistoryIndex(index: number) {
-    if (isControlled) {
-      // Use direct navigation callback if available
-      onBrowserGoToIndex?.(index);
-    } else {
-      internalHistoryIndex = index;
-      urlInput = internalHistory[index];
-      currentUrl = internalHistory[index];
-      iframeLoading = true;
-      iframeError = "";
-      iframeKey++;
-    }
-    showBackHistory = false;
-    showForwardHistory = false;
-  }
-
-  function closeHistoryDropdowns() {
-    showBackHistory = false;
-    showForwardHistory = false;
   }
 
   // Export markdown as PDF
@@ -623,8 +443,6 @@
         return getXlsxSelection(selection, text);
       case "json":
         return getJsonSelection(selection, text);
-      case "url":
-        return { text, type: "url" };
       default:
         return { text, type: "text" };
     }
@@ -733,14 +551,13 @@
         (contextMenu.selection.text.length > 50 ? "..." : ""),
       source: {
         type: contextMenu.selection.type,
-        path: detectedType === "url" ? undefined : source,
+        path: source,
         startLine: contextMenu.selection.startLine,
         endLine: contextMenu.selection.endLine,
         rows: contextMenu.selection.rows,
         columns: contextMenu.selection.columns,
         jsonPath: contextMenu.selection.jsonPath,
         sheet: contextMenu.selection.sheet,
-        url: detectedType === "url" ? currentUrl : undefined,
       },
     };
 
@@ -767,127 +584,6 @@
     ];
   }
 
-  function getDisplayUrl(url: string): string {
-    try {
-      const parsed = new URL(url);
-      return parsed.hostname + (parsed.pathname !== "/" ? parsed.pathname : "");
-    } catch {
-      return url;
-    }
-  }
-
-  // Sync URL when history index changes (back/forward navigation or session switch)
-  let prevBrowserHistoryIndex = $state<number | undefined>(undefined);
-
-  $effect(() => {
-    // Only react to history index changes in controlled mode
-    if (!isControlled) return;
-
-    const indexChanged = browserHistoryIndex !== prevBrowserHistoryIndex;
-    if (!indexChanged) return;
-
-    // Close any open history dropdowns
-    showBackHistory = false;
-    showForwardHistory = false;
-
-    // Sync URL with the new history position
-    if (browserHistory && browserHistoryIndex !== undefined && browserHistoryIndex >= 0) {
-      const newUrl = browserHistory[browserHistoryIndex];
-      if (newUrl && newUrl !== currentUrl) {
-        urlInput = newUrl;
-        currentUrl = newUrl;
-        iframeLoading = true;
-        iframeError = "";
-        iframeKey++;
-      }
-    }
-
-    prevBrowserHistoryIndex = browserHistoryIndex;
-  });
-
-  function handleIframeLoad() {
-    iframeLoading = false;
-    iframeError = "";
-  }
-
-  function handleIframeError() {
-    iframeLoading = false;
-    iframeError = "Failed to load page";
-  }
-
-  // Element inspector functions
-  function handleInspectorMessage(event: MessageEvent) {
-    // Only accept messages from localhost origins (dev servers)
-    if (!event.origin.includes('localhost') && !event.origin.includes('127.0.0.1')) {
-      return;
-    }
-
-    const { source: msgSource, type: msgType, data } = event.data || {};
-    if (msgSource !== 'navi-inspector') return;
-
-    switch (msgType) {
-      case 'ready':
-        inspectorReady = true;
-        if (inspectorTimeout) {
-          clearTimeout(inspectorTimeout);
-          inspectorTimeout = null;
-        }
-        break;
-      case 'element_selected':
-        if (data && onElementInspected) {
-          onElementInspected(data as InspectedElement);
-        }
-        inspectMode = false;
-        break;
-      case 'inspector_disabled':
-        inspectMode = false;
-        break;
-      case 'pong':
-        inspectorReady = true;
-        break;
-    }
-  }
-
-  function toggleInspectMode() {
-    if (!iframeRef?.contentWindow) return;
-
-    // Check if inspector is available
-    if (!inspectorReady) {
-      // Try pinging to see if inspector is loaded
-      iframeRef.contentWindow.postMessage({ type: 'ping' }, '*');
-
-      // Set a timeout to show unavailable message
-      inspectorTimeout = setTimeout(() => {
-        if (!inspectorReady) {
-          alert('Inspector not available.\n\nAdd the Navi inspector script to your dev server.\nSee: http://localhost:3021/navi-inspector.js');
-        }
-      }, 500);
-      return;
-    }
-
-    inspectMode = !inspectMode;
-    iframeRef.contentWindow.postMessage({
-      type: inspectMode ? 'enable_inspect' : 'disable_inspect'
-    }, '*');
-  }
-
-  // Set up inspector message listener
-  onMount(() => {
-    window.addEventListener('message', handleInspectorMessage);
-    return () => {
-      window.removeEventListener('message', handleInspectorMessage);
-      if (inspectorTimeout) clearTimeout(inspectorTimeout);
-    };
-  });
-
-  // Reset inspector state when iframe reloads
-  $effect(() => {
-    if (iframeKey) {
-      inspectorReady = false;
-      inspectMode = false;
-    }
-  });
-
   let lastSource = "";
 
   $effect(() => {
@@ -913,24 +609,7 @@
 
     detectedType = type !== "none" ? type : detectType(source);
 
-    if (detectedType === "url") {
-      const formatted = formatUrl(source);
-      if (formatted !== lastSource) {
-        urlInput = formatted;
-        currentUrl = formatted;
-        // Only update internal history if not controlled externally
-        if (!isControlled) {
-          if (internalHistory.length === 0 || internalHistory[internalHistory.length - 1] !== formatted) {
-            internalHistory = [...internalHistory, formatted];
-            internalHistoryIndex = internalHistory.length - 1;
-          }
-        }
-        lastSource = formatted;
-        iframeLoading = true;
-        iframeError = "";
-        iframeKey++;
-      }
-    } else if (detectedType === "csv") {
+    if (detectedType === "csv") {
       if (source !== lastSource) {
         lastSource = source;
         loading = true;
@@ -968,113 +647,6 @@
 </script>
 
 <div class="h-full flex flex-col bg-white">
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  {#if showBackHistory || showForwardHistory}
-    <div class="fixed inset-0 z-40" onclick={closeHistoryDropdowns}></div>
-  {/if}
-
-  {#if detectedType === "url"}
-    <div class="h-11 px-2 border-b border-gray-200 flex items-center gap-1.5 bg-gray-50/50 shrink-0">
-      <!-- Back button with right-click history -->
-      <div class="relative">
-        <button
-          onclick={goBack}
-          oncontextmenu={handleBackContextMenu}
-          disabled={historyIndex <= 0}
-          class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-          title="Back (right-click for history)"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
-        </button>
-        {#if showBackHistory}
-          <div class="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 max-h-64 overflow-y-auto">
-            {#each history.slice(0, historyIndex).reverse() as url, i}
-              <button
-                onclick={() => goToHistoryIndex(historyIndex - 1 - i)}
-                class="w-full px-3 py-1.5 text-left text-xs hover:bg-gray-100 flex items-center gap-2 truncate"
-              >
-                <svg class="w-3 h-3 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <circle cx="12" cy="12" r="10"></circle>
-                </svg>
-                <span class="truncate">{getDisplayUrl(url)}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-
-      <!-- Forward button with right-click history -->
-      <div class="relative">
-        <button
-          onclick={goForward}
-          oncontextmenu={handleForwardContextMenu}
-          disabled={historyIndex >= history.length - 1}
-          class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-          title="Forward (right-click for history)"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-        </button>
-        {#if showForwardHistory}
-          <div class="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 max-h-64 overflow-y-auto">
-            {#each history.slice(historyIndex + 1) as url, i}
-              <button
-                onclick={() => goToHistoryIndex(historyIndex + 1 + i)}
-                class="w-full px-3 py-1.5 text-left text-xs hover:bg-gray-100 flex items-center gap-2 truncate"
-              >
-                <svg class="w-3 h-3 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <circle cx="12" cy="12" r="10"></circle>
-                </svg>
-                <span class="truncate">{getDisplayUrl(url)}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-
-      <button onclick={() => iframeKey++} class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors" title="Refresh">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-      </button>
-      
-      <div class="flex-1 flex items-center">
-        <input 
-          type="text" 
-          bind:value={urlInput}
-          onkeydown={handleUrlSubmit}
-          placeholder="Enter URL..."
-          class="w-full h-7 px-3 text-xs font-mono bg-white border border-gray-200 rounded-md focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-200 transition-colors"
-        />
-      </div>
-      
-      <!-- Inspector toggle (only for localhost) -->
-      {#if isLocalUrl(currentUrl || source)}
-        <button
-          onclick={toggleInspectMode}
-          class={`p-1.5 rounded transition-colors ${inspectMode ? 'text-blue-600 bg-blue-100' : inspectorReady ? 'text-gray-400 hover:text-blue-600 hover:bg-blue-50' : 'text-gray-300 hover:text-gray-400 hover:bg-gray-100'}`}
-          title={inspectorReady ? (inspectMode ? 'Exit inspect mode (ESC)' : 'Inspect element') : 'Inspector not loaded - click to check'}
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
-          </svg>
-        </button>
-      {/if}
-      <button
-        onclick={() => showDebug = !showDebug}
-        class={`p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors ${showDebug ? 'bg-gray-200' : ''}`}
-        title="Debug info"
-      >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-      </button>
-      <a href={urlInput || formatUrl(source)} target="_blank" class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors" title="Open in browser">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-      </a>
-      {#if onClose}
-        <button onclick={onClose} class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 rounded transition-colors" title="Close preview">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-        </button>
-      {/if}
-    </div>
-  {:else}
     <div class="h-12 px-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50 shrink-0">
       <div class="flex items-center gap-2 min-w-0 flex-1">
         <div class="p-1.5 bg-white border border-gray-200 rounded shadow-sm">
@@ -1177,7 +749,6 @@
         {/if}
       </div>
     </div>
-  {/if}
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="flex-1 overflow-auto min-h-0 flex flex-col" oncontextmenu={handlePreviewContextMenu}>
@@ -1204,59 +775,8 @@
             <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
           </div>
           <p class="text-sm text-gray-500 mb-1">No preview</p>
-          <p class="text-xs text-gray-400">Enter a URL or file path to preview</p>
+          <p class="text-xs text-gray-400">Select a file to preview</p>
         </div>
-      </div>
-    {:else if detectedType === "url"}
-      {#if showDebug}
-        <div class="p-4 bg-gray-50 border-b border-gray-200 text-xs font-mono space-y-1">
-          <div><span class="text-gray-500">source:</span> {source}</div>
-          <div><span class="text-gray-500">urlInput:</span> {urlInput}</div>
-          <div><span class="text-gray-500">formatted:</span> {formatUrl(source)}</div>
-          <div><span class="text-gray-500">type:</span> {type}</div>
-          <div><span class="text-gray-500">detectedType:</span> {detectedType}</div>
-          <div><span class="text-gray-500">iframeKey:</span> {iframeKey}</div>
-          <div><span class="text-gray-500">loading:</span> {iframeLoading}</div>
-          <div><span class="text-gray-500">error:</span> {iframeError || 'none'}</div>
-          <div><span class="text-gray-500">history:</span> {JSON.stringify(history)}</div>
-        </div>
-      {/if}
-      <div class="flex-1 relative min-h-0 h-full" class:pointer-events-none={isParentResizing}>
-        {#if isParentResizing}
-          <!-- Overlay to capture mouse events during resize -->
-          <div class="absolute inset-0 z-20"></div>
-        {/if}
-        {#if iframeLoading}
-          <div class="absolute inset-0 flex items-center justify-center bg-white/80 z-10">
-            <div class="flex items-center gap-2 text-gray-500">
-              <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-              <span class="text-sm">Loading {urlInput}...</span>
-            </div>
-          </div>
-        {/if}
-        {#if iframeError}
-          <div class="absolute inset-0 flex items-center justify-center bg-white z-10">
-            <div class="text-center p-8">
-              <div class="w-12 h-12 mx-auto mb-4 rounded-full bg-yellow-50 flex items-center justify-center">
-                <svg class="w-6 h-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-              </div>
-              <p class="text-sm text-gray-600 mb-2">{iframeError}</p>
-              <p class="text-xs text-gray-400 mb-4">The site may be blocking iframe embedding</p>
-              <a href={urlInput} target="_blank" class="text-xs text-blue-600 hover:underline">Open in new tab instead</a>
-            </div>
-          </div>
-        {/if}
-        {#key iframeKey}
-          <iframe
-            bind:this={iframeRef}
-            src={getProxiedUrl(currentUrl || source)}
-            class="w-full h-full border-0"
-            title="Preview"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-            onload={handleIframeLoad}
-            onerror={handleIframeError}
-          ></iframe>
-        {/key}
       </div>
     {:else if detectedType === "pdf"}
       <div class="relative w-full h-full">

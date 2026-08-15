@@ -260,7 +260,6 @@
   function getServerIcon(server: McpServer): string {
     if (server.isBuiltIn) {
       switch (server.name) {
-        case "user-interaction": return "💬";
         case "navi-context": return "📊";
         case "multi-session": return "🤖";
         default: return "🔌";
@@ -277,8 +276,6 @@
   function getServerDescription(server: McpServer): string {
     if (server.isBuiltIn) {
       switch (server.name) {
-        case "user-interaction":
-          return "Enables Claude to ask you questions with UI prompts";
         case "navi-context":
           return "Allows Claude to view running processes and terminal output";
         case "multi-session":

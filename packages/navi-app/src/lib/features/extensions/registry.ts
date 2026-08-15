@@ -85,16 +85,6 @@ export const DEFAULT_EXTENSIONS: Record<string, Extension> = {
     defaultEnabled: true,
     defaultOrder: 0,
   },
-  browser: {
-    id: "browser",
-    name: "Browser",
-    icon: "globe",
-    description: "Web browser for previewing URLs",
-    panelMode: "browser",
-    requiresProject: false,
-    defaultEnabled: true,
-    defaultOrder: 1,
-  },
   git: {
     id: "git",
     name: "Git",

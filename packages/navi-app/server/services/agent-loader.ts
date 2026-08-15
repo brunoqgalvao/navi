@@ -74,6 +74,18 @@ export interface SDKSubagent {
  */
 export type SDKSubagents = Record<string, SDKSubagent>;
 
+/**
+ * The AgentDefinition shape the SDK accepts in query({ options: { agents } })
+ */
+export interface SDKAgentDefinition {
+  description: string;
+  prompt: string;
+  tools?: string[];
+  disallowedTools?: string[];
+  model?: string;
+  skills?: string[];
+}
+
 // ============================================================================
 // Navi Agent Types (persistent, independent sessions)
 // ============================================================================
@@ -480,6 +492,69 @@ export class AgentLoader {
     }
 
     return null;
+  }
+
+  /**
+   * Build the `agents` option for the SDK's query().
+   *
+   * The CLI runtime already auto-loads simple `.claude/agents/*.md` files
+   * (project and global) because we run with settingSources: user/project/local.
+   * Passing those again through the `agents` option registers every agent
+   * twice in the session. So this only returns what the CLI can't discover:
+   * - built-in agents (in-memory only)
+   * - directory bundles (agent.yaml is a Navi-specific format)
+   * - nested `subagents` declared inside any agent config
+   */
+  async getSDKAgentDefinitions(
+    projectPath: string
+  ): Promise<Record<string, SDKAgentDefinition>> {
+    const all = await this.loadAllAgents(projectPath);
+    const defs: Record<string, SDKAgentDefinition> = {};
+
+    all.forEach((agent, id) => {
+      const cliLoadsIt = agent.path?.endsWith(".md") ?? false;
+      if (!cliLoadsIt) {
+        defs[id] = this.toSDKDefinition(agent);
+      }
+
+      // Nested subagents only exist in Navi config; the CLI never sees them.
+      // Prefix with the parent agent id to avoid collisions.
+      if (agent.subagents) {
+        for (const [subId, sub] of Object.entries(agent.subagents)) {
+          defs[`${id}:${subId}`] = {
+            description: sub.description,
+            prompt: sub.prompt,
+            ...(sub.model ? { model: sub.model } : {}),
+            ...(sub.tools && sub.tools.length > 0 ? { tools: sub.tools } : {}),
+          };
+        }
+      }
+    });
+
+    return defs;
+  }
+
+  /**
+   * Convert a Navi Agent bundle to the SDK AgentDefinition format
+   */
+  private toSDKDefinition(agent: AgentBundle): SDKAgentDefinition {
+    // SDK skills are bare names; Navi references may carry source prefixes
+    const skills = (agent.navi?.skills || []).map((s) =>
+      path.basename(s.replace(/^(global|project):/, ""))
+    );
+
+    return {
+      description: agent.description,
+      prompt: agent.prompt,
+      ...(agent.model ? { model: agent.model } : {}),
+      ...(agent.tools?.allowed && agent.tools.allowed.length > 0
+        ? { tools: agent.tools.allowed }
+        : {}),
+      ...(agent.tools?.disallowed && agent.tools.disallowed.length > 0
+        ? { disallowedTools: agent.tools.disallowed }
+        : {}),
+      ...(skills.length > 0 ? { skills } : {}),
+    };
   }
 
   /**
@@ -908,42 +983,3 @@ export class AgentLoader {
 
 // Singleton instance
 export const agentLoader = new AgentLoader();
-
-// ============================================================================
-// Helper Functions (backwards compatible with old code)
-// ============================================================================
-
-/**
- * Load all agents as a simple record (backwards compatible)
- */
-export async function loadAllAgents(cwd: string): Promise<Record<string, {
-  description: string;
-  prompt: string;
-  model?: AgentModel;
-  tools?: string[];
-}>> {
-  const agents = await agentLoader.loadAllAgents(cwd);
-  const result: Record<string, any> = {};
-
-  agents.forEach((bundle, id) => {
-    result[id] = {
-      description: bundle.description,
-      prompt: bundle.prompt,
-      model: bundle.model,
-      tools: bundle.tools?.allowed,
-    };
-  });
-
-  return result;
-}
-
-/**
- * Get a resolved agent ready for execution
- */
-export async function getResolvedAgent(
-  agentId: string,
-  projectPath: string,
-  defaultModel: AgentModel = "sonnet"
-): Promise<ResolvedAgent | null> {
-  return agentLoader.resolveAgent(agentId, projectPath, defaultModel);
-}

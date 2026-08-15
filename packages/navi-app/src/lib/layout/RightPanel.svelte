@@ -3,7 +3,7 @@
    * RightPanel - Layout component for the right side panel
    *
    * Pure layout concerns:
-   * - Panel tabs (Files+Preview, Browser, Git, Terminal)
+   * - Panel tabs (Files+Preview, Git, Terminal)
    * - Resize handle
    * - Content switching
    * - Split view for Files + Preview (collapsible file list)
@@ -11,14 +11,14 @@
    * Delegates workspace logic to WorkspacePanel
    */
   import FileBrowser from "../FileBrowser.svelte";
-  import Preview, { type InspectedElement } from "../Preview.svelte";
+  import Preview from "../Preview.svelte";
   import { GitPanel } from "../features/git";
   import WorkspacePanel from "../components/WorkspacePanel.svelte";
   import BackgroundProcessPanel from "../components/BackgroundProcessPanel.svelte";
   import { ContextPanel } from "../features/context";
   import { ExtensionTabs, ExtensionSettingsModal } from "../features/extensions";
 
-  type PanelMode = "files" | "preview" | "browser" | "git" | "terminal" | "processes" | "context";
+  type PanelMode = "files" | "preview" | "git" | "terminal" | "processes" | "context";
 
   interface Props {
     mode: PanelMode;
@@ -28,18 +28,14 @@
     projectPath: string | null;
     worktreePath?: string | null;  // Use this for git operations when in a worktree
     previewSource: string | null;
-    browserUrl: string;
     isResizing: boolean;
     terminalInitialCommand?: string;
     onModeChange: (mode: PanelMode) => void;
     onClose: () => void;
     onStartResize: (e: MouseEvent) => void;
     onFileSelect: (path: string) => void;
-    onBrowserUrlChange: (url: string) => void;
     onTerminalRef?: (ref: { pasteCommand: (cmd: string) => void; runCommand: (cmd: string) => void } | null) => void;
     onTerminalSendToClaude?: (context: string) => void;
-    /** Callback when user inspects an element in browser preview */
-    onElementInspected?: (element: InspectedElement) => void;
   }
 
   let {
@@ -50,17 +46,14 @@
     projectPath,
     worktreePath = null,
     previewSource,
-    browserUrl,
     isResizing,
     terminalInitialCommand = "",
     onModeChange,
     onClose,
     onStartResize,
     onFileSelect,
-    onBrowserUrlChange,
     onTerminalRef,
     onTerminalSendToClaude,
-    onElementInspected,
   }: Props = $props();
 
   // Use worktree path for git if available, otherwise use project path
@@ -225,19 +218,6 @@
           </div>
         {/if}
       </div>
-    {:else if mode === "browser"}
-      <!-- Browser panel - full width -->
-      <div class="flex-1 flex flex-col w-full">
-        <WorkspacePanel
-          mode="browser"
-          {projectId}
-          {projectPath}
-          {browserUrl}
-          onBrowserUrlChange={onBrowserUrlChange}
-          {isResizing}
-          {onElementInspected}
-        />
-      </div>
     {:else if mode === "git" && effectiveGitPath}
       <!-- Git panel - full width -->
       <div class="flex-1 min-h-0 flex flex-col w-full overflow-hidden">
@@ -261,8 +241,8 @@
           {projectId}
           {sessionId}
           onOpenPreview={(url) => {
-            onBrowserUrlChange(url);
-            onModeChange("browser");
+            const formatted = url.startsWith(":") ? `http://localhost${url}` : url.startsWith("localhost") ? `http://${url}` : url;
+            window.open(formatted, "_blank");
           }}
         />
       </div>

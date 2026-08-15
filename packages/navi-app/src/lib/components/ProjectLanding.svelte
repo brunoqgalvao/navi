@@ -4,7 +4,7 @@
    *
    * Renders ProjectEmptyState (the project's new-chat / landing state).
    */
-  import type { Session, Workflow } from "$lib/api";
+  import type { Session } from "$lib/api";
   import ProjectEmptyState from "./ProjectEmptyState.svelte";
 
   interface Props {
@@ -12,7 +12,6 @@
     projectPath: string;
     projectName: string;
     sessions: Session[];
-    workflows: Workflow[];
     projectDescription?: string | null;
     claudeMdContent: string | null;
     projectContext: { summary: string; suggestions: string[] } | null;
@@ -30,7 +29,6 @@
     projectPath,
     projectName,
     sessions,
-    workflows,
     projectDescription = null,
     claudeMdContent,
     projectContext,
