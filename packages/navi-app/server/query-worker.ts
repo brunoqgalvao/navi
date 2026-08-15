@@ -11,6 +11,12 @@ import { getAgentDefinition, inferAgentTypeFromRole } from "./agent-types";
 import { agentLoader, type ResolvedAgent, type AgentBundle } from "./services/agent-loader";
 import { buildSystemPromptAppend } from "./services/system-prompt-append";
 import { buildSdkHooks } from "./services/sdk-hook-bridge";
+import {
+  describeChildStatus,
+  seedSpawnedChildrenFromDb,
+  type PendingDeliverable,
+  type SpawnedChildInfo,
+} from "./services/spawned-children";
 import { getSdkUserMessageFlags } from "../shared/sdk-user-message";
 
 // Query workers run in separate Bun processes while the main server owns the
@@ -453,21 +459,12 @@ const pendingWaitRequests = new Map<string, (result: { skipped: boolean }) => vo
 
 // Queue for child deliverables received during the session
 // These are injected via get_context(source: 'sibling') or when checking spawned agents
-interface PendingDeliverable {
-  childSessionId: string;
-  childRole: string;
-  deliverable: {
-    type: string;
-    summary: string;
-    content: string;
-    artifacts?: Array<{ path: string; description?: string }>;
-  };
-  receivedAt: number;
-}
+// Both collections are seeded from the database at startup, because this process
+// only lives for one turn — see services/spawned-children.ts.
 const pendingChildDeliverables: PendingDeliverable[] = [];
 
 // Track spawned child sessions for this parent (to check for deliverables)
-const spawnedChildren = new Map<string, { role: string; task: string; spawnedAt: number }>();
+const spawnedChildren = new Map<string, SpawnedChildInfo>();
 
 // Create MCP server with multi-session tools
 const multiSessionServer = createSdkMcpServer({
@@ -808,7 +805,9 @@ IMPORTANT: If you spawn agents in parallel, YOU MUST use this tool to retrieve t
           response += "### Spawned Agents:\n";
           spawnedChildren.forEach((info, sessionId) => {
             const hasDelivered = pendingChildDeliverables.some(d => d.childSessionId === sessionId);
-            const status = hasDelivered ? "✅ Completed" : "🔄 Working...";
+            const status = hasDelivered
+              ? "✅ Completed"
+              : describeChildStatus(info.status);
             response += `- **${info.role}** (${sessionId}): ${status}\n  Task: ${info.task}\n`;
           });
           response += "\n";
@@ -1656,6 +1655,7 @@ async function runQuery(input: WorkerInput): Promise<boolean> {
     const { initIntegrationsTable } = await import("./integrations/db");
     initIntegrationsTable();
     console.error(`[Worker] Database initialized`);
+    await seedSpawnedChildrenFromDb(sessionId, spawnedChildren, pendingChildDeliverables);
   } catch (e) {
     console.error(`[Worker] Failed to initialize database:`, e);
   }
