@@ -8,6 +8,7 @@ const allReady: Record<MenuEntryId, EntryAvailability> = {
   claude: ready,
   codex: ready,
   gemini: ready,
+  opencode: ready,
   zai: ready,
 };
 
@@ -18,6 +19,7 @@ const models = {
   ] as ModelInfo[],
   codex: [{ value: "gpt-5.6-sol", displayName: "GPT-5.6-sol", description: "" }] as ModelInfo[],
   gemini: [] as ModelInfo[],
+  opencode: [] as ModelInfo[],
 };
 
 describe("modelGroupsFor", () => {

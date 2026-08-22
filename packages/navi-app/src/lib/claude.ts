@@ -549,7 +549,7 @@ export class ClaudeClient {
     // Agent selection (e.g., "coder", "img3d")
     agentId?: string;
     // Backend selection (claude, codex, gemini)
-    backend?: "claude" | "codex" | "gemini";
+    backend?: "claude" | "codex" | "gemini" | "opencode";
     // Reasoning effort (low, medium, high, xhigh, max)
     reasoningEffort?: string;
     // Optional cap on thinking tokens (Claude backend)

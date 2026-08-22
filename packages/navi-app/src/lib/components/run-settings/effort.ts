@@ -12,6 +12,10 @@ export function isEffortDisabled(backend: BackendId, value: ReasoningEffort): bo
   if (backend === "gemini") {
     return value === "xhigh" || value === "max";
   }
+  // opencode passes effort through as --variant, which has no "xhigh" level.
+  if (backend === "opencode") {
+    return value === "xhigh";
+  }
   if (backend === "codex") {
     return value === "max";
   }
@@ -24,6 +28,7 @@ export function effortDisabledReason(
 ): string | undefined {
   if (!isEffortDisabled(backend, value)) return undefined;
   if (backend === "gemini") return "Gemini supports up to High";
+  if (backend === "opencode") return "opencode has no Extra High variant";
   if (backend === "codex") return "Codex supports up to Extra High";
   return undefined;
 }
@@ -32,5 +37,6 @@ export function effortDisabledReason(
 export function clampEffort(backend: BackendId, value: ReasoningEffort): ReasoningEffort {
   if (backend === "gemini" && (value === "xhigh" || value === "max")) return "high";
   if (backend === "codex" && value === "max") return "xhigh";
+  if (backend === "opencode" && value === "xhigh") return "high";
   return value;
 }

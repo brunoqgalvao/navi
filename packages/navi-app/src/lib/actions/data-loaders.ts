@@ -66,7 +66,7 @@ export async function loadModels() {
   }
 }
 
-// Load models for all backends (Claude, Codex, Gemini)
+// Load models for all backends (Claude, Codex, Gemini, opencode)
 export async function loadBackendModels() {
   try {
     const allModels = await backendsApi.getAllModels();
@@ -77,6 +77,7 @@ export async function loadBackendModels() {
       claude: [],
       codex: [],
       gemini: [],
+      opencode: [],
     };
 
     // Claude models (already loaded in availableModels)
@@ -100,6 +101,16 @@ export async function loadBackendModels() {
         displayName: formatModelName(m, "gemini"),
         description: getModelDescription(m, "gemini"),
         provider: "google",
+      }));
+    }
+
+    // opencode models (OpenRouter ids: openrouter/<vendor>/<model>)
+    if (allModels.opencode) {
+      formatted.opencode = allModels.opencode.map((m) => ({
+        value: m,
+        displayName: formatModelName(m, "opencode"),
+        description: getModelDescription(m, "opencode"),
+        provider: "openrouter",
       }));
     }
 
@@ -127,6 +138,17 @@ function formatModelName(model: string, backend: string): string {
       .replace("-flash", " Flash")
       .replace("-pro", " Pro")
       .replace("-preview", " (Preview)");
+  }
+  if (backend === "opencode") {
+    // "openrouter/nvidia/nemotron-3.5-lightning:free" -> "Nemotron 3.5 Lightning · free"
+    const withoutProvider = model.replace(/^openrouter\//, "");
+    const free = withoutProvider.endsWith(":free");
+    const slug = withoutProvider.replace(/:free$/, "").split("/").pop() || withoutProvider;
+    const label = slug
+      .split("-")
+      .map((word) => (/^[a-z]/.test(word) ? word[0].toUpperCase() + word.slice(1) : word))
+      .join(" ");
+    return free ? `${label} · free` : label;
   }
   return model;
 }
@@ -171,6 +193,13 @@ function getModelDescription(model: string, backend: string): string {
 
   if (backend === "codex" && /^gpt-5/.test(model)) {
     return "GPT-5 family model via local Codex CLI";
+  }
+
+  if (backend === "opencode") {
+    const vendor = model.replace(/^openrouter\//, "").split("/")[0];
+    return model.endsWith(":free")
+      ? `${vendor} via OpenRouter · no cost`
+      : `${vendor} via OpenRouter · billed`;
   }
 
   return "";

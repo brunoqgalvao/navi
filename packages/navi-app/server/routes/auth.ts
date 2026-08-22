@@ -247,6 +247,21 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       : null;
     const zaiKeySource = storedZaiKey ? "settings" : envZaiKey ? "environment" : null;
 
+    // opencode routes its models through OpenRouter, so the key decides whether that
+    // harness can run at all — same shape as the Z.ai key above.
+    const storedOpenrouterKey = globalSettings.get("openrouterApiKey") as string | null;
+    const envOpenrouterKey = process.env.OPENROUTER_API_KEY || null;
+    const openrouterKey = storedOpenrouterKey || envOpenrouterKey;
+    const hasOpenrouterKey = !!openrouterKey;
+    const openrouterKeyPreview = openrouterKey
+      ? `${openrouterKey.slice(0, 8)}...${openrouterKey.slice(-4)}`
+      : null;
+    const openrouterKeySource = storedOpenrouterKey
+      ? "settings"
+      : envOpenrouterKey
+        ? "environment"
+        : null;
+
     return json({
       claudeInstalled,
       claudePath,
@@ -261,6 +276,9 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
       hasZaiKey,
       zaiKeyPreview,
       zaiKeySource,
+      hasOpenrouterKey,
+      openrouterKeyPreview,
+      openrouterKeySource,
     });
   }
 
@@ -332,6 +350,24 @@ export async function handleAuthRoutes(url: URL, method: string, req: Request): 
     const zaiKeySource = storedZaiKey ? "settings" : envZaiKey ? "environment" : null;
 
     return json({ hasZaiKey, zaiKeyPreview, zaiKeySource });
+  }
+
+  if (url.pathname === "/api/auth/openrouter-key" && method === "POST") {
+    const body = await req.json();
+    const apiKey = body.apiKey;
+
+    if (!apiKey || typeof apiKey !== "string") {
+      return json({ error: "API key required" }, 400);
+    }
+
+    globalSettings.set("openrouterApiKey", apiKey);
+
+    return json({ success: true });
+  }
+
+  if (url.pathname === "/api/auth/openrouter-key" && method === "DELETE") {
+    globalSettings.set("openrouterApiKey", "");
+    return json({ success: true });
   }
 
   if (url.pathname === "/api/auth/login" && method === "POST") {

@@ -11,7 +11,7 @@
 // Backend Identification
 // =============================================================================
 
-export type BackendId = 'claude' | 'codex' | 'gemini';
+export type BackendId = 'claude' | 'codex' | 'gemini' | 'opencode';
 
 export interface BackendInfo {
   id: BackendId;

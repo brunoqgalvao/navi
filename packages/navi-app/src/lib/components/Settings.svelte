@@ -85,6 +85,14 @@
   let zaiError: string | null = $state(null);
   let savingZai = $state(false);
 
+  let hasOpenrouterKey = $state(false);
+  let openrouterKeyPreview: string | null = $state(null);
+  let openrouterKeySource: "settings" | "environment" | null = $state(null);
+  let showOpenrouterInput = $state(false);
+  let openrouterKeyInput = $state("");
+  let openrouterError: string | null = $state(null);
+  let savingOpenrouter = $state(false);
+
   let codexHealth = $state<CodexHealthInfo | null>(null);
   let checkingCodex = $state(false);
   let showCodexSetup = $state(false);
@@ -213,6 +221,9 @@
       hasZaiKey = auth.hasZaiKey;
       zaiKeyPreview = auth.zaiKeyPreview;
       zaiKeySource = auth.zaiKeySource;
+      hasOpenrouterKey = auth.hasOpenrouterKey;
+      openrouterKeyPreview = auth.openrouterKeyPreview;
+      openrouterKeySource = auth.openrouterKeySource;
       apiTabLoaded = true;
     } catch (e) {
       console.error("Failed to load API settings:", e);
@@ -386,6 +397,43 @@
     if (mode === "api_key") return "API key";
     if (mode === "not_logged_in") return "Not signed in";
     return "Unknown";
+  }
+
+  async function saveOpenrouterKey() {
+    if (!openrouterKeyInput.trim()) {
+      openrouterError = "Please enter an API key";
+      return;
+    }
+
+    savingOpenrouter = true;
+    openrouterError = null;
+
+    try {
+      await api.auth.setOpenrouterKey(openrouterKeyInput.trim());
+      hasOpenrouterKey = true;
+      openrouterKeyPreview = `${openrouterKeyInput.slice(0, 8)}...${openrouterKeyInput.slice(-4)}`;
+      openrouterKeySource = "settings";
+      showOpenrouterInput = false;
+      openrouterKeyInput = "";
+      notifyProviderAuthUpdated();
+    } catch (e: any) {
+      openrouterError = e.message || "Failed to save API key";
+    } finally {
+      savingOpenrouter = false;
+    }
+  }
+
+  async function deleteOpenrouterKey() {
+    try {
+      await api.auth.deleteOpenrouterKey();
+      const auth = await api.auth.status();
+      hasOpenrouterKey = auth.hasOpenrouterKey;
+      openrouterKeyPreview = auth.openrouterKeyPreview;
+      openrouterKeySource = auth.openrouterKeySource;
+      notifyProviderAuthUpdated();
+    } catch (e) {
+      console.error("Failed to delete OpenRouter key:", e);
+    }
   }
 
   async function deleteZaiKey() {
@@ -889,6 +937,85 @@
 
                       <p class="text-xs text-gray-500 dark:text-gray-400">
                         Get your key from <a href="https://z.ai/model-api" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Z.ai</a>. GLM-5.2 1M appears as <code class="font-mono">glm-5.2[1m]</code> after a key is configured.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- OpenRouter. The key the opencode harness runs on: without it that harness
+                     has no models at all, which is why the run-settings menu links here. -->
+                <div class="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <div class="flex items-start gap-4">
+                    <div class="w-10 h-10 bg-slate-200 dark:bg-slate-700 rounded-lg flex items-center justify-center shrink-0">
+                      <span class="text-slate-700 dark:text-slate-300 font-bold text-sm">O</span>
+                    </div>
+                    <div class="flex-1 space-y-4">
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <h5 class="font-medium text-gray-900 dark:text-gray-100">OpenRouter</h5>
+                          <p class="text-sm text-gray-500 dark:text-gray-400">Models for the opencode harness, free tier included</p>
+                        </div>
+                        {#if hasOpenrouterKey}
+                          <span class="text-xs font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2.5 py-1 rounded-full">Configured</span>
+                        {:else}
+                          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-700 px-2.5 py-1 rounded-full">Optional</span>
+                        {/if}
+                      </div>
+
+                      {#if hasOpenrouterKey && openrouterKeyPreview && !showOpenrouterInput}
+                        <div class="flex items-center gap-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2.5">
+                          <code class="text-sm font-mono text-gray-600 dark:text-gray-300">{openrouterKeyPreview}</code>
+                          <span class="text-xs text-gray-400 dark:text-gray-500">{openrouterKeySource === "environment" ? "environment" : "stored"}</span>
+                          {#if openrouterKeySource !== "environment"}
+                            <button
+                              onclick={deleteOpenrouterKey}
+                              class="ml-auto text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                            >
+                              Remove
+                            </button>
+                          {/if}
+                        </div>
+                      {/if}
+
+                      {#if !showOpenrouterInput}
+                        <button
+                          onclick={() => showOpenrouterInput = true}
+                          class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-lg px-4 py-2 transition-colors"
+                        >
+                          {hasOpenrouterKey ? "Update API Key" : "Add API Key"}
+                        </button>
+                      {:else}
+                        <div class="space-y-3">
+                          <input
+                            type="password"
+                            bind:value={openrouterKeyInput}
+                            placeholder="sk-or-v1-..."
+                            class="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2.5 text-sm font-mono focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none transition-colors text-gray-900 dark:text-gray-100"
+                            onkeydown={(e) => e.key === "Enter" && saveOpenrouterKey()}
+                          />
+                          {#if openrouterError}
+                            <p class="text-sm text-red-600 dark:text-red-400">{openrouterError}</p>
+                          {/if}
+                          <div class="flex gap-2">
+                            <button
+                              onclick={() => { showOpenrouterInput = false; openrouterKeyInput = ""; openrouterError = null; }}
+                              class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onclick={saveOpenrouterKey}
+                              disabled={savingOpenrouter}
+                              class="text-sm font-medium bg-gray-900 dark:bg-gray-700 text-white rounded-lg px-4 py-2 hover:bg-black dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+                            >
+                              {savingOpenrouter ? "Saving..." : "Save"}
+                            </button>
+                          </div>
+                        </div>
+                      {/if}
+
+                      <p class="text-xs text-gray-500 dark:text-gray-400">
+                        Get your key from <a href="https://openrouter.ai/keys" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">OpenRouter</a>. An opencode turn spends ~100k input tokens on its system prompt, so a weekly spend limit on the key is worth setting.
                       </p>
                     </div>
                   </div>

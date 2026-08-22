@@ -52,7 +52,7 @@ export interface Project {
 }
 
 // Multi-backend types
-export type BackendId = "claude" | "codex" | "gemini";
+export type BackendId = "claude" | "codex" | "gemini" | "opencode";
 
 export interface BackendInfo {
   id: BackendId;
@@ -701,6 +701,9 @@ export const api = {
         hasZaiKey: boolean;
         zaiKeyPreview: string | null;
         zaiKeySource: "settings" | "environment" | null;
+        hasOpenrouterKey: boolean;
+        openrouterKeyPreview: string | null;
+        openrouterKeySource: "settings" | "environment" | null;
       }>("/auth/status"),
     setApiKey: (apiKey: string) =>
       request<{ success: boolean }>("/auth/api-key", {
@@ -723,6 +726,15 @@ export const api = {
       }),
     deleteZaiKey: () =>
       request<{ success: boolean }>("/auth/zai-key", {
+        method: "DELETE",
+      }),
+    setOpenrouterKey: (apiKey: string) =>
+      request<{ success: boolean }>("/auth/openrouter-key", {
+        method: "POST",
+        body: JSON.stringify({ apiKey }),
+      }),
+    deleteOpenrouterKey: () =>
+      request<{ success: boolean }>("/auth/openrouter-key", {
         method: "DELETE",
       }),
   },

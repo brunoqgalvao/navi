@@ -43,7 +43,7 @@ describe("compactModelLabel", () => {
 
 describe("entryMeta", () => {
   test("covers every menu entry", () => {
-    expect(Object.keys(entryMeta).sort()).toEqual(["claude", "codex", "gemini", "zai"]);
+    expect(Object.keys(entryMeta).sort()).toEqual(["claude", "codex", "gemini", "opencode", "zai"]);
   });
 
   // Tailwind purges anything it cannot see as a literal and there is no safelist in

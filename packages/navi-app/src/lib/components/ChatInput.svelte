@@ -96,7 +96,7 @@
     onUICommand?: (command: string, args?: string) => boolean; // Return true if handled
   }
 
-  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, backend = "claude", selectedModel = "", backendModels = { claude: [], codex: [], gemini: [] }, reasoningEffort = "medium", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onBackendChange, onModelSelect, onReasoningEffortChange, onOpenProviderSettings, slashCommands = [], onUICommand }: Props = $props();
+  let { value = $bindable(), disabled = false, loading = false, queuedCount = 0, projectPath, activeSkills = [], mcpServers = [], sessionId, untilDoneEnabled = false, isGitRepo = false, isNewChat = false, worktreeBranch = null, worktreeBaseBranch = null, backend = "claude", selectedModel = "", backendModels = { claude: [], codex: [], gemini: [], opencode: [] }, reasoningEffort = "medium", onSubmit, onStop, onPreview, onExecCommand, onManageSkills, onManageMcp, onNavigateToChat, onToggleUntilDone, onOpenInfiniteLoop, isInfiniteLoopMode = false, onCreateWithWorktree, onMergeWorktree, onArchiveSession, onBackendChange, onModelSelect, onReasoningEffortChange, onOpenProviderSettings, slashCommands = [], onUICommand }: Props = $props();
 
   // Worktree mode state
   let worktreeEnabled = $state(false);
@@ -107,6 +107,7 @@
     claude: { label: "Claude" },
     codex: { label: "Codex" },
     gemini: { label: "Gemini" },
+    opencode: { label: "opencode" },
   };
 
   function getActiveProviderLabel(): string {

@@ -92,13 +92,13 @@ IMPORTANT: Only spawn agents for substantial work. For quick tasks, do them your
         model: {
           type: "string",
           description:
-            "Optional: Model to use. For Claude: 'haiku', 'sonnet', 'opus'. For Codex: 'gpt-5.2-codex', 'gpt-5-codex', 'gpt-5.4', 'o3', etc. For Gemini: 'gemini-2.0-flash', etc. Defaults to parent's model.",
+            "Optional: Model to use. For Claude: 'haiku', 'sonnet', 'opus'. For Codex: 'gpt-5.2-codex', 'gpt-5-codex', 'gpt-5.4', 'o3', etc. For Gemini: 'gemini-2.0-flash', etc. For opencode: 'openrouter/<vendor>/<model>'. Defaults to parent's model.",
         },
         backend: {
           type: "string",
           description:
-            "Optional: Backend to use. 'claude' (default), 'codex' (OpenAI Codex CLI), or 'gemini'. Each backend has different models available.",
-          enum: ["claude", "codex", "gemini"],
+            "Optional: Backend to use. 'claude' (default), 'codex' (OpenAI Codex CLI), 'gemini', or 'opencode' (OpenRouter models). Each backend has different models available.",
+          enum: ["claude", "codex", "gemini", "opencode"],
         },
         context: {
           type: "string",

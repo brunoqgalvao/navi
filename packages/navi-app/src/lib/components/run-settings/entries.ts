@@ -56,6 +56,14 @@ export const entryMeta: Record<MenuEntryId, EntryMeta> = {
     muted: "bg-blue-50 text-blue-700 dark:bg-blue-950/45 dark:text-blue-300",
     description: "Long-context passes",
   },
+  opencode: {
+    backendId: "opencode",
+    label: "opencode",
+    icon: "O",
+    accent: "bg-slate-700 text-white",
+    muted: "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
+    description: "OpenRouter models, free tier",
+  },
 };
 
 export const reasoningOptions: { value: ReasoningEffort; label: string }[] = [
@@ -81,6 +89,7 @@ export function resolveEntryForSelection(
 ): MenuEntryId {
   if (selectedBackend === "codex") return "codex";
   if (selectedBackend === "gemini") return "gemini";
+  if (selectedBackend === "opencode") return "opencode";
   if (model?.provider === "zai" || isZaiModel(modelValue || model?.value)) return "zai";
   return "claude";
 }

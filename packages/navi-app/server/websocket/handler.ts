@@ -131,7 +131,7 @@ export interface ClientMessage {
   // Agent selection (e.g., @coder, @img3d)
   agentId?: string;
   // Backend selection (claude, codex, gemini)
-  backend?: "claude" | "codex" | "gemini";
+  backend?: "claude" | "codex" | "gemini" | "opencode";
   // Reasoning effort (all backends)
   reasoningEffort?: string;
   // Optional cap on thinking tokens (Claude backend)

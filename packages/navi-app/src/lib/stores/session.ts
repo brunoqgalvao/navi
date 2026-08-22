@@ -415,7 +415,7 @@ export const loadingMessagesSessions = writable<Set<string>>(new Set());
 export const availableModels = writable<ModelInfo[]>([]);
 
 // Backend selection store (claude, codex, gemini)
-export type BackendId = "claude" | "codex" | "gemini";
+export type BackendId = "claude" | "codex" | "gemini" | "opencode";
 function createBackendStore() {
   const { subscribe, update } = writable<Map<string, BackendId>>(new Map());
 
@@ -498,6 +498,7 @@ export const backendModels = writable<Record<BackendId, ModelInfo[]>>({
   claude: [],
   codex: [],
   gemini: [],
+  opencode: [],
 });
 
 // Helper to get models formatted for a specific backend

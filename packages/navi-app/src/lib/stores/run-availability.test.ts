@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { deriveRunAvailability, type ProviderAuthStatus } from "./run-availability";
 import type { BackendInfo, CodexHealthInfo } from "../api";
 
-const backend = (id: "claude" | "codex" | "gemini", installed: boolean): BackendInfo => ({
+const backend = (
+  id: "claude" | "codex" | "gemini" | "opencode",
+  installed: boolean
+): BackendInfo => ({
   id,
   name: id,
   description: "",
@@ -21,6 +24,9 @@ const auth = (over: Partial<ProviderAuthStatus> = {}): ProviderAuthStatus => ({
   hasZaiKey: true,
   zaiKeyPreview: null,
   zaiKeySource: "settings",
+  hasOpenrouterKey: true,
+  openrouterKeyPreview: null,
+  openrouterKeySource: "settings",
   ...over,
 });
 
@@ -34,7 +40,12 @@ const codex = (over: Partial<CodexHealthInfo> = {}): CodexHealthInfo => ({
   ...over,
 });
 
-const all = [backend("claude", true), backend("codex", true), backend("gemini", true)];
+const all = [
+  backend("claude", true),
+  backend("codex", true),
+  backend("gemini", true),
+  backend("opencode", true),
+];
 
 describe("deriveRunAvailability", () => {
   test("everything ready when installed and signed in", () => {
@@ -147,5 +158,37 @@ describe("deriveRunAvailability", () => {
 
   test("a missing codex health payload does not crash", () => {
     expect(deriveRunAvailability(all, null, auth()).codex.state).toBe("needs-setup");
+  });
+});
+
+describe("deriveRunAvailability — opencode", () => {
+  test("an installed opencode with no OpenRouter key points at settings, not a reinstall", () => {
+    const result = deriveRunAvailability(all, codex(), auth({ hasOpenrouterKey: false }));
+
+    expect(result.opencode).toEqual({
+      state: "needs-setup",
+      reason: "No OpenRouter API key",
+      fix: { kind: "settings" },
+    });
+  });
+
+  test("a missing CLI is fixed by installing it", () => {
+    const backends = [
+      backend("claude", true),
+      backend("codex", true),
+      backend("gemini", true),
+      backend("opencode", false),
+    ];
+    const result = deriveRunAvailability(backends, codex(), auth());
+
+    expect(result.opencode).toEqual({
+      state: "needs-setup",
+      reason: "opencode CLI not found",
+      fix: { kind: "command", command: "npm i -g opencode-ai" },
+    });
+  });
+
+  test("ready when installed with a key", () => {
+    expect(deriveRunAvailability(all, codex(), auth()).opencode).toEqual({ state: "ready" });
   });
 });

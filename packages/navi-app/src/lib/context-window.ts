@@ -12,7 +12,7 @@ export const CLAUDE_RUNTIME_CONTEXT_WINDOW = 200_000;
 // session look a quarter full when it was about to overflow.
 export const CODEX_CONTEXT_WINDOW = 272_000;
 
-export type ContextBackendId = "claude" | "codex" | "gemini" | string;
+export type ContextBackendId = "claude" | "codex" | "gemini" | "opencode" | string;
 
 export function getEffectiveContextWindow(contextWindow?: number | null): number {
   return typeof contextWindow === "number" && contextWindow > 0

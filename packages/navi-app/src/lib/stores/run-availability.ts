@@ -11,7 +11,7 @@ import { api, backendsApi, type BackendInfo, type CodexHealthInfo } from "../api
 
 export type ProviderAuthStatus = Awaited<ReturnType<typeof api.auth.status>>;
 
-/** What the menu can offer: the three harnesses, plus Z.ai as a model group. */
+/** What the menu can offer: the harnesses, plus Z.ai as a model group. */
 export type MenuEntryId = BackendId | "zai";
 
 export type AvailabilityFix = { kind: "settings" } | { kind: "command"; command: string };
@@ -26,6 +26,7 @@ const INSTALL_COMMAND: Record<BackendId, string> = {
   claude: "npm i -g @anthropic-ai/claude-code",
   codex: "npm i -g @openai/codex",
   gemini: "npm i -g @google/gemini-cli",
+  opencode: "npm i -g opencode-ai",
 };
 
 const notFound = (id: BackendId, label: string): EntryAvailability => ({
@@ -66,6 +67,14 @@ export function deriveRunAvailability(
 
   const gemini = !installed("gemini") ? notFound("gemini", "Gemini") : READY;
 
+  // opencode reaches its models through OpenRouter, so an installed CLI with no key
+  // has nothing to run — the key is the fix, not a reinstall.
+  const opencode = !installed("opencode")
+    ? notFound("opencode", "opencode")
+    : !auth.hasOpenrouterKey
+      ? needsSettings("No OpenRouter API key")
+      : READY;
+
   // Z.ai models run on the Claude runtime, so a key without a usable Claude is not runnable.
   const zai =
     claude.state !== "ready"
@@ -74,7 +83,7 @@ export function deriveRunAvailability(
         ? needsSettings("No Z.ai API key")
         : READY;
 
-  return { claude, codex, gemini, zai };
+  return { claude, codex, gemini, opencode, zai };
 }
 
 /**

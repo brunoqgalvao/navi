@@ -42,7 +42,7 @@
   let {
     backend,
     selectedModel = "",
-    backendModels = { claude: [], codex: [], gemini: [] },
+    backendModels = { claude: [], codex: [], gemini: [], opencode: [] },
     reasoningEffort = "medium",
     canChangeBackend = false,
     onBackendChange,
@@ -62,6 +62,7 @@
     claude: READY,
     codex: READY,
     gemini: READY,
+    opencode: READY,
     zai: READY,
   };
 

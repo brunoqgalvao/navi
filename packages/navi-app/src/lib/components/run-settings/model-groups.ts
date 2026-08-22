@@ -10,11 +10,12 @@ import type { EntryAvailability, MenuEntryId } from "../../stores/run-availabili
 import { entryMeta, type EntryMeta } from "./entries";
 import { isZaiModel } from "../../../../shared/zai-models";
 
-/** The three real backends. Z.ai is a model group inside claude, not a harness. */
+/** The real backends. Z.ai is a model group inside claude, not a harness. */
 export const harnessMeta: Record<BackendId, EntryMeta> = {
   claude: entryMeta.claude,
   codex: entryMeta.codex,
   gemini: entryMeta.gemini,
+  opencode: entryMeta.opencode,
 };
 
 export type ModelGroup = {
@@ -42,7 +43,7 @@ export function modelGroupsFor(
   availability: Record<MenuEntryId, EntryAvailability>
 ): ModelGroup[] {
   const harnesses: BackendId[] = canChangeBackend
-    ? ["claude", "codex", "gemini"]
+    ? ["claude", "codex", "gemini", "opencode"]
     : [currentHarness];
 
   const groups: ModelGroup[] = [];

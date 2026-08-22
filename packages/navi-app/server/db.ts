@@ -785,7 +785,7 @@ export interface Project {
   auto_accept_all: number;
   archived: number;
   // Multi-backend support
-  default_backend: "claude" | "codex" | "gemini" | null;
+  default_backend: "claude" | "codex" | "gemini" | "opencode" | null;
   created_at: number;
   updated_at: number;
 }
@@ -891,7 +891,7 @@ export interface Session {
   cloud_branch: string | null; // orphaned by 2026-06 refocus
   e2b_sandbox_id: string | null; // orphaned by 2026-06 refocus
   // Multi-backend support
-  backend: "claude" | "codex" | "gemini" | null;
+  backend: "claude" | "codex" | "gemini" | "opencode" | null;
   // Per-session reasoning effort tier
   reasoning_effort: "low" | "medium" | "high" | "xhigh" | "max" | null;
   // Agent workspace links
@@ -1236,7 +1236,7 @@ export interface Workflow {
   learning_notes: string | null;
   feedback_notes: string | null;
   model: string | null;
-  backend: "claude" | "codex" | "gemini" | null;
+  backend: "claude" | "codex" | "gemini" | "opencode" | null;
   owner_agent_id: string | null;
   run_count: number;
   last_run_at: number | null;

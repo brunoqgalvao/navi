@@ -14,6 +14,7 @@ import type {
 import { claudeAdapter } from "./claude-adapter";
 import { codexAdapter } from "./codex-adapter";
 import { geminiAdapter } from "./gemini-adapter";
+import { opencodeAdapter } from "./opencode-adapter";
 
 // Export types
 export * from "./types";
@@ -22,6 +23,7 @@ export * from "./types";
 export { claudeAdapter } from "./claude-adapter";
 export { codexAdapter } from "./codex-adapter";
 export { geminiAdapter } from "./gemini-adapter";
+export { opencodeAdapter } from "./opencode-adapter";
 
 class BackendRegistryImpl implements BackendRegistry {
   private adapters = new Map<BackendId, BackendAdapter>();
@@ -31,6 +33,7 @@ class BackendRegistryImpl implements BackendRegistry {
     this.register(claudeAdapter);
     this.register(codexAdapter);
     this.register(geminiAdapter);
+    this.register(opencodeAdapter);
   }
 
   getAll(): BackendAdapter[] {
